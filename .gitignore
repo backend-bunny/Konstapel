@@ -1,0 +1,25 @@
+# dot-agent-deck runtime coordination artifacts.
+# The committed config is .dot-agent-deck.toml (a file, tracked); this is the
+# directory (note the trailing slash) holding per-role task and work-done
+# handoffs written during a live orchestration.
+.dot-agent-deck/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
