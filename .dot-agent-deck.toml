@@ -18,6 +18,28 @@
 # Generate/author with an agent:  Ctrl+d then g
 #
 # Edits are re-read on every delegation; no pane restart needed.
+#
+# ---------------------------------------------------------------------------
+# PERMISSIONS POLICY
+#
+# Worker roles run with --dangerously-skip-permissions. You do not sit in
+# their panes, so a permission prompt there is not a safety check -- it is a
+# stalled worker waiting on a human who is not looking. The blast radius is
+# bounded by design: `main` is a protected branch, work happens on branches,
+# and cluster operations target throwaway kind clusters.
+#
+# TWO DELIBERATE EXCEPTIONS -- do not "tidy" these into consistency:
+#
+#   * `release` stays gated. It is the only role whose job is outward-facing
+#     and hard to undo: it pushes, opens PRs, and can merge, using a GitHub
+#     token with write access. This is the one place a prompt earns its keep.
+#   * Orchestrators stay gated. You DO sit in those panes, so the prompts are
+#     answerable, and an orchestrator is the last checkpoint before a fan-out.
+#
+# Predictable project commands can also be allowlisted in .claude/settings.json
+# (tracked, shared) instead of prompting. Note that .claude/settings.local.json
+# is globally gitignored, so approvals accumulating there are per-machine only.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Top-level keys MUST stay above the first [[modes]] or [[orchestrations]]
@@ -92,7 +114,7 @@ and report that rather than inventing the answer.
 
 [[orchestrations.roles]]
 name = "coder"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Implements features, fixes bugs, and refactors the operator"
 prompt_template = """
 You implement changes in Konstapel, a Kopf (Python) Kubernetes operator for
@@ -137,7 +159,7 @@ what you tested, and anything you deliberately left undone.
 
 [[orchestrations.roles]]
 name = "reviewer"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Reviews changes for correctness, edge cases, and operator semantics"
 prompt_template = """
 You review code. You do NOT modify files -- report findings only.
@@ -166,7 +188,7 @@ Run `dot-agent-deck work-done` when finished.
 
 [[orchestrations.roles]]
 name = "auditor"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Audits changes for security vulnerabilities and unsafe patterns"
 # The upstream guidance is to run the auditor on a different model family from
 # the reviewer, so their blind spots do not correlate. Only `claude` is
@@ -200,7 +222,7 @@ work-done` when finished.
 
 [[orchestrations.roles]]
 name = "compliance"
-command = "claude --model opus"
+command = "claude --model opus --dangerously-skip-permissions"
 description = "Guards compliance correctness: control mapping, OSCAL validity, and honesty of verdicts"
 prompt_template = """
 You are Konstapel's compliance-correctness reviewer. You do NOT modify files.
@@ -244,7 +266,7 @@ Run `dot-agent-deck work-done` when finished.
 
 [[orchestrations.roles]]
 name = "e2e"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Runs and writes Chainsaw end-to-end tests against a kind cluster"
 prompt_template = """
 You own Konstapel's end-to-end tests. You may write and modify test files and
@@ -362,7 +384,7 @@ rewritten by the code it constrains is not a test.
 
 [[orchestrations.roles]]
 name = "tester"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Writes failing tests and verifies them; never writes implementation"
 prompt_template = """
 You write tests for Konstapel. You do NOT write implementation code.
@@ -392,7 +414,7 @@ Run `dot-agent-deck work-done` with the test path and the failure output.
 
 [[orchestrations.roles]]
 name = "coder"
-command = "claude --model sonnet"
+command = "claude --model sonnet --dangerously-skip-permissions"
 description = "Makes the failing test pass with the simplest sufficient change"
 prompt_template = """
 You make a failing test pass in Konstapel (Kopf, Python).
@@ -457,7 +479,7 @@ the gap instead.
 
 [[orchestrations.roles]]
 name = "researcher"
-command = "claude --model opus"
+command = "claude --model opus --dangerously-skip-permissions"
 description = "Investigates a research question against primary sources and reports findings"
 prompt_template = """
 You investigate one research question for Konstapel and report findings. You do
