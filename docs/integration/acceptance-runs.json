@@ -1,0 +1,186 @@
+{
+  "date": "2026-11-05",
+  "versions": "versions.json",
+  "runs": [
+    {
+      "output": "/tmp/konstapel-full-acceptance-5",
+      "cluster": "kube-system:c3133e77-586c-4d5e-a0e1-8a309304a7c0",
+      "evaluationBoundary": "2026-11-05T09:21:07.22226752Z",
+      "collected": "2026-11-05T09:21:34.617278955Z",
+      "evaluations": [
+        {
+          "resource": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "namespace": "konstapel-acceptance",
+            "name": "good-deployment",
+            "uid": "41cdd810-59c6-4ac1-ba2d-b80892831be5"
+          },
+          "sourceOutcome": "pass",
+          "normalizedOutcome": "pass",
+          "reason": "success",
+          "evaluated": "2026-11-05T09:21:21Z",
+          "report": "6b53c9bd-d7f3-41a7-914e-38569ca49341",
+          "resultIndex": 0,
+          "rule": ""
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "audit-privileged",
+            "uid": "03205bb2-3850-421a-95fd-4470ada75a9b"
+          },
+          "sourceOutcome": "fail",
+          "normalizedOutcome": "fail",
+          "reason": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "evaluated": "2026-11-05T09:21:22Z",
+          "report": "f4dad248-5321-4725-9e5f-28cbd18b5027",
+          "resultIndex": 0,
+          "rule": "0"
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "existing-privileged",
+            "uid": "4f027d7c-a7f5-42a2-97ee-3049faad6843"
+          },
+          "sourceOutcome": "fail",
+          "normalizedOutcome": "fail",
+          "reason": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "evaluated": "2026-11-05T09:21:16Z",
+          "report": "f264bd87-602d-4ff0-a695-89b8f58728b0",
+          "resultIndex": 0,
+          "rule": "0"
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "good",
+            "uid": "cd7357e8-f169-4925-b78c-0433a0920557"
+          },
+          "sourceOutcome": "pass",
+          "normalizedOutcome": "pass",
+          "reason": "success",
+          "evaluated": "2026-11-05T09:21:21Z",
+          "report": "df780e26-dff2-41fd-be87-ae3e20b20ef2",
+          "resultIndex": 0,
+          "rule": ""
+        }
+      ],
+      "acceptance": {
+        "cluster": "kube-system:c3133e77-586c-4d5e-a0e1-8a309304a7c0",
+        "complete": true,
+        "coverage": "Partial technical evidence for ac-6/ac-6_smt: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction.",
+        "deniedCreatesRequireReports": false,
+        "existingViolationRetained": true,
+        "passed": true
+      },
+      "chainsaw": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "teardown": "passed",
+      "sha256": {
+        "capture.json": "ee41787591da4148c18d679a32411381e1c9710c9b8a757a92874919b5895fce",
+        "assessment-results.json": "1e31f57c15f2e6b6a8198c16482fabc99de587990f2a6c5930875dd821a6e444"
+      }
+    },
+    {
+      "output": "/tmp/konstapel-full-acceptance-6",
+      "cluster": "kube-system:8f4d2a59-fd58-463f-9a39-3b5dcba917f2",
+      "evaluationBoundary": "2026-11-05T09:24:34.44392022Z",
+      "collected": "2026-11-05T09:25:01.77248024Z",
+      "evaluations": [
+        {
+          "resource": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "namespace": "konstapel-acceptance",
+            "name": "good-deployment",
+            "uid": "30ccbf0d-6cea-4d6f-b289-289854bc578f"
+          },
+          "sourceOutcome": "pass",
+          "normalizedOutcome": "pass",
+          "reason": "success",
+          "evaluated": "2026-11-05T09:24:48Z",
+          "report": "0c2a1a69-8462-4897-89f5-4b9281f604a8",
+          "resultIndex": 0,
+          "rule": ""
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "audit-privileged",
+            "uid": "fd95a36e-f741-4b36-abc2-5ad9acc307b5"
+          },
+          "sourceOutcome": "fail",
+          "normalizedOutcome": "fail",
+          "reason": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "evaluated": "2026-11-05T09:24:49Z",
+          "report": "13722ae5-e023-4919-af6b-e9f5b1c55e80",
+          "resultIndex": 0,
+          "rule": "0"
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "existing-privileged",
+            "uid": "b6975653-7594-4591-902b-3f8a3364341d"
+          },
+          "sourceOutcome": "fail",
+          "normalizedOutcome": "fail",
+          "reason": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "evaluated": "2026-11-05T09:24:43Z",
+          "report": "6f0326a8-3d9c-40ab-9ea4-6b00214819a6",
+          "resultIndex": 0,
+          "rule": "0"
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "konstapel-acceptance",
+            "name": "good",
+            "uid": "1f243877-7eb3-4080-8428-2c8a52668190"
+          },
+          "sourceOutcome": "pass",
+          "normalizedOutcome": "pass",
+          "reason": "success",
+          "evaluated": "2026-11-05T09:24:48Z",
+          "report": "4f3dfe65-6358-49b9-b4d0-6edc94c548bc",
+          "resultIndex": 0,
+          "rule": ""
+        }
+      ],
+      "acceptance": {
+        "cluster": "kube-system:8f4d2a59-fd58-463f-9a39-3b5dcba917f2",
+        "complete": true,
+        "coverage": "Partial technical evidence for ac-6/ac-6_smt: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction.",
+        "deniedCreatesRequireReports": false,
+        "existingViolationRetained": true,
+        "passed": true
+      },
+      "chainsaw": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "teardown": "passed",
+      "sha256": {
+        "capture.json": "138d21f4b2a92fcf1cbe7fa52cd2f7ca65df178ef05343a661863ccc52533587",
+        "assessment-results.json": "a08c6de5bfd097164e8a11d2348686e849e9fbfab3c17a649ba63ac421d95b34"
+      }
+    }
+  ]
+}

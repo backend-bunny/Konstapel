@@ -1,0 +1,8 @@
+{
+  "cluster": "kube-system:b8d4b582-30c8-408f-8438-c5dd00971bb8",
+  "complete": true,
+  "coverage": "Partial technical evidence for ac-6/ac-6_smt: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction.",
+  "deniedCreatesRequireReports": false,
+  "existingViolationRetained": true,
+  "passed": true
+}

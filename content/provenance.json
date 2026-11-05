@@ -1,0 +1,11 @@
+{
+  "policyRepository": "https://github.com/kyverno/policies",
+  "policyRevision": "fac1ccda72ab53594921ca1c040ac90b80afadcd",
+  "policyPath": "pod-security-vpol/baseline/disallow-privileged-containers",
+  "policyLicense": "Apache-2.0",
+  "policyModifications": "None; local rendering is separate. No upstream NOTICE file found.",
+  "nistRepository": "https://github.com/usnistgov/oscal-content",
+  "nistRevision": "f0de6d8d8c059d374f15e0ae07508d82e370fc1d",
+  "schemaRepository": "https://github.com/usnistgov/OSCAL",
+  "schemaVersions": ["1.1.3", "1.2.3"]
+}

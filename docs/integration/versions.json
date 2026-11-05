@@ -1,0 +1,17 @@
+{
+  "go": "1.25.7",
+  "c2pRevision": "45bfc1a8947e8b56b7e11391e13f8c1f2136cfaa",
+  "c2pVersion": "v2.0.0-rc.1.0.20260824132548-45bfc1a8947e",
+  "kyverno": "1.19.2",
+  "kyvernoChart": "3.9.2",
+  "kyvernoChartSha256": "f6fe7184544d5e2ee33a77808c09e67aa603ce6560cc197038fde31d727c861e",
+  "kind": "0.33.0",
+  "kubernetes": "1.36.1",
+  "nodeImage": "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5",
+  "helm": "4.3.1",
+  "kubectl": "1.37.2",
+  "generatedOscal": "1.1.3",
+  "nistOscal": "1.2.3",
+  "workloadImage": "docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+  "chainsaw": "0.2.15"
+}

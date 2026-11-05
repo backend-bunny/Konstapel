@@ -1,0 +1,94 @@
+{
+  "component-definition": {
+    "uuid": "a065e23d-6ac0-4b73-a7a6-c3f76d2b59d2",
+    "metadata": {
+      "title": "Konstapel privileged-container check",
+      "last-modified": "2026-11-05T00:00:00Z",
+      "version": "1.0.0",
+      "oscal-version": "1.1.3"
+    },
+    "components": [
+      {
+        "uuid": "04d90c66-6249-42d2-ad12-e94f2ecbeaed",
+        "type": "software",
+        "title": "Kubernetes workloads",
+        "description": "Partial AC-6 technical evidence: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction.",
+        "props": [
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "disallow-privileged-containers",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Rule_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "Partial AC-6 technical evidence: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction.",
+            "remarks": "rule_set_0"
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "bcdb290a-e726-4350-a06a-b7726b826e72",
+            "source": "upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+            "props": [
+              {
+                "name": "Framework_Short_Name",
+                "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal",
+                "value": "nist_800_53"
+              }
+            ],
+            "description": "NIST r5",
+            "implemented-requirements": [
+              {
+                "uuid": "850a08cf-eaeb-425f-9587-b3e18153862a",
+                "control-id": "ac-6",
+                "description": "Partial technical evidence only.",
+                "statements": [
+                  {
+                    "statement-id": "ac-6_smt",
+                    "uuid": "7c0ac8ea-5613-451f-8242-7702791727a2",
+                    "description": "Prohibit privileged containers; partial least-privilege coverage only.",
+                    "props": [
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-privileged-containers"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "uuid": "e3e0eb21-c1a5-44d8-b87a-aa983fe703ac",
+        "type": "validation",
+        "title": "konstapel-kyverno",
+        "description": "Kyverno policies.kyverno.io/v1 validation provider",
+        "props": [
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privileged-containers",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Check_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privileged-containers",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Check_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privileged-containers",
+            "remarks": "rule_set_1"
+          }
+        ]
+      }
+    ]
+  }
+}

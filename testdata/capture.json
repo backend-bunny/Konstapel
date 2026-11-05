@@ -1,0 +1,210 @@
+{
+  "cluster": "kube-system:synthetic-cluster",
+  "collected": "2026-11-05T00:02:00Z",
+  "context": "synthetic-offline-fixture",
+  "evaluationBoundary": "2026-11-05T00:00:00Z",
+  "expected": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "example",
+      "namespace": "team-a",
+      "uid": "synthetic-pod-a"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "name": "example",
+      "namespace": "team-b",
+      "uid": "synthetic-pod-b"
+    }
+  ],
+  "mappingSha256": "b90ebbe149b9a37e260763cb9eb14dfb11613b3a8799f4cc2e92fc72050bf5e0",
+  "policy": {
+    "apiVersion": "policies.kyverno.io/v1",
+    "kind": "ValidatingPolicy",
+    "metadata": {
+      "annotations": {
+        "kyverno.io/kubernetes-version": "1.30+",
+        "kyverno.io/kyverno-version": "1.14.0",
+        "policies.kyverno.io/category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+        "policies.kyverno.io/description": "Privileged mode disables most security mechanisms and must not be allowed. This policy ensures Pods do not call for privileged mode.",
+        "policies.kyverno.io/minversion": "1.19.1",
+        "policies.kyverno.io/severity": "medium",
+        "policies.kyverno.io/subject": "Pod",
+        "policies.kyverno.io/title": "Disallow Privileged Containers in ValidatingPolicy"
+      },
+      "labels": {
+        "konstapel.io/owner": "konstapel-assessment"
+      },
+      "name": "disallow-privileged-containers",
+      "uid": "synthetic-policy-uid"
+    },
+    "spec": {
+      "evaluation": {
+        "background": {
+          "enabled": true
+        }
+      },
+      "matchConstraints": {
+        "namespaceSelector": {
+          "matchLabels": {
+            "kubernetes.io/metadata.name": "konstapel-acceptance"
+          }
+        },
+        "resourceRules": [
+          {
+            "apiGroups": [
+              ""
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ],
+            "resources": [
+              "pods",
+              "replicationcontrollers"
+            ]
+          },
+          {
+            "apiGroups": [
+              "apps"
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ],
+            "resources": [
+              "deployments",
+              "daemonsets",
+              "statefulsets",
+              "replicasets"
+            ]
+          },
+          {
+            "apiGroups": [
+              "batch"
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ],
+            "resources": [
+              "jobs",
+              "cronjobs"
+            ]
+          },
+          {
+            "apiGroups": [
+              ""
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "UPDATE"
+            ],
+            "resources": [
+              "pods/ephemeralcontainers"
+            ]
+          }
+        ]
+      },
+      "validationActions": [
+        "Deny"
+      ],
+      "validations": [
+        {
+          "expression": "variables.allContainers.all(container, container.image in exceptions.allowedImages || container.?securityContext.?privileged.orValue(false) == false)",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field."
+        }
+      ],
+      "variables": [
+        {
+          "expression": "object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))",
+          "name": "podSpec"
+        },
+        {
+          "expression": "variables.podSpec.containers + variables.podSpec.?initContainers.orValue([]) + variables.podSpec.?ephemeralContainers.orValue([])",
+          "name": "allContainers"
+        }
+      ]
+    }
+  },
+  "policySpecSha256": "ebca019b09966dc23e11ea4125b6d51f98cc6b786f4b110f5e7ca5663db475c5",
+  "reports": [
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "namespace": "team-a",
+        "uid": "synthetic-report-a"
+      },
+      "results": [
+        {
+          "message": "Privileged mode is disallowed.",
+          "policy": "disallow-privileged-containers",
+          "result": "fail",
+          "rule": "",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793836860
+          },
+          "source": "KyvernoValidatingPolicy",
+          "properties": {
+            "cel.validationIndex": "0"
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "example",
+        "namespace": "team-a",
+        "uid": "synthetic-pod-a"
+      }
+    },
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "ClusterPolicyReport",
+      "metadata": {
+        "uid": "synthetic-report-b"
+      },
+      "results": [
+        {
+          "message": "Policy passed",
+          "policy": "disallow-privileged-containers",
+          "resources": [
+            {
+              "apiVersion": "v1",
+              "kind": "Pod",
+              "name": "example",
+              "namespace": "team-b",
+              "uid": "synthetic-pod-b"
+            }
+          ],
+          "result": "pass",
+          "rule": "",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793836860
+          },
+          "source": "KyvernoValidatingPolicy",
+          "properties": {
+            "cel.validationIndex": "0"
+          }
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "kyverno-admission-controller-574dd86df9-vwgjz",
+    "containers": [
+      {
+        "image": "reg.kyverno.io/kyverno/kyvernopre:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyvernopre@sha256:27f3cc52e628559b56d08363b85316819802086c9808606914f7805a244148f4",
+        "ready": true
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/kyverno:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyverno@sha256:c8c4dd09e720d2cd7fd24ca73ac28e46651001372f988e0cba3f2f612f04b955",
+        "ready": true
+      }
+    ]
+  },
+  {
+    "name": "kyverno-background-controller-5444ff6b9-pkxlp",
+    "containers": [
+      {
+        "image": "reg.kyverno.io/kyverno/background-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/background-controller@sha256:c46e124f21ef8a6bb4b48de57106808b1007edcd5ddd4ff7df5d23b9efa60ce2",
+        "ready": true
+      }
+    ]
+  },
+  {
+    "name": "kyverno-cleanup-controller-65cc94dcbf-jngjm",
+    "containers": [
+      {
+        "image": "reg.kyverno.io/kyverno/cleanup-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/cleanup-controller@sha256:d7340aa7c9315080c3dafa7b765d090ced37353e89e5cd7a3f9ac69e8fb532b2",
+        "ready": true
+      }
+    ]
+  },
+  {
+    "name": "kyverno-reports-controller-7557bc6659-989tm",
+    "containers": [
+      {
+        "image": "reg.kyverno.io/kyverno/reports-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/reports-controller@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3",
+        "ready": true
+      }
+    ]
+  }
+]

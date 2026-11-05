@@ -1,0 +1,43 @@
+[
+  {
+    "check": "privileged Pod create",
+    "error": "kubectl [create -f -]: exit status 1: Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n",
+    "expectedDenial": true,
+    "response": "Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n"
+  },
+  {
+    "check": "privileged init create",
+    "error": "kubectl [create -f -]: exit status 1: Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n",
+    "expectedDenial": true,
+    "response": "Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n"
+  },
+  {
+    "check": "compliant init create",
+    "error": "\u003cnil\u003e",
+    "expectedDenial": false,
+    "response": "pod/good-init created (server dry run)\n"
+  },
+  {
+    "check": "privileged Deployment create",
+    "error": "kubectl [create -f -]: exit status 1: Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n",
+    "expectedDenial": true,
+    "response": "Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n"
+  },
+  {
+    "check": "privileged Deployment update",
+    "error": "kubectl [apply -f -]: exit status 1: Error from server: error when applying patch:\n{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"apps/v1\\\",\\\"kind\\\":\\\"Deployment\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"labels\\\":{\\\"konstapel.io/owner\\\":\\\"konstapel-assessment\\\"},\\\"name\\\":\\\"good-deployment\\\",\\\"namespace\\\":\\\"konstapel-acceptance\\\"},\\\"spec\\\":{\\\"replicas\\\":0,\\\"selector\\\":{\\\"matchLabels\\\":{\\\"app\\\":\\\"acceptance\\\"}},\\\"template\\\":{\\\"metadata\\\":{\\\"labels\\\":{\\\"app\\\":\\\"acceptance\\\",\\\"konstapel.io/owner\\\":\\\"konstapel-assessment\\\"}},\\\"spec\\\":{\\\"containers\\\":[{\\\"command\\\":[\\\"sleep\\\",\\\"3600\\\"],\\\"image\\\":\\\"docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\\\",\\\"name\\\":\\\"app\\\",\\\"securityContext\\\":{\\\"privileged\\\":true}}]}}}}\\n\"}},\"spec\":{\"template\":{\"spec\":{\"$setElementOrder/containers\":[{\"name\":\"app\"}],\"containers\":[{\"name\":\"app\",\"securityContext\":{\"privileged\":true}}]}}}}\nto:\nResource: \"apps/v1, Resource=deployments\", GroupVersionKind: \"apps/v1, Kind=Deployment\"\nName: \"good-deployment\", Namespace: \"konstapel-acceptance\"\nfor: \"STDIN\": error when patching \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n",
+    "expectedDenial": true,
+    "response": "Error from server: error when applying patch:\n{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"apps/v1\\\",\\\"kind\\\":\\\"Deployment\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"labels\\\":{\\\"konstapel.io/owner\\\":\\\"konstapel-assessment\\\"},\\\"name\\\":\\\"good-deployment\\\",\\\"namespace\\\":\\\"konstapel-acceptance\\\"},\\\"spec\\\":{\\\"replicas\\\":0,\\\"selector\\\":{\\\"matchLabels\\\":{\\\"app\\\":\\\"acceptance\\\"}},\\\"template\\\":{\\\"metadata\\\":{\\\"labels\\\":{\\\"app\\\":\\\"acceptance\\\",\\\"konstapel.io/owner\\\":\\\"konstapel-assessment\\\"}},\\\"spec\\\":{\\\"containers\\\":[{\\\"command\\\":[\\\"sleep\\\",\\\"3600\\\"],\\\"image\\\":\\\"docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\\\",\\\"name\\\":\\\"app\\\",\\\"securityContext\\\":{\\\"privileged\\\":true}}]}}}}\\n\"}},\"spec\":{\"template\":{\"spec\":{\"$setElementOrder/containers\":[{\"name\":\"app\"}],\"containers\":[{\"name\":\"app\",\"securityContext\":{\"privileged\":true}}]}}}}\nto:\nResource: \"apps/v1, Resource=deployments\", GroupVersionKind: \"apps/v1, Kind=Deployment\"\nName: \"good-deployment\", Namespace: \"konstapel-acceptance\"\nfor: \"STDIN\": error when patching \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n"
+  },
+  {
+    "check": "privileged ephemeral update",
+    "error": "kubectl [patch pod good -n konstapel-acceptance --subresource=ephemeralcontainers --type=merge --patch-file=/dev/stdin]: exit status 1: Error from server: admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n",
+    "expectedDenial": true,
+    "response": "Error from server: admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy disallow-privileged-containers failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.\n"
+  },
+  {
+    "check": "Audit admits privileged Pod",
+    "expectedDenial": false,
+    "resourceUID": "27fb03f8-1c4a-4b91-b328-fba20fb62c9e"
+  }
+]
