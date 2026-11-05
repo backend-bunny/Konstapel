@@ -41,14 +41,12 @@ the configuration. `devbox install` installs the existing locked environment.
 
 | Task | Behavior |
 | --- | --- |
-| `task version:check` | Check the application version against the melange package. |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
 | `task test` | Run Go tests, including the real provider handshake and saved-evidence checks. |
 | `task lint` | Check Go formatting, `go vet`, and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures. |
-| `task deps:validate` | Validate `renovate.json` with the pinned validator. |
-| `task deps:check` | Check Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
+| `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
 | `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
@@ -59,7 +57,10 @@ and the checksum-verified chart download need network access. The pinned Devbox
 Kyverno CLI replaces the previous manual release-archive download.
 
 Task delegates orchestration to `scripts/`; scripts remain usable directly inside
-the environment. Full acceptance requires a fresh output directory, selects its
+the environment. The Taskfile exposes recurring workflows; helper scripts do not
+each need a task. Follow the [tooling guidelines](../AGENTS.md#taskfile-scope) when
+extending it. Build workflows check application version agreement internally.
+Full acceptance requires a fresh output directory, selects its
 own explicit kubeconfig/context, refuses existing clusters, and tears down its
 owned cluster while preserving diagnostic evidence. See the
 [assessment guide](integration/assessment-loop.md) for package inspection and
