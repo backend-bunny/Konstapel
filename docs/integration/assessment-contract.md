@@ -346,6 +346,35 @@ captures stay in `internal/assessment`).
 Engine-provided state correlation (task 4.3) may later replace the
 conservative continuity boundary where it is verified.
 
+## Package export
+
+`collector.Export` packages one frozen, evaluated capture.
+
+- **Assessment package.** When the mapping and content allow it, the package
+  holds the OSCAL 1.1.3 assessment plan, results, and a generated context SSP,
+  plus the content they reference. Schemas and reference closure are checked
+  before the package is accepted. This applies to incomplete evidence too.
+  - Each logical policy is one C2P check, with one subject per expected
+    observation. Overlapping binding contributions are therefore distinct
+    subjects of one control mapping and never add coverage.
+  - Each subject records its evidence state and full identity props. Only
+    attributable subjects carry an evaluation time and source report
+    reference.
+  - A not-satisfied finding is emitted only for an attributable failure.
+    Missing, rejected, or unresolved evidence and zero targets make no control
+    determination. No result ever claims a control is satisfied.
+- **Diagnostic package.** If plan, report, schema, or reference validation
+  fails, every OSCAL document and the copied content are removed. The package
+  becomes `Diagnostic` with reason `ExportFailed` and the error message.
+  Evidence completeness and outcome counts are recorded unchanged: export
+  state is separate from evidence.
+- **Always present:** `capture.json`, `evaluation.json` (per-observation states
+  and reasons), `summary.json`, and `descriptor.json`. The descriptor is
+  verified against the directory before `Export` returns.
+
+Binding-scope packages are exported today. Namespace packages require evidence
+projection (task 5.1) before export.
+
 ## Integration sequence
 
 1. This contract merges first. It needs no scheduler.
