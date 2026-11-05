@@ -26,7 +26,7 @@ plugin protocol. Konstapel does not evaluate workload admission itself.
 
 ### 1. Define two centrally administered alpha resources
 
-Use the API group `compliance.konstapel.io/v1alpha1` for cluster-scoped
+Use the API group `compliance.erenius.io` with version `v1alpha1` for cluster-scoped
 `ComplianceProfile` and `ComplianceBinding` resources. A profile identifies a
 pinned bundle digest and logical policy settings, including per-policy exception
 eligibility. A binding contains `profileRef`, a required `namespaceSelector`, and
