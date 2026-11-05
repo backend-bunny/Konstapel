@@ -191,3 +191,24 @@ func TestFreezeScopeFromListedObjects(t *testing.T) {
 		t.Fatal("subject whose engine policy was not rendered accepted")
 	}
 }
+
+func TestTrackerResumesFromRecordedChanges(t *testing.T) {
+	c := captureV2(t)
+	at := c.Window.Started.Add(time.Minute)
+	updated := c.Workloads[0]
+	updated.StateSHA256 = "v2"
+	NewTracker(&c).Workload(at, updated, false)
+	// A tracker rebuilt from the same capture (the next poll) sees the same
+	// state and records nothing new; a further update is recorded once.
+	NewTracker(&c).Workload(at.Add(time.Minute), updated, false)
+	if len(c.ScopeChanges) != 1 {
+		t.Fatalf("rebuilt tracker re-recorded a change: %d", len(c.ScopeChanges))
+	}
+	again := updated
+	again.StateSHA256 = "v3"
+	NewTracker(&c).Workload(at.Add(2*time.Minute), again, false)
+	NewTracker(&c).Workload(at.Add(3*time.Minute), again, false)
+	if len(c.ScopeChanges) != 2 {
+		t.Fatalf("want 2 changes, got %d", len(c.ScopeChanges))
+	}
+}

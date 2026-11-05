@@ -80,14 +80,26 @@ func NewTracker(c *CaptureV2) *Tracker {
 		t.byName[w.NamespaceUID+"/"+w.Resource+"/"+w.Name] = w
 		t.latest[w.UID] = w.StateSHA256
 	}
+	// Resume from changes already recorded, so a tracker rebuilt on every
+	// poll records each change once and compares against the latest state.
+	for _, ch := range c.ScopeChanges {
+		t.recorded[changeKey(ch)] = true
+		if ch.Kind == WorkloadUpdated && ch.Current != nil {
+			t.latest[ch.Current.UID] = ch.Current.StateSHA256
+		}
+	}
 	return t
+}
+
+func changeKey(ch ScopeChange) string {
+	return fmt.Sprint(ch.Kind, ch.NamespaceUID, ch.BindingUID, ch.LogicalPolicy, ch.Revision, ch.Detail, ch.Current, ch.Previous)
 }
 
 func (t *Tracker) record(ch ScopeChange) {
 	if ch.Observed.Before(t.c.Window.Started) || (!t.c.Window.Closed.IsZero() && ch.Observed.After(t.c.Window.Closed)) {
 		return // outside the collection window
 	}
-	key := fmt.Sprint(ch.Kind, ch.NamespaceUID, ch.BindingUID, ch.LogicalPolicy, ch.Revision, ch.Detail, ch.Current, ch.Previous)
+	key := changeKey(ch)
 	if t.recorded[key] {
 		return
 	}

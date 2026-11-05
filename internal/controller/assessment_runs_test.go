@@ -1,0 +1,268 @@
+package controller
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/publication/fake"
+)
+
+type runEnv struct {
+	*assessEnv
+	pub *fake.Publisher
+	rr  *AssessmentRunReconciler
+}
+
+func newRunEnv(t *testing.T, objs ...*v1alpha1.ComplianceBinding) *runEnv {
+	base := []client.Object{nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol), privilegedPod("prod", "web", "pod-1")}
+	for _, b := range objs {
+		base = append(base, b)
+	}
+	e := newAssessEnv(t, base...)
+	pub := fake.New(func() time.Time { return e.now })
+	root, _ := filepath.Abs("../..")
+	rt := AssessmentRuntime{Publisher: pub, StagingDir: t.TempDir(), ContentRoot: root, Poll: 10 * time.Second, PublishTimeout: 5 * time.Minute, Workers: 2}
+	e.ar.Runtime = rt
+	return &runEnv{assessEnv: e, pub: pub, rr: &AssessmentRunReconciler{Client: e.c, Assess: e.ar, Runtime: rt, Now: func() time.Time { return e.now }}}
+}
+
+func (e *runEnv) step(name string) ctrl.Result {
+	e.t.Helper()
+	res, err := e.rr.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name}})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return res
+}
+
+func (e *runEnv) run(name string) *v1alpha1.AssessmentRun {
+	e.t.Helper()
+	r := &v1alpha1.AssessmentRun{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: name}, r); err != nil {
+		e.t.Fatal(err)
+	}
+	return r
+}
+
+func (e *runEnv) schedule(binding string) *v1alpha1.AssessmentSchedule {
+	e.t.Helper()
+	b := &v1alpha1.ComplianceBinding{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: binding}, b)
+	if b.Status.Assessment == nil || b.Status.Assessment.Schedule == nil {
+		e.t.Fatalf("no schedule on %s", binding)
+	}
+	return b.Status.Assessment.Schedule
+}
+
+func (e *runEnv) runs() []v1alpha1.AssessmentRun {
+	var l v1alpha1.AssessmentRunList
+	_ = e.c.List(context.Background(), &l)
+	return l.Items
+}
+
+func shortTimeout(b *v1alpha1.ComplianceBinding) *v1alpha1.ComplianceBinding {
+	b.Spec.Assessment = &v1alpha1.BindingAssessment{CollectionTimeout: "5m"}
+	return b
+}
+
+func TestScheduledRunLifecycle(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	s := e.schedule("audit-prod")
+	if s.ActiveRun == nil || len(e.runs()) != 1 {
+		t.Fatalf("initial scheduled run not created: %+v", s)
+	}
+	name := s.ActiveRun.Name
+	if r := e.run(name); r.Spec.Trigger == nil || r.Spec.Trigger.Type != v1alpha1.TriggerScheduled || r.Labels[LabelRunBinding] != "uid-audit-prod" {
+		t.Fatalf("run %+v", r.Spec)
+	}
+	// Planning again is idempotent: same run, no duplicate.
+	e.assess("audit-prod")
+	if len(e.runs()) != 1 {
+		t.Fatal("re-planning duplicated the run")
+	}
+
+	e.step(name)
+	r := e.run(name)
+	if r.Status.Phase != v1alpha1.RunCollecting || r.Status.Binding == nil || r.Status.Scope == nil || r.Status.Scope.NamespaceCount != 1 {
+		t.Fatalf("start: %+v", r.Status)
+	}
+	if _, err := os.Stat(filepath.Join(e.rr.staging(r), "capture.json")); err != nil {
+		t.Fatal("capture not staged:", err)
+	}
+	// Not yet complete: keeps collecting.
+	e.now = a0.Add(30 * time.Second)
+	if res := e.step(name); res.RequeueAfter != 10*time.Second || e.run(name).Status.Phase != v1alpha1.RunCollecting {
+		t.Fatalf("closed before evidence or timeout: %+v", e.run(name).Status.Phase)
+	}
+	// An evaluation after observation completes the evidence: closes early.
+	e.report("prod", "pod-1", e.enginePolicy(), "fail", a0.Add(time.Minute))
+	e.now = a0.Add(90 * time.Second)
+	e.step(name)
+	r = e.run(name)
+	if r.Status.Phase != v1alpha1.RunCompleted || r.Status.Publication == nil || r.Status.Publication.Phase != "Committed" ||
+		r.Status.Summary.Evidence.Completeness != "Complete" || r.Status.Summary.Outcomes.Fail != 1 || r.Status.Window.Closed == nil {
+		t.Fatalf("completed run %+v", r.Status)
+	}
+	if r.Status.Publication.Retention == nil || r.Status.Publication.Retention.Duration != "2160h0m0s" {
+		t.Fatalf("retention %+v", r.Status.Publication.Retention)
+	}
+	if _, err := os.Stat(e.rr.staging(r)); !os.IsNotExist(err) {
+		t.Fatal("staging not cleaned after publication")
+	}
+	// The slot frees; the next run is due a full interval after the anchor.
+	e.assess("audit-prod")
+	if s = e.schedule("audit-prod"); s.ActiveRun != nil || !s.NextDue.Equal(&metav1.Time{Time: a0.Add(24 * time.Hour)}) {
+		t.Fatalf("slot not released or wrong next due: %+v", s)
+	}
+	e.now = a0.Add(24*time.Hour + time.Minute)
+	e.assess("audit-prod")
+	if s = e.schedule("audit-prod"); s.ActiveRun == nil || s.ActiveRun.Name == name || len(e.runs()) != 2 {
+		t.Fatalf("next scheduled run not created: %+v", s)
+	}
+}
+
+func TestRunClosesIncompleteAtTimeoutAndStillPublishes(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	name := e.schedule("audit-prod").ActiveRun.Name
+	e.step(name)
+	e.now = a0.Add(5*time.Minute + time.Second)
+	e.step(name)
+	r := e.run(name)
+	if r.Status.Phase != v1alpha1.RunCompleted || r.Status.Summary == nil || r.Status.Summary.Evidence.Completeness != "Incomplete" || r.Status.Summary.Evidence.Missing != 1 {
+		t.Fatalf("%+v %+v", r.Status, r.Status.Conditions)
+	}
+	if c := meta.FindStatusCondition(r.Status.Conditions, v1alpha1.ConditionEvidenceComplete); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("EvidenceComplete %+v", c)
+	}
+	if e.pub.Commits() != 1 {
+		t.Fatal("incomplete snapshot was not published")
+	}
+}
+
+func TestPublisherOutageFailsAndReleasesSlot(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	for range 100 {
+		e.pub.Fail(fake.OpStage, publication.ErrUnavailable)
+	}
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	name := e.schedule("audit-prod").ActiveRun.Name
+	e.step(name)
+	e.now = a0.Add(5*time.Minute + time.Second)
+	e.step(name)
+	if r := e.run(name); r.Status.Phase != v1alpha1.RunPublishing || r.Status.Summary == nil {
+		t.Fatalf("outage must keep retrying with evidence recorded: %+v", r.Status)
+	}
+	e.now = a0.Add(11 * time.Minute)
+	e.step(name)
+	r := e.run(name)
+	c := meta.FindStatusCondition(r.Status.Conditions, v1alpha1.ConditionPublished)
+	if r.Status.Phase != v1alpha1.RunFailed || c == nil || c.Reason != v1alpha1.ReasonPublicationFailed || r.Status.Summary.Evidence.Expected != 1 {
+		t.Fatalf("outage: %+v %+v", r.Status.Phase, c)
+	}
+	e.assess("audit-prod")
+	if s := e.schedule("audit-prod"); s.ActiveRun != nil {
+		t.Fatal("failed publication did not release the binding's slot")
+	}
+}
+
+func TestLostCaptureIsExplicit(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	name := e.schedule("audit-prod").ActiveRun.Name
+	e.step(name)
+	if err := os.RemoveAll(e.rr.staging(e.run(name))); err != nil { // controller restart without durable staging
+		t.Fatal(err)
+	}
+	e.now = a0.Add(time.Minute)
+	e.step(name)
+	r := e.run(name)
+	c := meta.FindStatusCondition(r.Status.Conditions, v1alpha1.ConditionPublished)
+	if r.Status.Phase != v1alpha1.RunFailed || c == nil || c.Reason != v1alpha1.ReasonCaptureLost || r.Status.Summary == nil || r.Status.Summary.Export != "CaptureLost" {
+		t.Fatalf("%+v %+v", r.Status, c)
+	}
+	if e.pub.Commits() != 0 {
+		t.Fatal("a lost capture was replaced by newer observations")
+	}
+}
+
+func TestSchedulingDisabledWithoutPublisher(t *testing.T) {
+	e := newAssessEnv(t, nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol),
+		epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}))
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	cur := e.current("audit-prod")
+	if !strings.Contains(strings.Join(cur.Limitations, ";"), "scheduled snapshots are disabled: no evidence publisher is configured") {
+		t.Fatalf("missing publisher not surfaced: %v", cur.Limitations)
+	}
+	var l v1alpha1.AssessmentRunList
+	_ = e.c.List(context.Background(), &l)
+	if len(l.Items) != 0 {
+		t.Fatal("runs created without a publisher")
+	}
+}
+
+func TestManualRunWaitsForScheduledFirst(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	manual := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: "manual-1", UID: "manual-uid"},
+		Spec: v1alpha1.AssessmentRunSpec{BindingRef: v1alpha1.BindingReference{Name: "audit-prod"}, Scope: v1alpha1.RunScopeBinding}}
+	if err := e.c.Create(context.Background(), manual); err != nil {
+		t.Fatal(err)
+	}
+	e.assess("audit-prod")
+	scheduled := e.schedule("audit-prod").ActiveRun.Name
+	if scheduled == "manual-1" {
+		t.Fatal("manual run admitted before the initial scheduled run")
+	}
+	e.step("manual-1")
+	if e.run("manual-1").Status.Phase != v1alpha1.RunPending {
+		t.Fatal("unadmitted manual run must wait as Pending")
+	}
+	e.step(scheduled)
+	e.now = a0.Add(5*time.Minute + time.Second)
+	e.step(scheduled)
+	e.assess("audit-prod")
+	if s := e.schedule("audit-prod"); s.ActiveRun == nil || s.ActiveRun.Name != "manual-1" {
+		t.Fatalf("manual run not admitted after the slot freed: %+v", s.ActiveRun)
+	}
+	if !e.schedule("audit-prod").LastScheduled.Equal(&metav1.Time{Time: a0}) {
+		t.Fatal("manual run moved the schedule")
+	}
+	e.step("manual-1")
+	if e.run("manual-1").Status.Phase != v1alpha1.RunCollecting {
+		t.Fatal("admitted manual run did not start")
+	}
+}
+
+func TestNamespaceRunFailsExplicitly(t *testing.T) {
+	e := newRunEnv(t, epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}))
+	r := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: "ns-run"}, Spec: v1alpha1.AssessmentRunSpec{
+		BindingRef: v1alpha1.BindingReference{Name: "audit-prod"}, Scope: v1alpha1.RunScopeNamespace,
+		Request: &v1alpha1.RequestReference{Namespace: "prod", Name: "r", UID: "u"}, Trigger: &v1alpha1.RunTrigger{Type: v1alpha1.TriggerRequest}}}
+	if err := e.c.Create(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	e.step("ns-run")
+	got := e.run("ns-run")
+	if c := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionScoped); got.Status.Phase != v1alpha1.RunFailed || c == nil || c.Reason != "NamespaceRunsNotSupported" {
+		t.Fatalf("%+v", got.Status)
+	}
+}

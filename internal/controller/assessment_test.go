@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
@@ -38,9 +39,10 @@ func newAssessEnv(t *testing.T, objs ...client.Object) *assessEnv {
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(targeting.ValidatingPolicyGVK, meta.RESTScopeRoot)
 	mapper.Add(PolicyReportGVK, meta.RESTScopeNamespace)
-	for _, k := range []string{"ComplianceBinding", "ComplianceProfile"} {
+	for _, k := range []string{"ComplianceBinding", "ComplianceProfile", "AssessmentRun"} {
 		mapper.Add(v1alpha1.GroupVersion.WithKind(k), meta.RESTScopeRoot)
 	}
+	mapper.Add(v1alpha1.GroupVersion.WithKind("AssessmentRequest"), meta.RESTScopeNamespace)
 	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, meta.RESTScopeRoot)
 	for _, gvk := range []schema.GroupVersionKind{{Version: "v1", Kind: "Pod"}, {Version: "v1", Kind: "ReplicationController"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"}, {Group: "apps", Version: "v1", Kind: "DaemonSet"}, {Group: "apps", Version: "v1", Kind: "StatefulSet"},
@@ -48,7 +50,14 @@ func newAssessEnv(t *testing.T, objs ...client.Object) *assessEnv {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithRESTMapper(mapper).WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}).Build()
+		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.AssessmentRun{}).
+		// The API server assigns UIDs on create; the fake client does not.
+		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if obj.GetUID() == "" {
+				obj.SetUID(types.UID("uid-" + obj.GetName()))
+			}
+			return c.Create(ctx, obj, opts...)
+		}}).Build()
 	e := &assessEnv{t: t, c: c, now: a0}
 	e.tr = &BindingReconciler{Client: c, Content: content, Cluster: "kube-system:test",
 		Engine: func(context.Context) (bool, error) { return true, nil },

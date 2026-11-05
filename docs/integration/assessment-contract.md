@@ -293,6 +293,55 @@ reporting-only server-side apply that omits the epoch, a forged epoch, an
 A→B→A change while the manager is stopped, and the fail-closed behavior without
 the policy.
 
+## Scheduling and run execution
+
+**Prerequisite.** Scheduling runs only when an evidence publisher, a staging
+directory, and a content root are configured through
+`controller.ConfigureAssessments`. `add-s3-evidence-publishing` supplies the
+production publisher. Until one is configured, every binding's
+`status.assessment.current.limitations` says
+`scheduled snapshots are disabled: no evidence publisher is configured`, and no
+runs are created. Current evidence status (above) works without a publisher.
+
+**Planning.** On every reconcile, the assessment controller runs
+`schedule.Plan` for the binding and persists the result in
+`status.assessment.schedule` and `latestRun`, applied together with `current`:
+
+- The first plan starts an initial scheduled run. Later runs are due at
+  `anchor + k × interval`. Changing the interval re-anchors at the last
+  scheduled time.
+- Missed due times coalesce into one run at the latest due time. The skipped
+  times are recorded in `gaps` and `missedTotal` and never claimed as
+  assessed.
+- Each binding has at most one active run (`schedule.activeRun`). When the slot
+  frees, an overdue scheduled run starts before queued platform manual runs,
+  which wait as `Pending` in creation order. Manual runs never move the
+  schedule.
+- Scheduled runs are named `<binding>-s-<hash(binding UID, scheduled time)>`.
+  A retry or a new leader finds the existing run instead of creating a
+  duplicate snapshot.
+
+**Execution.** The run controller (bounded concurrency, default 4) executes
+only the run its binding's schedule admitted:
+
+| Phase | What happens |
+| --- | --- |
+| `Pending` | Not yet admitted. |
+| `Collecting` | Scope frozen into `<staging>/<run UID>/capture.json`. Each poll records workload, namespace, and configuration changes against the frozen scope and attaches the current reports. Collection closes at `collectionTimeout`, or earlier once evidence is `Complete`. |
+| `Publishing` | The capture is evaluated and exported (Assessment or Diagnostic package). The summary, descriptor digest, and `EvidenceComplete` condition are recorded, then the frozen package is staged and published with the binding's retention. Failures retry until `PublishTimeout` after closure. |
+| `Completed` | `status.publication` holds the commit receipt; staging is removed. |
+| `Failed` | An explicit condition reason, then the slot is released. Recorded evidence is kept. |
+
+Failure reasons:
+
+- `PublicationFailed`: the publisher was still failing at the timeout.
+- `CaptureLost`: the staged capture or package disappeared, for example after
+  a restart without durable staging. The run is never reconstructed from the
+  changed cluster, and a later run assesses current state.
+- `BindingNotFound`: the binding is missing or was replaced.
+- `NamespaceRunsNotSupported`: namespace runs need evidence projection (task
+  5.1), so `AssessmentRequest`s are not executed yet.
+
 ## Collector evidence rules
 
 `internal/collector` implements the controller's capture path (prototype v1
