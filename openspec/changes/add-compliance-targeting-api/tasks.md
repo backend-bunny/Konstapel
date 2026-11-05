@@ -23,11 +23,11 @@ the bundle agent owns new content. Do not rewrite the assessment-loop task list.
 
 ## 2. Resolve namespace contributions and eligibility
 
-- [ ] 2.1 Implement the pure namespace resolver with standard Kubernetes selectors and stable ordering; verify matchLabels, all expression operators, `{}`, new namespaces, label changes, and namespace deletion against table-driven fixtures.
-- [ ] 2.2 Resolve overlapping policy contributions independently, retaining differing parameters; verify randomized input order yields identical output and Audit cannot remove a matching Deny contribution.
-- [ ] 2.3 Implement Forbidden precedence and shortest SelfService lifetime across all applicable contributions; verify restrictive Audit settings, missing profiles/content, unknown policy identities, and invalid mappings never authorize an exception.
-- [ ] 2.4 Reject bundle checks with unsupported cluster-scoped workload matches and resolve no-target scope explicitly; verify empty selectors cannot extend such checks cluster-wide and zero targets does not produce a compliance pass.
-- [ ] 2.5 Document resolver output, error states, and overlap examples; verify the documented examples match the executable fixtures and the exceptions handoff includes accepted revision identities.
+- [x] 2.1 Implement the pure namespace resolver with standard Kubernetes selectors and stable ordering; verify matchLabels, all expression operators, `{}`, new namespaces, label changes, and namespace deletion against table-driven fixtures.
+- [x] 2.2 Resolve overlapping policy contributions independently, retaining differing parameters; verify randomized input order yields identical output and Audit cannot remove a matching Deny contribution.
+- [x] 2.3 Implement Forbidden precedence and shortest SelfService lifetime across all applicable contributions; verify restrictive Audit settings, missing profiles/content, unknown policy identities, and invalid mappings never authorize an exception.
+- [x] 2.4 Reject bundle checks with unsupported cluster-scoped workload matches and resolve no-target scope explicitly; verify empty selectors cannot extend such checks cluster-wide and zero targets does not produce a compliance pass.
+- [x] 2.5 Document resolver output, error states, and overlap examples; verify the documented examples match the executable fixtures and the exceptions handoff includes accepted revision identities.
 
 ## 3. Deliver versioned engine policy instances
 

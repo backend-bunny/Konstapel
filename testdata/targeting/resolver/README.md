@@ -8,9 +8,12 @@ the contract tests in `internal/targeting`.
 
 `scenarios` lists the `compliance-targeting` spec scenarios a case exercises.
 `internal/targeting` tests check that every scenario exists, that inputs decode
-strictly into the API types and pass CRD validation, and, once the resolver
-lands, that resolving `input` yields `expected` for every permutation of the
-input order.
+strictly into the API types and pass CRD validation, and that resolving
+`input` yields `expected` for 50 random orderings of every input list, with
+identical revisions. Each case must be cited in
+`docs/integration/targeting-api.md`.
+
+Eligibility entries may list the error `reasons` that forced `Forbidden`.
 
 A case may add `steps`. Each step replaces namespaces or deletes bindings and
 then states the full expected result. The top-level `expected` always describes
