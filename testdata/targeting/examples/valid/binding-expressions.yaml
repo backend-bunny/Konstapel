@@ -1,0 +1,15 @@
+# Scenario: Select a namespace group (matchExpressions, all operators)
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: strict-regulated
+spec:
+  profileRef:
+    name: strict
+  namespaceSelector:
+    matchExpressions:
+      - {key: environment, operator: In, values: [production, staging]}
+      - {key: tier, operator: NotIn, values: [sandbox]}
+      - {key: compliance.erenius.io/regulated, operator: Exists}
+      - {key: compliance.erenius.io/legacy, operator: DoesNotExist}
+  mode: Deny

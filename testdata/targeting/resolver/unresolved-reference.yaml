@@ -1,0 +1,49 @@
+scenarios:
+  - A reference is unresolved
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: wrong-content, uid: p-wrong, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:2222222222222222222222222222222222222222222222222222222222222222}
+        policies:
+          - {name: disallow-privileged-containers, exceptions: {eligibility: SelfService, maxLifetime: 720h}}
+    - metadata: {name: unknown-policy, uid: p-unknown, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: does-not-exist, exceptions: {eligibility: SelfService, maxLifetime: 720h}}
+  bindings:
+    - metadata: {name: missing-profile, uid: b-missing, generation: 1}
+      spec: {profileRef: {name: absent}, namespaceSelector: {}, mode: Deny}
+    - metadata: {name: unavailable-content, uid: b-content, generation: 1}
+      spec: {profileRef: {name: wrong-content}, namespaceSelector: {}, mode: Deny}
+    - metadata: {name: unknown-policy, uid: b-unknown, generation: 1}
+      spec: {profileRef: {name: unknown-policy}, namespaceSelector: {}, mode: Deny}
+  namespaces:
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  # Targets still resolve from the selector, but nothing is contributed and no
+  # unresolved configuration grants exception eligibility.
+  bindings:
+    - binding: missing-profile
+      targets: [tools]
+      contributions: []
+      errors: [{reason: ProfileNotFound}]
+    - binding: unavailable-content
+      targets: [tools]
+      contributions: []
+      errors: [{reason: ContentUnavailable}]
+    - binding: unknown-policy
+      targets: [tools]
+      contributions: []
+      errors: [{reason: UnknownPolicy, policy: does-not-exist}]
+  eligibility: []

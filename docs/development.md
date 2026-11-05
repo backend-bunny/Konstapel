@@ -43,7 +43,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | --- | --- |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
 | `task test` | Run Go tests, including the real provider handshake and saved-evidence checks. |
-| `task lint` | Check Go formatting, `go vet`, and shell syntax. |
+| `task lint` | Check Go formatting, `go vet`, generated API files, and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
@@ -51,6 +51,10 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
+
+After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
+regenerate deepcopy code and CRDs with the pinned `controller-gen`; `task lint`
+fails when they are stale. See the [targeting API guide](integration/targeting-api.md).
 
 `task check` needs no cluster or Docker daemon. Initial tool/module installation
 and the checksum-verified chart download need network access. The pinned Devbox

@@ -1,0 +1,22 @@
+# Scenario: An administrator configures a binding
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata:
+  name: baseline
+spec:
+  bundle:
+    name: example-workload-hardening
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  policies:
+    - name: disallow-privileged-containers
+      exceptions:
+        eligibility: SelfService
+        maxLifetime: 720h
+    - name: require-run-as-non-root
+      # exceptions omitted: defaults to Forbidden
+    - name: restrict-capabilities
+      parameters:
+        allowedCapabilities: [NET_BIND_SERVICE]
+      exceptions:
+        eligibility: SelfService
+        maxLifetime: 168h

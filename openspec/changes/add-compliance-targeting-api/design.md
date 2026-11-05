@@ -34,8 +34,13 @@ an explicit `mode` of `Audit` or `Deny`. Missing mode is rejected rather than
 inheriting the prototype runner's default. References resolve in the local
 cluster; there is no remote target field in this version.
 
-Use `metav1.LabelSelector` and Kubernetes selector validation, with schema rules
-that reject absent/null selectors while accepting `{}`. Profile validation rejects
+Use Kubernetes `LabelSelector` semantics and selector validation, with schema
+rules that reject absent/null selectors while accepting `{}`. The field is a
+bounded type with the same JSON shape as `metav1.LabelSelector`. It caps
+matchLabels, matchExpressions and values, so CEL can reject invalid operators,
+keys and values at admission. Unbounded `metav1.LabelSelector` CEL rules exceed
+the API server's estimated cost limit, and the CRD would be refused. The type
+converts to `metav1.LabelSelector` for matching and rendering. Profile validation rejects
 unknown policy identities and incompatible configuration once content resolves.
 `Forbidden` is the default exception setting. `SelfService` requires a positive
 `maxLifetime` duration; invalid or missing limits cannot grant eligibility.

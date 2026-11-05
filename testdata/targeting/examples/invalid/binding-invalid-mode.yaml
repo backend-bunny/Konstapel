@@ -1,0 +1,9 @@
+# Scenario: An administrator configures a binding (mode is Audit or Deny)
+# expect: spec.mode: Unsupported value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: invalid-mode}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector: {}
+  mode: Enforce

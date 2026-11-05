@@ -1,0 +1,46 @@
+scenarios:
+  - Different policy parameters overlap
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: lenient, uid: p-lenient, generation: 3}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: restrict-capabilities, parameters: {allowedCapabilities: [NET_BIND_SERVICE, NET_RAW]}}
+    - metadata: {name: strict, uid: p-strict, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: restrict-capabilities, parameters: {allowedCapabilities: []}}
+  bindings:
+    - metadata: {name: lenient-deny-all, uid: b-lenient, generation: 1}
+      spec: {profileRef: {name: lenient}, namespaceSelector: {}, mode: Deny}
+    - metadata: {name: strict-deny-production, uid: b-strict, generation: 2}
+      spec: {profileRef: {name: strict}, namespaceSelector: {matchLabels: {environment: production}}, mode: Deny}
+  namespaces:
+    - {name: shop-prod, uid: 00000000-0000-0000-0000-000000000001, labels: {environment: production}}
+    - {name: shop-dev, uid: 00000000-0000-0000-0000-000000000002, labels: {environment: development}}
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  # Two distinct contributions for the same logical policy in shop-prod; neither
+  # parameter map wins and nothing is merged.
+  bindings:
+    - binding: lenient-deny-all
+      targets: [shop-dev, shop-prod, tools]
+      contributions: [{policy: restrict-capabilities, mode: Deny}]
+    - binding: strict-deny-production
+      targets: [shop-prod]
+      contributions: [{policy: restrict-capabilities, mode: Deny}]
+  eligibility:
+    - {namespace: shop-dev, policy: restrict-capabilities, effective: Forbidden, contributors: [lenient-deny-all]}
+    - {namespace: shop-prod, policy: restrict-capabilities, effective: Forbidden, contributors: [lenient-deny-all, strict-deny-production]}
+    - {namespace: tools, policy: restrict-capabilities, effective: Forbidden, contributors: [lenient-deny-all]}

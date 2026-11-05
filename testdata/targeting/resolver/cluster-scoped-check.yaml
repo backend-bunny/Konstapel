@@ -1,0 +1,34 @@
+scenarios:
+  - A bundle introduces a cluster-scoped check
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: mixed, uid: p-mixed, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - name: disallow-privileged-containers
+          - name: restrict-cluster-role-bindings
+  bindings:
+    - metadata: {name: deny-everything, uid: b-all, generation: 1}
+      spec: {profileRef: {name: mixed}, namespaceSelector: {}, mode: Deny}
+  namespaces:
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  # The empty selector does not authorise the cluster-scoped check; the
+  # namespaced check is still contributed.
+  bindings:
+    - binding: deny-everything
+      targets: [tools]
+      contributions: [{policy: disallow-privileged-containers, mode: Deny}]
+      errors: [{reason: UnsupportedScope, policy: restrict-cluster-role-bindings}]
+  eligibility:
+    - {namespace: tools, policy: disallow-privileged-containers, effective: Forbidden, contributors: [deny-everything]}

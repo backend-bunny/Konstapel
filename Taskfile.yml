@@ -15,15 +15,16 @@ tasks:
     cmd: go test -mod=readonly ./...
 
   lint:
-    desc: Check Go formatting, vet, and shell syntax
+    desc: Check Go formatting, vet, generated API files, and shell syntax
     cmds:
       - |
-        unformatted=$(gofmt -l cmd internal)
+        unformatted=$(gofmt -l api cmd internal)
         if [ -n "$unformatted" ]; then
           printf 'Run gofmt on:\n%s\n' "$unformatted"
           exit 1
         fi
       - go vet -mod=readonly ./...
+      - scripts/generate.sh --check
       - |
         set -eu
         bash -n .envrc

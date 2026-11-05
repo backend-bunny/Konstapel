@@ -1,0 +1,11 @@
+# Scenario: Reject ambiguous or invalid scope (invalid expression)
+# expect: spec.namespaceSelector.matchExpressions[0].operator: Unsupported value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: invalid-operator}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector:
+    matchExpressions:
+      - {key: environment, operator: Matches, values: [prod]}
+  mode: Audit

@@ -1,0 +1,44 @@
+scenarios:
+  - Resolve lifetime limits
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: month, uid: p-month, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: disallow-privileged-containers, exceptions: {eligibility: SelfService, maxLifetime: 720h}}
+    - metadata: {name: week, uid: p-week, generation: 4}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: disallow-privileged-containers, exceptions: {eligibility: SelfService, maxLifetime: 168h}}
+  bindings:
+    - metadata: {name: month-all, uid: b-month, generation: 1}
+      spec: {profileRef: {name: month}, namespaceSelector: {}, mode: Deny}
+    - metadata: {name: week-production, uid: b-week, generation: 1}
+      spec: {profileRef: {name: week}, namespaceSelector: {matchLabels: {environment: production}}, mode: Audit}
+  namespaces:
+    - {name: shop-prod, uid: 00000000-0000-0000-0000-000000000001, labels: {environment: production}}
+    - {name: shop-dev, uid: 00000000-0000-0000-0000-000000000002, labels: {environment: development}}
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  bindings:
+    - binding: month-all
+      targets: [shop-dev, shop-prod, tools]
+      contributions: [{policy: disallow-privileged-containers, mode: Deny}]
+    - binding: week-production
+      targets: [shop-prod]
+      contributions: [{policy: disallow-privileged-containers, mode: Audit}]
+  eligibility:
+    - {namespace: shop-dev, policy: disallow-privileged-containers, effective: SelfService, maxLifetime: 720h0m0s, contributors: [month-all]}
+    - {namespace: shop-prod, policy: disallow-privileged-containers, effective: SelfService, maxLifetime: 168h0m0s, contributors: [month-all, week-production]}
+    - {namespace: tools, policy: disallow-privileged-containers, effective: SelfService, maxLifetime: 720h0m0s, contributors: [month-all]}

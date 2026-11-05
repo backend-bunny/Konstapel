@@ -1,0 +1,10 @@
+# Scenario: Select every namespace / Audit everywhere and deny in production
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-audit-all
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector: {}
+  mode: Audit

@@ -1,0 +1,10 @@
+# Scenario: Resolve restrictive eligibility across bindings (eligibility enum)
+# expect: spec.policies[0].exceptions.eligibility: Unsupported value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata: {name: invalid-eligibility}
+spec:
+  bundle: {name: example-workload-hardening, digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+  policies:
+    - name: disallow-privileged-containers
+      exceptions: {eligibility: Always}

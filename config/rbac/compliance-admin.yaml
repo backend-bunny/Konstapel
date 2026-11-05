@@ -1,0 +1,17 @@
+# Platform administrators manage centrally administered compliance configuration.
+# Bind with a ClusterRoleBinding to platform-admin subjects only. This role is
+# deliberately not aggregated into the built-in admin/edit/view roles, so
+# namespace teams never gain it through their namespace roles.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-compliance-admin
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [complianceprofiles, compliancebindings]
+    verbs: [get, list, watch, create, update, patch, delete, deletecollection]
+  - apiGroups: [compliance.erenius.io]
+    resources: [complianceprofiles/status, compliancebindings/status]
+    verbs: [get]

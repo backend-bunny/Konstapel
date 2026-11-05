@@ -1,0 +1,11 @@
+# Scenario: Reject ambiguous or invalid scope (In without values)
+# expect: spec.namespaceSelector.matchExpressions[0]: Invalid value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: in-without-values}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector:
+    matchExpressions:
+      - {key: environment, operator: In}
+  mode: Audit
