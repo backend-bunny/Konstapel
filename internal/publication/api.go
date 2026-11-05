@@ -72,7 +72,7 @@ func FromAPI(s v1alpha1.PublicationStatus) Status {
 func SummaryToAPI(s RunSummary) v1alpha1.AssessmentSummary {
 	e, o := s.Evidence, s.Outcomes
 	return v1alpha1.AssessmentSummary{
-		Evidence: v1alpha1.EvidenceSummary{Completeness: v1alpha1.EvidenceCompleteness(e.Completeness), Expected: int32(e.Expected), Attributable: int32(e.Attributable), Missing: int32(e.Missing), Rejected: int32(e.Rejected), Unresolved: int32(e.Unresolved)},
+		Evidence: v1alpha1.EvidenceSummary{Completeness: v1alpha1.EvidenceCompleteness(e.Completeness), Expected: int32(e.Expected), Attributable: int32(e.Attributable), Missing: int32(e.Missing), Rejected: int32(e.Rejected), Unresolved: int32(e.Unresolved), StaleScopes: int32(e.StaleScopes)},
 		Outcomes: v1alpha1.OutcomeCounts{Pass: int32(o.Pass), Fail: int32(o.Fail), Error: int32(o.Error), Skip: int32(o.Skip), AcceptedRisk: int32(o.AcceptedRisk), NotApplicable: int32(o.NotApplicable), Unknown: int32(o.Unknown)},
 		Export:   v1alpha1.ExportState(s.Export),
 	}

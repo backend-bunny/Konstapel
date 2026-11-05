@@ -138,7 +138,7 @@ func BuildInventory(subjects []targeting.EvidenceSubject, checks []Check, worklo
 	for _, c := range checks {
 		byPolicy[c.EnginePolicy] = append(byPolicy[c.EnginePolicy], c)
 	}
-	var out []Expected
+	out := []Expected{}
 	seen := map[string]bool{}
 	for _, s := range subjects {
 		policyChecks := byPolicy[s.EnginePolicy]

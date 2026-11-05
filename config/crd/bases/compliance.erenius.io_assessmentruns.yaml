@@ -512,6 +512,13 @@ spec:
                         format: int32
                         minimum: 0
                         type: integer
+                      staleScopes:
+                        description: |-
+                          staleScopes counts bindings or policies whose configuration did not
+                          resolve; any stale scope makes evidence Incomplete.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       unresolved:
                         format: int32
                         minimum: 0
