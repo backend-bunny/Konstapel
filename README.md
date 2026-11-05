@@ -15,9 +15,9 @@ The intended workflow is to:
 
 ## Project status
 
-Konstapel is in the initial design phase. The repository currently contains the
-project vision and architecture; controller implementation has not started.
-The initial control scope and policy engine are still being selected.
+Konstapel includes a Go prototype for Kyverno 1.19.2 v1 policies and partial
+NIST AC-6 evidence. It exercises C2P v2, admission, background reporting and
+validated OSCAL export. A production controller is not yet implemented.
 
 ## Documentation
 

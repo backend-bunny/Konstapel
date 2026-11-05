@@ -1,14 +1,17 @@
 # Konstapel architecture
 
-Status: initial design. This document describes the intended architecture;
-implementation has not started. The project purpose is in [vision.md](vision.md).
+Status: architecture direction, with the first integration prototype implemented.
+The Go runner proves modern Kyverno policy delivery and bounded AC-6 assessment;
+see [the acceptance workflow](docs/integration/assessment-loop.md). The production controller and
+public Kubernetes API remain future work. The project purpose is in [vision.md](vision.md).
 
 ## Direction
 
 Konstapel is a compliance controller written in Go, targeting NIST SP 800-53
 and built on **OSCAL Compass compliance-to-policy-go v2 (C2P-Go v2)**.
 Kubernetes and NIST SP 800-53 Revision 5 are the working assumptions from the
-vision. The initial baseline and assessable control subset remain open.
+vision. The prototype uses Moderate baseline content and a bounded technical
+check for AC-6; broader assessable control coverage remains future work.
 
 The proposed runtime is a Kubernetes controller using `controller-runtime`,
 with C2P-Go embedded as a library behind a small integration boundary. Konstapel
@@ -65,7 +68,7 @@ will follow the prototype.
 
 ## C2P-Go v2 integration
 
-The dependency target is
+The dependency is
 `github.com/oscal-compass/compliance-to-policy-go/v2`. Upstream currently develops
 v2 on `main` and describes its API as experimental. Implementation should pin a
 specific commit through a Go module version and upgrade deliberately.
@@ -75,9 +78,9 @@ V2 uses external plugin executables communicating over gRPC through
 and configuring compatible plugin binaries. C2P manages their lifecycle;
 Konstapel must account for plugin failures in reconciliation and status.
 
-The first prototype should exercise policy generation and result conversion with
-one engine, using a pinned core/plugin combination. The policy engine remains to
-be selected; upstream documents Kyverno and Open Cluster Management integrations.
+The prototype exercises policy generation and result conversion with Kyverno
+1.19.2, using a pinned core and a focused provider for modern policies and reports.
+Upstream also documents an Open Cluster Management integration.
 
 ## Reconciliation behavior
 
@@ -98,7 +101,7 @@ Missing, stale, skipped, or errored evaluations must remain distinguishable from
 passing checks. Changes in scope must not make old evidence appear current.
 Policy deletion and replacement require an explicit ownership model.
 
-## Decisions still open
+## Production decisions still open
 
 - Initial NIST baseline, control subset, and source/version of OSCAL content.
 - First policy engine, supported versions, and audit/enforcement behavior.
@@ -119,5 +122,5 @@ Reviewed at commit `45bfc1a8947e8b56b7e11391e13f8c1f2136cfaa`:
 - [C2P-Go overview and v2 status](https://github.com/oscal-compass/compliance-to-policy-go/blob/45bfc1a8947e8b56b7e11391e13f8c1f2136cfaa/README.md)
 - [V2 plugin interfaces and packaging](https://github.com/oscal-compass/compliance-to-policy-go/blob/45bfc1a8947e8b56b7e11391e13f8c1f2136cfaa/plugin/README.md)
 
-This reference revision records the design research; the implementation dependency
-pin will be selected when the Go module is introduced.
+The Go module pins this revision as
+`v2.0.0-rc.1.0.20260824132548-45bfc1a8947e`; upgrades are deliberate.
