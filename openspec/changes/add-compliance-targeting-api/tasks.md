@@ -16,7 +16,7 @@ the bundle agent owns new content. Do not rewrite the assessment-loop task list.
 ## 1. Define the central API and contract
 
 - [ ] 1.1 Add profile/binding API examples and resolver input/output fixtures for selected namespaces, `{}`, missing/null selectors, overlapping modes, and eligibility; verify each example's expected result is tied to a spec scenario and document the independent fixture entry point.
-- [ ] 1.2 After the foundation module lands, add `compliance.konstapel.io/v1alpha1` cluster-scoped Go types, generated CRDs, and schema validation; verify API-server tests accept valid selectors and reject invalid selectors, absent mode, invalid eligibility, and missing/nonpositive SelfService lifetime.
+- [ ] 1.2 After the foundation module lands, add `compliance.erenius.io/v1alpha1` cluster-scoped Go types, generated CRDs, and schema validation; verify API-server tests accept valid selectors and reject invalid selectors, absent mode, invalid eligibility, and missing/nonpositive SelfService lifetime.
 - [ ] 1.3 Add platform administration RBAC and namespace-team negative authorization cases; verify application exception permissions cannot create/update/delete profiles or bindings.
 - [ ] 1.4 Define the shared contribution/revision/eligibility result types using the foundation's content and cluster identities; verify serialization fixtures preserve binding/profile identities, content/configuration digests, mode, scope, and resolution errors.
 - [ ] 1.5 Document the alpha API, explicit mode/selector rules, central scope-label ownership, exception defaults, and downstream contract; verify the examples validate against the generated CRDs and identify which files dependent agents may consume.

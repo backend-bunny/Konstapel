@@ -27,7 +27,7 @@ trusted; this design constrains namespace application roles.
 
 ### 1. Use a namespaced acceptance resource with explicit renewal
 
-Add `ComplianceException` in `compliance.konstapel.io/v1alpha1`. Its spec contains
+Add `ComplianceException` in `compliance.erenius.io/v1alpha1`. Its spec contains
 one logical policy reference, a required workload `LabelSelector`, a nonblank
 reason, an RFC3339 `expiresAt`, and an acceptance revision. An explicit empty
 workload selector selects all applicable workloads in its own namespace; missing

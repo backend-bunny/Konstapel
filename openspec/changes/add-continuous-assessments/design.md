@@ -75,7 +75,7 @@ contract, not a competing policy ownership scheme.
 ### 3. Use a namespaced request and a protected cluster run
 
 Add namespaced `AssessmentRequest` and cluster-scoped `AssessmentRun` resources
-in `compliance.konstapel.io/v1alpha1`. An application request contains an immutable
+in `compliance.erenius.io/v1alpha1`. An application request contains an immutable
 binding reference; its namespace defines its maximum scope. Admission captures
 the authenticated requester, and reconciliation resolves the binding UID and
 namespace UID. Recheck membership when execution starts. The team may read its
