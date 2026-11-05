@@ -33,7 +33,9 @@ Add `spec.assessment` with `interval: 24h`, `maxEvidenceAge: 2h`,
 `collectionTimeout: 5m`, and `retention: 2160h` as defaulted duration strings.
 Use the Kubernetes duration convention: 90 days is expressed as 2160 hours,
 without inventing a `d` suffix. Reject invalid, nonpositive, or overflowing values;
-omission defaults, while explicit null is invalid. The settings are independent:
+omission defaults. An explicit null also defaults: the API server prunes it before
+validation and CEL cannot distinguish null from omission, so no null is stored.
+The settings are independent:
 a short interval does not require Kyverno to reevaluate unchanged resources at
 that cadence. Document combinations that repeatedly yield stale evidence.
 

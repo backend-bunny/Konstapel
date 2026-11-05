@@ -1,0 +1,15 @@
+# A binding with hourly snapshots and 30-day retention. enforcementEpoch is
+# omitted: the konstapel-binding-enforcement-epoch policy maintains it.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-audit
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector: {}
+  mode: Audit
+  assessment:
+    interval: 1h
+    maxEvidenceAge: 2h
+    collectionTimeout: 10m
+    retention: 720h

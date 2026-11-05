@@ -57,10 +57,19 @@ type Input struct {
 	Namespaces []Namespace
 }
 
-// BindingEpoch returns the binding-side input to EnforcementRevision. It is
-// the binding's metadata.generation today. add-continuous-assessments replaces
-// this with an admission-maintained enforcement epoch.
-func BindingEpoch(b *v1alpha1.ComplianceBinding) int64 { return b.Generation }
+// BindingEpoch returns the binding-side input to EnforcementRevision: the
+// admission-maintained spec.enforcementEpoch, which changes only when
+// profileRef, namespaceSelector or mode change. Bindings written before the
+// konstapel-binding-enforcement-epoch policy existed have no epoch; their
+// metadata.generation is the epoch their current revisions were computed with,
+// and the policy initializes the epoch from it on their next write, so their
+// revisions do not rotate.
+func BindingEpoch(b *v1alpha1.ComplianceBinding) int64 {
+	if e := b.Spec.EnforcementEpoch; e > 0 {
+		return e
+	}
+	return b.Generation
+}
 
 // Resolve computes every binding's targets and contributions and the
 // effective exception eligibility per namespace and policy.

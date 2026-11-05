@@ -8,16 +8,23 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/yaml"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/crdtest"
 )
 
+// obj decodes YAML the way the API server decodes JSON request bodies:
+// integers become int64, not float64.
 func obj(t *testing.T, s string) map[string]any {
 	t.Helper()
+	j, err := yaml.YAMLToJSON([]byte(s))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var m map[string]any
-	if err := yaml.Unmarshal([]byte(s), &m); err != nil {
+	if err = utiljson.Unmarshal(j, &m); err != nil {
 		t.Fatal(err)
 	}
 	return m
@@ -71,8 +78,11 @@ func TestAssessmentExamplesAreAccepted(t *testing.T) {
 				t.Fatalf("rejected: %v", errs.ToAggregate())
 			}
 			var typed any = &v1alpha1.AssessmentRun{}
-			if kind == "AssessmentRequest" {
+			switch kind {
+			case "AssessmentRequest":
 				typed = &v1alpha1.AssessmentRequest{}
+			case "ComplianceBinding":
+				typed = &v1alpha1.ComplianceBinding{}
 			}
 			if err := yaml.UnmarshalStrict(raw, typed); err != nil {
 				t.Fatalf("does not decode into Go type: %v", err)
@@ -198,10 +208,7 @@ func TestResolvedFieldsAreStatusOnly(t *testing.T) {
 
 func mergePatch(t *testing.T, o map[string]any, patch string) {
 	t.Helper()
-	var p map[string]any
-	if err := yaml.Unmarshal([]byte(patch), &p); err != nil {
-		t.Fatal(err)
-	}
+	p := obj(t, patch)
 	var merge func(dst, src map[string]any)
 	merge = func(dst, src map[string]any) {
 		for k, v := range src {

@@ -25,11 +25,11 @@ change's entire task list before landing the shared contract or adapter.
 
 ## 2. Add binding settings without changing enforcement on reporting edits
 
-- [ ] 2.1 Add the four defaulted positive duration settings and validation; verify omitted settings resolve to 24h/2h/5m/2160h and null, cron syntax, zero, negative, and overflowing values are rejected.
-- [ ] 2.2 Implement the protected admission-maintained enforcement epoch and integrate it with targeting revision calculation; verify reporting-only edits retain policy identities, forged epochs fail, and A-to-B-to-A enforcement changes create new identities even across missed watch events.
-- [ ] 2.3 Update exception contribution comparison to use enforcement identity while retaining observed generation as provenance; verify interval, timeout, freshness, and retention edits leave valid grants intact and actual enforcement changes still require renewed acceptance.
-- [ ] 2.4 Add migration from existing applied revisions without rotating unchanged policies; verify restarts and initialization retries preserve policy identity and cannot reactivate an old exception.
-- [ ] 2.5 Document defaults, duration syntax, epoch migration, and controller compatibility; verify configuration examples validate and the documented reporting-only update preserves enforcement in the disposable cluster.
+- [x] 2.1 Add the four defaulted positive duration settings and validation; verify omitted settings and explicit nulls resolve to 24h/2h/5m/2160h, and cron syntax, zero, negative, and overflowing values are rejected.
+- [x] 2.2 Implement the protected admission-maintained enforcement epoch and integrate it with targeting revision calculation; verify reporting-only edits retain policy identities, forged epochs fail, and A-to-B-to-A enforcement changes create new identities even across missed watch events.
+- [x] 2.3 Update exception contribution comparison to use enforcement identity while retaining observed generation as provenance; verify interval, timeout, freshness, and retention edits leave valid grants intact and actual enforcement changes still require renewed acceptance. Contribution and eligibility revisions are verified here; the grant runtime that compares accepted revisions is implemented in `add-self-service-policy-exceptions` task 4.3.
+- [x] 2.4 Add migration from existing applied revisions without rotating unchanged policies; verify restarts and initialization retries preserve policy identity and cannot reactivate an old exception.
+- [x] 2.5 Document defaults, duration syntax, epoch migration, and controller compatibility; verify configuration examples validate and the documented reporting-only update preserves enforcement in the disposable cluster.
 
 ## 3. Reconcile current state and durable run scheduling
 

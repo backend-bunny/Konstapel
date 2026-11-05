@@ -219,6 +219,80 @@ chain ends at the pinned NIST catalog (about 10 MB), so the package is generated
 on demand rather than committed as a second copy. OSCAL UUIDs differ on every
 call, so compare these packages by descriptor, not bytes.
 
+## Binding assessment settings and the enforcement epoch
+
+`ComplianceBinding.spec.assessment` configures continuous assessment:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `interval` | `24h` | Time between scheduled snapshots, measured from a persisted anchor. |
+| `maxEvidenceAge` | `2h` | Oldest source evaluation accepted as current evidence at closure. |
+| `collectionTimeout` | `5m` | Upper bound on how long a run waits for evidence. |
+| `retention` | `2160h` | How long published packages are kept, fixed at publication (90 days). |
+
+Values are positive Kubernetes/Go duration strings with the units `h`, `m`,
+`s`, `ms`, `us` or `ns`, for example `90m`, `1h30m` or `8760h`. The API server
+rejects days (`90d`), cron expressions, signs, zero, and values that overflow a
+duration. Omitted settings default. An explicit `null` behaves like omission:
+the API server prunes it and applies the default, so a null is never stored.
+Short intervals do not make Kyverno re-evaluate unchanged resources faster; with
+the starting chart's hourly background scan, a `maxEvidenceAge` below about an
+hour repeatedly yields stale evidence.
+
+Changing `spec.assessment` is a reporting-only edit. It advances
+`metadata.generation` and `status.observedGeneration`, but not
+`spec.enforcementEpoch`. Engine policy names, specs, and the contribution
+revisions that exceptions bind to stay the same, so enforcement and accepted
+exceptions are unaffected. The controller may still update provenance
+annotations on the engine policies.
+
+`spec.enforcementEpoch` is maintained by the MutatingAdmissionPolicy in
+`config/admission/binding-enforcement-epoch.yaml`:
+
+| Write | Epoch |
+| --- | --- |
+| create | 1 |
+| update without a change to `profileRef`, `namespaceSelector` or `mode` | unchanged (carried forward even when the request omits it, as server-side apply and GitOps tools do) |
+| update that changes any of them, including a rollback to earlier values | previous + 1 |
+
+User-supplied values are overwritten. A CRD transition rule independently
+rejects an epoch that disappears, decreases, or does not follow these rules.
+`targeting.BindingEpoch` feeds the epoch into `EnforcementRevision`. Because
+the epoch, not the generation, identifies enforcement, an A→B→A change gets a
+new revision even if the controller missed the intermediate state.
+
+**Migration.** Bindings created before the policy existed have no epoch.
+`BindingEpoch` falls back to `metadata.generation`, which is the value their
+current revisions were computed with. On their next write, the policy
+initializes the epoch from the old generation (+1 if enforcement changed).
+Unchanged bindings therefore keep their engine policies, and a later rollback
+cannot reuse an old revision.
+
+**Prerequisite.** The policy needs MutatingAdmissionPolicy at
+`admissionregistration.k8s.io/v1`, which requires Kubernetes 1.36 or later. It
+is served and enabled by default on the pinned 1.36.1 kind node. Install it
+before the controller:
+
+```sh
+kubectl apply --server-side -f config/crd/bases -f config/admission
+```
+
+Without the policy:
+
+- Updates to bindings that already have an epoch fail with
+  `enforcementEpoch is maintained by admission`. They fail closed instead of
+  silently rotating policies.
+- Bindings created without it keep the generation fallback, and every edit,
+  including reporting-only edits, rotates their policies, as before this
+  change. The assessment controller will surface this as a run limitation when
+  it is wired into the manager.
+
+Verification: `scripts/targeting-live.sh` runs `TestLiveEnforcementEpoch` on a
+disposable cluster with Kyverno. It checks migration, creation, a
+reporting-only server-side apply that omits the epoch, a forged epoch, an
+A→B→A change while the manager is stopped, and the fail-closed behavior without
+the policy.
+
 ## Collector evidence rules
 
 `internal/collector` implements the controller's capture path (prototype v1
