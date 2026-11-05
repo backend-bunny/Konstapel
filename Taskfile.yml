@@ -24,7 +24,7 @@ tasks:
           exit 1
         fi
       - go vet -mod=readonly ./...
-      - go vet -mod=readonly -tags live ./internal/targeting/
+      - go vet -mod=readonly -tags live ./internal/targeting/ ./internal/controller/
       - scripts/generate.sh --check
       - |
         set -eu
