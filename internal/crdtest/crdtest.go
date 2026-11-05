@@ -105,7 +105,7 @@ func Load(t testing.TB, dir string) map[string]*Validator {
 func (v *Validator) Validate(obj map[string]any) field.ErrorList {
 	v.prepare(obj)
 	errs := apiservervalidation.ValidateCustomResource(nil, obj, v.schema)
-	errs = append(errs, schemaobjectmeta.Validate(nil, obj, v.structural, true)...)
+	errs = append(errs, schemaobjectmeta.Validate(context.Background(), nil, obj, v.structural, true)...)
 	celErrs, _ := v.cel.Validate(context.Background(), nil, v.structural, obj, nil, celconfig.RuntimeCELCostBudget)
 	return append(errs, celErrs...)
 }
@@ -119,7 +119,7 @@ func (v *Validator) ValidateUpdate(obj, old map[string]any) field.ErrorList {
 	v.prepare(old)
 	correlated := common.NewCorrelatedObject(obj, old, &model.Structural{Structural: v.structural})
 	errs := apiservervalidation.ValidateCustomResourceUpdate(nil, obj, old, v.schema, apiservervalidation.WithRatcheting(correlated))
-	errs = append(errs, schemaobjectmeta.Validate(nil, obj, v.structural, true)...)
+	errs = append(errs, schemaobjectmeta.Validate(context.Background(), nil, obj, v.structural, true)...)
 	celErrs, _ := v.cel.Validate(context.Background(), nil, v.structural, obj, old, celconfig.RuntimeCELCostBudget, cel.WithRatcheting(correlated))
 	return append(errs, celErrs...)
 }
