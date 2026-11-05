@@ -55,14 +55,29 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
       - name: Verify published signature and attestations
+        timeout-minutes: 5
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p out/image/verification
           identity='https://github.com/backend-bunny/Konstapel/.github/workflows/publish.yml@refs/heads/main'
-          devbox run -- cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST"
+          devbox run -- cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > out/image/verification/signature.json
+          count=0
           for type in spdxjson https://github.com/backend-bunny/Konstapel/sources/v1 https://github.com/backend-bunny/Konstapel/notices/v1; do
-            devbox run -- cosign verify-attestation --type "$type" --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST"
+            count=$((count + 1))
+            devbox run -- cosign verify-attestation --type "$type" --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > "out/image/verification/attestation-$count.jsonl"
+            printf 'Verified %s\n' "$type"
           done
-          gh attestation verify "oci://$IMAGE@$DIGEST" --repo backend-bunny/Konstapel
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo backend-bunny/Konstapel --format json > out/image/verification/provenance.json
           printf 'Published and verified `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: published-image-evidence
+          path: |
+            out/image/verification/
+            out/image/digest
+            out/image/notices.md
+          retention-days: 14
