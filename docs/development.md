@@ -54,7 +54,8 @@ the configuration. `devbox install` installs the existing locked environment.
 
 After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
 regenerate deepcopy code and CRDs with the pinned `controller-gen`; `task lint`
-fails when they are stale. See the [targeting API guide](integration/targeting-api.md).
+fails when they are stale. See the [targeting API guide](integration/targeting-api.md)
+and the [continuous assessment contract](integration/assessment-contract.md).
 
 `task check` needs no cluster or Docker daemon. Initial tool/module installation
 and the checksum-verified chart download need network access. The pinned Devbox

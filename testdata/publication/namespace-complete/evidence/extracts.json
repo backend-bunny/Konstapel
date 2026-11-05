@@ -1,0 +1,58 @@
+{
+  "extracts": [
+    {
+      "source": {
+        "report": "report-mixed-1",
+        "reportSha256": "4a3f9a0c2bd3e6d0c1f9b1e2a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7",
+        "resultIndex": 0
+      },
+      "transformation": "result-extract/v1",
+      "namespaceUID": "ns-uid-team-a",
+      "result": {
+        "resource": "Pod/api",
+        "result": "pass",
+        "evaluated": "2026-11-05T09:58:00Z"
+      }
+    },
+    {
+      "source": {
+        "report": "report-mixed-1",
+        "reportSha256": "4a3f9a0c2bd3e6d0c1f9b1e2a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7",
+        "resultIndex": 2
+      },
+      "transformation": "result-extract/v1",
+      "namespaceUID": "ns-uid-team-a",
+      "result": {
+        "resource": "Pod/worker",
+        "result": "fail",
+        "evaluated": "2026-11-05T09:58:00Z",
+        "message": "Privileged mode is disallowed."
+      }
+    },
+    {
+      "source": {
+        "report": "report-team-a-2",
+        "reportSha256": "9c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e",
+        "resultIndex": 0
+      },
+      "transformation": "exact",
+      "namespaceUID": "ns-uid-team-a",
+      "result": {
+        "resource": "Pod/debug",
+        "result": "fail",
+        "disposition": "accepted-risk",
+        "exception": "exc-7",
+        "evaluated": "2026-11-05T09:59:00Z"
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "source": {
+        "report": "report-mixed-1",
+        "resultIndex": 1
+      },
+      "reason": "sibling-namespace"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Controller-created namespace run serving one AssessmentRequest.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentRun
+metadata:
+  name: baseline-audit-request-7c1e
+spec:
+  bindingRef: {name: baseline-audit}
+  scope: Namespace
+  request: {namespace: team-a, name: nightly-check, uid: 0b7c2b5e-8f0e-4a8e-9d55-1f2a3b4c5d6e}
+  trigger: {type: Request}
