@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,6 +28,9 @@ const (
 type BundlePolicy struct {
 	Name  string      `json:"name"`
 	Scope PolicyScope `json:"scope"`
+	// Parameters is true when the content defines how profile parameters are
+	// rendered. Parameters for any other policy are rejected, never dropped.
+	Parameters bool `json:"parameters,omitempty"`
 }
 
 // Bundle is the metadata of one available, pinned bundle.
@@ -174,21 +178,25 @@ func resolveBinding(cluster string, b *v1alpha1.ComplianceBinding, profiles map[
 		fail(ReasonContentUnavailable, p.Name, "", "bundle %s@%s is not available", p.Spec.Bundle.Name, p.Spec.Bundle.Digest)
 		return br
 	}
-	scopes := make(map[string]PolicyScope, len(bundle.Policies))
+	meta := make(map[string]BundlePolicy, len(bundle.Policies))
 	for _, bp := range bundle.Policies {
-		scopes[bp.Name] = bp.Scope
+		meta[bp.Name] = bp
 	}
 
 	profileRev := ObjectRevision{Name: p.Name, UID: p.UID, Generation: p.Generation}
 	selectorCopy := *b.Spec.NamespaceSelector
 	for _, pol := range p.Spec.Policies {
-		scope, known := scopes[pol.Name]
+		bp, known := meta[pol.Name]
+		scope := bp.Scope
 		switch {
 		case !known:
 			fail(ReasonUnknownPolicy, p.Name, pol.Name, "policy %q is not in bundle %s@%s", pol.Name, bundle.Name, bundle.Digest)
 			continue
 		case scope != ScopeNamespaced:
 			fail(ReasonUnsupportedScope, p.Name, pol.Name, "policy %q has %s scope; namespace targeting supports only namespaced workload resources", pol.Name, scope)
+			continue
+		case hasParameters(pol) && !bp.Parameters:
+			fail(ReasonInvalidConfiguration, p.Name, pol.Name, "policy %q does not accept parameters", pol.Name)
 			continue
 		}
 		ex, err := normalizeExceptions(pol.Exceptions)
@@ -279,4 +287,12 @@ func eligibility(ns NamespaceRef, policy string, cs []Contribution, errs []Resol
 		})
 	}
 	return e
+}
+
+func hasParameters(p v1alpha1.ProfilePolicy) bool {
+	if p.Parameters == nil {
+		return false
+	}
+	raw := strings.TrimSpace(string(p.Parameters.Raw))
+	return raw != "" && raw != "null" && raw != "{}"
 }

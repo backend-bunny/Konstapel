@@ -24,6 +24,7 @@ tasks:
           exit 1
         fi
       - go vet -mod=readonly ./...
+      - go vet -mod=readonly -tags live ./internal/targeting/
       - scripts/generate.sh --check
       - |
         set -eu
@@ -36,8 +37,10 @@ tasks:
     cmd: sha256sum -c content/SHA256SUMS
 
   policies:test:
-    desc: Run the vendored Kyverno CLI fixtures
-    cmd: kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color
+    desc: Run the vendored and rendered-policy Kyverno CLI fixtures
+    cmds:
+      - kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color
+      - kyverno test testdata/targeting/rendered --require-tests --remove-color
 
   deps:check:
     desc: Validate Renovate configuration, dependency locks, and runtime pins
