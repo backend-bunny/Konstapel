@@ -90,6 +90,11 @@ relicense the bundled dependencies or NIST content. See [LICENSE](../LICENSE),
 
 ## Verify
 
+Both image workflows show expandable dependency/license inventories, pinned
+sources and license notices in the GitHub Actions job summary. The publishing
+summary also reports verification status and provides commands containing the
+actual published digest. Downloadable evidence remains available as an artifact.
+
 Use the digest printed in the publishing job summary:
 
 ```sh

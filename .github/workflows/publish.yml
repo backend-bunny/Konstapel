@@ -55,6 +55,7 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
       - name: Verify published signature and attestations
+        id: verify
         timeout-minutes: 5
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
@@ -70,7 +71,11 @@ jobs:
             printf 'Verified %s\n' "$type"
           done
           gh attestation verify "oci://$IMAGE@$DIGEST" --repo backend-bunny/Konstapel --format json > out/image/verification/provenance.json
-          printf 'Published and verified `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Image summary
+        if: always()
+        env:
+          PUBLISH_VERIFICATION: ${{ steps.verify.outcome }}
+        run: devbox run -- python3 scripts/image/summary.py >> "$GITHUB_STEP_SUMMARY"
       - name: Retain verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -79,5 +84,6 @@ jobs:
           path: |
             out/image/verification/
             out/image/digest
+            out/image/sources.md
             out/image/notices.md
           retention-days: 14
