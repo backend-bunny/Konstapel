@@ -45,7 +45,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task test` | Run Go tests, including the real provider handshake and saved-evidence checks. |
 | `task lint` | Check Go formatting, `go vet`, generated API files, and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
-| `task policies:test` | Run the vendored Kyverno CLI fixtures. |
+| `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
 | `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance in a disposable kind cluster and retain evidence. |

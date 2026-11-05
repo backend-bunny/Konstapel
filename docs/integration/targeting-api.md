@@ -9,9 +9,9 @@ cluster-scoped resources in `compliance.erenius.io/v1alpha1`:
 - **ComplianceBinding** applies one profile to the namespaces its selector
   matches, in `Audit` or `Deny` mode.
 
-This is an alpha API. The schema, validation, RBAC, shared contract and the pure
-resolver exist; the controller and engine delivery come in later task groups of
-`add-compliance-targeting-api`. Applying these CRDs does not enforce anything
+This is an alpha API. The schema, validation, RBAC, shared contract, pure
+resolver and engine delivery library exist; the controller that runs them comes
+in a later task group of `add-compliance-targeting-api`. Applying these CRDs does not enforce anything
 yet. The capability spec is
 [compliance-targeting](../../openspec/changes/add-compliance-targeting-api/specs/compliance-targeting/spec.md).
 
@@ -214,6 +214,97 @@ Namespace creation, deletion and label changes alter `targets` and
 `eligibility`, but never a contribution's `revision`. A recreated namespace has
 a new UID, so evidence and eligibility never reuse the old one. See
 [`membership-change.yaml`](../../testdata/targeting/resolver/membership-change.yaml).
+
+## Delivery
+
+Delivery turns resolved contributions into Kyverno `policies.kyverno.io/v1`
+ValidatingPolicies: one per contribution, cluster-scoped, owned by the binding.
+
+### Content
+
+`targeting.ContentSource` returns verified content for a profile's pinned
+`bundle.name` and `bundle.digest`, or `ErrContentUnavailable`. `LocalContent`
+serves the vendored `content/` tree under a configured bundle name. Its digest is
+`sha256:` plus the sha256 of `content/SHA256SUMS`, and every listed file is
+checked against that file on each call. `add-policy-bundle-distribution`
+supplies the verified OCI source behind the same interface.
+
+A policy can be namespace-targeted only if it is a `policies.kyverno.io/v1`
+ValidatingPolicy and every resource it matches is a known namespaced workload
+resource. Wildcards and unknown resources count as cluster scope, and the
+resolver reports `UnsupportedScope` for them.
+
+Profile `parameters` are rejected with `InvalidConfiguration` unless the content
+declares how to render them; they are never silently dropped. The vendored
+policy accepts none. Parameter rendering is defined by the bundle format in
+`add-policy-bundle-distribution`.
+
+### Rendering
+
+`targeting.Render` copies the source policy unchanged, then sets only what
+Konstapel owns:
+
+- `metadata.name`: `konstapel-<policy, at most 36 characters>-<16 hex>`, at most
+  63 characters. The suffix is derived from the binding UID, policy and
+  revision, so a new revision always gets a new name.
+- Labels: `app.kubernetes.io/managed-by: konstapel`,
+  `compliance.erenius.io/binding-uid`, and `compliance.erenius.io/policy-hash`
+  (a hash, because policy names can exceed label limits).
+- Annotations under `compliance.erenius.io/`: revision, policy, binding and
+  generation, profile name, UID and generation, bundle name and digest,
+  configuration digest, source file digest, cluster and mode. The source's own
+  annotations are kept.
+- A controller owner reference to the ComplianceBinding.
+- `spec.validationActions: [<mode>]`, `spec.evaluation.background.enabled: true`,
+  and `spec.matchConstraints.namespaceSelector` set from the binding.
+
+A source that sets its own `namespaceSelector` is rejected rather than
+overwritten. Rules, variables and validations are never changed. The golden
+output for the Audit-all and Deny-production example is in
+`testdata/targeting/rendered/`, and `task policies:test` runs the Kyverno CLI
+against it. Kyverno CLI 1.19 reports resources excluded by a selector as
+passing, so selector inclusion is also checked in Go.
+
+### Ownership, readiness and transitions
+
+`Delivery.Sync(binding UID, desired, hold)` is idempotent:
+
+- **Create.** Missing desired policies are created. If an owned policy has
+  drifted, its spec, labels and annotations are restored.
+- **Conflicts.** If a desired name is held by a resource without Konstapel's
+  labels and a controller reference to this binding, it is reported in
+  `Conflicts` and left unchanged. Labels alone do not confer ownership.
+- **Readiness.** A policy is ready when Kyverno reports
+  `RBACPermissionsGranted` and `WebhookConfigured`. `NotReady` lists desired
+  policies that are not ready yet.
+- **Replacement.** When a revision changes, the new policy is created next to
+  the old one. The old one stays in `Retained` until every desired instance of
+  that logical policy is ready, and only then is it deleted. During the overlap
+  both are enforced, so the stricter combination applies. A replacement that
+  never becomes ready keeps the last applied revision enforcing indefinitely.
+- **Holds.** Owned policies for logical policies listed in `hold` are never
+  removed. The controller holds every policy that failed to resolve, so a
+  missing profile or unavailable content leaves working enforcement in place.
+  It never resolves to an empty desired set.
+- **Removal.** An owned policy whose logical policy is no longer desired, and
+  not held, is deleted.
+
+`Delivery.Withdraw(binding UID)` deletes every policy the binding owns,
+including superseded revisions, and nothing else. Owner references also let
+Kubernetes garbage-collect them when the binding is deleted.
+
+### Rollback
+
+To roll back, restore the earlier profile or binding spec. The restore is a new
+generation, so it gets a new revision and a new engine policy name; the old
+name, and any exception acceptance tied to it, is never revived. Delivery
+creates the new policy and retires the current one once the new one is ready.
+To withdraw enforcement instead, delete the binding.
+
+The assessment-loop prototype's policy (`disallow-privileged-containers`,
+labelled `konstapel.io/owner`) has no Konstapel controller reference, and its
+name cannot collide with a rendered name. Delivery never adopts or removes it.
+Remove it through the prototype's own workflow.
 
 ## Downstream contract
 

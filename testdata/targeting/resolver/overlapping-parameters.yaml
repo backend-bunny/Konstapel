@@ -8,7 +8,7 @@ input:
       policies:
         - {name: disallow-privileged-containers, scope: Namespaced}
         - {name: require-run-as-non-root, scope: Namespaced}
-        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced, parameters: true}
         - {name: restrict-cluster-role-bindings, scope: Cluster}
   profiles:
     - metadata: {name: lenient, uid: p-lenient, generation: 3}
