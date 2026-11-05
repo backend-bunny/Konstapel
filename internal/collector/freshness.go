@@ -2,6 +2,7 @@ package collector
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -224,18 +225,45 @@ func (ev *Evaluation) add(o Observation) {
 func resultKey(uid, policy, index string) string { return uid + "\x00" + policy + "\x00" + index }
 
 // evaluationTime reads a result's source evaluation timestamp. Missing or
-// malformed timestamps are errors, never replaced by another time.
+// malformed timestamps are errors, never replaced by another time. Integers
+// arrive as int64 from the Kubernetes unstructured decoder and as float64
+// from encoding/json; both are accepted.
 func evaluationTime(r assessment.Object) (time.Time, error) {
 	stamp := assessment.Map(r["timestamp"])
-	seconds, ok := stamp["seconds"].(float64)
+	seconds, ok := integral(stamp["seconds"])
 	if !ok {
-		return time.Time{}, fmt.Errorf("missing source evaluation timestamp")
-	}
-	nanos, _ := stamp["nanos"].(float64)
-	if seconds <= 0 || math.Trunc(seconds) != seconds || math.Trunc(nanos) != nanos || nanos < 0 || nanos >= 1e9 {
+		if _, present := stamp["seconds"]; !present {
+			return time.Time{}, fmt.Errorf("missing source evaluation timestamp")
+		}
 		return time.Time{}, fmt.Errorf("invalid source evaluation timestamp")
 	}
-	return time.Unix(int64(seconds), int64(nanos)).UTC(), nil
+	nanos, ok := integral(stamp["nanos"])
+	if _, present := stamp["nanos"]; !present {
+		nanos, ok = 0, true
+	}
+	if !ok || seconds <= 0 || nanos < 0 || nanos >= 1e9 {
+		return time.Time{}, fmt.Errorf("invalid source evaluation timestamp")
+	}
+	return time.Unix(seconds, nanos).UTC(), nil
+}
+
+// integral converts a decoded JSON integer to int64.
+func integral(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		if math.Trunc(n) != n || math.Abs(n) > 1<<53 {
+			return 0, false
+		}
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
 }
 
 // Discontinuity records a watch gap or controller restart at time at.

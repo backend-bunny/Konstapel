@@ -128,6 +128,9 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := mgr.Add(&ownedPolicyWatch{mgr: mgr, ctrl: bc, engine: engine, poll: opts.EnginePoll}); err != nil {
 		return nil, err
 	}
+	if err := setupAssessments(mgr, opts.Content, engine, br.Cluster, opts.EnginePoll); err != nil {
+		return nil, err
+	}
 	return mgr, nil
 }
 

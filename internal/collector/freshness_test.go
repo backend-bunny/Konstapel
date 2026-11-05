@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -245,5 +246,34 @@ func TestStaleScopeAndZeroTargets(t *testing.T) {
 	}
 	if err = ev.Evidence.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Reports read through the Kubernetes client decode integers as int64;
+// reports read with encoding/json decode them as float64. Both are valid.
+func TestEvaluationTimeAcceptsDecoderIntegerForms(t *testing.T) {
+	want := time.Date(2026, 11, 5, 10, 1, 0, 5, time.UTC)
+	for name, stamp := range map[string]assessment.Object{
+		"int64":       {"seconds": want.Unix(), "nanos": int64(5)},
+		"float64":     {"seconds": float64(want.Unix()), "nanos": float64(5)},
+		"json.Number": {"seconds": json.Number(strconv.FormatInt(want.Unix(), 10)), "nanos": json.Number("5")},
+	} {
+		got, err := evaluationTime(assessment.Object{"timestamp": stamp})
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%s: %v %v", name, got, err)
+		}
+	}
+	for name, stamp := range map[string]assessment.Object{
+		"fractional": {"seconds": 1.5},
+		"string":     {"seconds": "1793836860"},
+		"negative":   {"seconds": int64(-1)},
+		"bad nanos":  {"seconds": int64(1), "nanos": int64(1e9)},
+	} {
+		if _, err := evaluationTime(assessment.Object{"timestamp": stamp}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, err := evaluationTime(assessment.Object{}); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatal("missing timestamp not reported as missing")
 	}
 }
