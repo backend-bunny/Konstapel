@@ -1,0 +1,70 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - compliance.erenius.io
+  resources:
+  - compliancebindings
+  - complianceprofiles
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - compliance.erenius.io
+  resources:
+  - compliancebindings/status
+  - complianceprofiles/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - policies.kyverno.io
+  resources:
+  - validatingpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-controller
+  namespace: konstapel-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
