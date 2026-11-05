@@ -4,7 +4,7 @@ Copyright 2026 Konstapel contributors
 Image build tooling includes code adapted from these Apache-2.0 projects:
   https://github.com/backend-bunny/talos-nyckelpiga
   https://github.com/backend-bunny/container-dropshipping
-See docs/images.md for the source revisions and adapted files.
+See docs/images.md and docs/releases.md for source revisions and adapted files.
 
 This project includes Kyverno policy content and NIST OSCAL content.
 Their original license files and provenance are retained under content/.

@@ -41,6 +41,7 @@ the configuration. `devbox install` installs the existing locked environment.
 
 | Task | Behavior |
 | --- | --- |
+| `task version:check` | Check the application version against the melange package. |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
 | `task test` | Run Go tests, including the real provider handshake and saved-evidence checks. |
 | `task lint` | Check Go formatting, `go vet`, and shell syntax. |
@@ -80,6 +81,7 @@ or download an independently selected Kyverno CLI.
 | Reviewed policy/NIST content and provenance | `content/` and its checksums |
 | Previously observed validation versions | `docs/integration/versions.json` and other historical evidence |
 | Image runtime APKs | `apko.yaml` and `apko.lock.json`, refreshed through reviewed PRs |
+| Application releases | `VERSION`, `melange.yaml` and `CHANGELOG.md`, managed by release-please |
 
 Renovate uses its Go, Devbox, and GitHub Actions managers plus custom extraction
 for the runtime chart/checksum, digest-pinned images, and Devbox installer/schema

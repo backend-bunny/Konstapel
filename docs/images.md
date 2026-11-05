@@ -59,8 +59,13 @@ and network access. No ambient cluster credentials are bundled in the image.
 
 Pull requests build and test with read-only repository permissions. Pushes to
 `main` run checks, rebuild and test, then publish
-`ghcr.io/backend-bunny/konstapel:sha-<full-commit>`. Manual publishing is restricted
-to `main`. There is no mutable `latest` tag or release-version promise yet.
+`ghcr.io/backend-bunny/konstapel:sha-<full-commit>`. Merging a release-please PR
+also publishes `ghcr.io/backend-bunny/konstapel:X.Y.Z` from its `vX.Y.Z` tag and
+adds the verified digest to the GitHub Release. Both tags use the same version
+from `VERSION` in the image metadata. There is no mutable `latest` tag.
+Manual publishing is restricted to the workflow on `main`; a requested release
+tag must identify a published GitHub Release and a commit in `main`'s history.
+See the [release guide](releases.md) for the review and retry workflow.
 
 Every published digest receives:
 
@@ -99,15 +104,15 @@ Use the digest printed in the publishing job summary:
 
 ```sh
 IMAGE=ghcr.io/backend-bunny/konstapel@sha256:...
-IDENTITY=https://github.com/backend-bunny/Konstapel/.github/workflows/publish.yml@refs/heads/main
-cosign verify "$IMAGE" --certificate-identity "$IDENTITY" \
+IDENTITY='^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$'
+cosign verify "$IMAGE" --certificate-identity-regexp "$IDENTITY" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 cosign verify-attestation "$IMAGE" --type spdxjson \
-  --certificate-identity "$IDENTITY" \
+  --certificate-identity-regexp "$IDENTITY" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 cosign verify-attestation "$IMAGE" \
   --type https://github.com/backend-bunny/Konstapel/notices/v1 \
-  --certificate-identity "$IDENTITY" \
+  --certificate-identity-regexp "$IDENTITY" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 gh attestation verify "oci://$IMAGE" --repo backend-bunny/Konstapel
 ```

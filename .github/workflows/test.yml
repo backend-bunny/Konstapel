@@ -16,6 +16,16 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Check Conventional Commit PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|revert|build|deps|docs|ci|chore|test|refactor|style)(\([^)]+\))?!?: .+'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo 'Use a Conventional Commit PR title, for example: feat: add policy support' >&2
+            exit 1
+          fi
       - uses: ./.github/actions/setup-tools
       - run: devbox run -- task check
       - name: Verify checks did not modify dependency locks

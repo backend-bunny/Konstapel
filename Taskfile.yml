@@ -49,6 +49,7 @@ tasks:
   check:
     desc: Run the same checks as CI (no cluster required)
     cmds:
+      - task: version:check
       - task: deps:validate
       - task: deps:check
       - task: content:check
@@ -56,6 +57,10 @@ tasks:
       - task: lint
       - task: test
       - task: policies:test
+
+  version:check:
+    desc: Check that VERSION and the melange package agree
+    cmd: sh scripts/check-version.sh
 
   acceptance:
     desc: Run full disposable-cluster acceptance (requires Docker and a fresh OUTPUT)

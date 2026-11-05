@@ -25,6 +25,7 @@ validated OSCAL export. A production controller is not yet implemented.
   and dependency updates with Renovate.
 - [Images](docs/images.md): melange/apko builds, SBOMs, signatures, provenance,
   and license notices.
+- [Releases](docs/releases.md): release-please version PRs, changelogs and image tags.
 - [Vision](vision.md): purpose, principles, and what success looks like.
 - [Architecture](ARCHITECTURE.md): components, reconciliation flow, C2P-Go v2
   integration, and open design decisions.

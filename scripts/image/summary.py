@@ -5,11 +5,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 
 IMAGE = "ghcr.io/backend-bunny/konstapel"
 REPOSITORY = "https://github.com/backend-bunny/Konstapel"
-IDENTITY = REPOSITORY + "/.github/workflows/publish.yml@refs/heads/main"
+IDENTITY = r"^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$"
 
 
 def cell(value):
@@ -27,6 +28,9 @@ def render(out):
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest):
             raise ValueError("Invalid published image digest")
         sections.append(f"Published image: `{IMAGE}@{digest}`\n")
+        tag = os.environ.get("RELEASE_TAG", "")
+        if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+            sections.append(f"Release tag: `{IMAGE}:{tag[1:]}`\n")
         verified = os.environ.get("PUBLISH_VERIFICATION") == "success"
         sections.append("Signature and all attestations verified successfully.\n" if verified
                         else "Signature and attestation verification did not complete successfully; inspect the verification step.\n")
@@ -34,8 +38,8 @@ def render(out):
             "### Verify this image\n",
             "```sh",
             f"IMAGE={IMAGE}@{digest}",
-            f"IDENTITY={IDENTITY}",
-            'cosign verify "$IMAGE" --certificate-identity "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com',
+            f"IDENTITY={shlex.quote(IDENTITY)}",
+            'cosign verify "$IMAGE" --certificate-identity-regexp "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com',
         ]
         for label, predicate in (
             ("SPDX SBOMs", "spdxjson"),
@@ -44,7 +48,7 @@ def render(out):
         ):
             commands.extend([
                 f"\n# {label}",
-                f'cosign verify-attestation "$IMAGE" --type {predicate} \\\n  --certificate-identity "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com',
+                f'cosign verify-attestation "$IMAGE" --type {predicate} \\\n  --certificate-identity-regexp "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com',
             ])
         commands.extend([
             "\n# GitHub build provenance",
