@@ -37,4 +37,7 @@ KUBECONFIG="$kubeconfig" chainsaw test --kube-context "$context" --exec-timeout 
 # Re-run schema and reference validation from the saved evidence, without cluster access.
 ./bin/konstapel convert --capture "$out/package/capture.json" --output "$out/reconverted" > "$out/reconvert.log" 2>&1
 ./bin/konstapel validate --output "$out/reconverted"
-printf '%s\n' 'Acceptance passed; admission, background findings, schema/reference validation and offline replay verified.' | tee "$out/result.txt"
+# Targeting delivery: Audit/Deny bindings, relabelling, ready-gated replacement,
+# withdrawal, and non-adoption of a prototype-style unmanaged policy.
+scripts/targeting-live.sh "$kubeconfig" "$context" "$out/targeting"
+printf '%s\n' 'Acceptance passed; admission, background findings, schema/reference validation, offline replay and targeting delivery verified.' | tee "$out/result.txt"

@@ -34,7 +34,7 @@ the bundle agent owns new content. Do not rewrite the assessment-loop task list.
 - [x] 3.1 Connect the resolver to the merged delivery boundary and render namespace selectors, explicit modes, and provenance into `policies.kyverno.io/v1` instances; verify schema/CLI fixtures preserve the original content, supported namespaced match set, and background evaluation.
 - [x] 3.2 Implement deterministic names and ownership from binding UID, logical policy, and configuration revision; verify changes and rollbacks produce new names using observed configuration generations, repeated delivery converges, and unmanaged collisions remain untouched.
 - [x] 3.3 Add readiness-gated replacement and cleanup of superseded owned revisions; verify fake-client/integration cases retain the previous revision on failed replacement and never remove another binding's contribution.
-- [ ] 3.4 Exercise delivery in the disposable cluster with Audit-all and Deny-selected bindings; verify policy-specific denial in the selected namespace, allowed/audited admission elsewhere, and behavior after a Namespace label change.
+- [x] 3.4 Exercise delivery in the disposable cluster with Audit-all and Deny-selected bindings; verify policy-specific denial in the selected namespace, allowed/audited admission elsewhere, and behavior after a Namespace label change.
 - [x] 3.5 Document policy naming, readiness/transition behavior, deletion, and rollback; verify the documented procedure restores a prior configuration without adopting the prototype's unmanaged resources.
 
 ## 4. Reconcile watches, status, and evidence scope
