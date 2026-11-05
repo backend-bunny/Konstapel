@@ -1,0 +1,83 @@
+{
+  "apiVersion": "compliance.erenius.io/v1alpha1",
+  "kind": "PackageDescriptor",
+  "run": {
+    "clusterID": "kube-system:fixture-cluster",
+    "bindingUID": "binding-uid-1",
+    "runUID": "run-uid-ns-complete"
+  },
+  "packageKind": "Assessment",
+  "scope": {
+    "kind": "Namespace",
+    "clusterID": "kube-system:fixture-cluster",
+    "bindingUID": "binding-uid-1",
+    "request": {
+      "namespace": "team-a",
+      "name": "nightly-check",
+      "uid": "req-uid-team-a",
+      "namespaceUID": "ns-uid-team-a"
+    },
+    "namespaceUIDs": [
+      "ns-uid-team-a"
+    ],
+    "revision": "scope-rev-1"
+  },
+  "scopeSha256": "582b3d6f5929f620a2e5aa84f4bbca92cbdb5a208b5be9fac7ae26ce268893bb",
+  "revisions": {
+    "bindingConfiguration": "binding-config-3",
+    "enforcement": [
+      "enf-binding-uid-1-e2-0f1e2d3c"
+    ],
+    "mappingSha256": "abababababababababababababababababababababababababababababababab"
+  },
+  "window": {
+    "started": "2026-11-05T10:00:00Z",
+    "closed": "2026-11-05T10:04:30Z"
+  },
+  "evidence": {
+    "completeness": "Complete",
+    "expected": 3,
+    "attributable": 3,
+    "missing": 0,
+    "rejected": 0,
+    "unresolved": 0
+  },
+  "outcomes": {
+    "pass": 1,
+    "fail": 1,
+    "error": 0,
+    "skip": 0,
+    "acceptedRisk": 1,
+    "notApplicable": 0,
+    "unknown": 0
+  },
+  "producer": {
+    "name": "konstapel-controller",
+    "version": "fixture",
+    "validatedAt": "2026-11-05T10:04:30Z",
+    "checks": [
+      "scope-projection",
+      "oscal-schema-1.1.3"
+    ]
+  },
+  "files": [
+    {
+      "path": "assessment-results.json",
+      "role": "oscal-assessment-results",
+      "sha256": "13330aa641312b14f399a6fcc6c3b876563e64eb8e49ea896b412b655ec1fcd6",
+      "size": 1927
+    },
+    {
+      "path": "evidence/extracts.json",
+      "role": "evidence-extract",
+      "sha256": "a09ecdabbf1198772bdff38d94806a79405a182007cf1545a3393c76d375f180",
+      "size": 1509
+    },
+    {
+      "path": "summary.json",
+      "role": "summary",
+      "sha256": "f6a2ad8559ced15b9e896ee8b6097b85d0955d6445936b0c98a9f1b23a2ed642",
+      "size": 172
+    }
+  ]
+}

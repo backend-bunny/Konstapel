@@ -1,0 +1,34 @@
+{
+  "extracts": [
+    {
+      "source": {
+        "report": "report-team-b-1",
+        "reportSha256": "1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff001",
+        "resultIndex": 0
+      },
+      "transformation": "exact",
+      "namespaceUID": "ns-uid-team-b",
+      "result": {
+        "resource": "Pod/web",
+        "result": "pass",
+        "evaluated": "2026-11-05T09:57:00Z"
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "source": {
+        "report": "report-team-b-1",
+        "resultIndex": 1
+      },
+      "resource": "Pod/cache",
+      "reason": "evaluation-predates-observed-state"
+    }
+  ],
+  "missing": [
+    {
+      "resource": "Pod/batch",
+      "check": "validation-0"
+    }
+  ]
+}

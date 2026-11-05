@@ -1,0 +1,12 @@
+{
+  "scope": "Namespace",
+  "namespace": "team-b",
+  "completeness": "Incomplete",
+  "expected": 3,
+  "attributable": 1,
+  "missing": 1,
+  "rejected": 1,
+  "outcomes": {
+    "pass": 1
+  }
+}
