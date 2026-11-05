@@ -1,0 +1,41 @@
+scenarios:
+  - Audit everywhere and deny in production
+  - Select a namespace group
+  - Select every namespace
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: baseline, uid: p-baseline, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - name: disallow-privileged-containers
+  bindings:
+    - metadata: {name: audit-all, uid: b-audit, generation: 1}
+      spec: {profileRef: {name: baseline}, namespaceSelector: {}, mode: Audit}
+    - metadata: {name: deny-production, uid: b-deny, generation: 1}
+      spec: {profileRef: {name: baseline}, namespaceSelector: {matchLabels: {environment: production}}, mode: Deny}
+  namespaces:
+    - {name: shop-prod, uid: 00000000-0000-0000-0000-000000000001, labels: {environment: production}}
+    - {name: shop-dev, uid: 00000000-0000-0000-0000-000000000002, labels: {environment: development}}
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  bindings:
+    - binding: audit-all
+      targets: [shop-dev, shop-prod, tools]
+      contributions: [{policy: disallow-privileged-containers, mode: Audit}]
+    - binding: deny-production
+      targets: [shop-prod]
+      contributions: [{policy: disallow-privileged-containers, mode: Deny}]
+  eligibility:
+    - {namespace: shop-dev, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all]}
+    - {namespace: shop-prod, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all, deny-production]}
+    - {namespace: tools, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all]}

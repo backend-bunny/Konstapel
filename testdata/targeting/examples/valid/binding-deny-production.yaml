@@ -1,0 +1,12 @@
+# Scenario: Select a namespace group / Audit everywhere and deny in production
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-deny-production
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector:
+    matchLabels:
+      environment: production
+  mode: Deny

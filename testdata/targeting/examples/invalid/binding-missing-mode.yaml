@@ -1,0 +1,8 @@
+# Scenario: An administrator configures a binding (mode has no default)
+# expect: spec.mode: Required value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: missing-mode}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector: {}

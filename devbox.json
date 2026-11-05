@@ -25,7 +25,8 @@
     "syft@1.55.0",
     "go-licenses@2.0.1",
     "gnutar@1.35",
-    "gzip@1.15"
+    "gzip@1.15",
+    "kubernetes-controller-tools@0.20.1"
   ],
   "env": {
     "GOTOOLCHAIN": "local"

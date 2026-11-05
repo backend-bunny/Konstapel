@@ -1,0 +1,10 @@
+# Scenario: Resolve lifetime limits (nonpositive maxLifetime)
+# expect: spec.policies[0].exceptions: Invalid value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata: {name: selfservice-zero-lifetime}
+spec:
+  bundle: {name: example-workload-hardening, digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+  policies:
+    - name: disallow-privileged-containers
+      exceptions: {eligibility: SelfService, maxLifetime: "-1h"}

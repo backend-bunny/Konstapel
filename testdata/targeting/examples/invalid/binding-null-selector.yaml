@@ -1,0 +1,9 @@
+# Scenario: Reject ambiguous or invalid scope (null selector)
+# expect: spec.namespaceSelector: Required value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: null-selector}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector: null
+  mode: Audit

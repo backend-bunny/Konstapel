@@ -1,0 +1,86 @@
+{
+  "contractVersion": 1,
+  "cluster": "kube-system:cluster-a",
+  "bindings": [
+    {
+      "binding": {
+        "name": "deny-production",
+        "uid": "b-deny",
+        "generation": 1
+      },
+      "targets": [
+        {
+          "name": "shop-prod",
+          "uid": "00000000-0000-0000-0000-000000000001"
+        }
+      ],
+      "targetCount": 1,
+      "contributions": [
+        {
+          "cluster": "kube-system:cluster-a",
+          "binding": {
+            "name": "deny-production",
+            "uid": "b-deny",
+            "generation": 1
+          },
+          "profile": {
+            "name": "baseline",
+            "uid": "p-baseline",
+            "generation": 1
+          },
+          "policy": "disallow-privileged-containers",
+          "bundleName": "example-workload-hardening",
+          "bundleDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "configurationDigest": "sha256:aaaa",
+          "mode": "Deny",
+          "namespaceSelector": {
+            "matchLabels": {
+              "environment": "production"
+            }
+          },
+          "exceptions": {
+            "eligibility": "SelfService",
+            "maxLifetime": "168h0m0s"
+          },
+          "revision": "sha256:2b1aaa92f68084acd6264719ad2a1b87bf94a37e67ca687f53446df757984338"
+        }
+      ],
+      "errors": [
+        {
+          "reason": "UnsupportedScope",
+          "binding": "deny-production",
+          "profile": "baseline",
+          "policy": "restrict-cluster-role-bindings",
+          "message": "policy matches cluster-scoped resources; namespace targeting cannot scope it"
+        }
+      ]
+    }
+  ],
+  "eligibility": [
+    {
+      "namespace": {
+        "name": "shop-prod",
+        "uid": "00000000-0000-0000-0000-000000000001"
+      },
+      "policy": "disallow-privileged-containers",
+      "effective": "SelfService",
+      "maxLifetime": "168h0m0s",
+      "contributors": [
+        {
+          "binding": {
+            "name": "deny-production",
+            "uid": "b-deny",
+            "generation": 1
+          },
+          "profile": {
+            "name": "baseline",
+            "uid": "p-baseline",
+            "generation": 1
+          },
+          "mode": "Deny",
+          "revision": "sha256:2b1aaa92f68084acd6264719ad2a1b87bf94a37e67ca687f53446df757984338"
+        }
+      ]
+    }
+  ]
+}

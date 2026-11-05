@@ -1,0 +1,9 @@
+# Scenario: An administrator configures a binding (content is pinned by digest)
+# expect: spec.bundle.digest: Invalid value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata: {name: invalid-digest}
+spec:
+  bundle: {name: example-workload-hardening, digest: "latest"}
+  policies:
+    - name: disallow-privileged-containers

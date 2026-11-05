@@ -1,0 +1,11 @@
+# Scenario: Reject ambiguous or invalid scope (invalid label key)
+# expect: spec.namespaceSelector.matchLabels: Invalid value
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata: {name: invalid-label-key}
+spec:
+  profileRef: {name: baseline}
+  namespaceSelector:
+    matchLabels:
+      "not a/valid/key": production
+  mode: Audit

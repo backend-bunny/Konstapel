@@ -1,0 +1,57 @@
+scenarios:
+  - A namespace enters and leaves a selected group
+  - Remove one overlapping binding
+# steps apply in order; each expected state is resolved from scratch.
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+        - {name: require-run-as-non-root, scope: Namespaced}
+        - {name: restrict-capabilities, scope: Namespaced}
+        - {name: restrict-cluster-role-bindings, scope: Cluster}
+  profiles:
+    - metadata: {name: baseline, uid: p-baseline, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies: [{name: disallow-privileged-containers}]
+  bindings:
+    - metadata: {name: audit-all, uid: b-audit, generation: 1}
+      spec: {profileRef: {name: baseline}, namespaceSelector: {}, mode: Audit}
+    - metadata: {name: deny-production, uid: b-deny, generation: 1}
+      spec: {profileRef: {name: baseline}, namespaceSelector: {matchLabels: {environment: production}}, mode: Deny}
+  namespaces:
+    - {name: shop, uid: 00000000-0000-0000-0000-00000000000a, labels: {environment: development}}
+steps:
+  - description: shop is relabelled into production and gains the Deny contribution
+    namespaces:
+      - {name: shop, uid: 00000000-0000-0000-0000-00000000000a, labels: {environment: production}}
+    expected:
+      bindings:
+        - {binding: audit-all, targets: [shop], contributions: [{policy: disallow-privileged-containers, mode: Audit}]}
+        - {binding: deny-production, targets: [shop], contributions: [{policy: disallow-privileged-containers, mode: Deny}]}
+      eligibility:
+        - {namespace: shop, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all, deny-production]}
+  - description: the Deny binding is deleted; the Audit contribution survives
+    deleteBindings: [deny-production]
+    expected:
+      bindings:
+        - {binding: audit-all, targets: [shop], contributions: [{policy: disallow-privileged-containers, mode: Audit}]}
+      eligibility:
+        - {namespace: shop, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all]}
+  - description: shop leaves production; only the Audit contribution remains
+    namespaces:
+      - {name: shop, uid: 00000000-0000-0000-0000-00000000000a, labels: {environment: development}}
+    expected:
+      bindings:
+        - {binding: audit-all, targets: [shop], contributions: [{policy: disallow-privileged-containers, mode: Audit}]}
+      eligibility:
+        - {namespace: shop, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all]}
+expected:
+  bindings:
+    - {binding: audit-all, targets: [shop], contributions: [{policy: disallow-privileged-containers, mode: Audit}]}
+    - {binding: deny-production, targets: [], contributions: [{policy: disallow-privileged-containers, mode: Deny}]}
+  eligibility:
+    - {namespace: shop, policy: disallow-privileged-containers, effective: Forbidden, contributors: [audit-all]}
