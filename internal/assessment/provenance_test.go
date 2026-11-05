@@ -4,12 +4,13 @@ import (
 	"context"
 	"github.com/oscal-compass/compliance-to-policy-go/v2/policy"
 	"github.com/oscal-compass/oscal-sdk-go/extensions"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestPolicyProvenance(t *testing.T) {
@@ -82,29 +83,32 @@ func TestDuplicateInventoryFails(t *testing.T) {
 
 func TestCollectionRechecksAdmittedResource(t *testing.T) {
 	c := clone(fixture(t))
-	dir := t.TempDir()
-	if err := Write(filepath.Join(dir, "policy.json"), c.Policy); err != nil {
-		t.Fatal(err)
+	var replaced atomic.Bool
+	target := targetForTest(t, func(w http.ResponseWriter, r *http.Request) bool {
+		switch {
+		case r.URL.Path == "/apis/wgpolicyk8s.io/v1alpha2/clusterpolicyreports":
+			respond(w, Object{"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReportList", "items": []any{}})
+		case r.URL.Path == "/apis/wgpolicyk8s.io/v1alpha2/policyreports":
+			respond(w, Object{"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "PolicyReportList", "items": c.Reports})
+		case r.URL.Path == "/apis/policies.kyverno.io/v1/validatingpolicies/"+PolicyName:
+			respond(w, c.Policy)
+		case strings.Contains(r.URL.Path, "/pods/"):
+			uid := c.Expected[0].UID
+			if replaced.Load() {
+				uid = "replacement-uid"
+			}
+			respond(w, Object{"apiVersion": "v1", "kind": "Pod", "metadata": Object{"uid": uid}})
+		default:
+			return false
+		}
+		return true
+	})
+	target.Cluster = c.Cluster
+	fresh := target.Capture(context.Background(), repo(t), c.Policy, c.Expected, c.Boundary)
+	if ev, _, err := Reconcile(fresh); err != nil || !ev.Complete {
+		t.Fatal("live API responses could not be reconciled", ev, err)
 	}
-	if err := Write(filepath.Join(dir, "reports.json"), Object{"items": c.Reports}); err != nil {
-		t.Fatal(err)
-	}
-	script := `#!/usr/bin/env bash
-set -eu
-case "$*" in
-*"get clusterpolicyreports"*) echo '{"items":[]}' ;;
-*"get policyreports"*) cat "$TEST_CAPTURE_DIR/reports.json" ;;
-*"get validatingpolicies"*) cat "$TEST_CAPTURE_DIR/policy.json" ;;
-*"get Pod"*) echo '{"metadata":{"uid":"replacement-uid"}}' ;;
-*) exit 99;;
-esac
-`
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	t.Setenv("TEST_CAPTURE_DIR", dir)
-	target := Target{Kubeconfig: "explicit", Context: "explicit", Cluster: c.Cluster, Timeout: time.Second}
+	replaced.Store(true)
 	saved := target.Capture(context.Background(), repo(t), c.Policy, c.Expected, c.Boundary)
 	ev, _, err := Reconcile(saved)
 	if err != nil {

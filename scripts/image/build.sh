@@ -25,7 +25,7 @@ apko build apko.yaml "$IMAGE:build" out/image/image.tar --arch x86_64 \
 python3 scripts/image/sources.py render out/image/sbom-x86_64.spdx.json out/image/image.tar out/image/sources.json out/image/sources.md
 python3 scripts/image/notices.py render out/image/sources.json out/image/image.tar .cache/image/notices out/image/notices.json out/image/notices.md
 # apko records APKs and their source relationships. Syft also finds Go modules
-# embedded in both Konstapel commands and the packaged kubectl binary.
+# embedded in both Konstapel commands.
 SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=true SYFT_GOLANG_SEARCH_REMOTE_LICENSES=true \
   syft scan "docker-archive:out/image/image.tar" -o spdx-json=out/image/sbom-complete.spdx.json
 git rev-parse HEAD > out/image/commit

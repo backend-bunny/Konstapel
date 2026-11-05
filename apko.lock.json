@@ -2,7 +2,7 @@
   "version": "v1",
   "config": {
     "name": "apko.yaml",
-    "checksum": "sha256-zevumwfHiPJojDPP4kmYvpC0nh7WtCzP4wQLhfLSK/s="
+    "checksum": "sha256-Brgb6PrK2IncZBrrDs74z2OBqJvsXg1loeGo65XCgw0="
   },
   "contents": {
     "keyring": [
@@ -64,44 +64,6 @@
           "checksum": "sha256-3Lo0o7Emn192v8lxbpfeoYO9cN5fbdNay6q0HT99wL0="
         },
         "checksum": "Q19P7fzB945PuRaQEnzg9napiRzKE="
-      },
-      {
-        "name": "kubectl-1.37",
-        "url": "https://packages.wolfi.dev/os/x86_64/kubectl-1.37-1.37.2-r1.apk",
-        "version": "1.37.2-r1",
-        "architecture": "x86_64",
-        "signature": {
-          "range": "",
-          "checksum": ""
-        },
-        "control": {
-          "range": "bytes=0-19531",
-          "checksum": "sha1-9ZuBCT5H/vT91EvD6eq0HIFzroI="
-        },
-        "data": {
-          "range": "bytes=19532-19539655",
-          "checksum": "sha256-OdaHrKVXJOW7QlwhgZhOOFvzfu23E7VsuHUute5S0lM="
-        },
-        "checksum": "Q19ZuBCT5H/vT91EvD6eq0HIFzroI="
-      },
-      {
-        "name": "kubectl-1.37-default",
-        "url": "https://packages.wolfi.dev/os/x86_64/kubectl-1.37-default-1.37.2-r1.apk",
-        "version": "1.37.2-r1",
-        "architecture": "x86_64",
-        "signature": {
-          "range": "",
-          "checksum": ""
-        },
-        "control": {
-          "range": "bytes=0-19524",
-          "checksum": "sha1-SVHRfYbja9RHfiVaZcya5j2ubaM="
-        },
-        "data": {
-          "range": "bytes=19525-21097",
-          "checksum": "sha256-CUB7AL9zlzA+NXQ1UGOq4EHnOe3JqIm6foU2LHEoAy4="
-        },
-        "checksum": "Q1SVHRfYbja9RHfiVaZcya5j2ubaM="
       }
     ]
   }
