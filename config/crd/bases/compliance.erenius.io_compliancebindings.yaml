@@ -59,6 +59,81 @@ spec:
             description: ComplianceBindingSpec applies a profile to selected namespaces
               in one mode.
             properties:
+              assessment:
+                default: {}
+                description: |-
+                  assessment configures continuous assessment. Omitted settings default;
+                  changing them is a reporting-only edit.
+                properties:
+                  collectionTimeout:
+                    default: 5m
+                    description: collectionTimeout bounds how long a run waits for
+                      evidence.
+                    maxLength: 32
+                    minLength: 2
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a duration such as 24h, 90m or 2160h; days,
+                        cron expressions and signs are not supported
+                      rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                    - message: must be a positive duration
+                      rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                        || duration(self) > duration(''0s'')'
+                  interval:
+                    default: 24h
+                    description: interval between scheduled snapshots, measured from
+                      a persisted anchor.
+                    maxLength: 32
+                    minLength: 2
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a duration such as 24h, 90m or 2160h; days,
+                        cron expressions and signs are not supported
+                      rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                    - message: must be a positive duration
+                      rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                        || duration(self) > duration(''0s'')'
+                  maxEvidenceAge:
+                    default: 2h
+                    description: |-
+                      maxEvidenceAge is the oldest source evaluation accepted as current
+                      evidence at snapshot closure.
+                    maxLength: 32
+                    minLength: 2
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a duration such as 24h, 90m or 2160h; days,
+                        cron expressions and signs are not supported
+                      rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                    - message: must be a positive duration
+                      rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                        || duration(self) > duration(''0s'')'
+                  retention:
+                    default: 2160h
+                    description: |-
+                      retention is how long published packages are kept, fixed at
+                      publication. 90 days is 2160h.
+                    maxLength: 32
+                    minLength: 2
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a duration such as 24h, 90m or 2160h; days,
+                        cron expressions and signs are not supported
+                      rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                    - message: must be a positive duration
+                      rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                        || duration(self) > duration(''0s'')'
+                type: object
+              enforcementEpoch:
+                description: |-
+                  enforcementEpoch identifies the enforcement configuration. The
+                  konstapel-binding-enforcement-epoch admission policy maintains it; user
+                  values are overwritten. It changes only when profileRef,
+                  namespaceSelector or mode change, so reporting-only edits keep engine
+                  policy identities and accepted exceptions.
+                format: int64
+                minimum: 1
+                type: integer
               mode:
                 description: mode is Audit or Deny. It has no default.
                 enum:
@@ -150,6 +225,15 @@ spec:
             - namespaceSelector
             - profileRef
             type: object
+            x-kubernetes-validations:
+            - message: 'enforcementEpoch is maintained by admission: unchanged for
+                reporting-only edits and incremented by one when profileRef, namespaceSelector
+                or mode change'
+              rule: '!has(oldSelf.enforcementEpoch) || (has(self.enforcementEpoch)
+                && ((self.profileRef == oldSelf.profileRef && self.namespaceSelector
+                == oldSelf.namespaceSelector && self.mode == oldSelf.mode) ? self.enforcementEpoch
+                == oldSelf.enforcementEpoch : self.enforcementEpoch == oldSelf.enforcementEpoch
+                + 1))'
           status:
             description: |-
               ComplianceBindingStatus reports resolution and engine readiness separately.

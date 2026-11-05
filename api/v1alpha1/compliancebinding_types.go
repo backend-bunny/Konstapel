@@ -46,6 +46,7 @@ type ProfileReference struct {
 }
 
 // ComplianceBindingSpec applies a profile to selected namespaces in one mode.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.enforcementEpoch) || (has(self.enforcementEpoch) && ((self.profileRef == oldSelf.profileRef && self.namespaceSelector == oldSelf.namespaceSelector && self.mode == oldSelf.mode) ? self.enforcementEpoch == oldSelf.enforcementEpoch : self.enforcementEpoch == oldSelf.enforcementEpoch + 1))",message="enforcementEpoch is maintained by admission: unchanged for reporting-only edits and incremented by one when profileRef, namespaceSelector or mode change"
 type ComplianceBindingSpec struct {
 	// profileRef references the profile whose policies this binding contributes.
 	// +required
@@ -60,6 +61,21 @@ type ComplianceBindingSpec struct {
 	// mode is Audit or Deny. It has no default.
 	// +required
 	Mode EnforcementMode `json:"mode"`
+
+	// assessment configures continuous assessment. Omitted settings default;
+	// changing them is a reporting-only edit.
+	// +optional
+	// +kubebuilder:default={}
+	Assessment *BindingAssessment `json:"assessment,omitempty"`
+
+	// enforcementEpoch identifies the enforcement configuration. The
+	// konstapel-binding-enforcement-epoch admission policy maintains it; user
+	// values are overwritten. It changes only when profileRef,
+	// namespaceSelector or mode change, so reporting-only edits keep engine
+	// policy identities and accepted exceptions.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	EnforcementEpoch int64 `json:"enforcementEpoch,omitempty"`
 }
 
 // ResolvedProfile records the profile revision a binding last resolved.
