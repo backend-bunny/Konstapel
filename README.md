@@ -23,6 +23,8 @@ validated OSCAL export. A production controller is not yet implemented.
 
 - [Development](docs/development.md): Devbox/direnv setup, Task commands, CI,
   and dependency updates with Renovate.
+- [Images](docs/images.md): melange/apko builds, SBOMs, signatures, provenance,
+  and license notices.
 - [Vision](vision.md): purpose, principles, and what success looks like.
 - [Architecture](ARCHITECTURE.md): components, reconciliation flow, C2P-Go v2
   integration, and open design decisions.
@@ -45,3 +47,6 @@ task check
 With direnv's shell hook installed, `.envrc` activates the pinned Devbox tools.
 Alternatively run `devbox run -- task check` without direnv. Use `task --list`
 to discover the build, test, policy, and disposable-cluster acceptance commands.
+
+Konstapel's own code is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
+for attribution; bundled content and dependencies retain their own licenses.

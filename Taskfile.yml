@@ -24,7 +24,11 @@ tasks:
           exit 1
         fi
       - go vet -mod=readonly ./...
-      - for script in .envrc scripts/*.sh scripts/runtime.env; do bash -n "$script"; done
+      - |
+        set -eu
+        bash -n .envrc
+        bash -n scripts/runtime.env
+        find scripts -name '*.sh' -print0 | xargs -0 -n 1 bash -n
 
   content:check:
     desc: Verify vendored policy, OSCAL, and schema checksums
@@ -74,3 +78,19 @@ tasks:
   clean:
     desc: Remove build outputs and Task cache; retain assessment evidence
     cmd: rm -rf -- bin .task
+
+  image:build:
+    desc: Build the melange package, locked apko image, SBOMs and license notices
+    cmd: scripts/image/build.sh
+
+  image:lock:
+    desc: Refresh the reviewed Wolfi runtime lock and build the image
+    cmd: scripts/image/build.sh lock
+
+  image:test:
+    desc: Test the built non-root image without network access (requires Docker)
+    cmd: scripts/image/test.sh
+
+  image:publish-dry-run:
+    desc: Validate publish inputs and print the commit tag without publishing
+    cmd: scripts/image/publish.sh --dry-run

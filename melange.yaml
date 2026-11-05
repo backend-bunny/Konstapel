@@ -1,0 +1,65 @@
+package:
+  name: konstapel
+  version: "0.1.0"
+  epoch: 0
+  description: "Konstapel compliance assessment runner and C2P provider"
+  copyright:
+    - license: Apache-2.0
+    - license: CC0-1.0
+      paths:
+        - content/upstream/nist/**
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - jq
+  environment:
+    CGO_ENABLED: "0"
+    GOFLAGS: "-mod=vendor -trimpath -buildvcs=false"
+    GOTOOLCHAIN: local
+    GOPROXY: "off"
+    GOSUMDB: "off"
+    GOCACHE: /var/cache/melange/go-build
+
+# scripts/image/build.sh supplies a source export with verified Go modules
+# vendored before entering the build sandbox. Compilation requires no network.
+pipeline:
+  - name: Build runner and provider
+    runs: |
+      set -eu
+      sh scripts/build.sh
+      dest="${{targets.destdir}}/usr/share/konstapel"
+      mkdir -p "$dest/bin" "${{targets.destdir}}/usr/bin"
+      cp -a bin/. "$dest/bin/"
+      cp -a content "$dest/content"
+      cp LICENSE NOTICE "$dest/"
+      ln -s /usr/share/konstapel/bin/konstapel "${{targets.destdir}}/usr/bin/konstapel"
+      mkdir -p "${{targets.destdir}}/usr/share/doc/konstapel"
+      cp -a image-notices/. "${{targets.destdir}}/usr/share/doc/konstapel/"
+      cp scripts/image/licenses/GO-LICENSE "${{targets.destdir}}/usr/share/doc/konstapel/GO-LICENSE"
+      go version > "${{targets.destdir}}/usr/share/doc/konstapel/go-version.txt"
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+        - binutils
+  pipeline:
+    - runs: |
+        set -eu
+        for binary in /usr/share/konstapel/bin/konstapel /usr/share/konstapel/bin/konstapel-provider; do
+          if readelf -l "$binary" | grep -q 'Requesting program interpreter'; then
+            echo "binary is dynamically linked: $binary" >&2
+            exit 1
+          fi
+        done
+        cd /usr/share/konstapel
+        konstapel generate --output /tmp/konstapel-image-test
+        test -s /tmp/konstapel-image-test/generated/policy.json

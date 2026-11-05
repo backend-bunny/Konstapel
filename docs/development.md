@@ -11,6 +11,8 @@ optionally, [direnv](https://direnv.net/docs/installation.html) with its shell h
 CI currently uses Devbox 0.18.4. The repository's `devbox.json` and generated
 `devbox.lock` select the tools, including Go, Task, Kyverno CLI, Chainsaw, kind,
 kubectl, Helm, shell utilities, and the Renovate configuration validator.
+Image tools include melange, apko, cosign, Syft, go-licenses and bubblewrap;
+see the [image guide](images.md) for build and attestation commands.
 
 ```sh
 devbox install
@@ -77,6 +79,7 @@ or download an independently selected Kyverno CLI.
 | GitHub Actions and CI Devbox version | `.github/`, with the matching Devbox schema version |
 | Reviewed policy/NIST content and provenance | `content/` and its checksums |
 | Previously observed validation versions | `docs/integration/versions.json` and other historical evidence |
+| Image runtime APKs | `apko.yaml` and `apko.lock.json`, refreshed through reviewed PRs |
 
 Renovate uses its Go, Devbox, and GitHub Actions managers plus custom extraction
 for the runtime chart/checksum, digest-pinned images, and Devbox installer/schema

@@ -1,0 +1,37 @@
+name: image
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+        with:
+          image: 'true'
+      - run: devbox run -- task image:build
+      - run: devbox run -- task image:test
+      - run: devbox run -- task image:publish-dry-run
+      - name: Dependency locks remain unchanged
+        run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum apko.lock.json
+      - name: License notice summary
+        if: always()
+        run: test ! -f out/image/notices.md || cat out/image/notices.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: image-evidence
+          path: |
+            out/image/*.json
+            out/image/*.md
+            out/image/*.sha256
+            packages/x86_64/*.attest.tar.gz
+          retention-days: 14
