@@ -1,0 +1,9 @@
+# Controller-created scheduled run, identified by its due time.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentRun
+metadata:
+  name: baseline-audit-scheduled-20261105t000000z
+spec:
+  bindingRef: {name: baseline-audit}
+  scope: Binding
+  trigger: {type: Scheduled, scheduledTime: "2026-11-05T00:00:00Z"}

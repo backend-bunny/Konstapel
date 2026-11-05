@@ -1,0 +1,8 @@
+# A platform operator requests a full-binding run. The trigger defaults to Manual.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentRun
+metadata:
+  generateName: baseline-audit-manual-
+spec:
+  bindingRef: {name: baseline-audit}
+  scope: Binding

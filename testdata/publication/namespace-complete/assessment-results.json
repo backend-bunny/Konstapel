@@ -1,0 +1,61 @@
+{
+  "assessment-results": {
+    "uuid": "6f1c2a90-0000-4000-8000-000000000101",
+    "metadata": {
+      "title": "Konstapel fixture assessment results",
+      "last-modified": "2026-11-05T10:04:30Z",
+      "version": "1.0.0",
+      "oscal-version": "1.1.3"
+    },
+    "import-ap": {
+      "href": "urn:konstapel:fixture:assessment-plan"
+    },
+    "results": [
+      {
+        "uuid": "6f1c2a90-0000-4000-8000-000000000001",
+        "title": "Namespace team-a assessment",
+        "description": "Fixture: complete evidence with one failure and one accepted risk; no control satisfaction is inferred.",
+        "start": "2026-11-05T10:00:00Z",
+        "end": "2026-11-05T10:04:30Z",
+        "reviewed-controls": {
+          "control-selections": [
+            {
+              "include-controls": [
+                {
+                  "control-id": "ac-6"
+                }
+              ]
+            }
+          ]
+        },
+        "remarks": "Fixture: complete evidence with one failure and one accepted risk; no control satisfaction is inferred.",
+        "observations": [
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a001",
+            "description": "pass: Pod team-a/api (validation-0)",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          },
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a002",
+            "description": "fail: Pod team-a/worker (validation-0)",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          },
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a003",
+            "description": "accepted-risk: Pod team-a/debug (validation-0), exception snapshot exc-7",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          }
+        ]
+      }
+    ]
+  }
+}

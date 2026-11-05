@@ -1,0 +1,11 @@
+{
+  "scope": "Namespace",
+  "namespace": "team-a",
+  "completeness": "Complete",
+  "expected": 3,
+  "outcomes": {
+    "pass": 1,
+    "fail": 1,
+    "acceptedRisk": 1
+  }
+}

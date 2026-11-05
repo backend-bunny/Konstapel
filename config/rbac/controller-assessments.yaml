@@ -1,0 +1,23 @@
+# The assessment controller resolves requests, creates runs, and is the only
+# writer of request and run status. Bind to the controller service account
+# configured in konstapel-system/konstapel-assessment-admission (default
+# konstapel-system/konstapel-controller) with a ClusterRoleBinding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-controller-assessments
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentruns]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentruns/status, assessmentrequests/status]
+    verbs: [get, update, patch]
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentrequests, compliancebindings, complianceprofiles]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]

@@ -1,0 +1,61 @@
+{
+  "assessment-results": {
+    "uuid": "6f1c2a90-0000-4000-8000-000000000102",
+    "metadata": {
+      "title": "Konstapel fixture assessment results",
+      "last-modified": "2026-11-05T10:04:30Z",
+      "version": "1.0.0",
+      "oscal-version": "1.1.3"
+    },
+    "import-ap": {
+      "href": "urn:konstapel:fixture:assessment-plan"
+    },
+    "results": [
+      {
+        "uuid": "6f1c2a90-0000-4000-8000-000000000002",
+        "title": "Namespace team-b assessment",
+        "description": "Fixture: incomplete evidence; missing and rejected observations remain in the denominator.",
+        "start": "2026-11-05T10:00:00Z",
+        "end": "2026-11-05T10:04:30Z",
+        "reviewed-controls": {
+          "control-selections": [
+            {
+              "include-controls": [
+                {
+                  "control-id": "ac-6"
+                }
+              ]
+            }
+          ]
+        },
+        "remarks": "Fixture: incomplete evidence; missing and rejected observations remain in the denominator.",
+        "observations": [
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a004",
+            "description": "pass: Pod team-b/web (validation-0)",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          },
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a005",
+            "description": "missing: Pod team-b/batch (validation-0) had no attributable evaluation by collection close",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          },
+          {
+            "uuid": "6f1c2a90-0000-4000-8000-00000000a006",
+            "description": "rejected: Pod team-b/cache (validation-0) evaluation predates the observed workload state",
+            "methods": [
+              "TEST"
+            ],
+            "collected": "2026-11-05T10:04:30Z"
+          }
+        ]
+      }
+    ]
+  }
+}

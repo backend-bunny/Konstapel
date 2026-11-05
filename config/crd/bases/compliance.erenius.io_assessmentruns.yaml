@@ -1,0 +1,601 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: assessmentruns.compliance.erenius.io
+spec:
+  group: compliance.erenius.io
+  names:
+    kind: AssessmentRun
+    listKind: AssessmentRunList
+    plural: assessmentruns
+    shortNames:
+    - arun
+    singular: assessmentrun
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.bindingRef.name
+      name: Binding
+      type: string
+    - jsonPath: .spec.scope
+      name: Scope
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.summary.evidence.completeness
+      name: Evidence
+      type: string
+    - jsonPath: .status.publication.phase
+      name: Publication
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AssessmentRun is a durable assessment record. It is protected and
+          cluster-scoped: application teams can neither create nor read runs.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AssessmentRunSpec is immutable. Platform operators may create Binding-scope
+              runs; Namespace-scope runs, request references, and Scheduled/Request
+              triggers are controller-owned and enforced by admission policy.
+            properties:
+              bindingRef:
+                description: bindingRef names the ComplianceBinding to assess.
+                properties:
+                  name:
+                    description: name of the ComplianceBinding.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              request:
+                description: request identifies the AssessmentRequest a Namespace
+                  run serves.
+                properties:
+                  name:
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  namespace:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  uid:
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - namespace
+                - uid
+                type: object
+              scope:
+                description: scope is Binding or Namespace. It has no default.
+                enum:
+                - Binding
+                - Namespace
+                type: string
+              trigger:
+                description: trigger records what caused the run; absent means Manual.
+                properties:
+                  scheduledTime:
+                    description: scheduledTime is the due time this scheduled run
+                      serves.
+                    format: date-time
+                    type: string
+                  type:
+                    description: TriggerType records what caused a run.
+                    enum:
+                    - Scheduled
+                    - Manual
+                    - Request
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: scheduledTime is required for and only allowed on Scheduled
+                    triggers
+                  rule: 'self.type == ''Scheduled'' ? has(self.scheduledTime) : !has(self.scheduledTime)'
+            required:
+            - bindingRef
+            - scope
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+            - message: request is required for and only allowed on Namespace scope
+              rule: 'self.scope == ''Namespace'' ? has(self.request) : !has(self.request)'
+            - message: Namespace scope requires a Request trigger, and Request triggers
+                require Namespace scope
+              rule: (self.scope == 'Namespace') == (has(self.trigger) && self.trigger.type
+                == 'Request')
+          status:
+            description: |-
+              AssessmentRunStatus holds controller-resolved fields. Only the controller
+              can write status; users cannot set resolved scope, captured data, or
+              publication state.
+            properties:
+              binding:
+                description: |-
+                  ResolvedBinding records the binding identity a request or run resolved.
+                  A binding recreated under the same name has a different UID and is never
+                  adopted.
+                properties:
+                  name:
+                    maxLength: 253
+                    type: string
+                  uid:
+                    maxLength: 128
+                    type: string
+                required:
+                - name
+                - uid
+                type: object
+              bindingConfiguration:
+                description: bindingConfiguration is the binding configuration revision
+                  captured.
+                maxLength: 128
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              descriptorSha256:
+                description: descriptorSha256 is the digest of the frozen package
+                  descriptor.
+                pattern: ^[0-9a-f]{64}$
+                type: string
+              enforcementRevisions:
+                items:
+                  maxLength: 128
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-list-type: set
+              phase:
+                description: |-
+                  RunPhase is an AssessmentRun's lifecycle. Evidence completeness, outcomes,
+                  and publication state are reported separately.
+                enum:
+                - Pending
+                - Collecting
+                - Exporting
+                - Publishing
+                - Completed
+                - Failed
+                type: string
+              publication:
+                description: |-
+                  PublicationStatus is the run's publication record. It mirrors
+                  internal/publication.Status; publication.ToAPI/FromAPI convert between them.
+                properties:
+                  availability:
+                    description: Availability reports whether new authorized downloads
+                      can be served.
+                    enum:
+                    - Unknown
+                    - Available
+                    - Unavailable
+                    - Expired
+                    type: string
+                  cleanup:
+                    description: PublicationCleanup is the retention cleanup record.
+                    properties:
+                      attempts:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      lastAttempt:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 512
+                        type: string
+                      state:
+                        description: CleanupState reports retention cleanup.
+                        enum:
+                        - NotDue
+                        - Pending
+                        - Deleted
+                        - DeletionFailed
+                        - RetentionBlocked
+                        type: string
+                    required:
+                    - state
+                    type: object
+                  commit:
+                    description: PublicationCommit is the fixed commit-manifest reference
+                      and its archive.
+                    properties:
+                      archiveKey:
+                        maxLength: 1024
+                        type: string
+                      archiveVersionID:
+                        maxLength: 1024
+                        type: string
+                      manifestKey:
+                        maxLength: 1024
+                        type: string
+                      manifestVersionID:
+                        maxLength: 1024
+                        type: string
+                    required:
+                    - archiveKey
+                    - manifestKey
+                    type: object
+                  descriptorSha256:
+                    pattern: ^[0-9a-f]{64}$
+                    type: string
+                  destination:
+                    description: PublicationDestination snapshots where a publication
+                      was written.
+                    properties:
+                      bucket:
+                        maxLength: 255
+                        type: string
+                      credentialRef:
+                        description: SecretReference names a credential Secret; status
+                          never holds its value.
+                        properties:
+                          name:
+                            maxLength: 253
+                            type: string
+                          namespace:
+                            maxLength: 63
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      endpoint:
+                        maxLength: 2048
+                        type: string
+                      id:
+                        maxLength: 253
+                        type: string
+                      prefix:
+                        maxLength: 1024
+                        type: string
+                    required:
+                    - bucket
+                    - endpoint
+                    - id
+                    type: object
+                  expiresAt:
+                    format: date-time
+                    type: string
+                  failure:
+                    description: PublicationFailure is a sanitized publication failure.
+                    properties:
+                      at:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 512
+                        type: string
+                      reason:
+                        maxLength: 128
+                        type: string
+                      retryable:
+                        type: boolean
+                    required:
+                    - at
+                    - reason
+                    - retryable
+                    type: object
+                  ownedObjects:
+                    items:
+                      description: OwnedObject is a storage object a publication owns
+                        and must clean up.
+                      properties:
+                        attemptID:
+                          maxLength: 128
+                          type: string
+                        key:
+                          maxLength: 1024
+                          type: string
+                        role:
+                          description: ObjectRole identifies an owned storage object's
+                            purpose.
+                          enum:
+                          - archive
+                          - manifest
+                          - staging
+                          type: string
+                        uploadID:
+                          maxLength: 1024
+                          type: string
+                        versionID:
+                          maxLength: 1024
+                          type: string
+                      required:
+                      - key
+                      - role
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  packageSha256:
+                    pattern: ^[0-9a-f]{64}$
+                    type: string
+                  packageSize:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  phase:
+                    description: |-
+                      PublicationPhase is the publication lifecycle. Only Committed denotes
+                      durable published output.
+                    enum:
+                    - Pending
+                    - Uploading
+                    - Committed
+                    - Failed
+                    - Expired
+                    - Deleting
+                    - Deleted
+                    type: string
+                  publicationID:
+                    maxLength: 64
+                    type: string
+                  publishedAt:
+                    format: date-time
+                    type: string
+                  retention:
+                    description: PublicationRetention is the effective retention frozen
+                      at first commit.
+                    properties:
+                      bindingConfiguration:
+                        description: bindingConfiguration is the binding revision
+                          the duration was read from.
+                        maxLength: 128
+                        type: string
+                      duration:
+                        description: duration is a positive duration string such as
+                          "2160h".
+                        maxLength: 64
+                        type: string
+                      selectedAt:
+                        format: date-time
+                        type: string
+                    required:
+                    - bindingConfiguration
+                    - duration
+                    - selectedAt
+                    type: object
+                required:
+                - availability
+                - cleanup
+                - phase
+                - publicationID
+                type: object
+              scope:
+                description: |-
+                  FrozenScope summarizes the scope frozen at run start. The full inventory
+                  lives in the package, not in status.
+                properties:
+                  clusterID:
+                    maxLength: 253
+                    type: string
+                  namespaceCount:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  namespaceUID:
+                    description: namespaceUID is set for Namespace scope only.
+                    maxLength: 128
+                    type: string
+                  revision:
+                    maxLength: 128
+                    type: string
+                  sha256:
+                    pattern: ^[0-9a-f]{64}$
+                    type: string
+                required:
+                - clusterID
+                - namespaceCount
+                - revision
+                - sha256
+                type: object
+              summary:
+                description: |-
+                  AssessmentSummary is the sanitized result summary exposed in status. It
+                  contains no inventory, storage location, credential, or sibling data.
+                properties:
+                  evidence:
+                    description: EvidenceSummary counts expected checks by evidence
+                      state.
+                    properties:
+                      attributable:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      completeness:
+                        description: EvidenceCompleteness describes evidence coverage
+                          only, never outcomes.
+                        enum:
+                        - Complete
+                        - Incomplete
+                        - NoTargets
+                        type: string
+                      expected:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      missing:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      rejected:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      unresolved:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    required:
+                    - attributable
+                    - completeness
+                    - expected
+                    - missing
+                    - rejected
+                    - unresolved
+                    type: object
+                  export:
+                    description: ExportState records whether a run produced assessment
+                      OSCAL.
+                    enum:
+                    - Assessment
+                    - Diagnostic
+                    - CaptureLost
+                    type: string
+                  outcomes:
+                    description: |-
+                      OutcomeCounts preserves check dispositions separately from completeness.
+                      It deliberately has no aggregate pass field.
+                    properties:
+                      acceptedRisk:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      error:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      fail:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      notApplicable:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      pass:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      skip:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      unknown:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    required:
+                    - acceptedRisk
+                    - error
+                    - fail
+                    - notApplicable
+                    - pass
+                    - skip
+                    - unknown
+                    type: object
+                required:
+                - evidence
+                - export
+                - outcomes
+                type: object
+              window:
+                description: CaptureWindow is the bounded observation window.
+                properties:
+                  closed:
+                    format: date-time
+                    type: string
+                  started:
+                    format: date-time
+                    type: string
+                required:
+                - started
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
