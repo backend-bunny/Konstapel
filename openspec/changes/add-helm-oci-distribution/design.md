@@ -48,6 +48,7 @@ and image inputs. Resolve these from merged code before filling runtime template
 | `add-self-service-policy-exceptions` | Exception API, admission/governance handlers, compatible-engine matrix and expiry gate |
 | `add-continuous-assessments` | Request/run APIs, admission epoch handling, scheduler and assessment readiness |
 | `add-s3-evidence-publishing` | Download service, TLS interface, destination/credential configuration and authorization |
+| `add-controller-high-availability` | Replica lifecycle, Lease identity, serving/leader separation, shutdown budgets and availability acceptance |
 
 Chart metadata, rendering fixtures, version checks, and registry/publication
 helpers can be developed before those implementations. Keep fixture schemas and
@@ -201,8 +202,40 @@ bounded writable directories for the manager/provider and any implemented
 staging requirements; the controller's existing capture/recovery contract decides
 whether storage must survive restart. Probes and hooks cannot assume a shell
 exists inside the application image. Keep C2P executable/content paths aligned
-with the image build. Do not claim multi-replica availability until leader and
-admission behavior from the owning implementations passes its tests.
+with the image build. The availability contract in
+[`add-controller-high-availability`](../add-controller-high-availability/design.md)
+defines the multi-replica runtime and its release tests. This chart change owns
+their Deployment, Service, PDB, scheduling and values-schema integration; the
+availability change owns manager lifecycle and cross-feature fault tests.
+
+Default `replicaCount` to 2 and prefer separation using pod anti-affinity with
+weight 100 on `kubernetes.io/hostname`. Match stable release-scoped pod labels
+within the installation namespace, including both sides of a rolling upgrade.
+Do not make node separation required. Render a `policy/v1` PodDisruptionBudget
+with `minAvailable: 1` by default when replicas exceed one; explicit development
+values use one replica and omit the default PDB. Keep operator overrides explicit
+and validate replica counts and incompatible budget settings.
+
+Use Deployment RollingUpdate with `maxUnavailable: 0` and `maxSurge: 1`. This
+allows a third non-terminating pod during the default rollout; terminating pods
+follow Kubernetes accounting, so this is not a strict total pod quota. If surge
+capacity is unavailable, keep the rollout pending rather than weakening the
+strategy. The PDB covers voluntary eviction, while Deployment rollout safety
+comes from the rolling strategy; neither protects against every node failure.
+
+Select every ready replica for implemented admission/download services, without
+leader labels or session affinity. Keep readiness independent of leadership and
+global engine health while requiring usable local handlers, state and TLS. Use
+60s pod termination grace with the availability contract's 45s application and
+20s HTTP drain defaults, validating timing overrides and avoiding shell preStop
+hooks. Retain the same Lease identity across compatible runtime upgrades and
+keep election enabled in single-replica development.
+
+Do not publish the default replicated runtime until the applicable availability
+cases pass against actual enabled features. Cover both replicas serving, leader
+failure, rolling upgrade, eviction, durable recovery and single-node/development
+limits through the shared chart acceptance harness. Preserve independent CRD
+lifecycle and the owning features' exception expiry and authorization gates.
 
 If the merged manager introduces another binary or command mode, extend the
 existing build/melange/apko packaging to ship and exercise that entry point.

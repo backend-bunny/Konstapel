@@ -17,9 +17,15 @@ Do not create another manager or API schema, alter another change's task list,
 or enable production publication before the applicable runtime tests pass.
 Coordinate shared manager and release-file edits after rebasing.
 
+Consume `add-controller-high-availability` for the replicated runtime lifecycle
+and acceptance contract. This Helm change owns its chart values, Deployment,
+Service/PDB/anti-affinity resources and rendering tests; the availability change
+owns manager lifecycle and cross-feature failure tests. Chart fixtures can start
+independently, but release acceptance requires that integrated runtime.
+
 ## 1. Establish chart inputs and independent fixtures
 
-- [ ] 1.1 Define the chart input contract for generated CRDs/RBAC, available capabilities, manager entry point, ports/probes, TLS, writable storage and image inputs; verify every field is traced to a named implementation owner and unresolved inputs cannot be substituted with a fixture in a release.
+- [ ] 1.1 Define the chart input contract for generated CRDs/RBAC, available capabilities, manager entry point, ports/probes, TLS, writable storage, image inputs and the availability owner's Lease/shutdown/replica lifecycle; verify every field is traced to a named implementation owner and unresolved inputs cannot be substituted with a fixture in a release.
 - [ ] 1.2 Add metadata and values-schema scaffolding for the two independent charts with fixture render cases; verify chart names, the `compliance.erenius.io` API contract, mutually exclusive TLS settings, and absence of CRD/Kyverno/cert-manager chart dependencies.
 - [ ] 1.3 Extend release-please and the existing version helper to update/check both charts' version and appVersion; verify an unchanged-schema release advances both charts and a deliberate version mismatch fails the check.
 - [ ] 1.4 Add packaging-input/publication-manifest fixtures recording source revision, chart versions, archive checksums and image digest; verify source/digest mismatches, missing artifacts and incompatible version pairs fail before registry writes.
@@ -41,6 +47,7 @@ Coordinate shared manager and release-file edits after rebasing.
 - [ ] 3.4 Add operator-managed TLS Secret/CA configuration; verify installation without cert-manager, caller Secret preservation, and explicit failure for absent keys, expiry, wrong service identity or mismatched trust.
 - [ ] 3.5 Wire serving probes and certificate reload through the owning runtime interfaces; verify leaf and CA rotation preserve protected admission/download behavior, invalid TLS is not reported ready, and Kyverno unavailability does not remove otherwise healthy webhook endpoints.
 - [ ] 3.6 Document both TLS modes, trust rotation, runtime values and feature availability; verify the examples render and install without changing the existing CLI workflow or claiming unimplemented exception/download support.
+- [ ] 3.7 Render and document the availability defaults: two replicas, preferred hostname anti-affinity, minAvailable 1 PDB when replicas exceed one, zero-unavailable/one-surge rolling updates and 60s termination grace; verify default/development/override fixtures, stable release selectors including all ready serving pods, timing validation, explicit one-replica development without the default PDB, and no required node separation or leader-only routing.
 
 ## 4. Recover from external engine prerequisites
 
@@ -62,6 +69,6 @@ Coordinate shared manager and release-file edits after rebasing.
 ## 6. Verify the complete installation and release workflow
 
 - [ ] 6.1 Wire shared chart checks into `task check` and expose only `charts:package` and `charts:acceptance` for the new recurring workflows; verify local and CI use Devbox and the same helpers, update the development command table, and keep signing/summary/digest helpers private.
-- [ ] 6.2 Run the documented two-chart lifecycle using real implemented APIs and the exact packaged controller image in kind; verify both TLS modes, late Kyverno readiness, policy delivery, available assessment/exception/download features, upgrades and retained-CRD reinstall together.
+- [ ] 6.2 Run the documented two-chart lifecycle using real implemented APIs and the exact packaged controller image in kind; verify both TLS modes, late Kyverno readiness, policy delivery, available assessment/exception/download features, upgrades and retained-CRD reinstall together, consuming the availability owner's leader-failure/serving/recovery tests as a release gate for the enabled replicated runtime.
 - [ ] 6.3 Verify the trusted publication path for a release candidate pair and exercise incomplete/signature-failure recovery; retain both remote verification results and confirm neither chart is reported successfully released until both subjects and their original inputs match.
 - [ ] 6.4 Retain the version matrix, chart/image digests and lifecycle evidence, then tear down task-owned test releases, retained test CRDs/instances, clusters, registry data and processes through explicit test cleanup; verify unrelated infrastructure remains untouched and the existing prototype checks still pass.

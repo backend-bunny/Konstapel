@@ -165,6 +165,26 @@ distinguish serving readiness from engine and assessment readiness.
 - **THEN** the controller reconciles real Konstapel resources and can execute its required C2P provider
 - **AND** the release fails validation if the image only supplies the prototype CLI or requires broader privileges than declared
 
+### Requirement: Package the supported replica availability defaults
+
+The controller chart SHALL default to two replicas, preferred separation across
+nodes, a minAvailable 1 PodDisruptionBudget, and rolling updates with zero
+unavailable and one surge replica. Explicit single-replica development SHALL
+omit the default PDB. Services and probes SHALL consume the controller
+availability contract without requiring a replica to hold leadership.
+
+#### Scenario: Render production and development settings
+
+- **WHEN** the chart is rendered with defaults or single-replica development values
+- **THEN** replicas, scheduling, disruption protection and rollout settings match the selected mode
+- **AND** service selectors include all ready installation replicas across supported image revisions
+
+#### Scenario: Validate the replicated runtime before publication
+
+- **WHEN** a functional controller chart is prepared for publication
+- **THEN** the real enabled features pass the controller availability acceptance cases
+- **AND** chart rendering or fixture services alone cannot establish that release gate
+
 ### Requirement: Sign and attest each OCI chart digest
 
 Both charts SHALL be published to distinct GHCR OCI repositories. Each OCI
