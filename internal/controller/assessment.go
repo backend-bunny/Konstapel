@@ -121,7 +121,20 @@ func (t *BoundaryTracker) Observe(now time.Time, ws []collector.Workload) []coll
 	return out
 }
 
-// AssessmentReconciler maintains status.assessment.current.
+// Lookup returns the boundary for a workload only if its tracked state is
+// state. It never changes the tracker.
+func (t *BoundaryTracker) Lookup(uid, state string) (collector.Boundary, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.seen[uid]
+	if !ok || s.boundary.StateSHA256 != state {
+		return collector.Boundary{}, false
+	}
+	return s.boundary, true
+}
+
+// AssessmentReconciler maintains status.assessment.current and plans the
+// binding's snapshot schedule.
 type AssessmentReconciler struct {
 	Client     client.Client
 	Content    targeting.ContentSource
@@ -129,6 +142,8 @@ type AssessmentReconciler struct {
 	Cluster    string
 	Boundaries *BoundaryTracker
 	Now        func() time.Time
+	// Runtime enables scheduled runs when ready; see AssessmentRuntime.
+	Runtime AssessmentRuntime
 }
 
 func (r *AssessmentReconciler) now() time.Time {
@@ -152,24 +167,45 @@ func (r *AssessmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.apply(ctx, b, current); err != nil {
+	sched, latest, nextDue, limit, err := r.plan(ctx, b, now)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if current.NextExpiry != nil {
-		// Re-evaluate when the oldest attributable evidence becomes stale,
-		// without waiting for an event or a snapshot tick.
-		return ctrl.Result{RequeueAfter: current.NextExpiry.Sub(now) + time.Second}, nil
+	if limit != "" {
+		current.Limitations = boundLimitations(append([]string{limit}, current.Limitations...))
 	}
-	return ctrl.Result{}, nil
+	if err := r.apply(ctx, b, &v1alpha1.BindingAssessmentStatus{Current: current, Schedule: sched, LatestRun: latest}); err != nil {
+		return ctrl.Result{}, err
+	}
+	// Re-evaluate when the oldest attributable evidence becomes stale (without
+	// waiting for an event or a snapshot tick), or when the next run is due.
+	var after time.Duration
+	for _, t := range []time.Time{nextDue, ptrTime(current.NextExpiry)} {
+		if !t.IsZero() {
+			if d := t.Sub(now) + time.Second; after == 0 || d < after {
+				after = d
+			}
+		}
+	}
+	return ctrl.Result{RequeueAfter: max(after, 0)}, nil
 }
 
-// evaluate builds the current-evidence status for b at time now.
-func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.CurrentEvidence, error) {
+func ptrTime(t *metav1.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.Time
+}
+
+// snapshot resolves b's expected evidence at time now and freezes it into a
+// capture with the current PolicyReports attached. It also returns the
+// limitations found and the binding's maxEvidenceAge.
+func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (collector.CaptureV2, []string, time.Duration, error) {
 	maxAge := 2 * time.Hour
 	if b.Spec.Assessment != nil && b.Spec.Assessment.MaxEvidenceAge != "" {
 		d, err := time.ParseDuration(string(b.Spec.Assessment.MaxEvidenceAge))
 		if err != nil || d <= 0 {
-			return nil, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
+			return collector.CaptureV2{}, nil, 0, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
 		}
 		maxAge = d
 	}
@@ -180,27 +216,27 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 
 	in, profile, err := (&BindingReconciler{Client: r.Client, Content: r.Content, Cluster: r.Cluster}).input(ctx, b)
 	if err != nil {
-		return nil, err
+		return collector.CaptureV2{}, nil, 0, err
 	}
 	res := targeting.Resolve(in)
 	content := map[string]*targeting.Content{}
 	if profile != nil && len(in.Bundles) > 0 {
 		c, err := r.Content.Content(ctx, profile.Spec.Bundle)
 		if err != nil {
-			return nil, err
+			return collector.CaptureV2{}, nil, 0, err
 		}
 		content[c.Bundle.Digest] = c
 	}
 	subjects, stale, err := targeting.ExpectedEvidence(res, content)
 	if err != nil {
-		return nil, err
+		return collector.CaptureV2{}, nil, 0, err
 	}
 
 	engineUp := false
 	if r.Engine != nil {
 		engineUp, err = r.Engine(ctx)
 		if err != nil {
-			return nil, err
+			return collector.CaptureV2{}, nil, 0, err
 		}
 	}
 	var rendered []assessment.Object
@@ -208,7 +244,7 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 	if engineUp {
 		if rendered, err = r.listUnstructured(ctx, targeting.ValidatingPolicyGVK, "", client.MatchingLabels{
 			targeting.LabelManagedBy: targeting.ManagedByValue, targeting.LabelBindingUID: string(b.UID)}); err != nil {
-			return nil, err
+			return collector.CaptureV2{}, nil, 0, err
 		}
 	} else {
 		limits = append(limits, "policy engine API is not served; no engine policies or reports can be read")
@@ -255,16 +291,16 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 		for _, ns := range sortedKeys(namespaces) {
 			_, list := mk()
 			if err := r.Client.List(ctx, list, client.InNamespace(ns)); err != nil {
-				return nil, err
+				return collector.CaptureV2{}, nil, 0, err
 			}
 			items, err := meta.ExtractList(list)
 			if err != nil {
-				return nil, err
+				return collector.CaptureV2{}, nil, 0, err
 			}
 			for _, it := range items {
 				o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(it)
 				if err != nil {
-					return nil, err
+					return collector.CaptureV2{}, nil, 0, err
 				}
 				if ts := assessment.Str(assessment.At(o, "metadata", "deletionTimestamp")); ts != "" {
 					continue
@@ -286,17 +322,26 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 
 	capture, err := collector.FreezeScope(r.Cluster, now, mappingDigest(subjects), subjects, stale, rendered, listed)
 	if err != nil {
+		return collector.CaptureV2{}, nil, 0, err
+	}
+	capture.Reports = reports
+	return capture, limits, maxAge, nil
+}
+
+// evaluate builds the current-evidence status for b at time now.
+func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.CurrentEvidence, error) {
+	capture, limits, maxAge, err := r.snapshot(ctx, b, now)
+	if err != nil {
 		return nil, err
 	}
 	capture.Window.Closed = now
-	capture.Reports = reports
 	boundaries := r.Boundaries.Observe(now, capture.Workloads)
 	ev, err := capture.Evaluate(boundaries, maxAge)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, s := range stale {
+	for _, s := range capture.Stale {
 		limits = append(limits, fmt.Sprintf("stale scope %s: %s", s.Reason, s.Message))
 	}
 	if n := ev.Evidence.Expected - ev.Evidence.Attributable; n > 0 {
@@ -317,24 +362,19 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 	return cur, nil
 }
 
-// apply server-side applies status.assessment.current when it changed.
-// evaluatedAt alone never causes a write.
-func (r *AssessmentReconciler) apply(ctx context.Context, b *v1alpha1.ComplianceBinding, cur *v1alpha1.CurrentEvidence) error {
-	if b.Status.Assessment != nil && b.Status.Assessment.Current != nil {
-		old := b.Status.Assessment.Current.DeepCopy()
-		next := cur.DeepCopy()
-		old.EvaluatedAt, next.EvaluatedAt = metav1.Time{}, metav1.Time{}
+// apply server-side applies status.assessment when it changed. evaluatedAt
+// alone never causes a write.
+func (r *AssessmentReconciler) apply(ctx context.Context, b *v1alpha1.ComplianceBinding, a *v1alpha1.BindingAssessmentStatus) error {
+	if b.Status.Assessment != nil {
+		old, next := b.Status.Assessment.DeepCopy(), a.DeepCopy()
+		if old.Current != nil && next.Current != nil {
+			old.Current.EvaluatedAt, next.Current.EvaluatedAt = metav1.Time{}, metav1.Time{}
+		}
 		if equalJSON(old, next) {
 			return nil
 		}
 	}
-	a := v1alpha1.BindingAssessmentStatus{Current: cur}
-	if b.Status.Assessment != nil {
-		// Fields this manager applies later (schedule, latestRun) are carried
-		// so an apply never drops them.
-		a.Schedule, a.LatestRun = b.Status.Assessment.Schedule, b.Status.Assessment.LatestRun
-	}
-	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&a)
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(a)
 	if err != nil {
 		return err
 	}
@@ -444,17 +484,28 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 
 // setupAssessments registers the assessment reconciler with the manager.
 func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine EngineAvailable, cluster string, poll time.Duration) error {
-	r := &AssessmentReconciler{Client: mgr.GetClient(), Content: content, Engine: engine, Cluster: cluster, Boundaries: NewBoundaryTracker()}
+	rt := currentRuntime()
+	r := &AssessmentReconciler{Client: mgr.GetClient(), Content: content, Engine: engine, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
 		For(&v1alpha1.ComplianceBinding{}).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient()))
+		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient())).
+		Watches(&v1alpha1.AssessmentRun{}, bindingForRun())
 	for _, res := range sortedKeys(workloadKinds) {
 		obj, _ := workloadKinds[res]()
 		b = b.Watches(obj, allBindings(mgr.GetClient()), builder.WithPredicates(workloadStateChanged()))
 	}
 	c, err := b.Build(r)
 	if err != nil {
+		return err
+	}
+	// Runs execute with bounded concurrency across all bindings; each binding
+	// has at most one admitted run.
+	if err := builder.ControllerManagedBy(mgr).Named("assessmentrun").
+		For(&v1alpha1.AssessmentRun{}).
+		Watches(&v1alpha1.ComplianceBinding{}, runsForBinding(mgr.GetClient())).
+		WithOptions(controller.Options{MaxConcurrentReconciles: rt.Workers}).
+		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt}); err != nil {
 		return err
 	}
 	// Engine policies and reports are watched once the engine API is served.

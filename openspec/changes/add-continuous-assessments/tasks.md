@@ -33,11 +33,11 @@ change's entire task list before landing the shared contract or adapter.
 
 ## 3. Reconcile current state and durable run scheduling
 
-- [ ] 3.1 Implement persisted schedule anchors/due times and deterministic scheduled-run identities with a fake clock; verify independent intervals, initial runs, interval edits, and manual requests that do not reset cadence.
+- [x] 3.1 Implement persisted schedule anchors/due times and deterministic scheduled-run identities with a fake clock; verify independent intervals, initial runs, interval edits, and manual requests that do not reset cadence.
 - [ ] 3.2 Add one-active-run-per-binding coordination, leader recovery, bounded workers/queues, and deterministic request ordering; verify concurrent reconciles cannot duplicate a trigger and an overdue scheduled run is not starved by manual requests.
-- [ ] 3.3 Implement missed-interval coalescing and restart recovery; verify downtime records a gap and produces one current run without fabricated historical evaluations or an unbounded backlog.
+- [x] 3.3 Implement missed-interval coalescing and restart recovery; verify downtime records a gap and produces one current run without fabricated historical evaluations or an unbounded backlog.
 - [ ] 3.4 Add workload/namespace/policy/report/exception watches and age-expiry reconciliation for current status; verify a 2h-old result becomes stale before a 24h snapshot tick and zero targets does not establish a pass.
-- [ ] 3.5 Implement bounded collection/export/publication execution and failure release of active slots; verify unready policies, plugin hangs, and publisher outages produce explicit limitations/failures without blocking the binding forever.
+- [x] 3.5 Implement bounded collection/export/publication execution and failure release of active slots; verify unready policies, plugin hangs, and publisher outages produce explicit limitations/failures without blocking the binding forever.
 - [ ] 3.6 Document scheduling, request quotas, pending/failed runs, and recovery; verify a fake-clock and disposable-cluster walkthrough reproduces cadence, gap, and concurrency behavior.
 
 ## 4. Correlate changing resources with expected evidence

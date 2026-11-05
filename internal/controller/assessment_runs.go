@@ -1,0 +1,534 @@
+package controller
+
+// Assessment run scheduling and execution (add-continuous-assessments group
+// 3). The AssessmentReconciler plans each binding's schedule and admits one
+// run at a time; the AssessmentRunReconciler executes only the admitted run:
+// it freezes scope into a staging capture, collects until collectionTimeout
+// or complete evidence, evaluates, exports, publishes, and records the
+// outcome, which releases the binding's slot.
+
+// +kubebuilder:rbac:groups=compliance.erenius.io,resources=assessmentruns,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=compliance.erenius.io,resources=assessmentruns/status,verbs=get;update;patch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/schedule"
+)
+
+// LabelRunBinding labels AssessmentRuns with their binding's UID.
+const LabelRunBinding = "compliance.erenius.io/binding-uid"
+
+// AssessmentRuntime configures run execution. Scheduling is enabled only
+// when a publisher, a staging directory, and a content root are configured;
+// otherwise bindings report scheduled snapshots as disabled.
+type AssessmentRuntime struct {
+	Publisher publication.Publisher
+	// StagingDir holds frozen captures and packages until publication.
+	StagingDir string
+	// ContentRoot contains the verified content/ tree used for export.
+	ContentRoot string
+	// Poll is how often a collecting run re-reads evidence.
+	Poll time.Duration
+	// PublishTimeout bounds publication retries after collection closes.
+	PublishTimeout time.Duration
+	// Workers bounds concurrently executing runs across all bindings.
+	Workers int
+}
+
+var (
+	runtimeMu        sync.Mutex
+	assessmentRunCfg AssessmentRuntime
+)
+
+// ConfigureAssessments sets the run runtime used by managers built afterwards.
+// add-s3-evidence-publishing supplies the production publisher; until then a
+// manager has none and scheduling stays explicitly disabled.
+func ConfigureAssessments(rt AssessmentRuntime) {
+	runtimeMu.Lock()
+	defer runtimeMu.Unlock()
+	assessmentRunCfg = rt
+}
+
+func currentRuntime() AssessmentRuntime {
+	runtimeMu.Lock()
+	defer runtimeMu.Unlock()
+	rt := assessmentRunCfg
+	if rt.Poll <= 0 {
+		rt.Poll = 15 * time.Second
+	}
+	if rt.PublishTimeout <= 0 {
+		rt.PublishTimeout = 5 * time.Minute
+	}
+	if rt.Workers <= 0 {
+		rt.Workers = 4
+	}
+	return rt
+}
+
+// ready reports whether runs can be executed and published.
+func (rt AssessmentRuntime) ready() (bool, string) {
+	switch {
+	case rt.Publisher == nil:
+		return false, "no evidence publisher is configured"
+	case rt.StagingDir == "":
+		return false, "no staging directory is configured"
+	case rt.ContentRoot == "":
+		return false, "no content root is configured for export"
+	}
+	return true, ""
+}
+
+func bindingDurations(b *v1alpha1.ComplianceBinding) (interval, timeout, retention time.Duration, err error) {
+	a := v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "5m", Retention: "2160h"}
+	if b.Spec.Assessment != nil {
+		if b.Spec.Assessment.Interval != "" {
+			a.Interval = b.Spec.Assessment.Interval
+		}
+		if b.Spec.Assessment.CollectionTimeout != "" {
+			a.CollectionTimeout = b.Spec.Assessment.CollectionTimeout
+		}
+		if b.Spec.Assessment.Retention != "" {
+			a.Retention = b.Spec.Assessment.Retention
+		}
+	}
+	parse := func(d v1alpha1.Duration) time.Duration {
+		v, e := time.ParseDuration(string(d))
+		if e != nil || v <= 0 {
+			err = fmt.Errorf("binding %s: invalid duration %q", b.Name, d)
+		}
+		return v
+	}
+	return parse(a.Interval), parse(a.CollectionTimeout), parse(a.Retention), err
+}
+
+func runDone(r *v1alpha1.AssessmentRun) bool {
+	return r.Status.Phase == v1alpha1.RunCompleted || r.Status.Phase == v1alpha1.RunFailed
+}
+
+// plan runs the binding's schedule. It returns the schedule and latest run to
+// persist, the next due time, and a limitation when scheduling is disabled.
+func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.AssessmentSchedule, *v1alpha1.RunReference, time.Time, string, error) {
+	var prev *v1alpha1.AssessmentSchedule
+	var latest *v1alpha1.RunReference
+	if b.Status.Assessment != nil {
+		prev, latest = b.Status.Assessment.Schedule, b.Status.Assessment.LatestRun
+	}
+	if ok, why := r.Runtime.ready(); !ok {
+		return prev, latest, time.Time{}, "scheduled snapshots are disabled: " + why, nil
+	}
+	interval, _, _, err := bindingDurations(b)
+	if err != nil {
+		return prev, latest, time.Time{}, "", err
+	}
+	st, err := schedule.FromStatus(prev)
+	if err != nil {
+		return prev, latest, time.Time{}, "", err
+	}
+	activeDone, activeUID := false, ""
+	if st.Active != "" {
+		run := &v1alpha1.AssessmentRun{}
+		switch err := r.Client.Get(ctx, client.ObjectKey{Name: st.Active}, run); {
+		case apierrors.IsNotFound(err):
+			activeDone = true
+		case err != nil:
+			return prev, latest, time.Time{}, "", err
+		default:
+			activeDone, activeUID = runDone(run), string(run.UID)
+		}
+	}
+	var runs v1alpha1.AssessmentRunList
+	if err := r.Client.List(ctx, &runs); err != nil {
+		return prev, latest, time.Time{}, "", err
+	}
+	var pending []schedule.Pending
+	for _, run := range runs.Items {
+		manual := run.Spec.Trigger == nil || run.Spec.Trigger.Type == v1alpha1.TriggerManual
+		if run.Spec.BindingRef.Name == b.Name && run.Spec.Scope == v1alpha1.RunScopeBinding && manual &&
+			(run.Status.Phase == "" || run.Status.Phase == v1alpha1.RunPending) && run.Name != st.Active && run.DeletionTimestamp.IsZero() {
+			pending = append(pending, schedule.Pending{Kind: schedule.Manual, Name: run.Name, UID: string(run.UID), Created: run.CreationTimestamp.Time})
+		}
+	}
+	d := schedule.Plan(schedule.Input{Now: now, BindingName: b.Name, BindingUID: string(b.UID), Interval: interval, State: st, ActiveDone: activeDone, Pending: pending})
+	if d.Start != nil {
+		var run *v1alpha1.AssessmentRun
+		switch d.Start.Kind {
+		case schedule.Scheduled:
+			when := metav1.NewTime(d.Start.ScheduledTime)
+			run = &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: d.Start.RunName, Labels: map[string]string{LabelRunBinding: string(b.UID)}},
+				Spec: v1alpha1.AssessmentRunSpec{BindingRef: v1alpha1.BindingReference{Name: b.Name}, Scope: v1alpha1.RunScopeBinding,
+					Trigger: &v1alpha1.RunTrigger{Type: v1alpha1.TriggerScheduled, ScheduledTime: &when}}}
+			// The name is deterministic, so a retry or a lost race finds the
+			// existing run instead of creating a duplicate snapshot.
+			if err := r.Client.Create(ctx, run); err != nil && !apierrors.IsAlreadyExists(err) {
+				return prev, latest, time.Time{}, "", err
+			}
+			if err := r.Client.Get(ctx, client.ObjectKey{Name: d.Start.RunName}, run); err != nil {
+				return prev, latest, time.Time{}, "", err
+			}
+		default:
+			// A platform-created manual run already exists under its own name.
+			d.State.Active = d.Start.Pending.Name
+			run = &v1alpha1.AssessmentRun{}
+			if err := r.Client.Get(ctx, client.ObjectKey{Name: d.Start.Pending.Name}, run); err != nil {
+				return prev, latest, time.Time{}, "", err
+			}
+		}
+		activeUID = string(run.UID)
+		latest = &v1alpha1.RunReference{Name: run.Name, UID: string(run.UID)}
+	}
+	if d.State.Active == "" {
+		activeUID = ""
+	}
+	return schedule.ToStatus(d.State, d.NextDue, activeUID), latest, d.NextDue, "", nil
+}
+
+// runsForBinding maps a binding to its runs, and a run to its binding.
+func runsForBinding(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		var runs v1alpha1.AssessmentRunList
+		if err := c.List(ctx, &runs); err != nil {
+			return nil
+		}
+		var out []reconcile.Request
+		for _, r := range runs.Items {
+			if r.Spec.BindingRef.Name == o.GetName() && !runDone(&r) {
+				out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
+			}
+		}
+		return out
+	})
+}
+
+func bindingForRun() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
+		run, ok := o.(*v1alpha1.AssessmentRun)
+		if !ok {
+			return nil
+		}
+		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: run.Spec.BindingRef.Name}}}
+	})
+}
+
+// AssessmentRunReconciler executes admitted assessment runs.
+type AssessmentRunReconciler struct {
+	Client  client.Client
+	Assess  *AssessmentReconciler
+	Runtime AssessmentRuntime
+	Now     func() time.Time
+}
+
+func (r *AssessmentRunReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now().UTC().Truncate(time.Second)
+	}
+	return time.Now().UTC().Truncate(time.Second)
+}
+
+func (r *AssessmentRunReconciler) staging(run *v1alpha1.AssessmentRun) string {
+	return filepath.Join(r.Runtime.StagingDir, string(run.UID))
+}
+
+// Reconcile advances one run through Pending, Collecting, Publishing, and a
+// terminal phase. Only the run admitted by its binding's schedule executes.
+func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	run := &v1alpha1.AssessmentRun{}
+	if err := r.Client.Get(ctx, req.NamespacedName, run); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if runDone(run) || !run.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+	if run.UID == "" {
+		return ctrl.Result{}, fmt.Errorf("run %s has no UID", run.Name)
+	}
+	if run.Spec.Scope == v1alpha1.RunScopeNamespace {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, "NamespaceRunsNotSupported", "namespace evidence projection is not implemented yet; no broader assessment is substituted")
+	}
+	b := &v1alpha1.ComplianceBinding{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: run.Spec.BindingRef.Name}, b); apierrors.IsNotFound(err) {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, v1alpha1.ReasonBindingNotFound, "binding "+run.Spec.BindingRef.Name+" does not exist")
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+	if run.Status.Binding != nil && run.Status.Binding.UID != string(b.UID) {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, v1alpha1.ReasonBindingNotFound, "binding was replaced after the run started; the new binding is never adopted")
+	}
+	admitted := b.Status.Assessment != nil && b.Status.Assessment.Schedule != nil && b.Status.Assessment.Schedule.ActiveRun != nil &&
+		b.Status.Assessment.Schedule.ActiveRun.Name == run.Name
+	if !admitted {
+		if run.Status.Phase == "" {
+			run.Status.Phase = v1alpha1.RunPending
+			return ctrl.Result{}, r.Client.Status().Update(ctx, run)
+		}
+		return ctrl.Result{}, nil // queued; the binding's schedule admits it later
+	}
+	if ok, why := r.Runtime.ready(); !ok {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, why)
+	}
+	now := r.now()
+	switch run.Status.Phase {
+	case "", v1alpha1.RunPending:
+		return r.start(ctx, run, b, now)
+	case v1alpha1.RunCollecting:
+		return r.collect(ctx, run, b, now)
+	case v1alpha1.RunPublishing:
+		return r.publish(ctx, run, b, now)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
+	c, limits, _, err := r.Assess.snapshot(ctx, b, now)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	c.Reports = []assessment.Object{}
+	if err := os.MkdirAll(r.staging(run), 0o700); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := assessment.Write(filepath.Join(r.staging(run), "capture.json"), c); err != nil {
+		return ctrl.Result{}, err
+	}
+	var revisions []string
+	nsUIDs := map[string]bool{}
+	for _, s := range c.Subjects {
+		if !slices.Contains(revisions, s.Revision) && len(revisions) < 64 {
+			revisions = append(revisions, s.Revision)
+		}
+		nsUIDs[string(s.NamespaceUID)] = true
+	}
+	slices.Sort(revisions)
+	scope := r.scope(b, c)
+	run.Status.Phase = v1alpha1.RunCollecting
+	run.Status.Binding = &v1alpha1.ResolvedBinding{Name: b.Name, UID: string(b.UID)}
+	run.Status.BindingConfiguration = bindingConfiguration(b)
+	run.Status.EnforcementRevisions = revisions
+	run.Status.Scope = &v1alpha1.FrozenScope{ClusterID: c.Cluster, NamespaceCount: int32(len(nsUIDs)), Revision: scope.Revision, SHA256: scope.Digest()}
+	run.Status.Window = &v1alpha1.CaptureWindow{Started: metav1.NewTime(now)}
+	msg := "collecting evidence"
+	if len(limits) > 0 {
+		msg = truncateMsg(limits[0])
+	}
+	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionEvidenceComplete, Status: metav1.ConditionUnknown, Reason: "Collecting", Message: msg})
+	if err := r.Client.Status().Update(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
+}
+
+func bindingConfiguration(b *v1alpha1.ComplianceBinding) string {
+	return fmt.Sprintf("generation-%d/epoch-%d", b.Generation, b.Spec.EnforcementEpoch)
+}
+
+func (r *AssessmentRunReconciler) scope(b *v1alpha1.ComplianceBinding, c collector.CaptureV2) publication.Scope {
+	set := map[string]bool{}
+	for _, s := range c.Subjects {
+		set[string(s.NamespaceUID)] = true
+	}
+	ns := sortedKeys(set)
+	if ns == nil {
+		ns = []string{}
+	}
+	return publication.Scope{Kind: publication.ScopeBinding, ClusterID: c.Cluster, BindingUID: string(b.UID), NamespaceUIDs: ns, Revision: "frozen-" + c.Window.Started.UTC().Format(time.RFC3339)}
+}
+
+// boundaries returns continuity boundaries for the frozen workload states
+// without changing the shared tracker.
+func (r *AssessmentRunReconciler) boundaries(c collector.CaptureV2) []collector.Boundary {
+	var out []collector.Boundary
+	for _, w := range c.Workloads {
+		if b, ok := r.Assess.Boundaries.Lookup(w.UID, w.StateSHA256); ok {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
+	var c collector.CaptureV2
+	if err := assessment.Read(filepath.Join(r.staging(run), "capture.json"), &c); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost,
+				"the staged capture was lost before closure; it is not reconstructed from the changed cluster, and a later run assesses current state")
+		}
+		return ctrl.Result{}, err
+	}
+	cur, _, maxAge, err := r.Assess.snapshot(ctx, b, now)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	// Record changes against the frozen scope; it never broadens or shrinks.
+	t := collector.NewTracker(&c)
+	present := map[string]bool{}
+	for _, w := range cur.Workloads {
+		present[w.UID] = true
+		t.Workload(now, w, false)
+	}
+	for _, w := range c.Workloads {
+		if !present[w.UID] {
+			t.Workload(now, w, true)
+		}
+	}
+	t.Configuration(now, cur.Subjects, cur.Stale)
+	c.Reports = cur.Reports
+
+	_, timeout, _, err := bindingDurations(b)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	trial := c
+	trial.Window.Closed = now
+	ev, err := trial.Evaluate(r.boundaries(trial), maxAge)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if now.Before(c.Window.Started.Add(timeout)) && ev.Evidence.Completeness != publication.Complete {
+		if err := assessment.Write(filepath.Join(r.staging(run), "capture.json"), c); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
+	}
+	// Close the bounded window and freeze the package bytes.
+	c = trial
+	pkg := filepath.Join(r.staging(run), "package")
+	if err := os.RemoveAll(pkg); err != nil {
+		return ctrl.Result{}, err
+	}
+	d, err := collector.Export(ctx, collector.ExportRequest{Root: r.Runtime.ContentRoot, Out: pkg,
+		Run: publication.RunRef{ClusterID: c.Cluster, BindingUID: string(b.UID), RunUID: string(run.UID)}, Scope: r.scope(b, c),
+		BindingConfiguration: run.Status.BindingConfiguration, Capture: c, Evaluation: ev})
+	if err != nil {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())
+	}
+	sum := publication.SummaryToAPI(publication.Summarize(d, publication.Status{Phase: publication.PhasePending}))
+	closed := metav1.NewTime(now)
+	run.Status.Window.Closed = &closed
+	run.Status.Summary = &sum
+	run.Status.DescriptorSHA256 = d.Digest()
+	run.Status.Phase = v1alpha1.RunPublishing
+	evidence := metav1.ConditionFalse
+	if d.Evidence.Completeness == publication.Complete {
+		evidence = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionEvidenceComplete, Status: evidence, Reason: string(d.Evidence.Completeness),
+		Message: fmt.Sprintf("%d of %d expected observations attributable; %d stale scopes", d.Evidence.Attributable, d.Evidence.Expected, d.Evidence.StaleScopes)})
+	if err := r.Client.Status().Update(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.publish(ctx, run, b, now)
+}
+
+func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
+	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: string(b.UID), RunUID: string(run.UID)}
+	pkg := filepath.Join(r.staging(run), "package")
+	d, err := publication.LoadDescriptor(pkg)
+	if err != nil {
+		// The frozen bytes are gone: never re-export a newer cluster state
+		// under this run's identity.
+		staged, rerr := r.Runtime.Publisher.Recover(ctx, ref)
+		if rerr != nil {
+			return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "frozen package lost before publication: "+err.Error())
+		}
+		return r.commit(ctx, run, b, staged, now)
+	}
+	if d.Digest() != run.Status.DescriptorSHA256 {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "staged package does not match the frozen descriptor")
+	}
+	staged, err := r.Runtime.Publisher.Stage(ctx, publication.StageRequest{Run: ref, Dir: pkg})
+	if err != nil {
+		return r.retry(ctx, run, now, err)
+	}
+	return r.commit(ctx, run, b, staged, now)
+}
+
+func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, staged publication.Staged, now time.Time) (ctrl.Result, error) {
+	_, _, retention, err := bindingDurations(b)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	receipt, err := r.Runtime.Publisher.Publish(ctx, publication.PublishRequest{Staged: staged,
+		Retention: publication.Retention{Duration: retention.String(), BindingConfiguration: bindingConfiguration(b), SelectedAt: now}})
+	if err != nil {
+		return r.retry(ctx, run, now, err)
+	}
+	st := publication.Committed(receipt)
+	pub := publication.ToAPI(st)
+	run.Status.Publication = &pub
+	if run.Status.Summary != nil {
+		run.Status.Summary.Export = v1alpha1.ExportState(publication.ExportAssessment)
+		if d, err := publication.LoadDescriptor(filepath.Join(r.staging(run), "package")); err == nil {
+			sum := publication.SummaryToAPI(publication.Summarize(d, st))
+			run.Status.Summary = &sum
+		}
+	}
+	run.Status.Phase = v1alpha1.RunCompleted
+	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionPublished, Status: metav1.ConditionTrue, Reason: "Committed", Message: "published as " + receipt.PublicationID})
+	if err := r.Client.Status().Update(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
+	_ = os.RemoveAll(r.staging(run))
+	return ctrl.Result{}, nil
+}
+
+// retry keeps a publishing run retrying within PublishTimeout after closure,
+// then fails it so the binding's slot is released.
+func (r *AssessmentRunReconciler) retry(ctx context.Context, run *v1alpha1.AssessmentRun, now time.Time, cause error) (ctrl.Result, error) {
+	closed := now
+	if run.Status.Window != nil && run.Status.Window.Closed != nil {
+		closed = run.Status.Window.Closed.Time
+	}
+	if now.Before(closed.Add(r.Runtime.PublishTimeout)) {
+		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionPublished, Status: metav1.ConditionFalse, Reason: "Retrying", Message: truncateMsg(cause.Error())})
+		if err := r.Client.Status().Update(ctx, run); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
+	}
+	return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, "publication did not succeed within "+r.Runtime.PublishTimeout.String()+": "+cause.Error())
+}
+
+// fail ends a run with an explicit reason, which releases the binding's slot.
+// Evidence already recorded in status is kept.
+func (r *AssessmentRunReconciler) fail(ctx context.Context, run *v1alpha1.AssessmentRun, condition, reason, msg string) error {
+	run.Status.Phase = v1alpha1.RunFailed
+	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: condition, Status: metav1.ConditionFalse, Reason: reason, Message: truncateMsg(msg)})
+	if reason == v1alpha1.ReasonCaptureLost {
+		if run.Status.Summary == nil {
+			run.Status.Summary = &v1alpha1.AssessmentSummary{Evidence: v1alpha1.EvidenceSummary{Completeness: "Incomplete"}}
+		}
+		run.Status.Summary.Export = v1alpha1.ExportState(publication.ExportCaptureLost)
+	}
+	if err := r.Client.Status().Update(ctx, run); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(r.staging(run))
+	return nil
+}
+
+func truncateMsg(s string) string {
+	if len(s) > 1024 {
+		return s[:1021] + "..."
+	}
+	return s
+}
