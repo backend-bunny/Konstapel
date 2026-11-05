@@ -80,8 +80,8 @@ func (l *live) epochPolicyInstalled(installed bool) {
 }
 
 // enforcementIdentity maps each managed engine policy to its metadata
-// generation and spec: what enforces. Kyverno status writes and provenance
-// annotation updates change resourceVersion but not this identity.
+// generation, labels, annotations, and spec. Kyverno status writes change
+// resourceVersion but not this identity; any write by the controller does.
 func (l *live) enforcementIdentity(bindings ...string) map[string]string {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(targeting.ValidatingPolicyGVK.GroupVersion().WithKind("ValidatingPolicyList"))
@@ -91,7 +91,7 @@ func (l *live) enforcementIdentity(bindings ...string) map[string]string {
 	out := map[string]string{}
 	for _, o := range list.Items {
 		if slices.Contains(bindings, o.GetAnnotations()[targeting.AnnotationBinding]) {
-			out[o.GetName()] = fmt.Sprint(o.GetGeneration()) + "/" + toJSON(o.Object["spec"])
+			out[o.GetName()] = fmt.Sprint(o.GetGeneration()) + "/" + toJSON(o.GetLabels()) + "/" + toJSON(o.GetAnnotations()) + "/" + toJSON(o.Object["spec"])
 		}
 	}
 	return out
