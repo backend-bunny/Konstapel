@@ -7,8 +7,6 @@ contents:
   packages:
     - konstapel@local
     - ca-certificates-bundle
-    # The prototype uses kubectl for its explicit cluster target.
-    - kubectl
 
 annotations:
   org.opencontainers.image.title: Konstapel

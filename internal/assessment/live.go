@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	oscal "github.com/defenseunicorns/go-oscal/src/types/oscal-1-1-3"
 	"github.com/oscal-compass/compliance-to-policy-go/v2/framework/actions"
 	"github.com/oscal-compass/compliance-to-policy-go/v2/plugin"
@@ -21,6 +24,15 @@ func pod(name, ns, owner string, privileged bool) Object {
 }
 
 const WorkloadImage = "docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec"
+
+// Keep the API server's admission message in diagnostic evidence and denial checks.
+func admissionResponse(obj Object, err error) []byte {
+	if err != nil {
+		return []byte(err.Error())
+	}
+	data, _ := json.Marshal(obj)
+	return data
+}
 
 func CheckAdmission(response []byte, requestErr error, denied bool) error {
 	if denied {
@@ -39,9 +51,9 @@ func resource(o Object) Resource {
 
 func (t *Target) Capture(ctx context.Context, root string, p Object, expected []Resource, boundary time.Time) Capture {
 	c := Capture{Version: 1, Cluster: t.Cluster, Context: t.Context, Boundary: boundary, Policy: p, PolicyDigest: Digest(p["spec"]), MappingDigest: FileHash(filepath.Join(root, "content/component-definition.json")), Expected: expected, Reports: []Object{}}
-	for _, kind := range []string{"policyreports.wgpolicyk8s.io", "clusterpolicyreports.wgpolicyk8s.io"} {
-		var list Object
-		if err := t.JSON(ctx, &list, "get", kind, "-A", "-o", "json"); err != nil {
+	for _, gvk := range []schema.GroupVersionKind{reportGVK, clusterReportGVK} {
+		list, err := t.List(ctx, gvk)
+		if err != nil {
 			c.CollectionErrors = append(c.CollectionErrors, err.Error())
 			continue
 		}
@@ -54,8 +66,8 @@ func (t *Target) Capture(ctx context.Context, root string, p Object, expected []
 			c.Reports = append(c.Reports, Map(item))
 		}
 	}
-	var current Object
-	if err := t.JSON(ctx, &current, "get", "validatingpolicies.policies.kyverno.io", PolicyName, "-o", "json"); err != nil {
+	current, err := t.Get(ctx, policyGVK, "", PolicyName)
+	if err != nil {
 		c.CollectionErrors = append(c.CollectionErrors, err.Error())
 	} else if Str(At(current, "metadata", "uid")) != Str(At(p, "metadata", "uid")) || Digest(current["spec"]) != c.PolicyDigest {
 		c.CollectionErrors = append(c.CollectionErrors, "policy identity/revision changed during collection")
@@ -63,8 +75,8 @@ func (t *Target) Capture(ctx context.Context, root string, p Object, expected []
 	// Inventory is independent of reports: an old report cannot establish that
 	// an admitted resource still exists with the original identity.
 	for _, r := range expected {
-		var current Object
-		if err := t.JSON(ctx, &current, "get", r.Kind, r.Name, "-n", r.Namespace, "-o", "json"); err != nil || Str(At(current, "metadata", "uid")) != r.UID {
+		current, err := t.Get(ctx, schema.FromAPIVersionAndKind(r.APIVersion, r.Kind), r.Namespace, r.Name)
+		if err != nil || Str(At(current, "metadata", "uid")) != r.UID {
 			c.CollectionErrors = append(c.CollectionErrors, "expected resource missing/replaced: "+r.Key(t.Cluster))
 		}
 	}
@@ -85,21 +97,40 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	namespaceCreated, policyCreated := false, false
 	defer func() {
 		_ = Write(filepath.Join(out, "admission.json"), admission)
-		for _, snapshot := range []struct{ file, kind string }{{"final-policies.json", "validatingpolicies.policies.kyverno.io"}, {"final-reports.json", "policyreports.wgpolicyk8s.io"}, {"final-workloads.json", "pods,deployments"}} {
-			b, _ := t.Run(context.Background(), nil, "get", snapshot.kind, "-A", "-o", "json")
-			_ = os.WriteFile(filepath.Join(out, snapshot.file), b, 0644)
-		}
-		b, _ := t.Run(context.Background(), nil, "get", "events", "-A", "-o", "json")
-		_ = os.WriteFile(filepath.Join(out, "events.json"), b, 0644)
-		// Only test-created policy/namespace, with ownership rechecked immediately.
-		for _, item := range []struct{ kind, name string }{{"validatingpolicies.policies.kyverno.io", PolicyName}, {"namespace", ns}} {
-			if (item.kind == "namespace" && !namespaceCreated) || (item.kind != "namespace" && !policyCreated) {
-				continue
+		for _, snapshot := range []struct {
+			file  string
+			kinds []schema.GroupVersionKind
+		}{
+			{"final-policies.json", []schema.GroupVersionKind{policyGVK}},
+			{"final-reports.json", []schema.GroupVersionKind{reportGVK}},
+			{"final-workloads.json", []schema.GroupVersionKind{podGVK, deploymentGVK}},
+			{"events.json", []schema.GroupVersionKind{eventGVK}},
+		} {
+			items := []any{}
+			var collectionErrors []string
+			for _, gvk := range snapshot.kinds {
+				list, err := t.List(context.Background(), gvk)
+				if err != nil {
+					collectionErrors = append(collectionErrors, err.Error())
+					continue
+				}
+				found, _ := list["items"].([]any)
+				items = append(items, found...)
 			}
-			var current Object
-			if e := t.JSON(context.Background(), &current, "get", item.kind, item.name, "--ignore-not-found", "-o", "json"); e == nil && Str(At(current, "metadata", "labels", OwnerLabel)) == owner {
-				if _, e = t.Run(context.Background(), nil, "delete", item.kind, item.name, "--wait=true", "--timeout=60s"); e != nil && returnErr == nil {
-					returnErr = e
+			diagnostic := Object{"apiVersion": "v1", "kind": "List", "items": items}
+			if len(collectionErrors) > 0 {
+				diagnostic["collectionErrors"] = collectionErrors
+			}
+			_ = Write(filepath.Join(out, snapshot.file), diagnostic)
+		}
+		for _, item := range []struct {
+			gvk     schema.GroupVersionKind
+			name    string
+			created bool
+		}{{policyGVK, PolicyName, policyCreated}, {namespaceGVK, ns, namespaceCreated}} {
+			if item.created {
+				if err := t.DeleteOwned(context.Background(), item.gvk, "", item.name, owner); err != nil && returnErr == nil {
+					returnErr = err
 				}
 			}
 		}
@@ -111,28 +142,24 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 		return err
 	}
 	// Refuse existing namespace, even if it has the same owner label.
-	b, e := t.Run(ctx, nil, "get", "namespace", ns, "--ignore-not-found", "-o", "name")
-	if e != nil {
-		return e
-	}
-	if strings.TrimSpace(string(b)) != "" {
+	if _, err := t.Get(ctx, namespaceGVK, "", ns); err == nil {
 		return fmt.Errorf("acceptance namespace already exists")
+	} else if !apierrors.IsNotFound(err) {
+		return err
 	}
-	if _, err := t.Apply(ctx, Object{"apiVersion": "v1", "kind": "Namespace", "metadata": Object{"name": ns, "labels": Object{OwnerLabel: owner, "pod-security.kubernetes.io/enforce": "privileged"}}}); err != nil {
+	if _, err := t.Create(ctx, Object{"apiVersion": "v1", "kind": "Namespace", "metadata": Object{"name": ns, "labels": Object{OwnerLabel: owner, "pod-security.kubernetes.io/enforce": "privileged"}}}, false); err != nil {
 		return err
 	}
 	namespaceCreated = true
 	// Namespace creation and creation of its default ServiceAccount are asynchronous.
-	if _, err := t.Run(ctx, nil, "wait", "--for=create", "serviceaccount/default", "-n", ns, "--timeout=60s"); err != nil {
+	if err := t.Wait(ctx, serviceAccountGVK, ns, "default", 60*time.Second, func(Object) bool { return true }); err != nil {
 		return err
 	}
 	// Reject an existing policy before seeding, even if a different namespace would scope it out.
-	b, e = t.Run(ctx, nil, "get", "validatingpolicies.policies.kyverno.io", PolicyName, "--ignore-not-found", "-o", "name")
-	if e != nil {
-		return e
-	}
-	if strings.TrimSpace(string(b)) != "" {
+	if _, err := t.Get(ctx, policyGVK, "", PolicyName); err == nil {
 		return fmt.Errorf("acceptance policy already exists")
+	} else if !apierrors.IsNotFound(err) {
+		return err
 	}
 	existing, err := t.Apply(ctx, pod("existing-privileged", ns, owner, true))
 	if err != nil {
@@ -160,12 +187,12 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 		return fmt.Errorf("repeated delivery replaced policy identity")
 	}
 	// Check webhook propagation using non-persisting requests before testing behavior.
-	request := func(label string, obj Object, denied bool, args ...string) error {
+	request := func(label string, denied bool, call func() (Object, error)) error {
 		if os.Getenv("KONSTAPEL_TEST_EXPECT_ACTION") == "Audit" {
 			denied = false
 		}
-		data, _ := json.Marshal(obj)
-		response, e := t.Run(ctx, data, args...)
+		result, e := call()
+		response := admissionResponse(result, e)
 		admission = append(admission, Object{"check": label, "expectedDenial": denied, "response": string(response), "error": fmt.Sprint(e)})
 		if err := CheckAdmission(response, e, denied); err != nil {
 			return fmt.Errorf("%s: %w", label, err)
@@ -174,8 +201,8 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		data, _ := json.Marshal(pod("probe", ns, owner, true))
-		response, e := t.Run(ctx, data, "create", "--dry-run=server", "-f", "-")
+		result, e := t.Create(ctx, pod("probe", ns, owner, true), true)
+		response := admissionResponse(result, e)
 		if e != nil && strings.Contains(string(response), "Policy "+PolicyName+" failed") {
 			break
 		}
@@ -197,17 +224,17 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 		return err
 	}
 	expected = append(expected, resource(dep))
-	if err = request("privileged Pod create", pod("denied", ns, owner, true), true, "create", "-f", "-"); err != nil {
+	if err = request("privileged Pod create", true, func() (Object, error) { return t.Create(ctx, pod("denied", ns, owner, true), false) }); err != nil {
 		return err
 	}
 	badInit := pod("denied-init", ns, owner, false)
 	Map(badInit["spec"])["initContainers"] = []any{Object{"name": "init", "image": WorkloadImage, "command": []any{"true"}, "securityContext": Object{"privileged": true}}}
-	if err = request("privileged init create", badInit, true, "create", "-f", "-"); err != nil {
+	if err = request("privileged init create", true, func() (Object, error) { return t.Create(ctx, badInit, false) }); err != nil {
 		return err
 	}
 	goodInit := pod("good-init", ns, owner, false)
 	Map(goodInit["spec"])["initContainers"] = []any{Object{"name": "init", "image": WorkloadImage, "command": []any{"true"}, "securityContext": Object{"privileged": false}}}
-	if err = request("compliant init create", goodInit, false, "create", "--dry-run=server", "-f", "-"); err != nil {
+	if err = request("compliant init create", false, func() (Object, error) { return t.Create(ctx, goodInit, true) }); err != nil {
 		return err
 	}
 	// Independent clone: do not mutate the already-admitted deployment's desired copy.
@@ -216,18 +243,18 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	_ = json.Unmarshal(data, &badDeployment)
 	Map(At(badDeployment, "spec", "template", "spec"))["containers"] = Map(pod("unused", ns, owner, true)["spec"])["containers"]
 	Map(badDeployment["metadata"])["name"] = "denied-deployment"
-	if err = request("privileged Deployment create", badDeployment, true, "create", "-f", "-"); err != nil {
+	if err = request("privileged Deployment create", true, func() (Object, error) { return t.Create(ctx, badDeployment, false) }); err != nil {
 		return err
 	}
 	Map(badDeployment["metadata"])["name"] = "good-deployment"
-	if err = request("privileged Deployment update", badDeployment, true, "apply", "-f", "-"); err != nil {
+	if err = request("privileged Deployment update", true, func() (Object, error) { return t.Apply(ctx, badDeployment) }); err != nil {
 		return err
 	}
-	if _, err = t.Run(ctx, nil, "wait", "--for=jsonpath={.status.phase}=Running", "pod/good", "-n", ns, "--timeout=120s"); err != nil {
+	if err = t.Wait(ctx, podGVK, ns, "good", 120*time.Second, func(obj Object) bool { return At(obj, "status", "phase") == "Running" }); err != nil {
 		return err
 	}
 	eph := Object{"apiVersion": "v1", "kind": "Pod", "metadata": Object{"name": "good", "namespace": ns}, "spec": Object{"ephemeralContainers": []any{Object{"name": "debug", "image": WorkloadImage, "command": []any{"sleep", "30"}, "securityContext": Object{"privileged": true}}}}}
-	if err = request("privileged ephemeral update", eph, true, "patch", "pod", "good", "-n", ns, "--subresource=ephemeralcontainers", "--type=merge", "--patch-file=/dev/stdin"); err != nil {
+	if err = request("privileged ephemeral update", true, func() (Object, error) { return t.PatchEphemeralContainers(ctx, eph) }); err != nil {
 		return err
 	}
 	// Audit permits the same otherwise-valid violating Pod; then restore Deny for
@@ -296,8 +323,8 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 			return fmt.Errorf("unexpected background result for %s: %s", e.Resource.Name, e.Outcome)
 		}
 	}
-	var retained Object
-	if err = t.JSON(ctx, &retained, "get", "pod", "existing-privileged", "-n", ns, "-o", "json"); err != nil {
+	retained, err := t.Get(ctx, podGVK, ns, "existing-privileged")
+	if err != nil {
 		return err
 	}
 	if At(retained, "metadata", "uid") != At(existing, "metadata", "uid") || At(retained, "metadata", "deletionTimestamp") != nil {

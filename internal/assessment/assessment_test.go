@@ -3,12 +3,15 @@ package assessment
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oscal-compass/compliance-to-policy-go/v2/framework/actions"
 	"github.com/oscal-compass/compliance-to-policy-go/v2/plugin"
@@ -274,25 +277,17 @@ func TestDeliveryPrerequisitesAndOwnership(t *testing.T) {
 	}
 	for _, mode := range []string{"missing-api", "conflict"} {
 		t.Run(mode, func(t *testing.T) {
-			dir := t.TempDir()
-			script := `#!/usr/bin/env bash
-set -eu
-args="$*"
-case "$args" in
-*"/apis/policies.kyverno.io/v1"*)
- if [[ $TEST_TARGET_MODE == missing-api ]]; then echo 'required API unavailable' >&2; exit 1; fi
- echo '{"resources":[{"name":"validatingpolicies"}]}' ;;
-*"/apis/wgpolicyk8s.io/v1alpha2"*) echo '{"resources":[{"name":"policyreports"},{"name":"clusterpolicyreports"}]}' ;;
-*"get validatingpolicies"*) echo '{"metadata":{"uid":"other","labels":{"konstapel.io/owner":"other-owner"}}}' ;;
-*) echo 'unexpected mutation' >&2; exit 99;;
-esac
-`
-			if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0755); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-			t.Setenv("TEST_TARGET_MODE", mode)
-			target := &Target{Kubeconfig: "explicit-config", Context: "explicit-context", Cluster: "fixture", Timeout: time.Second}
+			target := targetForTest(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path == "/apis/policies.kyverno.io/v1" && mode == "missing-api" {
+					statusError(w, 404, metav1.StatusReasonNotFound, "required API unavailable")
+					return true
+				}
+				if r.URL.Path == "/apis/policies.kyverno.io/v1/validatingpolicies/"+PolicyName && r.Method == "GET" {
+					respond(w, Object{"apiVersion": "policies.kyverno.io/v1", "kind": "ValidatingPolicy", "metadata": Object{"uid": "other", "labels": Object{OwnerLabel: "other-owner"}}})
+					return true
+				}
+				return false
+			})
 			rendered, err := Render(repo(t), "Deny", "test", "test")
 			if err != nil {
 				t.Fatal(err)
@@ -366,33 +361,27 @@ func TestIncompleteCLIAndCleanupGuard(t *testing.T) {
 	}
 	// The acceptance refusal path must not delete pre-existing resources, even
 	// when their owner label equals the configured value.
-	fake := `#!/usr/bin/env bash
-set -eu
-case "$*" in
-*"get --raw /apis/policies"*) echo '{"resources":[{"name":"validatingpolicies"}]}' ;;
-*"get --raw /apis/wgpolicy"*) echo '{"resources":[{"name":"policyreports"},{"name":"clusterpolicyreports"}]}' ;;
-*"get namespace konstapel-acceptance"*) echo 'namespace/konstapel-acceptance' ;;
-*"get events"*) echo '{"items":[]}' ;;
-*"delete "*) echo 'unrelated deletion' >> "$FAKE_DELETIONS"; exit 99;;
-*) echo 'unexpected command' >&2;exit 1;;
-esac
-`
-	bindir := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(bindir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bindir, "kubectl"), []byte(fake), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bindir+":"+os.Getenv("PATH"))
-	marker := filepath.Join(dir, "deletions")
-	t.Setenv("FAKE_DELETIONS", marker)
-	target := &Target{Kubeconfig: "explicit", Context: "kind-konstapel-assessment", Cluster: "fixture", Timeout: time.Second}
+	target := targetForTest(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != "GET" {
+			t.Errorf("unexpected mutation: %s %s", r.Method, r.URL)
+			statusError(w, 403, metav1.StatusReasonForbidden, "unexpected mutation")
+			return true
+		}
+		if r.URL.Path == "/api/v1/namespaces/konstapel-acceptance" {
+			respond(w, Object{"apiVersion": "v1", "kind": "Namespace", "metadata": Object{"name": "konstapel-acceptance", "labels": Object{OwnerLabel: "konstapel-assessment"}}})
+			return true
+		}
+		for _, suffix := range []string{"/validatingpolicies", "/policyreports", "/pods", "/deployments", "/events"} {
+			if strings.HasSuffix(r.URL.Path, suffix) {
+				respond(w, Object{"apiVersion": "v1", "kind": "List", "items": []any{}})
+				return true
+			}
+		}
+		return false
+	})
+	target.Context = "kind-konstapel-assessment"
 	err := Acceptance(context.Background(), target, root, filepath.Join(dir, "refused"), "konstapel-acceptance", "konstapel-assessment", time.Second, nil, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "namespace already exists") {
 		t.Fatal("existing namespace not refused", err)
-	}
-	if _, err = os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("cleanup deleted unrelated resource")
 	}
 }

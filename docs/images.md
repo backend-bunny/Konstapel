@@ -1,10 +1,10 @@
 # Container images
 
 Konstapel uses melange to build an APK and apko to assemble a non-root Linux
-amd64 image. The current image packages the assessment prototype: the runner,
-C2P provider and manifest, reviewed policy/OSCAL content, CA certificates, and
-kubectl. It has no shell or package manager. A production controller is still
-planned separately.
+amd64 image. The image packages the controller and assessment runner, C2P
+provider and manifest, reviewed policy/OSCAL content, and CA certificates.
+Cluster operations use Kubernetes Go clients; the image has no kubectl,
+shell, or package manager.
 
 ## Build and test
 
@@ -38,7 +38,7 @@ APK is merged into a temporary build lock; configuration and package-set drift
 fail the build. Image trust comes from the published digest's keyless signature.
 
 Tests exercise real policy generation and the provider handshake, saved-evidence
-conversion, kubectl availability, non-root UID 65532, a read-only root filesystem,
+conversion, absence of kubectl, non-root UID 65532, a read-only root filesystem,
 no network, dropped capabilities, and embedded C2P dependencies in the SBOM.
 Test containers and the temporary Docker image are removed afterwards. Build
 artifacts and evidence remain under `out/image`; `task clean` preserves them.
@@ -52,8 +52,13 @@ docker run --rm --read-only --network none --cap-drop ALL \
   ghcr.io/backend-bunny/konstapel@sha256:... generate --output /tmp/generated
 ```
 
-Live operations also need an explicitly mounted kubeconfig, an explicit context,
-and network access. No ambient cluster credentials are bundled in the image.
+The assessment `deliver` and `acceptance` commands need an explicitly mounted
+kubeconfig, an explicit context, and network access. They ignore ambient cluster
+configuration and use server-side apply with field manager `konstapel-assessment`,
+without forcing field conflicts. Kubeconfigs that use an external credential
+helper still require that helper to be available. The `controller` command uses
+standard Kubernetes client configuration, including in-cluster credentials.
+No cluster credentials are bundled in the image.
 
 ## Published evidence
 
@@ -71,7 +76,7 @@ Every published digest receives:
 
 - A keyless cosign signature using the GitHub Actions OIDC identity.
 - Two SPDX SBOM attestations: apko's APK/source inventory and Syft's image scan,
-  including Go modules embedded in Konstapel and kubectl.
+  including Go modules embedded in both Konstapel commands.
 - A source manifest linking APKs to recipes and pinned upstream sources, and
   Konstapel's linked Go modules to checksum-verified module archives.
 - A license notices attestation containing deduplicated full texts. It includes
