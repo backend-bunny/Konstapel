@@ -1,7 +1,13 @@
 # Only the controller may create Namespace-scope runs or set Scheduled/Request
 # triggers. Platform operators may create Binding-scope Manual runs.
-# Adjust the controller identity if the controller is not deployed as
-# konstapel-system/konstapel-controller.
+#
+# The controller identity is configuration: the policy reads the controller's
+# service account from the konstapel-assessment-admission ConfigMap. Edit that
+# ConfigMap, not this policy, when the controller runs under another service
+# account. Anyone who can edit the ConfigMap can grant controller rights, so
+# restrict write access to it to platform administrators. Missing configuration
+# fails closed: without the ConfigMap every AssessmentRun create is denied, and
+# with an empty key no identity is treated as the controller.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -10,6 +16,9 @@ metadata:
     app.kubernetes.io/part-of: konstapel
 spec:
   failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
   matchConstraints:
     resourceRules:
       - apiGroups: [compliance.erenius.io]
@@ -17,14 +26,23 @@ spec:
         operations: [CREATE]
         resources: [assessmentruns]
   variables:
+    - name: controllerNamespace
+      expression: params.?data.?controllerServiceAccountNamespace.orValue('')
+    - name: controllerName
+      expression: params.?data.?controllerServiceAccountName.orValue('')
     - name: controller
-      expression: request.userInfo.username == 'system:serviceaccount:konstapel-system:konstapel-controller'
+      expression: >-
+        variables.controllerNamespace != '' && variables.controllerName != '' &&
+        request.userInfo.username == 'system:serviceaccount:' + variables.controllerNamespace + ':' + variables.controllerName
   validations:
     - expression: >-
         variables.controller ||
         (object.spec.scope == 'Binding' &&
          (!has(object.spec.trigger) || object.spec.trigger.type == 'Manual'))
-      message: only the Konstapel controller may create Namespace-scope runs or Scheduled/Request triggers
+      messageExpression: >-
+        'only the Konstapel controller (' +
+        (variables.controllerName == '' ? 'not configured' : variables.controllerNamespace + '/' + variables.controllerName) +
+        ') may create Namespace-scope runs or Scheduled/Request triggers'
       reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -36,3 +54,20 @@ metadata:
 spec:
   policyName: konstapel-assessment-run-scope
   validationActions: [Deny]
+  paramRef:
+    name: konstapel-assessment-admission
+    namespace: konstapel-system
+    parameterNotFoundAction: Deny
+---
+# Controller identity used by konstapel-assessment-run-scope. Keep it in the
+# controller's namespace and writable by platform administrators only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: konstapel-assessment-admission
+  namespace: konstapel-system
+  labels:
+    app.kubernetes.io/part-of: konstapel
+data:
+  controllerServiceAccountNamespace: konstapel-system
+  controllerServiceAccountName: konstapel-controller

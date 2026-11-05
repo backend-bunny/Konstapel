@@ -155,6 +155,12 @@ func TestAssessmentSpecsAreImmutable(t *testing.T) {
 	if errs := crds["AssessmentRun"].ValidateUpdate(updated, copyObj(old)); len(errs) > 0 {
 		t.Fatal(errs.ToAggregate())
 	}
+	// Root metadata is still validated on update.
+	bad := copyObj(old)
+	mergePatch(t, bad, `{"metadata": {"labels": {"not a/valid/key": "x"}}}`)
+	if errs := crds["AssessmentRun"].ValidateUpdate(bad, copyObj(old)); len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), "metadata.labels") {
+		t.Fatalf("invalid label key accepted on update: %v", errs.ToAggregate())
+	}
 }
 
 // TestResolvedFieldsAreStatusOnly checks that controller-resolved fields are

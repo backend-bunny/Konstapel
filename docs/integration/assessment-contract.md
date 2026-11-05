@@ -88,7 +88,7 @@ in the package, never in status.
 | --- | --- | --- |
 | `konstapel-assessment-requester` | RoleBinding in the team namespace | get/list/watch/create/delete `assessmentrequests`; get `assessmentrequests/status` and `assessmentrequests/download` |
 | `konstapel-assessment-operator` | ClusterRoleBinding to platform subjects | get/list/watch/create/delete `assessmentruns`; read runs/status, requests, request status; get `assessmentruns/download` |
-| `konstapel-controller-assessments` | ClusterRoleBinding to `konstapel-system/konstapel-controller` | Create and manage runs; the only writer of request and run status; read bindings, profiles, namespaces |
+| `konstapel-controller-assessments` | ClusterRoleBinding to the controller service account (the one configured for admission) | Create and manage runs; the only writer of request and run status; read bindings, profiles, namespaces |
 
 None of these roles aggregates into the built-in `admin`, `edit`, or `view`
 roles. Teams have no access to `AssessmentRun` objects.
@@ -116,8 +116,15 @@ together with read permission on the object. They are not CRD subresources.
   Both fail closed.
 - `assessment-run-scope.yaml`: rejects `Namespace`-scope runs and
   `Scheduled`/`Request` triggers from any identity other than the controller
-  service account. If the controller runs under another service account, change
-  the `controller` variable.
+  service account. The policy reads that identity from the
+  `konstapel-system/konstapel-assessment-admission` ConfigMap
+  (`controllerServiceAccountNamespace`, `controllerServiceAccountName`,
+  default `konstapel-system`/`konstapel-controller`). To run the controller
+  under another service account, edit the ConfigMap, not the policy. Anyone who
+  can write that ConfigMap can grant controller rights, so only platform
+  administrators should have write access. Missing configuration fails closed:
+  without the ConfigMap, every AssessmentRun create is denied, and with an empty
+  key no identity counts as the controller.
 
 Both use `admissionregistration.k8s.io/v1`. MutatingAdmissionPolicy at v1 needs
 Kubernetes 1.36 or later; the pinned acceptance node image is 1.36.1.

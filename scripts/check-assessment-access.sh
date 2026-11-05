@@ -23,7 +23,14 @@ failures=0
 expect() { # expect ok|deny DESCRIPTION -- kubectl args...
 	local want=$1 desc=$2
 	shift 3
-	if k "$@" >>"$log" 2>&1; then got=ok; else got=deny; fi
+	local attempt result
+	for attempt in 1 2 3 4 5 6; do
+		if result=$(k "$@" 2>&1); then got=ok; else got=deny; fi
+		printf '%s\n' "$result" >>"$log"
+		# Discovery can briefly report a just-established CRD as unavailable.
+		[[ $got == deny && $result == *ServiceUnavailable* ]] || break
+		sleep 2
+	done
 	if [ "$got" = "$want" ]; then
 		printf 'PASS %s\n' "$desc" | tee -a "$log"
 	else
@@ -34,8 +41,8 @@ expect() { # expect ok|deny DESCRIPTION -- kubectl args...
 
 k apply --server-side -f "$root/config/crd/bases" >>"$log"
 k wait --for=condition=Established crd --all --timeout=60s >>"$log"
-k apply --server-side -f "$root/config/rbac" -f "$root/config/admission" >>"$log"
 for ns in team-a team-b konstapel-system; do k create namespace "$ns" --dry-run=client -o yaml | k apply -f - >>"$log"; done
+k apply --server-side -f "$root/config/rbac" -f "$root/config/admission" >>"$log"
 k -n team-a create rolebinding requester --clusterrole=konstapel-assessment-requester --serviceaccount=team-a:dev --dry-run=client -o yaml | k apply -f - >>"$log"
 k -n team-b create rolebinding requester --clusterrole=konstapel-assessment-requester --serviceaccount=team-b:dev --dry-run=client -o yaml | k apply -f - >>"$log"
 k create clusterrolebinding platform-operator --clusterrole=konstapel-assessment-operator --user="$platform" --dry-run=client -o yaml | k apply -f - >>"$log"
@@ -91,6 +98,23 @@ expect ok "controller writes run status" -- patch assessmentrun controller-ns --
 expect ok "controller writes request status" -- -n team-a patch assessmentrequest nightly --as="$controller" --subresource=status --type=merge -p '{"status":{"phase":"Running"}}'
 expect deny "run spec is immutable for the controller" -- patch assessmentrun controller-ns --as="$controller" --type=merge -p '{"spec":{"bindingRef":{"name":"other"}}}'
 expect ok "team-a still reads its own request and status" -- -n team-a get assessmentrequest nightly --as="$team_a"
+
+# The controller identity is configuration, not policy text.
+custom=system:serviceaccount:konstapel-system:custom-controller
+k create clusterrolebinding custom-controller-assessments --clusterrole=konstapel-controller-assessments --serviceaccount=konstapel-system:custom-controller --dry-run=client -o yaml | k apply -f - >>"$log"
+k -n konstapel-system patch configmap konstapel-assessment-admission --type=merge -p '{"data":{"controllerServiceAccountName":"custom-controller"}}' >>"$log"
+wait_for() { # DESCRIPTION -- kubectl args...; retry while admission caches the parameter change
+	local desc=$1; shift 2
+	for _ in $(seq 30); do k "$@" >>"$log" 2>&1 && return 0; sleep 2; done
+	return 1
+}
+if wait_for "custom controller allowed" -- create --as="$custom" --dry-run=server -f <(run probe-custom Binding Scheduled); then echo "PASS reconfigured controller identity is honored" | tee -a "$log"; else echo "FAIL reconfigured controller identity is not honored" | tee -a "$log"; failures=$((failures + 1)); fi
+expect deny "previous controller identity loses controller rights" -- create --as="$controller" --dry-run=server -f <(run probe-old Binding Scheduled)
+k -n konstapel-system delete configmap konstapel-assessment-admission >>"$log"
+for _ in $(seq 30); do k create --as="$platform" --dry-run=server -f <(run probe-missing Binding) >>"$log" 2>&1 || break; sleep 2; done
+expect deny "missing controller configuration fails closed" -- create --as="$custom" --dry-run=server -f <(run probe-missing Binding Scheduled)
+expect deny "missing configuration denies platform runs too" -- create --as="$platform" --dry-run=server -f <(run probe-missing Binding)
+k apply --server-side -f "$root/config/admission/assessment-run-scope.yaml" >>"$log"
 
 k get assessmentrequests -A -o yaml >"$out/assessmentrequests.yaml"
 k get assessmentruns -o yaml >"$out/assessmentruns.yaml"
