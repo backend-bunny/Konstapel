@@ -74,6 +74,9 @@ func (s *Provider) GetResults(_ context.Context, p policy.Policy) (policy.PVPRes
 	if err := Read(s.Config["capture"], &c); err != nil {
 		return policy.PVPResult{}, err
 	}
+	if _, err := VerifyPolicy(s.Config["root"], c); err != nil {
+		return policy.PVPResult{}, err
+	}
 	_, result, err := Reconcile(c)
 	return result, err
 }

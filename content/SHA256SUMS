@@ -19,3 +19,4 @@ c9b4d86200c140adf569119c10d2b22567c7a40be2b01751ff19a7a0fa650d62  content/upstre
 6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e  content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml
 e3a0f11237cfaac24dfcf1586e07683f17423757fd84208deb33196b12e8f590  content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json
 64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb  content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json
+9f0ddd1ed71f691bb483965a7c46e1315ab6cc28dac0426d4c3d27108aafde13  content/upstream/nist/LICENSE.md

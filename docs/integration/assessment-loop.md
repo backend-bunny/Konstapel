@@ -42,8 +42,11 @@ No release signature verification is implied by the recorded checksum.
 
 ## Disposable environment and full acceptance
 
-The complete workflow creates only the dedicated `konstapel-assessment` kind
-cluster. It refuses to reuse an existing cluster with that name, sets an explicit
+The complete workflow creates a uniquely named `konstapel-assessment-*` kind
+cluster and records its name/context in `target.json`. Set
+`KONSTAPEL_CLUSTER_NAME` to choose a specific name. It refuses to reuse an
+existing cluster with that name, verifies its kube-system UID before teardown,
+and sets an explicit
 kubeconfig/context on all calls, exports failure logs, and tears down the cluster
 it created. It does not alter the ambient kubeconfig. Never point it at production.
 Its output directory must be new; choose an absolute path:
@@ -167,7 +170,7 @@ evaluation time (the C2P intermediate representation uses its zero value).
 
 Completeness reconciles reports against admitted fixtures, independently of
 report presence. Results before the evaluation boundary or after collection,
-replaced UIDs, conflicting simultaneous results, collection errors and changed
+replaced UIDs, conflicting simultaneous results, collection errors, independently rechecked admitted-resource UIDs and changed
 policy identity/revision cannot establish a current passing assessment. Polling
 is bounded. A fresh fail is complete evidence of a failing technical check;
 complete does not mean compliant. A missing or error result is never a pass.
@@ -219,6 +222,13 @@ satisfied. C2P negative findings remain limited by this documented scope.
 `assessment-results.json` imports the packaged `assessment-plan.json`, which
 imports `system-security-plan.json`. The package contains source mapping, NIST
 content and provenance, `capture.json`, `evidence.json`, and `run-manifest.json`.
+`rendered-policy.json` and `content-manifest.json` retain the reconstructed
+policy and source/render checksums. Provider conversion and export compare the
+entire captured policy spec to that render; even a recomputed capture hash cannot
+validate changed expressions, matching, or evaluation settings. JSON key order,
+metadata and status are ignored. The pinned runtime adds no spec defaults;
+additional spec fields fail closed until reviewed explicitly.
+
 Source result references use captured report UID and result index. The validator
 checks declared schemas, UUID references and all local evidence hrefs.
 
@@ -232,3 +242,19 @@ not a claim that those records were observed from a cluster. To inspect it:
 bin/konstapel convert --capture testdata/capture.json --output artifacts/example
 bin/konstapel validate --output artifacts/example
 ```
+
+## Failure-path probes
+
+```sh
+scripts/test-failures.sh artifacts/failure-probes
+```
+
+This runs two fresh disposable clusters. Missing-evidence injection requires an
+independently inventoried nonexistent Pod and bounds collection to three seconds.
+The admission probe deliberately expects Audit behavior while Deny is installed.
+Both must fail, preserve policy/report/workload snapshots and admission responses,
+and remove only their own clusters. The `KONSTAPEL_TEST_MISSING_EVIDENCE` and
+`KONSTAPEL_TEST_EXPECT_ACTION` environment variables are failure probes, not
+options that relax acceptance. `acceptance-result.json` records the final exit
+status after teardown. All-missing exports remain incomplete and omit fabricated
+control-violation findings.

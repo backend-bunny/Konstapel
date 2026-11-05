@@ -1,3 +1,5 @@
 /bin/
 /artifacts/
 /tools/
+/.tools/
+__pycache__/

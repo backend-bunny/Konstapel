@@ -86,6 +86,17 @@ func Export(ctx context.Context, root, out string, input *actions.InputContext, 
 	if c.MappingDigest != FileHash(filepath.Join(root, "content/component-definition.json")) {
 		return fmt.Errorf("capture mapping revision mismatch")
 	}
+	rendered, err := VerifyPolicy(root, c)
+	if err != nil {
+		return err
+	}
+	if err = Write(filepath.Join(out, "rendered-policy.json"), rendered); err != nil {
+		return err
+	}
+	renderedHash := FileHash(filepath.Join(out, "rendered-policy.json"))
+	if err = Write(filepath.Join(out, "content-manifest.json"), Object{"sourcePolicySha256": FileHash(filepath.Join(root, SourcePolicy)), "renderedPolicySha256": renderedHash, "policySpecSha256": c.PolicyDigest}); err != nil {
+		return err
+	}
 	if err = Write(filepath.Join(out, "capture.json"), c); err != nil {
 		return err
 	}
@@ -122,9 +133,15 @@ func Export(ctx context.Context, root, out string, input *actions.InputContext, 
 	ar.Metadata.OscalVersion = "1.1.3"
 	props := []oscal.Property{{Name: "coverage", Ns: "https://konstapel.dev/ns", Value: "partial"}, {Name: "complete", Ns: "https://konstapel.dev/ns", Value: fmt.Sprint(ev.Complete)}, {Name: "cluster-id", Ns: "https://konstapel.dev/ns", Value: c.Cluster}, {Name: "policy-spec-sha256", Ns: "https://konstapel.dev/ns", Value: c.PolicyDigest}, {Name: "mapping-sha256", Ns: "https://konstapel.dev/ns", Value: c.MappingDigest}}
 	ar.Metadata.Props = &props
+	*ar.Metadata.Props = append(*ar.Metadata.Props, oscal.Property{Name: "rendered-policy-sha256", Ns: "https://konstapel.dev/ns", Value: renderedHash}, oscal.Property{Name: "source-policy-sha256", Ns: "https://konstapel.dev/ns", Value: FileHash(filepath.Join(root, SourcePolicy))})
 	ar.Metadata.Links = &[]oscal.Link{{Href: "content/component-definition.json", Rel: "related", Text: "Authored partial mapping"}, {Href: "content/provenance.json", Rel: "related", Text: "Pinned source revisions"}, {Href: "run-manifest.json", Rel: "related", Text: "Capture identity and content checksums"}, {Href: "evidence.json", Rel: "related", Text: "Completeness and rejected evidence"}}
+	*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: "rendered-policy.json", Rel: "related", Text: "Verified rendered policy"}, oscal.Link{Href: "content-manifest.json", Rel: "related", Text: "Source and rendered policy checksums"})
 	for i := range ar.Results {
 		r := &ar.Results[i]
+		if !ev.Complete && len(ev.Evaluations) == 0 {
+			// Missing evidence is not an observed violation of the control.
+			r.Findings = nil
+		}
 		// C2P initializes optional inventory properties to an empty slice, which
 		// violates OSCAL's minItems constraint. Omit empty optional properties.
 		if r.LocalDefinitions != nil && r.LocalDefinitions.InventoryItems != nil {
@@ -199,6 +216,23 @@ func ValidatePackage(root, out string) error {
 		if err := Schema(filepath.Join(out, name+".json"), filepath.Join(root, "content/schemas/oscal-1.1.3.json")); err != nil {
 			return fmt.Errorf("%s schema: %w", name, err)
 		}
+	}
+	var capture Capture
+	if err := Read(filepath.Join(out, "capture.json"), &capture); err != nil {
+		return err
+	}
+	if _, _, err := Reconcile(capture); err != nil {
+		return err
+	}
+	if _, err := VerifyPolicy(out, capture); err != nil {
+		return err
+	}
+	var manifest Object
+	if err := Read(filepath.Join(out, "content-manifest.json"), &manifest); err != nil {
+		return err
+	}
+	if manifest["renderedPolicySha256"] != FileHash(filepath.Join(out, "rendered-policy.json")) || manifest["sourcePolicySha256"] != FileHash(filepath.Join(out, SourcePolicy)) || manifest["policySpecSha256"] != capture.PolicyDigest || capture.MappingDigest != FileHash(filepath.Join(out, "content/component-definition.json")) {
+		return fmt.Errorf("package policy or mapping checksum mismatch")
 	}
 	return ValidateReferences(out)
 }
