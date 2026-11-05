@@ -1,6 +1,6 @@
 package:
   name: konstapel
-  version: "0.1.0"
+  version: "0.1.0" # x-release-please-version
   epoch: 0
   description: "Konstapel compliance assessment runner and C2P provider"
   copyright:

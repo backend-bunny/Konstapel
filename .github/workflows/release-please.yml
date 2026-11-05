@@ -1,0 +1,81 @@
+name: release-please
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+jobs:
+  release-please:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # GITHUB_TOKEN updates do not trigger pull_request workflows.
+      - name: Run checks on the release PR
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRS: ${{ steps.rp.outputs.prs }}
+        run: |
+          printf '%s' "$RELEASE_PRS" | jq -r '.[].headBranchName' | while IFS= read -r branch; do
+            test -n "$branch" && test "$branch" != null
+            gh workflow run test.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+            gh workflow run image.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          done
+
+  publish-release:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+
+  release-notes:
+    needs: [release-please, publish-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+      IMAGE_DIGEST: ${{ needs.publish-release.outputs.digest }}
+    steps:
+      - name: Add verified image digest to the GitHub Release
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          digest = os.environ['IMAGE_DIGEST']
+          assert re.fullmatch(r'sha256:[a-f0-9]{64}', digest)
+          image = 'ghcr.io/backend-bunny/konstapel@' + digest
+          path = Path(os.environ['RUNNER_TEMP']) / 'release-notes.md'
+          start, end = '<!-- konstapel-image:start -->', '<!-- konstapel-image:end -->'
+          block = f'{start}\n## Container image\n\n`{image}`\n\n'
+          block += 'The image is signed and carries verified SPDX SBOMs, source/license notices, and build provenance.\n\n'
+          block += '[Verification instructions](https://github.com/backend-bunny/Konstapel/blob/main/docs/images.md#verify)\n'
+          block += end
+          body = re.sub(re.escape(start) + r'.*?' + re.escape(end), '', path.read_text(), flags=re.S).rstrip()
+          path.write_text(body + '\n\n' + block + '\n')
+          PY
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"

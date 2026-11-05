@@ -38,18 +38,15 @@ tasks:
     desc: Run the vendored Kyverno CLI fixtures
     cmd: kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color
 
-  deps:validate:
-    desc: Validate Renovate configuration
-    cmd: renovate-config-validator --strict renovate.json
-
   deps:check:
-    desc: Check the lockfile, Go pins, and Kyverno chart/CLI agreement
-    cmd: scripts/check-dependencies.sh
+    desc: Validate Renovate configuration, dependency locks, and runtime pins
+    cmds:
+      - renovate-config-validator --strict renovate.json
+      - scripts/check-dependencies.sh
 
   check:
     desc: Run the same checks as CI (no cluster required)
     cmds:
-      - task: deps:validate
       - task: deps:check
       - task: content:check
       - task: build

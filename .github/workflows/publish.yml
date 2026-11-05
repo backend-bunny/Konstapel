@@ -3,6 +3,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again (vX.Y.Z); leave empty for a commit build
+        type: string
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: false
+        default: ''
+    outputs:
+      digest:
+        description: Published and verified image digest
+        value: ${{ jobs.publish.outputs.digest }}
 permissions:
   contents: read
 concurrency:
@@ -12,6 +28,8 @@ jobs:
   publish:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -19,10 +37,22 @@ jobs:
       attestations: write
     env:
       IMAGE: ghcr.io/backend-bunny/konstapel
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ inputs.tag || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Validate release target
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD origin/main
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
       - uses: ./.github/actions/setup-tools
         with:
           image: 'true'
@@ -55,22 +85,27 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
       - name: Verify published signature and attestations
+        id: verify
         timeout-minutes: 5
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p out/image/verification
-          identity='https://github.com/backend-bunny/Konstapel/.github/workflows/publish.yml@refs/heads/main'
-          devbox run -- cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > out/image/verification/signature.json
+          identity='^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$'
+          devbox run -- cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > out/image/verification/signature.json
           count=0
           for type in spdxjson https://github.com/backend-bunny/Konstapel/sources/v1 https://github.com/backend-bunny/Konstapel/notices/v1; do
             count=$((count + 1))
-            devbox run -- cosign verify-attestation --type "$type" --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > "out/image/verification/attestation-$count.jsonl"
+            devbox run -- cosign verify-attestation --type "$type" --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > "out/image/verification/attestation-$count.jsonl"
             printf 'Verified %s\n' "$type"
           done
           gh attestation verify "oci://$IMAGE@$DIGEST" --repo backend-bunny/Konstapel --format json > out/image/verification/provenance.json
-          printf 'Published and verified `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Image summary
+        if: always()
+        env:
+          PUBLISH_VERIFICATION: ${{ steps.verify.outcome }}
+        run: devbox run -- python3 scripts/image/summary.py >> "$GITHUB_STEP_SUMMARY"
       - name: Retain verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -79,5 +114,6 @@ jobs:
           path: |
             out/image/verification/
             out/image/digest
+            out/image/sources.md
             out/image/notices.md
           retention-days: 14

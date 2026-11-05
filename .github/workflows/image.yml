@@ -22,9 +22,9 @@ jobs:
       - run: devbox run -- task image:publish-dry-run
       - name: Dependency locks remain unchanged
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum apko.lock.json
-      - name: License notice summary
+      - name: Image summary
         if: always()
-        run: test ! -f out/image/notices.md || cat out/image/notices.md >> "$GITHUB_STEP_SUMMARY"
+        run: devbox run -- python3 scripts/image/summary.py >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

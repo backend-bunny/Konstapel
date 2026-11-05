@@ -22,6 +22,14 @@
   "customManagers": [
     {
       "customType": "regex",
+      "description": "Release-please configuration schema",
+      "managerFilePatterns": ["/^release-please-config\\.json$/"],
+      "matchStrings": ["googleapis/release-please/(?<currentValue>v\\d+\\.\\d+\\.\\d+)/schemas/config\\.json"],
+      "depNameTemplate": "googleapis/release-please",
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
       "description": "Keep the Kyverno chart version and archive checksum together",
       "managerFilePatterns": [
         "/^scripts/runtime\\.env$/"
