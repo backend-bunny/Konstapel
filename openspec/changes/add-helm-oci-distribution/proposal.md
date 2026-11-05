@@ -27,6 +27,10 @@ with the same confidence as the existing signed container images.
 - Install the controller with its generated RBAC, services, admission integration,
   probes, and a digest-pinned image. Keep engine readiness distinct from process
   health, configuration admission, and assessment completeness.
+- Default to two controller replicas with preferred node separation, a
+  minAvailable 1 disruption budget and zero-unavailable/one-surge rolling updates;
+  provide single-replica development values without the default disruption budget.
+  Consume the lifecycle and release gates from `add-controller-high-availability`.
 - Exercise rendered charts and real install, upgrade, certificate rotation,
   dependency recovery, uninstall, and reinstall workflows before publication.
 
