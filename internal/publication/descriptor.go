@@ -291,9 +291,6 @@ func (d Descriptor) Validate() error {
 				fail("diagnostic package cannot contain %s", r)
 			}
 		}
-		if d.Evidence.Completeness == Complete {
-			fail("diagnostic package cannot claim complete evidence")
-		}
 	default:
 		fail("unknown package kind %q", d.PackageKind)
 	}
