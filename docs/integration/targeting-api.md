@@ -301,6 +301,32 @@ name, and any exception acceptance tied to it, is never revived. Delivery
 creates the new policy and retires the current one once the new one is ready.
 To withdraw enforcement instead, delete the binding.
 
+### Live acceptance
+
+`task acceptance` runs `scripts/targeting-live.sh` on its disposable kind
+cluster after the prototype checks. The script can also be run against any
+disposable cluster with Kyverno installed, given an explicit kubeconfig,
+context and output directory. The `live`-tagged Go test
+`TestLiveDelivery`:
+
+1. installs the generated CRDs and creates a profile, an Audit binding for all
+   namespaces and a Deny binding for `environment: production`, then checks that
+   the API server rejects a binding without a selector;
+2. delivers both, then shows privileged pods are denied in production (server-side
+   dry run), admitted in development, and reported as failing in a development
+   PolicyReport;
+3. relabels the development namespace into production and back: denial follows
+   the label, and the policy name, and therefore the revision, does not change;
+4. edits the profile: a new revision is created, the old one is retained until
+   the new one is ready and then removed, and denial continues;
+5. withdraws the Deny binding: exactly its policy is removed and production
+   admits again;
+6. requires that a prototype-style unmanaged policy created at the start was
+   never modified or adopted.
+
+Each step is recorded in `targeting/targeting-live.json` in the acceptance
+output.
+
 The assessment-loop prototype's policy (`disallow-privileged-containers`,
 labelled `konstapel.io/owner`) has no Konstapel controller reference, and its
 name cannot collide with a rendered name. Delivery never adopts or removes it.

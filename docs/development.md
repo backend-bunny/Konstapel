@@ -48,7 +48,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
-| `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance in a disposable kind cluster and retain evidence. |
+| `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance, including targeting delivery, in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
 
