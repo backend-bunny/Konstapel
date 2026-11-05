@@ -1,0 +1,16 @@
+name: Set up development tools
+description: Install the same locked Devbox environment used locally
+runs:
+  using: composite
+  steps:
+    - uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
+      with:
+        devbox-version: '0.18.4'
+        enable-cache: 'true'
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum', 'devbox.lock') }}
+        restore-keys: go-${{ runner.os }}-${{ runner.arch }}-

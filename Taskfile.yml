@@ -1,0 +1,76 @@
+version: "3"
+
+# Run inside direnv/devbox shell, or use: devbox run -- task check
+tasks:
+  default:
+    silent: true
+    cmd: task --list
+
+  build:
+    desc: Build the runner and C2P provider
+    cmd: scripts/build.sh
+
+  test:
+    desc: Run Go tests (including provider and saved-evidence tests)
+    cmd: go test -mod=readonly ./...
+
+  lint:
+    desc: Check Go formatting, vet, and shell syntax
+    cmds:
+      - |
+        unformatted=$(gofmt -l cmd internal)
+        if [ -n "$unformatted" ]; then
+          printf 'Run gofmt on:\n%s\n' "$unformatted"
+          exit 1
+        fi
+      - go vet -mod=readonly ./...
+      - for script in .envrc scripts/*.sh scripts/runtime.env; do bash -n "$script"; done
+
+  content:check:
+    desc: Verify vendored policy, OSCAL, and schema checksums
+    cmd: sha256sum -c content/SHA256SUMS
+
+  policies:test:
+    desc: Run the vendored Kyverno CLI fixtures
+    cmd: kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color
+
+  deps:validate:
+    desc: Validate Renovate configuration
+    cmd: renovate-config-validator --strict renovate.json
+
+  deps:check:
+    desc: Check the lockfile, Go pins, and Kyverno chart/CLI agreement
+    cmd: scripts/check-dependencies.sh
+
+  check:
+    desc: Run the same checks as CI (no cluster required)
+    cmds:
+      - task: deps:validate
+      - task: deps:check
+      - task: content:check
+      - task: build
+      - task: lint
+      - task: test
+      - task: policies:test
+
+  acceptance:
+    desc: Run full disposable-cluster acceptance (requires Docker and a fresh OUTPUT)
+    requires:
+      vars: [OUTPUT]
+    env:
+      KONSTAPEL_TASK_OUTPUT: '{{.OUTPUT}}'
+    cmds:
+      - scripts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT"
+
+  test:failures:
+    desc: Run disposable-cluster failure probes (requires Docker and a fresh OUTPUT)
+    requires:
+      vars: [OUTPUT]
+    env:
+      KONSTAPEL_TASK_OUTPUT: '{{.OUTPUT}}'
+    cmds:
+      - scripts/test-failures.sh "$KONSTAPEL_TASK_OUTPUT"
+
+  clean:
+    desc: Remove build outputs and Task cache; retain assessment evidence
+    cmd: rm -rf -- bin .task

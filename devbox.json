@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.4/.schema/devbox.schema.json",
+  "packages": [
+    "go@1.25.7",
+    "go-task@3.53.1",
+    "kyverno@1.19.2",
+    "kyverno-chainsaw@0.2.15",
+    "kind@0.33.0",
+    "kubectl@1.37.2",
+    "kubernetes-helm@4.3.1",
+    "jq@1.8.2",
+    "ripgrep@15.2.0",
+    "bashInteractive@5.3p20",
+    "coreutils@9.12",
+    "findutils@4.11.0",
+    "gnused@4.10",
+    "curl@8.22.0",
+    "git@2.56.0",
+    "renovate@44.181.0"
+  ],
+  "env": {
+    "GOTOOLCHAIN": "local"
+  }
+}
