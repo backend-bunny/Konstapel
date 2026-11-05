@@ -1,0 +1,28 @@
+name: test
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version: '1.25.7'
+      - run: sha256sum -c content/SHA256SUMS
+      - run: scripts/build.sh
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Upstream CLI fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          curl -fLsS https://github.com/kyverno/kyverno/releases/download/v1.19.2/kyverno-cli_v1.19.2_linux_x86_64.tar.gz -o tools/cli.tar.gz
+          echo '357eaf1df8bc24ddd5a73979fadeaae6a032e8710f11af264229756e4956bf4a  tools/cli.tar.gz' | sha256sum -c -
+          tar -xzf tools/cli.tar.gz -C tools
+          tools/kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color

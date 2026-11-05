@@ -24,3 +24,10 @@ The initial control scope and policy engine are still being selected.
 - [Vision](vision.md): purpose, principles, and what success looks like.
 - [Architecture](ARCHITECTURE.md): components, reconciliation flow, C2P-Go v2
   integration, and open design decisions.
+
+## Assessment-loop prototype
+
+The Go prototype delivers the shipped Kyverno v1 privileged-container check and
+exports bounded AC-6 evidence through C2P v2. See the
+[setup, acceptance and evidence guide](docs/integration/assessment-loop.md) and
+[recorded validation results](docs/integration/validation-results.md).
