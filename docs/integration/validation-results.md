@@ -118,3 +118,9 @@ explicit disposable-test context, not an authorization artifact.
 | Earlier policy/resource state | `TestCompletenessAndLayouts`: stale timestamps, replaced UID, policy digest mismatch |
 | Inspect assessment artifact | `ValidatePackage`: schema and local UUID/evidence references; live export and offline replay |
 | Run complete repeatable workflow | Final clean acceptance runs, controller/image/version captures, Chainsaw and scoped teardown |
+
+## Reconciled implementation
+
+See [reconciliation.md](reconciliation.md) for the combined implementation's two
+fresh acceptance runs, artifact hashes, provenance regressions and complete
+failure/cleanup probes performed after PR #29.

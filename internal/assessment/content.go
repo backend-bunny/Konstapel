@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	oscal "github.com/defenseunicorns/go-oscal/src/types/oscal-1-1-3"
@@ -195,8 +196,8 @@ func Render(root, action, namespace, owner string) (Object, error) {
 	if action != "Deny" && action != "Audit" {
 		return nil, fmt.Errorf("unsupported validation action %q", action)
 	}
-	if namespace == "" || owner == "" {
-		return nil, fmt.Errorf("namespace and owner are required")
+	if len(namespace) > 63 || !regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`).MatchString(namespace) || owner == "" {
+		return nil, fmt.Errorf("valid namespace and owner are required")
 	}
 	b, e := os.ReadFile(filepath.Join(root, SourcePolicy))
 	if e != nil {
@@ -216,4 +217,25 @@ func Render(root, action, namespace, owner string) (Object, error) {
 	spec["evaluation"] = Object{"background": Object{"enabled": true}}
 	Map(spec["matchConstraints"])["namespaceSelector"] = Object{"matchLabels": Object{"kubernetes.io/metadata.name": namespace}}
 	return p, nil
+}
+
+// VerifyPolicy compares the full captured spec with the shipped source and
+// selected overlay. A self-consistent capture digest alone is not provenance.
+func VerifyPolicy(root string, c Capture) (Object, error) {
+	actions, ok := At(c.Policy, "spec", "validationActions").([]any)
+	if !ok || len(actions) != 1 {
+		return nil, fmt.Errorf("policy provenance: expected one validation action")
+	}
+	ns := Str(At(c.Policy, "spec", "matchConstraints", "namespaceSelector", "matchLabels", "kubernetes.io/metadata.name"))
+	owner := Str(At(c.Policy, "metadata", "labels", OwnerLabel))
+	expected, err := Render(root, Str(actions[0]), ns, owner)
+	if err != nil {
+		return nil, fmt.Errorf("policy provenance: %w", err)
+	}
+	// Canonical JSON ignores object key order and server metadata/status. Unknown
+	// spec fields fail closed; the pinned runtime adds no spec defaults.
+	if Digest(c.Policy["spec"]) != Digest(expected["spec"]) {
+		return nil, fmt.Errorf("policy provenance mismatch: captured spec differs from shipped source and configuration")
+	}
+	return expected, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -59,6 +60,14 @@ func (t *Target) Capture(ctx context.Context, root string, p Object, expected []
 	} else if Str(At(current, "metadata", "uid")) != Str(At(p, "metadata", "uid")) || Digest(current["spec"]) != c.PolicyDigest {
 		c.CollectionErrors = append(c.CollectionErrors, "policy identity/revision changed during collection")
 	}
+	// Inventory is independent of reports: an old report cannot establish that
+	// an admitted resource still exists with the original identity.
+	for _, r := range expected {
+		var current Object
+		if err := t.JSON(ctx, &current, "get", r.Kind, r.Name, "-n", r.Namespace, "-o", "json"); err != nil || Str(At(current, "metadata", "uid")) != r.UID {
+			c.CollectionErrors = append(c.CollectionErrors, "expected resource missing/replaced: "+r.Key(t.Cluster))
+		}
+	}
 	c.Collected = time.Now().UTC()
 	return c
 }
@@ -66,8 +75,8 @@ func (t *Target) Capture(ctx context.Context, root string, p Object, expected []
 // Acceptance only operates against the documented disposable context. All cleanup
 // checks ownership; diagnostic packages are retained even on failure.
 func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, timeout time.Duration, input *actions.InputContext, plan *oscal.AssessmentPlan, p policy.Provider, providers map[plugin.ID]policy.Provider) (returnErr error) {
-	if t.Context != "kind-konstapel-assessment" || ns != "konstapel-acceptance" {
-		return fmt.Errorf("acceptance requires disposable kind-konstapel-assessment context and konstapel-acceptance namespace")
+	if !regexp.MustCompile(`^kind-konstapel-assessment(-[a-z0-9-]+)?$`).MatchString(t.Context) || ns != "konstapel-acceptance" {
+		return fmt.Errorf("acceptance requires a disposable kind-konstapel-assessment context and konstapel-acceptance namespace")
 	}
 	if err := os.MkdirAll(out, 0755); err != nil {
 		return err
@@ -76,6 +85,10 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	namespaceCreated, policyCreated := false, false
 	defer func() {
 		_ = Write(filepath.Join(out, "admission.json"), admission)
+		for _, snapshot := range []struct{ file, kind string }{{"final-policies.json", "validatingpolicies.policies.kyverno.io"}, {"final-reports.json", "policyreports.wgpolicyk8s.io"}, {"final-workloads.json", "pods,deployments"}} {
+			b, _ := t.Run(context.Background(), nil, "get", snapshot.kind, "-A", "-o", "json")
+			_ = os.WriteFile(filepath.Join(out, snapshot.file), b, 0644)
+		}
 		b, _ := t.Run(context.Background(), nil, "get", "events", "-A", "-o", "json")
 		_ = os.WriteFile(filepath.Join(out, "events.json"), b, 0644)
 		// Only test-created policy/namespace, with ownership rechecked immediately.
@@ -148,6 +161,9 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	}
 	// Check webhook propagation using non-persisting requests before testing behavior.
 	request := func(label string, obj Object, denied bool, args ...string) error {
+		if os.Getenv("KONSTAPEL_TEST_EXPECT_ACTION") == "Audit" {
+			denied = false
+		}
 		data, _ := json.Marshal(obj)
 		response, e := t.Run(ctx, data, args...)
 		admission = append(admission, Object{"check": label, "expectedDenial": denied, "response": string(response), "error": fmt.Sprint(e)})
@@ -245,6 +261,10 @@ func Acceptance(ctx context.Context, t *Target, root, out, ns, owner string, tim
 	}
 	boundary := time.Now().UTC()
 	deadline = time.Now().Add(timeout)
+	if os.Getenv("KONSTAPEL_TEST_MISSING_EVIDENCE") == "1" {
+		expected = append(expected, Resource{APIVersion: "v1", Kind: "Pod", Namespace: ns, Name: "required-missing-resource", UID: "missing-resource-uid"})
+		deadline = time.Now().Add(3 * time.Second)
+	}
 	var capture Capture
 	var ev Evidence
 	for {

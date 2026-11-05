@@ -254,8 +254,15 @@ func TestPluginAndExport(t *testing.T) {
 			if strings.Contains(string(b), `"state":"satisfied"`) {
 				t.Fatal("full satisfaction asserted")
 			}
-			if mode == "missing" && !strings.Contains(string(b), `"value":"false"`) {
-				t.Fatal("missing completeness")
+			if mode == "missing" {
+				if !strings.Contains(string(b), `"value":"false"`) {
+					t.Fatal("missing completeness")
+				}
+				for _, result := range At(doc, "assessment-results", "results").([]any) {
+					if findings, _ := Map(result)["findings"].([]any); len(findings) > 0 {
+						t.Fatal("missing evidence became an observed violation")
+					}
+				}
 			}
 		})
 	}

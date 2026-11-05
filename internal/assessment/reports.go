@@ -80,6 +80,9 @@ func Reconcile(c Capture) (Evidence, policy.PVPResult, error) {
 		if r.UID == "" || r.Name == "" || r.Kind == "" || r.APIVersion == "" {
 			return ev, policy.PVPResult{}, fmt.Errorf("incomplete resource identity")
 		}
+		if _, exists := expected[r.Key(c.Cluster)]; exists {
+			return ev, policy.PVPResult{}, fmt.Errorf("duplicate expected resource identity")
+		}
 		expected[r.Key(c.Cluster)] = r
 	}
 	best := map[string]Evaluation{}
