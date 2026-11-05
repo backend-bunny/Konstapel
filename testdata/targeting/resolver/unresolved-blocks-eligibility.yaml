@@ -1,0 +1,38 @@
+scenarios:
+  - A reference is unresolved
+  - Resolve restrictive eligibility across bindings
+input:
+  cluster: kube-system:cluster-a
+  bundles:
+    - name: example-workload-hardening
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      policies:
+        - {name: disallow-privileged-containers, scope: Namespaced}
+  profiles:
+    - metadata: {name: self-service, uid: p-ss, generation: 1}
+      spec:
+        bundle: {name: example-workload-hardening, digest: sha256:1111111111111111111111111111111111111111111111111111111111111111}
+        policies:
+          - {name: disallow-privileged-containers, exceptions: {eligibility: SelfService, maxLifetime: 720h}}
+  bindings:
+    - metadata: {name: deny-selfservice, uid: b-ss, generation: 1}
+      spec: {profileRef: {name: self-service}, namespaceSelector: {}, mode: Deny}
+    # The settings of this binding are unknown, so they might forbid
+    # exceptions; unresolved configuration is not permission.
+    - metadata: {name: audit-missing-profile, uid: b-missing, generation: 1}
+      spec: {profileRef: {name: absent}, namespaceSelector: {matchLabels: {environment: production}}, mode: Audit}
+  namespaces:
+    - {name: shop-prod, uid: 00000000-0000-0000-0000-000000000001, labels: {environment: production}}
+    - {name: tools, uid: 00000000-0000-0000-0000-000000000003, labels: {}}
+expected:
+  bindings:
+    - binding: audit-missing-profile
+      targets: [shop-prod]
+      contributions: []
+      errors: [{reason: ProfileNotFound}]
+    - binding: deny-selfservice
+      targets: [shop-prod, tools]
+      contributions: [{policy: disallow-privileged-containers, mode: Deny}]
+  eligibility:
+    - {namespace: shop-prod, policy: disallow-privileged-containers, effective: Forbidden, contributors: [deny-selfservice], errors: [ProfileNotFound]}
+    - {namespace: tools, policy: disallow-privileged-containers, effective: SelfService, maxLifetime: 720h0m0s, contributors: [deny-selfservice]}

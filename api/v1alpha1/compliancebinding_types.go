@@ -24,15 +24,16 @@ const (
 	// the current configuration revision. It never asserts workload compliance.
 	ConditionEngineReady = "EngineReady"
 
-	ReasonProfileNotFound     = "ProfileNotFound"
-	ReasonContentUnavailable  = "ContentUnavailable"
-	ReasonUnknownPolicy       = "UnknownPolicy"
-	ReasonUnsupportedScope    = "UnsupportedScope"
-	ReasonInvalidSelector     = "InvalidSelector"
-	ReasonOwnershipConflict   = "OwnershipConflict"
-	ReasonStaleRevision       = "StaleRevision"
-	ReasonReplacementPending  = "ReplacementPending"
-	ReasonResolutionSucceeded = "Resolved"
+	ReasonProfileNotFound      = "ProfileNotFound"
+	ReasonContentUnavailable   = "ContentUnavailable"
+	ReasonUnknownPolicy        = "UnknownPolicy"
+	ReasonUnsupportedScope     = "UnsupportedScope"
+	ReasonInvalidSelector      = "InvalidSelector"
+	ReasonInvalidConfiguration = "InvalidConfiguration"
+	ReasonOwnershipConflict    = "OwnershipConflict"
+	ReasonStaleRevision        = "StaleRevision"
+	ReasonReplacementPending   = "ReplacementPending"
+	ReasonResolutionSucceeded  = "Resolved"
 )
 
 // ProfileReference names a cluster-scoped ComplianceProfile.

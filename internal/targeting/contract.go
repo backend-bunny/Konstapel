@@ -70,7 +70,7 @@ type Eligibility struct {
 	Effective v1alpha1.ExceptionEligibility `json:"effective"`
 	// MaxLifetime is the shortest applicable limit; set only when Effective is SelfService.
 	MaxLifetime *Duration `json:"maxLifetime,omitempty"`
-	// Contributors are every contribution considered, sorted by Revision.
+	// Contributors are every contribution considered, sorted by binding name then Revision.
 	Contributors []ContributionRef `json:"contributors"`
 	// Errors make eligibility Forbidden; unresolved configuration is not permission.
 	Errors []ResolutionError `json:"errors,omitempty"`
@@ -80,11 +80,12 @@ type Eligibility struct {
 type Reason string
 
 const (
-	ReasonProfileNotFound    Reason = v1alpha1.ReasonProfileNotFound
-	ReasonContentUnavailable Reason = v1alpha1.ReasonContentUnavailable
-	ReasonUnknownPolicy      Reason = v1alpha1.ReasonUnknownPolicy
-	ReasonUnsupportedScope   Reason = v1alpha1.ReasonUnsupportedScope
-	ReasonInvalidSelector    Reason = v1alpha1.ReasonInvalidSelector
+	ReasonProfileNotFound      Reason = v1alpha1.ReasonProfileNotFound
+	ReasonContentUnavailable   Reason = v1alpha1.ReasonContentUnavailable
+	ReasonUnknownPolicy        Reason = v1alpha1.ReasonUnknownPolicy
+	ReasonUnsupportedScope     Reason = v1alpha1.ReasonUnsupportedScope
+	ReasonInvalidSelector      Reason = v1alpha1.ReasonInvalidSelector
+	ReasonInvalidConfiguration Reason = v1alpha1.ReasonInvalidConfiguration
 )
 
 // ResolutionError is an explicit, attributable failure to resolve configuration.
