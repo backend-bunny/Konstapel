@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -495,5 +497,81 @@ func TestReportingOnlyEditWritesNoEnginePolicy(t *testing.T) {
 	}
 	if got := e.binding("deny-prod"); got.Status.ObservedGeneration != 2 || cond(got, v1alpha1.ConditionEngineReady).Status != metav1.ConditionTrue {
 		t.Fatalf("status after reporting-only edit: %+v", got.Status)
+	}
+}
+
+// statusJSON encodes a value for byte-identical comparison.
+func statusJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+func assessmentStatus() *v1alpha1.BindingAssessmentStatus {
+	at := metav1.NewTime(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
+	return &v1alpha1.BindingAssessmentStatus{
+		Schedule: &v1alpha1.AssessmentSchedule{Anchor: at, Interval: "24h", LastScheduled: &at, MissedTotal: 2,
+			Gaps: []v1alpha1.MissedInterval{{From: at, To: at, Missed: 2}}},
+		Current: &v1alpha1.CurrentEvidence{Evidence: v1alpha1.EvidenceSummary{Completeness: "Incomplete", Expected: 1, Missing: 1},
+			EvaluatedAt: at, Limitations: []string{"no attributable report yet"}},
+		LatestRun: &v1alpha1.RunReference{Name: "run", UID: "run-uid"},
+	}
+}
+
+// The assessment controller owns status.assessment; this reconciler carries it
+// forward byte-identical, including when its own fields change.
+func TestReconcileCarriesAssessmentStatusForward(t *testing.T) {
+	b := bindingObj("deny-prod", "baseline", v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{"environment": "production"})
+	e := newEnv(t, nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol), b)
+	got := e.binding("deny-prod")
+	got.Status.Assessment = assessmentStatus()
+	if err := e.c.Status().Update(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	want := statusJSON(got.Status.Assessment)
+
+	e.reconcile("deny-prod") // policies not ready yet
+	if b := e.binding("deny-prod"); statusJSON(b.Status.Assessment) != want || cond(b, v1alpha1.ConditionEngineReady).Status != metav1.ConditionFalse {
+		t.Fatalf("assessment status changed on first reconcile: %s", statusJSON(b.Status.Assessment))
+	}
+	e.markAllReady()
+	e.reconcile("deny-prod") // EngineReady False -> True: this reconciler writes
+	b = e.binding("deny-prod")
+	if cond(b, v1alpha1.ConditionEngineReady).Status != metav1.ConditionTrue {
+		t.Fatal("own status did not change; the carry-forward was not exercised")
+	}
+	if statusJSON(b.Status.Assessment) != want {
+		t.Fatalf("assessment status not carried forward:\nwant %s\ngot  %s", want, statusJSON(b.Status.Assessment))
+	}
+}
+
+// staleReader returns a binding as it was before a concurrent status write.
+type staleReader struct {
+	client.Client
+	stale *v1alpha1.ComplianceBinding
+}
+
+func (s staleReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if b, ok := obj.(*v1alpha1.ComplianceBinding); ok && key.Name == s.stale.Name {
+		s.stale.DeepCopyInto(b)
+		return nil
+	}
+	return s.Client.Get(ctx, key, obj, opts...)
+}
+
+// A reconcile from a stale read after the assessment controller wrote status
+// gets a Conflict and returns it for a retry; it never clobbers the write.
+func TestStaleStatusWriteConflictsInsteadOfClobbering(t *testing.T) {
+	e := newEnv(t, nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol),
+		bindingObj("deny-prod", "baseline", v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{"environment": "production"}))
+	stale := e.binding("deny-prod")
+	fresh := stale.DeepCopy()
+	fresh.Status.Assessment = assessmentStatus()
+	if err := e.c.Status().Update(context.Background(), fresh); err != nil { // the concurrent assessment write
+		t.Fatal(err)
+	}
+	e.r.Client = staleReader{Client: e.c, stale: stale}
+	_, err := e.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "deny-prod"}})
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("stale status write must return a conflict for retry, got %v", err)
+	}
+	if b := e.binding("deny-prod"); b.Status.Assessment == nil || statusJSON(b.Status.Assessment) != statusJSON(fresh.Status.Assessment) {
+		t.Fatal("stale reconcile clobbered status.assessment")
 	}
 }

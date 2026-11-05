@@ -239,6 +239,220 @@ spec:
               ComplianceBindingStatus reports resolution and engine readiness separately.
               It does not report assessment outcomes.
             properties:
+              assessment:
+                description: |-
+                  assessment is owned by the assessment controller; see
+                  BindingAssessmentStatus. The targeting controller carries it forward.
+                properties:
+                  current:
+                    description: |-
+                      current is the continuously reconciled evidence state. It is separate
+                      from historical snapshots and from EngineReady, which never asserts
+                      compliance.
+                    properties:
+                      evaluatedAt:
+                        description: evaluatedAt is when the controller last evaluated
+                          current evidence.
+                        format: date-time
+                        type: string
+                      evidence:
+                        description: EvidenceSummary counts expected checks by evidence
+                          state.
+                        properties:
+                          attributable:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          completeness:
+                            description: EvidenceCompleteness describes evidence coverage
+                              only, never outcomes.
+                            enum:
+                            - Complete
+                            - Incomplete
+                            - NoTargets
+                            type: string
+                          expected:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          missing:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          rejected:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          staleScopes:
+                            description: |-
+                              staleScopes counts bindings or policies whose configuration did not
+                              resolve; any stale scope makes evidence Incomplete.
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          unresolved:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                        required:
+                        - attributable
+                        - completeness
+                        - expected
+                        - missing
+                        - rejected
+                        - unresolved
+                        type: object
+                      limitations:
+                        description: limitations explain why evidence is incomplete,
+                          most significant first.
+                        items:
+                          maxLength: 256
+                          type: string
+                        maxItems: 8
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      nextExpiry:
+                        description: nextExpiry is when the oldest attributable evidence
+                          becomes stale.
+                        format: date-time
+                        type: string
+                      outcomes:
+                        description: |-
+                          OutcomeCounts preserves check dispositions separately from completeness.
+                          It deliberately has no aggregate pass field.
+                        properties:
+                          acceptedRisk:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          error:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          fail:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          notApplicable:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          pass:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          skip:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          unknown:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                        required:
+                        - acceptedRisk
+                        - error
+                        - fail
+                        - notApplicable
+                        - pass
+                        - skip
+                        - unknown
+                        type: object
+                    required:
+                    - evaluatedAt
+                    - evidence
+                    - outcomes
+                    type: object
+                  latestRun:
+                    description: latestRun is the newest run started for this binding.
+                    properties:
+                      name:
+                        maxLength: 253
+                        type: string
+                      uid:
+                        maxLength: 128
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  schedule:
+                    description: schedule is the persisted snapshot schedule.
+                    properties:
+                      activeRun:
+                        description: activeRun holds the binding's single run slot.
+                        properties:
+                          name:
+                            maxLength: 253
+                            type: string
+                          uid:
+                            maxLength: 128
+                            type: string
+                        required:
+                        - name
+                        - uid
+                        type: object
+                      anchor:
+                        format: date-time
+                        type: string
+                      gaps:
+                        description: |-
+                          gaps are the most recent missed intervals, oldest first. Each was
+                          coalesced into one later run; none was assessed.
+                        items:
+                          description: MissedInterval is a range of scheduled times
+                            that were not run.
+                          properties:
+                            from:
+                              format: date-time
+                              type: string
+                            missed:
+                              format: int32
+                              minimum: 1
+                              type: integer
+                            to:
+                              format: date-time
+                              type: string
+                          required:
+                          - from
+                          - missed
+                          - to
+                          type: object
+                        maxItems: 10
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      interval:
+                        description: interval in effect when anchor was set.
+                        maxLength: 32
+                        minLength: 2
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a duration such as 24h, 90m or 2160h; days,
+                            cron expressions and signs are not supported
+                          rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                        - message: must be a positive duration
+                          rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                            || duration(self) > duration(''0s'')'
+                      lastScheduled:
+                        description: lastScheduled is the scheduled time of the newest
+                          scheduled run.
+                        format: date-time
+                        type: string
+                      missedTotal:
+                        description: |-
+                          missedTotal counts every missed scheduled time, including gaps
+                          dropped from the bounded list.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      nextDue:
+                        format: date-time
+                        type: string
+                    required:
+                    - anchor
+                    - interval
+                    type: object
+                type: object
               conditions:
                 description: conditions report Resolved and EngineReady separately.
                 items:

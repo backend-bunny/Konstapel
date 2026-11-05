@@ -91,6 +91,7 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		ObservedGeneration: b.Generation,
 		TargetCount:        ptr(int32(br.TargetCount)),
 		Conditions:         slices.Clone(b.Status.Conditions),
+		Assessment:         b.Status.Assessment,
 	}
 	if profile != nil {
 		status.Profile = &v1alpha1.ResolvedProfile{Name: profile.Name, UID: profile.UID, Generation: profile.Generation, BundleDigest: profile.Spec.Bundle.Digest}

@@ -114,6 +114,11 @@ type ComplianceBindingStatus struct {
 	// +listMapKey=type
 	// +kubebuilder:validation:MaxItems=16
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// assessment is owned by the assessment controller; see
+	// BindingAssessmentStatus. The targeting controller carries it forward.
+	// +optional
+	Assessment *BindingAssessmentStatus `json:"assessment,omitempty"`
 }
 
 // ComplianceBinding applies a ComplianceProfile to namespaces in Audit or Deny mode.
