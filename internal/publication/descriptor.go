@@ -157,6 +157,10 @@ type EvidenceSummary struct {
 	Missing      int          `json:"missing"`
 	Rejected     int          `json:"rejected"`
 	Unresolved   int          `json:"unresolved"`
+	// StaleScopes counts bindings or policies whose current configuration did
+	// not resolve, so their expected checks are unknown. Any stale scope makes
+	// evidence Incomplete.
+	StaleScopes int `json:"staleScopes,omitempty"`
 }
 
 // OutcomeCounts preserves check dispositions separately from completeness.
@@ -240,7 +244,7 @@ func (d Descriptor) Validate() error {
 	if d.Window.Started.IsZero() || d.Window.Closed.Before(d.Window.Started) {
 		fail("capture window must start and close in order")
 	}
-	if err := d.Evidence.validate(); err != nil {
+	if err := d.Evidence.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 	if d.Producer.Name == "" || d.Producer.Version == "" || d.Producer.ValidatedAt.IsZero() || len(d.Producer.Checks) == 0 {
@@ -325,25 +329,27 @@ func (s Scope) validate(run RunRef) error {
 	return nil
 }
 
-func (e EvidenceSummary) validate() error {
-	if e.Expected < 0 || e.Attributable < 0 || e.Missing < 0 || e.Rejected < 0 || e.Unresolved < 0 {
+// Validate checks that the counts and completeness are consistent.
+func (e EvidenceSummary) Validate() error {
+	if e.Expected < 0 || e.Attributable < 0 || e.Missing < 0 || e.Rejected < 0 || e.Unresolved < 0 || e.StaleScopes < 0 {
 		return errors.New("evidence counts cannot be negative")
 	}
 	if e.Attributable+e.Missing+e.Rejected+e.Unresolved != e.Expected {
 		return errors.New("evidence counts must account for every expected check")
 	}
+	gaps := e.Attributable < e.Expected || e.StaleScopes > 0
 	switch e.Completeness {
 	case NoTargets:
-		if e.Expected != 0 {
-			return errors.New("NoTargets requires zero expected checks")
+		if e.Expected != 0 || e.StaleScopes != 0 {
+			return errors.New("NoTargets requires zero expected checks and no stale scope")
 		}
 	case Complete:
-		if e.Expected == 0 || e.Attributable != e.Expected {
-			return errors.New("Complete requires every expected check to be attributable")
+		if e.Expected == 0 || gaps {
+			return errors.New("Complete requires every expected check to be attributable and no stale scope")
 		}
 	case Incomplete:
-		if e.Expected == 0 || e.Attributable == e.Expected {
-			return errors.New("Incomplete requires unattributable expected checks")
+		if !gaps {
+			return errors.New("Incomplete requires unattributable expected checks or stale scope")
 		}
 	default:
 		return fmt.Errorf("unknown completeness %q", e.Completeness)
