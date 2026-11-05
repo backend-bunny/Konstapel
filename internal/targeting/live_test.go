@@ -336,6 +336,7 @@ func TestLiveDelivery(t *testing.T) {
 	if err := e.c.Create(e.ctx, proto); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = e.c.Delete(context.Background(), proto) })
 	// Kyverno writes status, so compare generation and spec, not resourceVersion.
 	protoGeneration, protoSpec := proto.GetGeneration(), proto.Object["spec"]
 
@@ -355,6 +356,16 @@ func TestLiveDelivery(t *testing.T) {
 			t.Fatalf("API server rejected %s: %v", o.GetName(), err)
 		}
 	}
+	// Leave nothing behind, even on failure, so the test reruns on the same
+	// cluster. Bindings' engine policies are withdrawn explicitly.
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, b := range []*v1alpha1.ComplianceBinding{auditAll, denyProd} {
+			_, _ = (&Delivery{Client: e.c}).Withdraw(ctx, b.UID)
+			_ = e.c.Delete(ctx, b)
+		}
+		_ = e.c.Delete(ctx, profile)
+	})
 	// The API server must reject an absent selector, as the in-process tests claim.
 	bad := &v1alpha1.ComplianceBinding{ObjectMeta: metav1.ObjectMeta{Name: "live-no-selector"}, Spec: v1alpha1.ComplianceBindingSpec{
 		ProfileRef: v1alpha1.ProfileReference{Name: profile.Name}, Mode: v1alpha1.ModeDeny}}
@@ -369,9 +380,12 @@ func TestLiveDelivery(t *testing.T) {
 	e.record("delivered", map[string]any{"policies": e.policyNames(), "deny": deny, "audit": audit, "bundleDigest": e.ref.Digest, "cluster": e.cluster})
 	e.expectDenied("targeting-prod", deny)
 	e.expectAdmitted("targeting-dev")
-	if err := e.c.Create(e.ctx, privilegedPod("targeting-dev", "audited")); err != nil {
+	audited := privilegedPod("targeting-dev", "audited")
+	if err := e.c.Create(e.ctx, audited); err != nil {
 		t.Fatal(err)
 	}
+	// Remove the pod even on failure, so the test can rerun on the same cluster.
+	t.Cleanup(func() { _ = e.c.Delete(context.Background(), audited) })
 	e.expectAuditFinding("targeting-dev", "audited", audit)
 
 	// 2. A label change moves the namespace into the Deny scope without a new revision.

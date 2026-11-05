@@ -470,3 +470,30 @@ func TestBindingsForProfileUsesIndex(t *testing.T) {
 		t.Fatalf("profile a maps to %v", names)
 	}
 }
+
+// A reporting-only edit (spec.assessment) advances the binding generation but
+// not its enforcement epoch. It must not write to engine policies at all.
+func TestReportingOnlyEditWritesNoEnginePolicy(t *testing.T) {
+	b := bindingObj("deny-prod", "baseline", v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{"environment": "production"})
+	b.Spec.EnforcementEpoch = 1
+	e := newEnv(t, nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol), b)
+	e.reconcile("deny-prod")
+	e.markAllReady()
+	e.reconcile("deny-prod")
+	before := e.policies()[0]
+
+	live := e.binding("deny-prod")
+	live.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "12h"}
+	live.Generation = 2 // the fake client does not advance generation
+	if err := e.c.Update(context.Background(), live); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile("deny-prod")
+	after := e.policies()
+	if len(after) != 1 || after[0].GetName() != before.GetName() || after[0].GetResourceVersion() != before.GetResourceVersion() {
+		t.Fatalf("reporting-only edit wrote engine policies: %s@%s -> %v", before.GetName(), before.GetResourceVersion(), after)
+	}
+	if got := e.binding("deny-prod"); got.Status.ObservedGeneration != 2 || cond(got, v1alpha1.ConditionEngineReady).Status != metav1.ConditionTrue {
+		t.Fatalf("status after reporting-only edit: %+v", got.Status)
+	}
+}

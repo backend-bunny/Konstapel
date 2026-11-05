@@ -18,7 +18,10 @@ import (
 var ValidatingPolicyGVK = schema.GroupVersionKind{Group: "policies.kyverno.io", Version: "v1", Kind: "ValidatingPolicy"}
 
 // Labels and annotations on delivered engine policies. Labels support
-// selection; annotations carry full provenance.
+// selection; annotations carry full provenance. There is deliberately no
+// binding-generation annotation: reporting-only binding edits advance the
+// generation, and must not write to engine policies. The revision identifies
+// the enforcement configuration.
 const (
 	LabelManagedBy  = "app.kubernetes.io/managed-by"
 	ManagedByValue  = "konstapel"
@@ -31,7 +34,6 @@ const (
 	AnnotationRevision      = annotationPrefix + "revision"
 	AnnotationPolicy        = annotationPrefix + "policy"
 	AnnotationBinding       = annotationPrefix + "binding"
-	AnnotationBindingGen    = annotationPrefix + "binding-generation"
 	AnnotationProfile       = annotationPrefix + "profile"
 	AnnotationProfileUID    = annotationPrefix + "profile-uid"
 	AnnotationProfileGen    = annotationPrefix + "profile-generation"
@@ -102,7 +104,6 @@ func Render(c Contribution, src PolicySource) (*unstructured.Unstructured, error
 		AnnotationRevision:      c.Revision,
 		AnnotationPolicy:        c.Policy,
 		AnnotationBinding:       c.Binding.Name,
-		AnnotationBindingGen:    strconv.FormatInt(c.Binding.Generation, 10),
 		AnnotationProfile:       c.Profile.Name,
 		AnnotationProfileUID:    string(c.Profile.UID),
 		AnnotationProfileGen:    strconv.FormatInt(c.Profile.Generation, 10),
