@@ -271,7 +271,12 @@ func revisionSummary(cs []targeting.Contribution) string {
 	return "sha256:" + sha256Hex(strings.Join(revs, "\n"))
 }
 
+// errorsMessage explains resolution errors. A single error's reason is
+// already the condition reason, so only its message is repeated.
 func errorsMessage(errs []targeting.ResolutionError) string {
+	if len(errs) == 1 {
+		return truncate(errs[0].Message)
+	}
 	slices.SortFunc(errs, func(a, b targeting.ResolutionError) int { return cmp.Compare(a.Reason, b.Reason) })
 	parts := make([]string, 0, len(errs))
 	for _, e := range errs {
