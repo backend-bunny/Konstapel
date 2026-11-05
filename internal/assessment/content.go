@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	oscal "github.com/defenseunicorns/go-oscal/src/types/oscal-1-1-3"
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,7 +54,7 @@ func At(m Object, keys ...string) any {
 	return v
 }
 func Schema(path, schema string) error {
-	s, e := jsonschema.Compile(schema)
+	s, e := jsonschema.NewCompiler().Compile(schema)
 	if e != nil {
 		return e
 	}
