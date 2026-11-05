@@ -460,8 +460,42 @@ Other changes consume these files but do not edit them:
 | Consumer | Uses |
 | --- | --- |
 | `add-self-service-policy-exceptions` | `targeting.Eligibility` (effective eligibility, shortest lifetime, contributor revisions) and `Contribution.Revision`. An acceptance is scoped to a revision and is never reused across revisions. |
-| `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`. |
+| `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`, and consumes `targeting.ExpectedEvidence`. |
 | `add-linux-workload-hardening-bundle` | Bundle policy metadata (logical name and resource scope) that the resolver reads. |
+
+### Expected evidence
+
+`targeting.ExpectedEvidence(result, content)` turns a resolver `Result` into the
+expected-evidence subjects that `add-continuous-assessments`' collector
+consumes. That change owns everything inside `internal/assessment`. There is
+one `EvidenceSubject` per namespace UID × contribution, carrying:
+
+- cluster, namespace name and UID, binding name and UID;
+- `revision` (the contribution's `EnforcementRevision`) and `enginePolicy`
+  (the rendered name);
+- logical policy, mode, matched `resources` as `group/version/resource`;
+- profile name, UID and generation, and bundle, configuration and source digests.
+
+The rules:
+
+- **Keyed by namespace UID.** A recreated namespace is a new subject; old
+  subjects are never reused.
+- **Overlaps stay separate.** Overlapping bindings produce separate subjects with
+  distinct revisions and engine policies. The collector must not count them as
+  independent control coverage.
+- **Checks are not enumerated here.** `checks` is empty for the vendored
+  policy, whose validations are unnamed; the collector enumerates them from the
+  rendered policy.
+- **Stale scope is reported.** Bindings or policies that did not resolve are
+  returned as `StaleScope` entries with their reason. Their last applied
+  policies may still be enforcing, so the collector records a limitation rather
+  than a silent gap.
+- **Missing content is an error.** A contribution whose bundle digest has no
+  content fails instead of guessing.
+
+Subjects are sorted by namespace UID, binding UID, logical policy and revision.
+The output is pinned by `testdata/targeting/contract/evidence.json`; changing it
+requires bumping `targeting.ContractVersion`.
 
 `targeting.EnforcementRevision` is the only place revisions are calculated. Its
 binding-side input is the single `BindingEpoch` value. Today that is the
