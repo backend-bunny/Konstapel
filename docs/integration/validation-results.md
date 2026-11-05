@@ -80,6 +80,10 @@ kubeconfigs or controller logs. The version matrix is the pinned matrix in
 live verification from synthetic/offline tests. Final Go tests, vet, shell syntax,
 diff whitespace and strict OpenSpec validation also passed.
 
+The initial PR CI run exposed older-jq expression parsing in the build script.
+Parenthesizing the manifest configuration expression fixes that compatibility
+issue; the generated manifest, binaries and live acceptance behavior are unchanged.
+
 ## Limits
 
 Only the recorded Linux amd64/Kubernetes/Kyverno combination is exercised. No
