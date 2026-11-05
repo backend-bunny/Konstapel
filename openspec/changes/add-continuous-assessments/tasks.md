@@ -18,10 +18,10 @@ change's entire task list before landing the shared contract or adapter.
 ## 1. Establish the shared request, run, and package contract
 
 - [x] 1.1 Add versioned package descriptors and publication interfaces/status types for scope, checksums, staging, commit receipts, retention, availability, and cleanup; verify serialization fixtures round-trip without bulk reports or credentials in status.
-- [ ] 1.2 Add namespaced AssessmentRequest and protected cluster-scoped AssessmentRun types/CRDs after coordinating API registration with targeting; verify API-server validation enforces immutable requests, controller-owned resolved fields, and namespace versus full-binding scope.
-- [ ] 1.3 Add request/run RBAC and authenticated requester attribution, including controller-only status updates; verify team roles cannot create full-binding runs, forge requester identity, or read another namespace's request.
+- [x] 1.2 Add namespaced AssessmentRequest and protected cluster-scoped AssessmentRun types/CRDs after coordinating API registration with targeting; verify API-server validation enforces immutable requests, controller-owned resolved fields, and namespace versus full-binding scope.
+- [x] 1.3 Add request/run RBAC and authenticated requester attribution, including controller-only status updates; verify team roles cannot create full-binding runs, forge requester identity, or read another namespace's request.
 - [x] 1.4 Add a fake publisher and scoped complete/incomplete/diagnostic package fixtures; verify idempotent run/publication identities and separate completeness, result, and publication states without a real backend.
-- [ ] 1.5 Document the contract and its ownership, scope-projection rules, download authorization attributes, and initial integration sequence; verify the S3 implementation can consume the fixtures/interfaces without editing these APIs or depending on a finished scheduler.
+- [x] 1.5 Document the contract and its ownership, scope-projection rules, download authorization attributes, and initial integration sequence; verify the S3 implementation can consume the fixtures/interfaces without editing these APIs or depending on a finished scheduler.
 
 ## 2. Add binding settings without changing enforcement on reporting edits
 
