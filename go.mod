@@ -3,10 +3,10 @@ module github.com/backend-bunny/Konstapel
 go 1.25.7
 
 require (
-	github.com/defenseunicorns/go-oscal v0.7.0
+	github.com/defenseunicorns/go-oscal v0.7.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
-	github.com/hashicorp/go-plugin v1.7.0
+	github.com/hashicorp/go-plugin v1.8.0
 	github.com/oscal-compass/compliance-to-policy-go/v2 v2.0.0-rc.1.0.20260824132548-45bfc1a8947e
 	github.com/oscal-compass/oscal-sdk-go v0.0.9
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
