@@ -1,0 +1,26 @@
+# Kyverno CLI checks of the golden output of targeting.Render (see
+# internal/targeting/render_test.go). The namespace selector is evaluated
+# against Namespace labels from values.yaml: the Deny contribution applies only
+# in production, the Audit contribution everywhere.
+#
+# Limitation of kyverno test 1.19: a resource excluded by the selector is
+# reported as passing whatever result is expected. "skip" below therefore
+# catches a selector that wrongly includes development, but the production
+# "fail" for the Deny policy cannot catch a selector that wrongly excludes
+# production. TestRenderedSelectorsMatchIntendedNamespaces covers that.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: targeting-rendered
+policies:
+  - audit-all.yaml
+  - deny-production.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-c07ae34193f1d3c1, kind: Pod, resources: [shop-prod/privileged-in-production, shop-dev/privileged-in-development], result: fail}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-c07ae34193f1d3c1, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-prod/privileged-in-production], result: fail}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-dev/privileged-in-development], result: skip}

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: privileged-in-production, namespace: shop-prod}
+spec:
+  containers:
+    - {name: c, image: registry.example/app:1, securityContext: {privileged: true}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: unprivileged-in-production, namespace: shop-prod}
+spec:
+  containers:
+    - {name: c, image: registry.example/app:1}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: privileged-in-development, namespace: shop-dev}
+spec:
+  containers:
+    - {name: c, image: registry.example/app:1, securityContext: {privileged: true}}

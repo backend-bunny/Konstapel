@@ -1,0 +1,100 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  annotations:
+    compliance.erenius.io/binding: deny-production
+    compliance.erenius.io/binding-generation: "1"
+    compliance.erenius.io/bundle: konstapel-vendored
+    compliance.erenius.io/bundle-digest: sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2
+    compliance.erenius.io/cluster: kube-system:fixture
+    compliance.erenius.io/configuration-digest: sha256:ea47d8a6f23e50ae6b15cad4609f8084484f783afae792d25a79569e049a91ed
+    compliance.erenius.io/mode: Deny
+    compliance.erenius.io/policy: disallow-privileged-containers
+    compliance.erenius.io/profile: baseline
+    compliance.erenius.io/profile-generation: "1"
+    compliance.erenius.io/profile-uid: uid-baseline
+    compliance.erenius.io/revision: sha256:903021c157e4d2308ba92facfa8df0ab77630dd8010d65ec50dc52afc7c37e11
+    compliance.erenius.io/source-digest: sha256:6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e
+    kyverno.io/kubernetes-version: 1.30+
+    kyverno.io/kyverno-version: 1.14.0
+    policies.kyverno.io/category: Pod Security Standards (Baseline) in ValidatingPolicy
+    policies.kyverno.io/description: Privileged mode disables most security mechanisms
+      and must not be allowed. This policy ensures Pods do not call for privileged
+      mode.
+    policies.kyverno.io/minversion: 1.19.1
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Disallow Privileged Containers in ValidatingPolicy
+  labels:
+    app.kubernetes.io/managed-by: konstapel
+    compliance.erenius.io/binding-uid: uid-deny-production
+    compliance.erenius.io/policy-hash: ee99f03214bb69c15e4845c5af409ef4278477dc
+  name: konstapel-disallow-privileged-containers-835a035b40c0af8f
+  ownerReferences:
+  - apiVersion: compliance.erenius.io/v1alpha1
+    controller: true
+    kind: ComplianceBinding
+    name: deny-production
+    uid: uid-deny-production
+spec:
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        environment: production
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - replicationcontrollers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+      - replicasets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - UPDATE
+      resources:
+      - pods/ephemeralcontainers
+  validationActions:
+  - Deny
+  validations:
+  - expression: variables.allContainers.all(container, container.image in exceptions.allowedImages
+      || container.?securityContext.?privileged.orValue(false) == false)
+    message: Privileged mode is disallowed. All containers must set the securityContext.privileged
+      field to `false` or unset the field.
+  variables:
+  - expression: object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))
+    name: podSpec
+  - expression: variables.podSpec.containers + variables.podSpec.?initContainers.orValue([])
+      + variables.podSpec.?ephemeralContainers.orValue([])
+    name: allContainers
