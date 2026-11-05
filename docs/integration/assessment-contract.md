@@ -199,10 +199,25 @@ or outcomes.
 After changing fixture files, regenerate their descriptors with
 `devbox run -- go test ./internal/publication -run TestFixturesRoundTrip -update`.
 
-The assessment-results files are schema-valid OSCAL 1.1.3. Their `import-ap` is
-a `urn:` reference, so they are contract fixtures, not complete OSCAL packages
-that pass reference closure. Producer output from later task groups includes the
-plan, the SSP, and full reference closure.
+These static fixtures are contract fixtures. Their assessment results are
+schema-valid OSCAL 1.1.3, but their `import-ap` is a `urn:` reference, so they
+do not pass full package validation (reference closure).
+
+For a complete package, call
+`publicationtest.FullAssessmentPackage(root, dir, run)` from
+`internal/publication/publicationtest`. It exports the saved prototype capture
+(`testdata/capture.json`) through the prototype's own export path, with no
+plugin or cluster, and writes a descriptor. The result passes
+`assessment.ValidatePackage`:
+
+- OSCAL schemas for the plan, results, and SSP
+- policy provenance and content checksums
+- reference closure through the plan, SSP, and NIST catalog
+
+It is a complete Binding-scope package with failing outcomes. Every reference
+chain ends at the pinned NIST catalog (about 10 MB), so the package is generated
+on demand rather than committed as a second copy. OSCAL UUIDs differ on every
+call, so compare these packages by descriptor, not bytes.
 
 ## Integration sequence
 
