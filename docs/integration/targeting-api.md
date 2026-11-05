@@ -398,7 +398,21 @@ Binding status separates three questions. None of them is a compliance result.
 | --- | --- | --- |
 | Is the configuration resolved? | `Resolved` condition, `status.profile`, `status.targetCount` | `Resolved=True` and its `observedGeneration` equals `metadata.generation` |
 | Is the engine enforcing the current revision? | `EngineReady` condition, `status.configurationRevision` | `EngineReady=True` with the same `observedGeneration` |
-| Is the cluster compliant? | Assessment results, not this status | Never inferred from binding status |
+| Is the evidence for this scope complete? | An assessment run's `evidence.completeness` (`Complete`, `NoTargets` or `Incomplete`) | Decided by the collector, never by binding status ([rules](assessment-contract.md#collector-evidence-rules)) |
+| Is the cluster compliant? | The run's check outcomes, which are kept separate from completeness | Never inferred from binding status or from completeness |
+
+The answers are independent, as `internal/controller/semantics_test.go`
+shows with the collector:
+
+- **Ready but incomplete.** A binding with `Resolved=True` and
+  `EngineReady=True` still yields `Incomplete` evidence until reports for every
+  expected observation are attributable.
+- **Stale scope is incomplete.** A binding whose configuration did not resolve
+  becomes a `StaleScope` in `targeting.ExpectedEvidence`, counted in the run's
+  `staleScopes`. Evidence is then `Incomplete`, never `NoTargets`, even when
+  nothing is expected.
+- **Zero targets is `NoTargets`.** `targetCount: 0` with `EngineReady=True`
+  gives `NoTargets` evidence, never `Complete`.
 
 | `EngineReady` reason | Meaning |
 | --- | --- |
@@ -430,13 +444,15 @@ and rely on assessment evidence, not binding status, for what was evaluated.
 
 ### Troubleshooting
 
+Replace `BINDING` and `POLICY` with real names.
+
 ```sh
 # Scope, readiness and revision per binding
 kubectl get compliancebindings
-kubectl get compliancebinding NAME -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
+kubectl get compliancebinding BINDING -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
 # Engine policies a binding owns, with their revisions
-kubectl get validatingpolicies -l compliance.erenius.io/binding-uid=$(kubectl get compliancebinding NAME -o jsonpath='{.metadata.uid}') \
-  -o custom-columns=NAME:.metadata.name,REVISION:.metadata.annotations.compliance\.erenius\.io/revision
+kubectl get validatingpolicies -l compliance.erenius.io/binding-uid=$(kubectl get compliancebinding BINDING -o jsonpath='{.metadata.uid}') \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.compliance\.erenius\.io/revision}{"\n"}{end}'
 # Kyverno's view of one policy
 kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.conditions}'
 ```

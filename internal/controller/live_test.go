@@ -9,7 +9,9 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -197,6 +199,64 @@ func (l *live) denied(ns string) (bool, string) {
 	return true, err.Error()
 }
 
+// docCommands returns the troubleshooting commands from the targeting guide,
+// with continuation lines joined and comments dropped, so the documented text
+// is what runs.
+func docCommands(t *testing.T) []string {
+	raw, err := os.ReadFile("../../docs/integration/targeting-api.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(raw), "### Troubleshooting\n")
+	_, rest, okFence := strings.Cut(section, "```sh\n")
+	block, _, ok2 := strings.Cut(rest, "```")
+	ok = ok && okFence
+	if !ok || !ok2 {
+		t.Fatal("troubleshooting block not found in docs/integration/targeting-api.md")
+	}
+	var cmds []string
+	cur := ""
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.HasSuffix(line, "\\") {
+			cur += strings.TrimSuffix(line, "\\")
+			continue
+		}
+		cmds = append(cmds, cur+line)
+		cur = ""
+	}
+	return cmds
+}
+
+// runDocCommands runs the documented commands for one binding and policy with
+// the disposable cluster's kubeconfig (whose current context is that cluster).
+func (l *live) runDocCommands(binding, policy string) string {
+	l.t.Helper()
+	var out strings.Builder
+	for _, c := range docCommands(l.t) {
+		c = strings.ReplaceAll(strings.ReplaceAll(c, "BINDING", binding), "POLICY", policy)
+		cmd := exec.CommandContext(l.ctx, "bash", "-c", c)
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"))
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			l.t.Fatalf("documented command failed: %s\n%s", c, b)
+		}
+		fmt.Fprintf(&out, "$ %s\n%s", c, b)
+	}
+	return out.String()
+}
+
+// runDocCommandsQuiet returns the binding's owned policy names via the
+// documented label query, to find the policy argument for the other commands.
+func (l *live) runDocCommandsQuiet(binding string) string {
+	cmd := exec.CommandContext(l.ctx, "bash", "-c", "kubectl get validatingpolicies -l compliance.erenius.io/binding-uid=$(kubectl get compliancebinding "+binding+" -o jsonpath='{.metadata.uid}') -o name")
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"))
+	b, _ := cmd.CombinedOutput()
+	return string(b)
+}
+
 func toJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 func TestLiveManager(t *testing.T) {
@@ -236,6 +296,38 @@ func TestLiveManager(t *testing.T) {
 	before := l.managedPolicies()
 	denyRV, auditRV := l.binding(deny.Name).ResourceVersion, l.binding(audit.Name).ResourceVersion
 	l.record("ready", map[string]any{"policies": len(before)})
+
+	// The documented troubleshooting commands tell resolved scope and engine
+	// readiness apart, for a ready binding and for one whose profile is missing.
+	var denyPolicy string
+	for name := range before {
+		if strings.Contains(l.runDocCommandsQuiet(deny.Name), name) {
+			denyPolicy = name
+		}
+	}
+	readyOut := l.runDocCommands(deny.Name, denyPolicy)
+	for _, want := range []string{"Resolved=True Resolved", "EngineReady=True Ready", "not a compliance result", denyPolicy, "sha256:", "WebhookConfigured"} {
+		if !strings.Contains(readyOut, want) {
+			t.Fatalf("documented commands for a ready binding lack %q:\n%s", want, readyOut)
+		}
+	}
+	orphan := bindingObj("manager-orphan", "absent-profile", v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{envLabel: "production"})
+	orphan.SetUID("")
+	orphan.SetGeneration(0)
+	if err := l.c.Create(l.ctx, orphan); err != nil {
+		t.Fatal(err)
+	}
+	var orphanOut string
+	l.eventually("orphan status", func() (bool, string) {
+		orphanOut = l.runDocCommands(orphan.Name, denyPolicy)
+		return strings.Contains(orphanOut, "Resolved=False ProfileNotFound") && strings.Contains(orphanOut, "EngineReady=False StaleRevision"), orphanOut
+	})
+	_ = os.WriteFile(filepath.Join(l.out, "documented-commands.txt"), []byte(readyOut+"\n"+orphanOut), 0o644)
+	if err := l.c.Delete(l.ctx, l.binding(orphan.Name)); err != nil {
+		t.Fatal(err)
+	}
+	l.record("documented-commands", map[string]any{"ready": deny.Name, "stale": orphan.Name, "policy": denyPolicy})
+	denyRV = l.binding(deny.Name).ResourceVersion
 
 	// 2. A restart re-lists everything and writes nothing.
 	stop()

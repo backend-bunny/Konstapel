@@ -42,7 +42,7 @@ the bundle agent owns new content. Do not rewrite the assessment-loop task list.
 - [x] 4.1 Add the controller-runtime manager in the existing module, profile/binding/Namespace watches, reference indexes, and owned-resource watches; verify reconciliation is idempotent and creation, deletion, updates, and restart re-listing converge without unrelated policy writes.
 - [x] 4.2 Implement bounded status with observed generations, resolved content revisions, target counts, errors, and separate engine Conditions; verify missing references, stale generations, replacement failures, and zero targets cannot appear as current ready/compliant enforcement.
 - [x] 4.3 Feed resolved contributions and namespace identities into expected-evidence inventory and provenance through the existing assessment boundary; verify overlapping instances retain distinct configuration context without multiplying control coverage and replaced namespace UIDs do not reuse old subjects.
-- [ ] 4.4 Document deployment/RBAC, status interpretation, engine exclusions, and troubleshooting; verify the documented commands distinguish resolved scope, engine readiness, and assessment completeness on saved fixtures and the disposable cluster.
+- [x] 4.4 Document deployment/RBAC, status interpretation, engine exclusions, and troubleshooting; verify the documented commands distinguish resolved scope, engine readiness, and assessment completeness on saved fixtures and the disposable cluster.
 
 ## 5. Verify integrated controller behavior
 
