@@ -3,3 +3,11 @@
 /tools/
 /.tools/
 __pycache__/
+/.devbox/
+/.direnv/
+/.task/
+/.venv/
+/.cache/
+/packages/
+/out/
+/melange-out/

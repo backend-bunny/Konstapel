@@ -1,0 +1,36 @@
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+    - "@local ./packages"
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - konstapel@local
+    - ca-certificates-bundle
+    # The prototype uses kubectl for its explicit cluster target.
+    - kubectl
+
+annotations:
+  org.opencontainers.image.title: Konstapel
+  org.opencontainers.image.description: "NIST SP 800-53 compliance assessment with Kyverno and OSCAL Compass C2P"
+  org.opencontainers.image.licenses: Apache-2.0
+  org.opencontainers.image.vendor: backend-bunny
+  org.opencontainers.image.url: https://github.com/backend-bunny/Konstapel
+  org.opencontainers.image.documentation: https://github.com/backend-bunny/Konstapel/blob/main/docs/images.md
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      homedir: /home/nonroot
+  run-as: 65532
+
+work-dir: /usr/share/konstapel
+entrypoint:
+  command: /usr/bin/konstapel
+archs:
+  - x86_64

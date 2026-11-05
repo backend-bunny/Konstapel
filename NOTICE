@@ -1,0 +1,14 @@
+Konstapel
+Copyright 2026 Konstapel contributors
+
+Image build tooling includes code adapted from these Apache-2.0 projects:
+  https://github.com/backend-bunny/talos-nyckelpiga
+  https://github.com/backend-bunny/container-dropshipping
+See docs/images.md for the source revisions and adapted files.
+
+This project includes Kyverno policy content and NIST OSCAL content.
+Their original license files and provenance are retained under content/.
+Go dependencies retain their own licenses and applicable notices; image
+builds collect those texts alongside the runtime package license notices.
+
+This notice is informational and does not change any applicable license.

@@ -1,0 +1,68 @@
+name: publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publish-konstapel
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/backend-bunny/konstapel
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+        with:
+          image: 'true'
+      - run: devbox run -- task check
+      - run: devbox run -- task image:build
+      - run: devbox run -- task image:test
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish tested packages
+        id: publish
+        run: |
+          devbox run -- scripts/image/publish.sh
+          echo "digest=$(cat out/image/digest)" >> "$GITHUB_OUTPUT"
+      - name: Sign and attest SBOMs, sources and license notices
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          devbox run -- cosign sign --yes "$IMAGE@$DIGEST"
+          devbox run -- cosign attest --yes --type spdxjson --predicate out/image/sbom-x86_64.spdx.json "$IMAGE@$DIGEST"
+          devbox run -- cosign attest --yes --type spdxjson --predicate out/image/sbom-complete.spdx.json "$IMAGE@$DIGEST"
+          devbox run -- cosign attest --yes --type https://github.com/backend-bunny/Konstapel/sources/v1 --predicate out/image/sources.json "$IMAGE@$DIGEST"
+          devbox run -- cosign attest --yes --type https://github.com/backend-bunny/Konstapel/notices/v1 --predicate out/image/notices.json "$IMAGE@$DIGEST"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+      - name: Verify published signature and attestations
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          identity='https://github.com/backend-bunny/Konstapel/.github/workflows/publish.yml@refs/heads/main'
+          devbox run -- cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST"
+          for type in spdxjson https://github.com/backend-bunny/Konstapel/sources/v1 https://github.com/backend-bunny/Konstapel/notices/v1; do
+            devbox run -- cosign verify-attestation --type "$type" --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST"
+          done
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo backend-bunny/Konstapel
+          printf 'Published and verified `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"

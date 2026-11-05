@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/runtime.env
 command=${1:?usage: environment.sh create|smoke|delete KUBECONFIG OUTPUT}
 kubeconfig=${2:?explicit kubeconfig path required}
 out=${3:?output directory required}
@@ -14,10 +15,8 @@ create)
   if kind get clusters 2>/dev/null | rg -qx "$name"; then
     echo "Refusing to reuse or delete existing cluster $name" >&2; exit 1
   fi
-  chart=tools/kyverno-3.9.2.tgz
-  if [[ ! -f $chart ]]; then curl -fLsS https://kyverno.github.io/kyverno/kyverno-3.9.2.tgz -o "$chart"; fi
-  echo "f6fe7184544d5e2ee33a77808c09e67aa603ce6560cc197038fde31d727c861e  $chart" | sha256sum -c -
-  kind create cluster --name "$name" --kubeconfig "$kubeconfig" --image kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5 --wait 120s
+  chart=$(scripts/fetch-chart.sh)
+  kind create cluster --name "$name" --kubeconfig "$kubeconfig" --image "$KONSTAPEL_NODE_IMAGE" --wait 120s
   "${k[@]}" get namespace kube-system -o jsonpath='{.metadata.uid}' > "$out/cluster-uid"
   # This kubeconfig file belongs only to this disposable cluster; never edit the ambient config.
   helm upgrade --install kyverno "$chart" --kubeconfig "$kubeconfig" --kube-context "$context" -n kyverno --create-namespace --set features.backgroundScan.backgroundScanInterval=15s --set features.logging.verbosity=0 --set features.policyExceptions.enabled=true --set features.policyExceptions.namespace=policy-exceptions --wait --timeout 10m > "$out/helm-install.log" 2>&1

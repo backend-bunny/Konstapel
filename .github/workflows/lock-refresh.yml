@@ -1,0 +1,49 @@
+name: lock-refresh
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-lock-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+        with:
+          image: 'true'
+      - name: Refresh and test runtime dependencies
+        run: |
+          cp apko.lock.json "$RUNNER_TEMP/apko-before.json"
+          devbox run -- task image:lock
+          devbox run -- task image:test
+          printf 'Refresh the locked Wolfi runtime packages. The refreshed image passed local smoke tests; merging publishes the updated image.\n\n' > "$RUNNER_TEMP/lock-body.md"
+          devbox run -- python3 scripts/image/lockfile.py diff "$RUNNER_TEMP/apko-before.json" apko.lock.json >> "$RUNNER_TEMP/lock-body.md"
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        id: pr
+        with:
+          branch: chore/image-lock-refresh
+          add-paths: apko.lock.json
+          commit-message: 'build(deps): refresh image runtime lock'
+          title: 'build(deps): refresh image runtime lock'
+          body-path: ${{ runner.temp }}/lock-body.md
+          delete-branch: true
+      # GITHUB_TOKEN pushes don't trigger pull_request workflows.
+      - name: Run checks on the refresh PR
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run test.yml --repo "$GITHUB_REPOSITORY" --ref chore/image-lock-refresh
+          gh workflow run image.yml --repo "$GITHUB_REPOSITORY" --ref chore/image-lock-refresh

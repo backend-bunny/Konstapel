@@ -1,0 +1,173 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":dependencyDashboard"
+  ],
+  "enabledManagers": [
+    "gomod",
+    "devbox",
+    "github-actions",
+    "custom.regex"
+  ],
+  "ignorePaths": [
+    "content/**",
+    "docs/**",
+    "openspec/**"
+  ],
+  "semanticCommits": "enabled",
+  "automerge": false,
+  "timezone": "Europe/Stockholm",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep the Kyverno chart version and archive checksum together",
+      "managerFilePatterns": [
+        "/^scripts/runtime\\.env$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=helm depName=(?<depName>\\S+) registryUrl=(?<registryUrl>\\S+)\\nKONSTAPEL_KYVERNO_CHART_VERSION=(?<currentValue>\\S+)\\nKONSTAPEL_KYVERNO_CHART_SHA256=(?<currentDigest>[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "helm",
+      "versioningTemplate": "helm"
+    },
+    {
+      "customType": "regex",
+      "description": "Digest-pinned disposable cluster and workload images",
+      "managerFilePatterns": [
+        "/^scripts/runtime\\.env$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=docker\\nKONSTAPEL_[A-Z_]+_IMAGE=(?<depName>[^\\s@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the Devbox schema and CI installer version together",
+      "managerFilePatterns": [
+        "/^devbox\\.json$/",
+        "/^\\.github/actions/setup-tools/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "jetify-com/devbox/(?<currentValue>\\d+\\.\\d+\\.\\d+)/\\.schema/",
+        "devbox-version:\\s*['\"](?<currentValue>\\d+\\.\\d+\\.\\d+)['\"]"
+      ],
+      "depNameTemplate": "jetify-com/devbox",
+      "datasourceTemplate": "github-tags"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "Go modules",
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": [
+        "devbox"
+      ],
+      "groupName": "development tools",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": [
+        "devbox"
+      ],
+      "matchDepNames": [
+        "bashInteractive"
+      ],
+      "description": "Renovate's Devbox manager rejects Bash patch-level versions during extraction; update this pin and lock manually",
+      "enabled": false
+    },
+    {
+      "matchManagers": [
+        "gomod",
+        "devbox"
+      ],
+      "matchDepNames": [
+        "go",
+        "golang"
+      ],
+      "groupName": "Go toolchain",
+      "rangeStrategy": "bump",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/oscal-compass/compliance-to-policy-go/v2"
+      ],
+      "groupName": "C2P integration",
+      "dependencyDashboardApproval": true
+    },
+    {
+      "matchDepNames": [
+        "kyverno"
+      ],
+      "matchManagers": [
+        "devbox",
+        "custom.regex"
+      ],
+      "groupName": "Kyverno runtime",
+      "dependencyDashboardApproval": true,
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchDepNames": [
+        "kind",
+        "kubectl",
+        "kubernetes-helm",
+        "kyverno-chainsaw",
+        "kindest/node",
+        "docker.io/library/busybox"
+      ],
+      "matchManagers": [
+        "devbox",
+        "custom.regex"
+      ],
+      "groupName": "Kubernetes test environment",
+      "dependencyDashboardApproval": true,
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchDepNames": [
+        "jetify-com/devbox"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "groupName": "Devbox",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions",
+      "semanticCommitType": "ci",
+      "semanticCommitScope": "deps"
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 6am on monday"
+    ]
+  }
+}

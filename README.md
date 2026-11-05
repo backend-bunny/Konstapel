@@ -21,6 +21,10 @@ validated OSCAL export. A production controller is not yet implemented.
 
 ## Documentation
 
+- [Development](docs/development.md): Devbox/direnv setup, Task commands, CI,
+  and dependency updates with Renovate.
+- [Images](docs/images.md): melange/apko builds, SBOMs, signatures, provenance,
+  and license notices.
 - [Vision](vision.md): purpose, principles, and what success looks like.
 - [Architecture](ARCHITECTURE.md): components, reconciliation flow, C2P-Go v2
   integration, and open design decisions.
@@ -31,3 +35,18 @@ The Go prototype delivers the shipped Kyverno v1 privileged-container check and
 exports bounded AC-6 evidence through C2P v2. See the
 [setup, acceptance and evidence guide](docs/integration/assessment-loop.md) and
 [recorded validation results](docs/integration/validation-results.md).
+
+## Development quick start
+
+```sh
+devbox install
+direnv allow
+task check
+```
+
+With direnv's shell hook installed, `.envrc` activates the pinned Devbox tools.
+Alternatively run `devbox run -- task check` without direnv. Use `task --list`
+to discover the build, test, policy, and disposable-cluster acceptance commands.
+
+Konstapel's own code is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
+for attribution; bundled content and dependencies retain their own licenses.

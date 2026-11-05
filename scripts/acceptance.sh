@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/runtime.env
 out=${1:?usage: scripts/acceptance.sh ABSOLUTE_OUTPUT_DIRECTORY}
 out=$(realpath -m "$out")
 if [[ -e $out ]]; then echo 'Acceptance output must be a fresh directory' >&2; exit 1; fi
@@ -31,7 +32,7 @@ scripts/environment.sh create "$kubeconfig" "$out/environment"
 # Upstream Chainsaw fixtures remain unmodified in content. Apply only an image
 # overlay in the disposable test copy because the upstream busybox failed startup.
 cp -a content/upstream/kyverno/disallow-privileged-containers "$out/chainsaw-policy"
-find "$out/chainsaw-policy" -type f -name '*.yaml' -exec sed -i 's|ghcr.io/kyverno/test-busybox:1.35|docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec|g' {} +
+find "$out/chainsaw-policy" -type f -name '*.yaml' -exec sed -i "s|ghcr.io/kyverno/test-busybox:1.35|$KONSTAPEL_WORKLOAD_IMAGE|g" {} +
 KUBECONFIG="$kubeconfig" chainsaw test --kube-context "$context" --exec-timeout 180s --apply-timeout 30s --assert-timeout 120s --cleanup-timeout 60s --test-dir "$out/chainsaw-policy/.chainsaw-test" > "$out/chainsaw.log" 2>&1
 # Re-run schema and reference validation from the saved evidence, without cluster access.
 ./bin/konstapel convert --capture "$out/package/capture.json" --output "$out/reconverted" > "$out/reconvert.log" 2>&1

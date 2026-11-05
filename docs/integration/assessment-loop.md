@@ -8,37 +8,34 @@ are outside this change.
 
 ## Prerequisites and pinned inputs
 
-Use Linux amd64, Go 1.25.7, Docker with a running daemon, kind 0.33.0,
-Helm 4.3.1, kubectl 1.37.2, jq, curl, rg, sha256sum, and Chainsaw 0.2.15.
-[versions.json](versions.json) records the C2P pseudo-version/revision,
+Use Linux amd64 and the [Devbox environment](../development.md), activated by
+direnv or `devbox shell`. Docker with a running daemon is required for live tests.
+Current tool versions are pinned in `devbox.json`/`devbox.lock`; current chart and
+test-image pins live in `scripts/runtime.env`.
+[versions.json](versions.json) records the original C2P pseudo-version/revision,
 Kubernetes 1.36.1 node digest, Kyverno/CLI 1.19.2, chart 3.9.2 and checksum,
 and the generated/source OSCAL versions. [runtime-images.json](runtime-images.json)
-records observed Kyverno image digests from environment setup. The chart version
-and digest are fixed; runtime image versions are supplied by that chart, and
-the acceptance package records resolved image IDs for comparison with this file.
+records observed Kyverno image digests from the original environment setup. The
+current chart version and digest are fixed in `scripts/runtime.env`; runtime image
+versions are supplied by that chart, and the acceptance package records resolved
+image IDs for comparison with this file.
 Go dependencies are pinned by go.mod/go.sum; no C2P internal packages or legacy
 policy objects are used.
 
 Build and run the offline checks from the repository root:
 
 ```sh
-scripts/build.sh
-go test ./...
-go vet ./...
-sha256sum -c content/SHA256SUMS
+devbox run -- task check
 ```
 
-Download the matching CLI and check the archive bytes before extraction:
+The matching Kyverno CLI is included in the Devbox lock. Run its fixtures alone:
 
 ```sh
-mkdir -p tools
-curl -fLsS https://github.com/kyverno/kyverno/releases/download/v1.19.2/kyverno-cli_v1.19.2_linux_x86_64.tar.gz -o tools/kyverno-cli.tar.gz
-echo '357eaf1df8bc24ddd5a73979fadeaae6a032e8710f11af264229756e4956bf4a  tools/kyverno-cli.tar.gz' | sha256sum -c -
-tar -xzf tools/kyverno-cli.tar.gz -C tools
-tools/kyverno test content/upstream/kyverno/disallow-privileged-containers --require-tests --remove-color
+devbox run -- task policies:test
 ```
 
-No release signature verification is implied by the recorded checksum.
+The chart archive is checksum-verified by `scripts/fetch-chart.sh`. No release
+signature verification is implied by a recorded checksum or the Devbox lock.
 
 ## Disposable environment and full acceptance
 
@@ -52,8 +49,8 @@ it created. It does not alter the ambient kubeconfig. Never point it at producti
 Its output directory must be new; choose an absolute path:
 
 ```sh
-scripts/acceptance.sh /tmp/konstapel-acceptance-1
-scripts/acceptance.sh /tmp/konstapel-acceptance-2
+task acceptance OUTPUT=/tmp/konstapel-acceptance-1
+task acceptance OUTPUT=/tmp/konstapel-acceptance-2
 ```
 
 Both runs start from a clean disposable environment. Read `result.txt`,
@@ -93,7 +90,7 @@ for compliant fixtures. Rejected creates are not in the expected-report inventor
 
 Acceptance then runs the upstream Chainsaw suite on a disposable copy. The sole
 fixture overlay replaces `ghcr.io/kyverno/test-busybox:1.35` with the digest-pinned
-BusyBox image in versions.json: the upstream image returned `exec format error`
+BusyBox image in `scripts/runtime.env`: the upstream image returned `exec format error`
 in the initial local test. Vendored originals, including their tests, stay
 unchanged. Chainsaw exercises controller/init/ephemeral behavior and a scoped
 image exception with sibling rejection. These cluster-wide fixtures and their
