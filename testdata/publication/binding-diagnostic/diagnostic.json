@@ -1,0 +1,12 @@
+{
+  "reason": "ExportFailed",
+  "missingExports": [
+    "oscal-assessment-results"
+  ],
+  "detail": "component-definition mapping digest did not match the enforcement revision; OSCAL export was not attempted",
+  "evidence": {
+    "expected": 4,
+    "attributable": 2,
+    "unresolved": 2
+  }
+}

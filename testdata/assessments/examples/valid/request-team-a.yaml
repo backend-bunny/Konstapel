@@ -1,0 +1,8 @@
+# An application team asks for an assessment of its own namespace.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentRequest
+metadata:
+  name: nightly-check
+  namespace: team-a
+spec:
+  bindingRef: {name: baseline-audit}

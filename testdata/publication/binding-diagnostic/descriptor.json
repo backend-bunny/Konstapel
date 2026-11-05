@@ -1,0 +1,78 @@
+{
+  "apiVersion": "compliance.erenius.io/v1alpha1",
+  "kind": "PackageDescriptor",
+  "run": {
+    "clusterID": "kube-system:fixture-cluster",
+    "bindingUID": "binding-uid-1",
+    "runUID": "run-uid-binding-diagnostic"
+  },
+  "packageKind": "Diagnostic",
+  "scope": {
+    "kind": "Binding",
+    "clusterID": "kube-system:fixture-cluster",
+    "bindingUID": "binding-uid-1",
+    "namespaceUIDs": [
+      "ns-uid-team-a",
+      "ns-uid-team-b"
+    ],
+    "revision": "scope-rev-1"
+  },
+  "scopeSha256": "472175bd80b0e17cb6429070f1e21cdc40e884c2a153cf7204d4949a7c897375",
+  "revisions": {
+    "bindingConfiguration": "binding-config-3",
+    "enforcement": [
+      "enf-binding-uid-1-e2-0f1e2d3c"
+    ],
+    "mappingSha256": "abababababababababababababababababababababababababababababababab"
+  },
+  "window": {
+    "started": "2026-11-05T10:00:00Z",
+    "closed": "2026-11-05T10:04:30Z"
+  },
+  "evidence": {
+    "completeness": "Incomplete",
+    "expected": 4,
+    "attributable": 2,
+    "missing": 0,
+    "rejected": 0,
+    "unresolved": 2
+  },
+  "outcomes": {
+    "pass": 1,
+    "fail": 1,
+    "error": 0,
+    "skip": 0,
+    "acceptedRisk": 0,
+    "notApplicable": 0,
+    "unknown": 0
+  },
+  "diagnostic": {
+    "reason": "ExportFailed",
+    "missingExports": [
+      "oscal-assessment-results"
+    ],
+    "message": "mapping digest did not match the enforcement revision"
+  },
+  "producer": {
+    "name": "konstapel-controller",
+    "version": "fixture",
+    "validatedAt": "2026-11-05T10:04:30Z",
+    "checks": [
+      "scope-projection"
+    ]
+  },
+  "files": [
+    {
+      "path": "diagnostic.json",
+      "role": "diagnostic",
+      "sha256": "233320be6f819e0e29f0e22b8e50fe122ad1df2bb8806acacb992a154978309f",
+      "size": 294
+    },
+    {
+      "path": "summary.json",
+      "role": "summary",
+      "sha256": "0777b899f69f19b3857dbfed302a83737a947c9c35b6ab858ed213eae5641af1",
+      "size": 209
+    }
+  ]
+}

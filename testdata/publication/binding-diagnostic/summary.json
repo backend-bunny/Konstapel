@@ -1,0 +1,13 @@
+{
+  "scope": "Binding",
+  "namespaces": 2,
+  "completeness": "Incomplete",
+  "expected": 4,
+  "attributable": 2,
+  "unresolved": 2,
+  "outcomes": {
+    "pass": 1,
+    "fail": 1
+  },
+  "export": "Diagnostic"
+}
