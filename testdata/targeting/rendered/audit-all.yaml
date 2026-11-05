@@ -3,7 +3,6 @@ kind: ValidatingPolicy
 metadata:
   annotations:
     compliance.erenius.io/binding: audit-all
-    compliance.erenius.io/binding-generation: "1"
     compliance.erenius.io/bundle: konstapel-vendored
     compliance.erenius.io/bundle-digest: sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2
     compliance.erenius.io/cluster: kube-system:fixture

@@ -251,10 +251,11 @@ Konstapel owns:
 - Labels: `app.kubernetes.io/managed-by: konstapel`,
   `compliance.erenius.io/binding-uid`, and `compliance.erenius.io/policy-hash`
   (a hash, because policy names can exceed label limits).
-- Annotations under `compliance.erenius.io/`: revision, policy, binding and
-  generation, profile name, UID and generation, bundle name and digest,
-  configuration digest, source file digest, cluster and mode. The source's own
-  annotations are kept.
+- Annotations under `compliance.erenius.io/`: revision, policy, binding name,
+  profile name, UID and generation, bundle name and digest, configuration
+  digest, source file digest, cluster and mode. The source's own annotations
+  are kept. There is no binding generation: reporting-only edits such as
+  `spec.assessment` advance it, and must not write to engine policies.
 - A controller owner reference to the ComplianceBinding.
 - `spec.validationActions: [<mode>]`, `spec.evaluation.background.enabled: true`,
   and `spec.matchConstraints.namespaceSelector` set from the binding.
