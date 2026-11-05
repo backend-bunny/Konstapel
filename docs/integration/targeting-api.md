@@ -9,9 +9,10 @@ cluster-scoped resources in `compliance.erenius.io/v1alpha1`:
 - **ComplianceBinding** applies one profile to the namespaces its selector
   matches, in `Audit` or `Deny` mode.
 
-This is an alpha API. The schema, validation, RBAC, shared contract, pure
-resolver and engine delivery library exist; the controller that runs them comes
-in a later task group of `add-compliance-targeting-api`. Applying these CRDs does not enforce anything
+This is an alpha API. The schema, validation, RBAC, shared contract, resolver,
+engine delivery and the controller (`konstapel controller`) exist. Packaging
+the controller as a Helm chart is owned by `add-helm-oci-distribution`; feeding
+resolved scope into assessment evidence follows in this change. Applying these CRDs does not enforce anything
 yet. The capability spec is
 [compliance-targeting](../../openspec/changes/add-compliance-targeting-api/specs/compliance-targeting/spec.md).
 
@@ -332,6 +333,142 @@ labelled `konstapel.io/owner`) has no Konstapel controller reference, and its
 name cannot collide with a rendered name. Delivery never adopts or removes it.
 Remove it through the prototype's own workflow.
 
+## Controller
+
+`konstapel controller` runs the targeting manager from the existing image
+(`/usr/bin/konstapel controller`). It uses in-cluster configuration, or
+`KUBECONFIG` when run outside a cluster.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--content-root` | `/usr/share/konstapel/content` | Vendored content, served as bundle `konstapel-vendored`. |
+| `--health-probe-bind-address` | `:8081` | `/healthz` and `/readyz`. They report process health only, never engine readiness or compliance. |
+| `--metrics-bind-address` | `0` (off) | controller-runtime metrics. |
+| `--leader-elect` | `true` | Lease `konstapel-targeting.compliance.erenius.io` in the pod namespace. |
+| `--leader-election-namespace` | `$POD_NAMESPACE` | Namespace of the Lease. |
+
+Profiles pin the vendored content as bundle `konstapel-vendored` at
+`sha256:` plus the sha256 of the shipped `content/SHA256SUMS`:
+
+```sh
+echo "sha256:$(sha256sum content/SHA256SUMS | cut -d' ' -f1)"
+```
+
+### Deployment and RBAC
+
+Install the CRDs from `config/crd/bases/` first. The controller runs as service
+account `konstapel-controller` in `konstapel-system`. That name is shared with
+`add-continuous-assessments`, whose run-scope admission policy trusts it.
+`config/rbac/controller/role.yaml` is generated from the reconcilers' markers
+(`scripts/generate.sh`) and contains:
+
+- ClusterRole `konstapel-controller`: read profiles, bindings and namespaces;
+  write only their `status`; manage `policies.kyverno.io` ValidatingPolicies.
+- Role `konstapel-controller` in `konstapel-system`: leader-election Leases and
+  events.
+
+Bind both to the service account. The controller cannot create or change
+profiles or bindings; `api/v1alpha1/rbac_test.go` enforces that for every role
+under `config/rbac/`.
+
+### What it watches
+
+- **ComplianceBinding** (spec changes) and **ComplianceProfile** (spec changes,
+  mapped to referencing bindings through a `spec.profileRef.name` index).
+- **Namespace** label changes, creation and deletion. Only bindings whose
+  selector matches the old or new labels are reconciled, and only their status
+  changes: selectors are rendered into the policy, never expanded into names.
+- **Owned ValidatingPolicies**, once discovery finds
+  `policies.kyverno.io/v1 validatingpolicies`. The manager starts without
+  Kyverno; until the API is served, bindings report `EngineUnavailable` and
+  are retried every 5 seconds. Delivery reads engine policies uncached, so no
+  Kyverno informer is needed. `add-helm-oci-distribution`'s capability monitor
+  will also cover Kyverno being removed and later reinstalled.
+
+Deleting a binding needs no finalizer: its policies, including superseded
+revisions, carry a controller owner reference, and Kubernetes garbage
+collection removes them. A restart re-lists everything; when nothing changed it
+writes neither policies nor status.
+
+### Reading status
+
+Binding status separates three questions. None of them is a compliance result.
+
+| Question | Where | Current only when |
+| --- | --- | --- |
+| Is the configuration resolved? | `Resolved` condition, `status.profile`, `status.targetCount` | `Resolved=True` and its `observedGeneration` equals `metadata.generation` |
+| Is the engine enforcing the current revision? | `EngineReady` condition, `status.configurationRevision` | `EngineReady=True` with the same `observedGeneration` |
+| Is the evidence for this scope complete? | An assessment run's `evidence.completeness` (`Complete`, `NoTargets` or `Incomplete`) | Decided by the collector, never by binding status ([rules](assessment-contract.md#collector-evidence-rules)) |
+| Is the cluster compliant? | The run's check outcomes, which are kept separate from completeness | Never inferred from binding status or from completeness |
+
+The answers are independent, as `internal/controller/semantics_test.go`
+shows with the collector:
+
+- **Ready but incomplete.** A binding with `Resolved=True` and
+  `EngineReady=True` still yields `Incomplete` evidence until reports for every
+  expected observation are attributable.
+- **Stale scope is incomplete.** A binding whose configuration did not resolve
+  becomes a `StaleScope` in `targeting.ExpectedEvidence`, counted in the run's
+  `staleScopes`. Evidence is then `Incomplete`, never `NoTargets`, even when
+  nothing is expected.
+- **Zero targets is `NoTargets`.** `targetCount: 0` with `EngineReady=True`
+  gives `NoTargets` evidence, never `Complete`.
+
+| `EngineReady` reason | Meaning |
+| --- | --- |
+| `Ready` | Every desired policy exists at the current revision and Kyverno reports it ready. The message says this is not a compliance result. |
+| `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. Retried every 5 seconds. |
+| `StaleRevision` | Configuration did not resolve (see `Resolved`). The last applied policies, if any, stay in force and are named in the message. |
+| `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched. |
+| `EngineUnavailable` | The ValidatingPolicy API is not served, or discovery failed. Nothing is changed. |
+| `NoContributions` | The binding resolved to no deliverable policies. |
+
+`status.targetCount` is absent until the first reconcile. `0` means no namespace
+currently matches, while the policies stay installed for namespaces created
+later. `status.configurationRevision` is the revision when there is one
+contribution, otherwise a digest of all contribution revisions. Messages are
+capped at 1024 bytes.
+
+Profile status has one `Resolved` condition: `ContentUnavailable`,
+`UnknownPolicy`, `UnsupportedScope`, or `Resolved`.
+
+### Engine exclusions
+
+Konstapel adds no namespace exclusions: `namespaceSelector: {}` includes
+`kube-system` and the controller's own namespace. Kyverno's own configuration
+can still exempt resources, for example through its webhook
+`namespaceSelector`, resource filters or excluded groups. Konstapel does not
+detect those, so an excluded namespace can be a target in status while Kyverno
+never evaluates it. Review the engine's exclusions when you choose selectors,
+and rely on assessment evidence, not binding status, for what was evaluated.
+
+### Troubleshooting
+
+Replace `BINDING` and `POLICY` with real names.
+
+```sh
+# Scope, readiness and revision per binding
+kubectl get compliancebindings
+kubectl get compliancebinding BINDING -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
+# Engine policies a binding owns, with their revisions
+kubectl get validatingpolicies -l compliance.erenius.io/binding-uid=$(kubectl get compliancebinding BINDING -o jsonpath='{.metadata.uid}') \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.compliance\.erenius\.io/revision}{"\n"}{end}'
+# Kyverno's view of one policy
+kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.conditions}'
+```
+
+- `Resolved=False`: the reason is `ProfileNotFound`, `ContentUnavailable`,
+  `UnknownPolicy`, `UnsupportedScope`, `InvalidConfiguration` or
+  `InvalidSelector`. Fix the profile or binding; the previous enforcement stays
+  in force meanwhile.
+- `EngineReady=False, ReplacementPending` for a long time: check Kyverno's
+  conditions on the new policy (`RBACPermissionsGranted`, `WebhookConfigured`)
+  and the Kyverno admission controller logs.
+- `OwnershipConflict`: the named resource was not created by this binding.
+  Remove or rename it deliberately; Konstapel never adopts it.
+- `EngineUnavailable`: install Kyverno 1.19 with the `policies.kyverno.io/v1`
+  API, or check the controller's discovery permissions.
+
 ## Downstream contract
 
 Other changes consume these files but do not edit them:
@@ -339,8 +476,42 @@ Other changes consume these files but do not edit them:
 | Consumer | Uses |
 | --- | --- |
 | `add-self-service-policy-exceptions` | `targeting.Eligibility` (effective eligibility, shortest lifetime, contributor revisions) and `Contribution.Revision`. An acceptance is scoped to a revision and is never reused across revisions. |
-| `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`. |
+| `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`, and consumes `targeting.ExpectedEvidence`. |
 | `add-linux-workload-hardening-bundle` | Bundle policy metadata (logical name and resource scope) that the resolver reads. |
+
+### Expected evidence
+
+`targeting.ExpectedEvidence(result, content)` turns a resolver `Result` into the
+expected-evidence subjects that `add-continuous-assessments`' collector
+consumes. That change owns everything inside `internal/assessment`. There is
+one `EvidenceSubject` per namespace UID × contribution, carrying:
+
+- cluster, namespace name and UID, binding name and UID;
+- `revision` (the contribution's `EnforcementRevision`) and `enginePolicy`
+  (the rendered name);
+- logical policy, mode, matched `resources` as `group/version/resource`;
+- profile name, UID and generation, and bundle, configuration and source digests.
+
+The rules:
+
+- **Keyed by namespace UID.** A recreated namespace is a new subject; old
+  subjects are never reused.
+- **Overlaps stay separate.** Overlapping bindings produce separate subjects with
+  distinct revisions and engine policies. The collector must not count them as
+  independent control coverage.
+- **Checks are not enumerated here.** `checks` is empty for the vendored
+  policy, whose validations are unnamed; the collector enumerates them from the
+  rendered policy.
+- **Stale scope is reported.** Bindings or policies that did not resolve are
+  returned as `StaleScope` entries with their reason. Their last applied
+  policies may still be enforcing, so the collector records a limitation rather
+  than a silent gap.
+- **Missing content is an error.** A contribution whose bundle digest has no
+  content fails instead of guessing.
+
+Subjects are sorted by namespace UID, binding UID, logical policy and revision.
+The output is pinned by `testdata/targeting/contract/evidence.json`; changing it
+requires bumping `targeting.ContractVersion`.
 
 `targeting.EnforcementRevision` is the only place revisions are calculated. Its
 binding-side input is the single `BindingEpoch` value. Today that is the

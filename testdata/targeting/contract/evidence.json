@@ -1,0 +1,106 @@
+{
+  "contractVersion": 1,
+  "stale": [
+    {
+      "binding": {
+        "name": "dangling",
+        "uid": "uid-dangling",
+        "generation": 1
+      },
+      "reason": "ProfileNotFound",
+      "message": "ComplianceProfile \"absent\" not found"
+    }
+  ],
+  "subjects": [
+    {
+      "cluster": "kube-system:fixture",
+      "namespace": "shop-dev",
+      "namespaceUID": "uid-shop-dev",
+      "bindingName": "audit-all",
+      "bindingUID": "uid-audit-all",
+      "revision": "sha256:23076bca9032f27d4623c9a89fafa6b33acc66ae432e7ac97da3218d9a6e730d",
+      "enginePolicy": "konstapel-disallow-privileged-containers-c07ae34193f1d3c1",
+      "logicalPolicy": "disallow-privileged-containers",
+      "mode": "Audit",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "baseline",
+      "profileUID": "uid-baseline",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2",
+      "configurationDigest": "sha256:ea47d8a6f23e50ae6b15cad4609f8084484f783afae792d25a79569e049a91ed",
+      "sourceDigest": "sha256:6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e"
+    },
+    {
+      "cluster": "kube-system:fixture",
+      "namespace": "shop-prod",
+      "namespaceUID": "uid-shop-prod",
+      "bindingName": "audit-all",
+      "bindingUID": "uid-audit-all",
+      "revision": "sha256:23076bca9032f27d4623c9a89fafa6b33acc66ae432e7ac97da3218d9a6e730d",
+      "enginePolicy": "konstapel-disallow-privileged-containers-c07ae34193f1d3c1",
+      "logicalPolicy": "disallow-privileged-containers",
+      "mode": "Audit",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "baseline",
+      "profileUID": "uid-baseline",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2",
+      "configurationDigest": "sha256:ea47d8a6f23e50ae6b15cad4609f8084484f783afae792d25a79569e049a91ed",
+      "sourceDigest": "sha256:6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e"
+    },
+    {
+      "cluster": "kube-system:fixture",
+      "namespace": "shop-prod",
+      "namespaceUID": "uid-shop-prod",
+      "bindingName": "deny-production",
+      "bindingUID": "uid-deny-production",
+      "revision": "sha256:903021c157e4d2308ba92facfa8df0ab77630dd8010d65ec50dc52afc7c37e11",
+      "enginePolicy": "konstapel-disallow-privileged-containers-835a035b40c0af8f",
+      "logicalPolicy": "disallow-privileged-containers",
+      "mode": "Deny",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "baseline",
+      "profileUID": "uid-baseline",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2",
+      "configurationDigest": "sha256:ea47d8a6f23e50ae6b15cad4609f8084484f783afae792d25a79569e049a91ed",
+      "sourceDigest": "sha256:6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e"
+    }
+  ]
+}

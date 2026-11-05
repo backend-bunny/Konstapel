@@ -69,6 +69,11 @@ type EvidenceSummary struct {
 	Rejected int32 `json:"rejected"`
 	// +kubebuilder:validation:Minimum=0
 	Unresolved int32 `json:"unresolved"`
+	// staleScopes counts bindings or policies whose configuration did not
+	// resolve; any stale scope makes evidence Incomplete.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	StaleScopes int32 `json:"staleScopes,omitempty"`
 }
 
 // OutcomeCounts preserves check dispositions separately from completeness.

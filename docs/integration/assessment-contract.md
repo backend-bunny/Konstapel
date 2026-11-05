@@ -219,6 +219,59 @@ chain ends at the pinned NIST catalog (about 10 MB), so the package is generated
 on demand rather than committed as a second copy. OSCAL UUIDs differ on every
 call, so compare these packages by descriptor, not bytes.
 
+## Collector evidence rules
+
+`internal/collector` implements the controller's capture path (prototype v1
+captures stay in `internal/assessment`).
+
+- **Expected inventory.** `FreezeScope` builds the frozen inventory when a run
+  starts, from three inputs: `targeting.ExpectedEvidence` subjects, one check
+  per CEL sub-validation of each rendered engine policy, and the listed
+  workloads. Reports are never an input, so a missing report stays missing.
+  Overlapping bindings remain separate contributions. An observation's
+  identity covers:
+  - cluster
+  - namespace UID
+  - workload UID and state digest (spec, labels, annotations)
+  - check
+  - binding and revision
+  - source and mapping digests
+- **Scope changes.** The `Tracker` records changes during collection without
+  altering the frozen scope:
+  - workloads updated, removed, replaced, or added
+  - namespaces joined, left, or recreated
+  - revision changes and stale scope
+  - watch discontinuities
+- **Attributable evidence.** `CaptureV2.Evaluate` counts an expected
+  observation as attributable only if a report result meets all of these:
+  - it names the observation's engine policy (whose name binds the binding,
+    policy, and revision), sub-validation index, and workload UID
+  - it has a valid source evaluation time, no later than closure
+  - it was evaluated strictly after the workload's continuity boundary and
+    after the last watch discontinuity
+  - it is at most `maxEvidenceAge` old at closure
+  - its subject is unchanged during collection
+  - it does not conflict with another result evaluated at the same time
+
+  A result timestamp alone never proves which state was evaluated, and
+  relisting after a restart does not create history.
+- **Completeness.** Each observation is `Attributable`, `Missing` (no
+  matching result), `Rejected` (results exist but none qualifies, with
+  reasons), or `Unresolved` (scope changed or results conflict). Evidence
+  completeness is:
+  - `Complete`: every expected observation is attributable and no binding or
+    policy scope is stale
+  - `NoTargets`: nothing is expected and nothing is stale
+  - `Incomplete`: everything else
+
+  A stale scope (`staleScopes`) always makes evidence `Incomplete`. Outcome
+  counts are reported separately and never aggregate into a pass.
+  `NextExpiry` gives the time current status must be re-evaluated, without
+  waiting for an event.
+
+Engine-provided state correlation (task 4.3) may later replace the
+conservative continuity boundary where it is verified.
+
 ## Integration sequence
 
 1. This contract merges first. It needs no scheduler.

@@ -2,6 +2,7 @@ package v1alpha1_test
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,11 +35,18 @@ type role struct {
 	rules            []rbacv1.PolicyRule
 }
 
-// loadRoles reads every Role and ClusterRole shipped in config/rbac, including
-// roles other changes add later, such as the namespace exception role.
+// loadRoles reads every Role and ClusterRole under config/rbac, including the
+// generated controller role and roles other changes add later, such as the
+// namespace exception role.
 func loadRoles(t *testing.T) []role {
 	t.Helper()
-	files, err := filepath.Glob("../../config/rbac/*.yaml")
+	var files []string
+	err := filepath.WalkDir("../../config/rbac", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".yaml") {
+			files = append(files, path)
+		}
+		return err
+	})
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no RBAC manifests: %v", err)
 	}

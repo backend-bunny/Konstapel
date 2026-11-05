@@ -236,3 +236,26 @@ func TestPublicationIDDeterministic(t *testing.T) {
 		t.Fatal("identity components must not be ambiguous")
 	}
 }
+
+func TestStaleScopeIsNeverComplete(t *testing.T) {
+	for name, ev := range map[string]publication.EvidenceSummary{
+		"complete with stale":   {Completeness: publication.Complete, Expected: 2, Attributable: 2, StaleScopes: 1},
+		"no targets with stale": {Completeness: publication.NoTargets, StaleScopes: 1},
+	} {
+		d := valid()
+		d.Evidence = ev
+		if d.Validate() == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	for name, ev := range map[string]publication.EvidenceSummary{
+		"all attributable but stale": {Completeness: publication.Incomplete, Expected: 2, Attributable: 2, StaleScopes: 1},
+		"only stale scope":           {Completeness: publication.Incomplete, StaleScopes: 1},
+	} {
+		d := valid()
+		d.Evidence = ev
+		if err := d.Validate(); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+}
