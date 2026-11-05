@@ -14,7 +14,8 @@ provider manifest and OCI version annotation read `VERSION` as well.
 The initial application version is `0.1.0`. The release-please manifest starts at
 `0.0.0` because no versioned release exists yet; release-please owns subsequent
 manifest changes. Do not manually synchronize that historical baseline with
-`VERSION` before the first release PR.
+`VERSION` before the first release PR. The bootstrap commit marks the project's
+fresh start, so the initial changelog excludes work from the previous codebase.
 
 ## Commit conventions
 
