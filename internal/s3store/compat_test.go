@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -216,6 +217,15 @@ func TestPublisherRoundTrip(t *testing.T) {
 			}
 			if _, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: other}); !errors.Is(err, publication.ErrConflict) {
 				t.Fatalf("conflicting content staged: %v", err)
+			}
+			if body, st, err := p.Open(ctx, run); err != nil || st.PackageSHA256 != r.PackageSHA256 {
+				t.Fatalf("open committed archive: %v", err)
+			} else {
+				ob, _ := io.ReadAll(body)
+				_ = body.Close()
+				if sum := sha256.Sum256(ob); hex.EncodeToString(sum[:]) != r.PackageSHA256 {
+					t.Fatal("opened archive does not match its commit")
+				}
 			}
 			b, err := p.read(ctx, r.Commit.ArchiveKey, r.Commit.ArchiveVersionID)
 			if sum := sha256.Sum256(b); err != nil || hex.EncodeToString(sum[:]) != r.PackageSHA256 {

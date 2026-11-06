@@ -5,10 +5,12 @@
 package fake
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,6 +28,7 @@ const (
 	OpInspect Op = "Inspect"
 	OpDelete  Op = "Delete"
 	OpCleanup Op = "CleanupAttempts"
+	OpOpen    Op = "Open"
 )
 
 type fault struct {
@@ -36,6 +39,7 @@ type fault struct {
 }
 
 type record struct {
+	archive []byte
 	staged  publication.Staged
 	durable bool
 	receipt *publication.Receipt
@@ -156,10 +160,12 @@ func (p *Publisher) Stage(ctx context.Context, req publication.StageRequest) (pu
 	if err = publication.VerifyDir(req.Dir, d); err != nil {
 		return publication.Staged{}, err
 	}
-	sum, size, err := packageDigest(req.Dir, d)
+	archive, err := packageBytes(req.Dir, d)
 	if err != nil {
 		return publication.Staged{}, err
 	}
+	h := sha256.Sum256(archive)
+	sum, size := hex.EncodeToString(h[:]), int64(len(archive))
 	s := publication.Staged{Run: req.Run, PublicationID: req.Run.PublicationID(), DescriptorSHA256: d.Digest(), PackageSHA256: sum, PackageSize: size}
 	if r, ok := p.records[s.PublicationID]; ok {
 		if r.staged != s {
@@ -167,7 +173,7 @@ func (p *Publisher) Stage(ctx context.Context, req publication.StageRequest) (pu
 		}
 		return s, lost(f, nil)
 	}
-	p.records[s.PublicationID] = &record{staged: s, durable: p.DurableStaging, cleanup: publication.Cleanup{State: publication.CleanupNotDue}}
+	p.records[s.PublicationID] = &record{archive: archive, staged: s, durable: p.DurableStaging, cleanup: publication.Cleanup{State: publication.CleanupNotDue}}
 	return s, lost(f, nil)
 }
 
@@ -270,19 +276,19 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 
 // packageDigest stands in for an archive checksum: a SHA-256 over the
 // descriptor bytes and every inventoried file in path order.
-func packageDigest(dir string, d publication.Descriptor) (string, int64, error) {
-	h := sha256.New()
-	var size int64
+// packageBytes is the fake's archive: each file's name, length and bytes in
+// descriptor order. It is deterministic, like the real archive.
+func packageBytes(dir string, d publication.Descriptor) ([]byte, error) {
+	var b []byte
 	for _, name := range append([]string{publication.DescriptorFile}, paths(d)...) {
-		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+		f, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
 		if err != nil {
-			return "", 0, err
+			return nil, err
 		}
-		fmt.Fprintf(h, "%s\x00%d\x00", name, len(b))
-		h.Write(b)
-		size += int64(len(b))
+		b = fmt.Appendf(b, "%s\x00%d\x00", name, len(f))
+		b = append(b, f...)
 	}
-	return hex.EncodeToString(h.Sum(nil)), size, nil
+	return b, nil
 }
 
 func paths(d publication.Descriptor) []string {
@@ -305,4 +311,36 @@ func (p *Publisher) CleanupAttempts(ctx context.Context, run publication.RunRef)
 		delete(p.records, run.PublicationID())
 	}
 	return lost(f, nil)
+}
+
+// Open returns the committed archive bytes. Corrupt replaces them for
+// integrity tests.
+func (p *Publisher) Open(ctx context.Context, run publication.RunRef) (io.ReadCloser, publication.Status, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, err := p.enter(ctx, OpOpen); err != nil {
+		return nil, publication.Status{}, err
+	}
+	r, ok := p.records[run.PublicationID()]
+	if !ok || r.receipt == nil {
+		return nil, publication.Status{}, publication.ErrNotFound
+	}
+	st := publication.Committed(*r.receipt)
+	if r.deleted || !p.now().Before(r.receipt.ExpiresAt) {
+		return nil, st, publication.ErrExpired
+	}
+	if r.archive == nil {
+		return nil, st, fmt.Errorf("%w: archive missing before expiry", publication.ErrUnavailable)
+	}
+	return io.NopCloser(bytes.NewReader(r.archive)), st, nil
+}
+
+// Corrupt replaces a committed archive's bytes (nil removes them), modeling
+// storage corruption or early object loss.
+func (p *Publisher) Corrupt(run publication.RunRef, archive []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if r, ok := p.records[run.PublicationID()]; ok {
+		r.archive = archive
+	}
 }

@@ -3,6 +3,7 @@ package publication
 import (
 	"context"
 	"errors"
+	"io"
 )
 
 // Errors returned by publishers. Storage errors never change evaluation
@@ -21,6 +22,9 @@ var (
 	ErrNotFound = errors.New("publication not found")
 	// ErrRetentionActive means deletion was requested before recorded expiry.
 	ErrRetentionActive = errors.New("publication retention has not expired")
+	// ErrExpired reports that a publication's retention ended; it is no
+	// longer served.
+	ErrExpired = errors.New("publication expired")
 )
 
 // StageRequest hands a frozen, validated package directory to the publisher.
@@ -68,4 +72,10 @@ type Publisher interface {
 	// archive, and leaves anything whose ownership by this run cannot be
 	// established. It is idempotent and safe to retry.
 	CleanupAttempts(ctx context.Context, run RunRef) error
+	// Open returns the committed archive of a run with its committed status,
+	// for a verified download. An uncommitted run is ErrNotFound, an expired
+	// one ErrExpired, and a committed archive that cannot be read before
+	// expiry ErrUnavailable. The caller verifies size and SHA-256 against the
+	// returned status before serving any byte.
+	Open(ctx context.Context, run RunRef) (io.ReadCloser, Status, error)
 }

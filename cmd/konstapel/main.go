@@ -22,11 +22,14 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: konstapel controller|generate|deliver|convert|acceptance|validate [flags]")
+		return fmt.Errorf("usage: konstapel controller|download-server|generate|deliver|convert|acceptance|validate [flags]")
 	}
 	command := os.Args[1]
 	if command == "controller" {
 		return runController(os.Args[2:])
+	}
+	if command == "download-server" {
+		return runDownload(os.Args[2:])
 	}
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	root := fs.String("root", ".", "repository root")

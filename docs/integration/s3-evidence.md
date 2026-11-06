@@ -4,8 +4,8 @@
 bucket. This guide covers the parts implemented so far: the platform-controlled
 destination, setup and permissions, the compatibility probe that decides whether
 a backend may be used, package kinds, the publisher's commit protocol, recovery,
-and teardown. The download service and retention reconciliation come in later
-task groups.
+the download service, and teardown. Retention reconciliation comes in a later
+task group.
 
 ## Destination configuration
 
@@ -235,6 +235,71 @@ default) each time a client is built, so a rotated Secret takes effect. A
 missing Secret or key names the Secret and key, never their values. TLS
 verification cannot be disabled: an untrusted endpoint fails until its CA is in
 `caBundle`.
+
+## Downloads
+
+`konstapel download-server` serves committed packages over TLS. It takes
+`--tls-cert-file`, `--tls-private-key-file`, `--evidence-destination` and
+`--audience` (default `konstapel-download`). Its service account needs
+`config/rbac/evidence-download.yaml`. That file holds a ClusterRole with
+TokenReview and SubjectAccessReview `create` plus read on requests, runs and
+namespaces, and for a `credentialSecret` destination a Role reading that
+Secret. Bind both to the download service account only.
+
+| Route | Caller needs (SubjectAccessReview) | Serves |
+| --- | --- | --- |
+| `GET /v1/namespaces/<ns>/assessmentrequests/<name>/download?uid=<request uid>` | `get` on `assessmentrequests/download` and `assessmentrequests`, name `<name>`, in `<ns>`, from `konstapel-assessment-requester` | that request's own namespace-scoped package |
+| `GET /v1/assessmentruns/<run uid>/download` | `get` on `assessmentruns/download` and `assessmentruns`, name of the run, from `konstapel-assessment-operator` | any run's package |
+
+Each request is checked as follows:
+
+1. The bearer token goes to TokenReview with the service's audience. A token
+   minted for another audience is refused. Forwarded or impersonation headers
+   are ignored.
+2. Current RBAC is checked with SubjectAccessReview on both attributes, so
+   revoking a role stops the next download. Bytes already received cannot be
+   revoked.
+3. The object is resolved and checked:
+   - the request UID must match `?uid=`;
+   - the namespace's current UID must equal the request's recorded
+     `namespaceUID`, so a recreated namespace is refused;
+   - the run must be that request's namespace-scoped run, and its publication
+     must be the request's `artifactRef`.
+
+   A team permission never reaches a full-binding run, a sibling namespace, or
+   a run through the platform route. Storage keys, URLs and endpoints are never
+   accepted as addresses.
+4. The committed archive is fetched into bounded temporary storage
+   (`--max-temp-bytes`, `--max-concurrent`). Its size and SHA-256 are checked
+   against the run's receipt and the stored commit before any byte is sent, and
+   the temporary file is always removed.
+
+A successful response is `Cache-Control: private, no-store`, with
+`Repr-Digest: sha-256=:…:`, `X-Konstapel-Publication`,
+`X-Konstapel-Descriptor-SHA256`, `X-Konstapel-Published-At` and
+`X-Konstapel-Expires-At`.
+
+| Status | Meaning |
+| --- | --- |
+| 401 | no token, or TokenReview did not accept it for the audience |
+| 403 | not authorized, or not found. The two are indistinguishable, so UIDs are not an existence oracle |
+| 409 | the request or run has no committed package yet |
+| 410 | the package expired and is no longer served |
+| 429 | too many concurrent downloads (`Retry-After`) |
+| 502 | the stored package does not match the receipt or fails integrity verification |
+| 503 | TokenReview/SubjectAccessReview unavailable (fail closed), storage unavailable, the archive missing before expiry, or temp space full (`Retry-After`) |
+
+Error bodies never contain storage locations, credentials, tokens, or another
+scope's data. A team downloads its package like this:
+
+```sh
+# A service account in the team namespace; other identities need a token
+# issued for the konstapel-download audience by their identity provider.
+TOKEN=$(kubectl create token ci-reader -n dev --audience konstapel-download)
+UID=$(kubectl get assessmentrequest nightly -n dev -o jsonpath='{.metadata.uid}')
+curl --cacert ca.crt -H "Authorization: Bearer $TOKEN" -o package.tar.gz \
+  "https://<download-service>/v1/namespaces/dev/assessmentrequests/nightly/download?uid=$UID"
+```
 
 ## Tested compatibility
 

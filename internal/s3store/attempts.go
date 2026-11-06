@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
@@ -144,4 +145,32 @@ func (p *Publisher) listCurrent(ctx context.Context, prefix string) ([]objectVer
 		}
 		in.ContinuationToken = page.NextContinuationToken
 	}
+}
+
+// Open returns the committed archive for a verified download. The status is
+// the committed receipt; the caller checks size and SHA-256 before serving.
+func (p *Publisher) Open(ctx context.Context, run publication.RunRef) (io.ReadCloser, publication.Status, error) {
+	st, err := p.Inspect(ctx, run)
+	if err != nil {
+		return nil, publication.Status{}, err
+	}
+	switch st.Phase {
+	case publication.PhaseCommitted:
+	case publication.PhaseExpired:
+		return nil, st, publication.ErrExpired
+	default:
+		return nil, publication.Status{}, publication.ErrNotFound
+	}
+	in := &s3.GetObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(st.Commit.ArchiveKey)}
+	if st.Commit.ArchiveVersionID != "" {
+		in.VersionId = aws.String(st.Commit.ArchiveVersionID)
+	}
+	out, err := p.Client.GetObject(ctx, in)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, st, fmt.Errorf("%w: committed archive is missing before expiry", publication.ErrUnavailable)
+		}
+		return nil, st, fmt.Errorf("%w: read archive: %v", publication.ErrUnavailable, sanitize(err))
+	}
+	return out.Body, st, nil
 }

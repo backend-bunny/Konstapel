@@ -1,0 +1,40 @@
+# The evidence download service authenticates callers with TokenReview,
+# authorizes them with SubjectAccessReview, and resolves requests, runs and
+# namespaces. Bind this role with a ClusterRoleBinding to the download
+# service's own service account only; no other identity needs review
+# permissions. Callers need the download attributes in
+# konstapel-assessment-requester (namespace) or konstapel-assessment-operator
+# (platform runs).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-download
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentrequests, assessmentruns]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
+---
+# Only for a credentialSecret destination: read that Secret in the download
+# service's namespace. Bind with a RoleBinding in that namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-evidence-download-credentials
+  namespace: konstapel-system
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
