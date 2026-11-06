@@ -40,4 +40,7 @@ KUBECONFIG="$kubeconfig" chainsaw test --kube-context "$context" --exec-timeout 
 # Targeting delivery: Audit/Deny bindings, relabelling, ready-gated replacement,
 # withdrawal, and non-adoption of a prototype-style unmanaged policy.
 scripts/targeting-live.sh "$kubeconfig" "$context" "$out/targeting"
-printf '%s\n' 'Acceptance passed; admission, background findings, schema/reference validation, offline replay and targeting delivery verified.' | tee "$out/result.txt"
+# Exception acceptance admission: authenticated attribution, eligibility and
+# lifetime limits against the real API server.
+scripts/exception-admission-live.sh "$KONSTAPEL_CLUSTER_NAME" "$out/exceptions"
+printf '%s\n' 'Acceptance passed; admission, background findings, schema/reference validation, offline replay, targeting delivery and exception admission verified.' | tee "$out/result.txt"

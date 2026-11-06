@@ -229,8 +229,6 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	if a.Eligibility == nil || a.Eligibility.Effective != v1alpha1.ExceptionsSelfService || len(a.Eligibility.Contributors) != 1 || a.Eligibility.Contributors[0].Binding.Name != b.Name {
 		t.Fatalf("resolved set = %+v", a.Eligibility)
 	}
-	accepted := created.Annotations[exception.AcceptanceAnnotation]
-
 	// 2. Dry run: the would-be record is returned and nothing is stored.
 	dry := newEx("dry", nil)
 	if err := bob.Create(l.ctx, dry, client.DryRunAll); err != nil {
@@ -244,49 +242,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	}
 	l.record("dry-run", map[string]any{"stored": false})
 
-	// 3. Later configuration does not replace the accepted set on metadata edits.
-	if err := l.c.Delete(l.ctx, b); err != nil {
-		t.Fatal(err)
-	}
-	l.eventually("binding removed", func() (bool, string) {
-		err := l.c.Get(l.ctx, client.ObjectKeyFromObject(b), &v1alpha1.ComplianceBinding{})
-		return err != nil, "still present"
-	})
-	edited := created.DeepCopy()
-	edited.Labels = map[string]string{"edited-by": "bob"}
-	if err := bob.Update(l.ctx, edited); err != nil {
-		t.Fatalf("metadata edit: %v", err)
-	}
-	if edited.Annotations[exception.AcceptanceAnnotation] != accepted {
-		t.Error("a metadata edit changed the acceptance")
-	}
-	l.record("metadata-edit-after-binding-deleted", map[string]any{"unchanged": true})
-
-	// 4. A caller cannot rewrite the record outside a renewal.
-	tampered := edited.DeepCopy()
-	tampered.Annotations[exception.AcceptanceAnnotation] = strings.Replace(accepted, `"username":"alice"`, `"username":"platform-admin"`, 1)
-	err = bob.Update(l.ctx, tampered)
-	if err == nil || !strings.Contains(err.Error(), "protected") {
-		t.Fatalf("tampered record: %v", err)
-	}
-	l.record("tamper", map[string]any{"rejected": err.Error()})
-
-	// 5. An explicit renewal records a new acceptance by the renewing caller.
-	renewed := edited.DeepCopy()
-	renewed.Spec.AcceptanceRevision = 2
-	renewed.Spec.Reason = "renewed live"
-	renewed.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(48 * time.Hour).Truncate(time.Second))
-	if err := bob.Update(l.ctx, renewed); err != nil {
-		t.Fatal(err)
-	}
-	r := acceptance(t, renewed)
-	l.record("renewal", map[string]any{"acceptance": r})
-	if r.Revision != 2 || r.Actor.Username != "bob" || r.Eligibility != nil {
-		// The binding was deleted: the renewal records that nothing applies.
-		t.Fatalf("renewal = %+v", r)
-	}
-
-	// 6. GitOps: the service account is the actor; the commit author is a claim.
+	// 3. GitOps: the service account is the actor; the commit author is a claim.
 	gitops := newEx("gitops", map[string]string{exception.ClaimAnnotation: "carol (commit abc123)"})
 	if err := argo.Create(l.ctx, gitops); err != nil {
 		t.Fatal(err)
@@ -296,4 +252,106 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	if !strings.HasPrefix(g.Actor.Username, "system:serviceaccount:argocd:") || g.Claim != "carol (commit abc123)" {
 		t.Fatalf("gitops acceptance = %+v", g)
 	}
+
+	// 4. An explicit renewal records a new acceptance by the renewing caller.
+	renewed := created.DeepCopy()
+	renewed.Spec.AcceptanceRevision = 2
+	renewed.Spec.Reason = "renewed live"
+	renewed.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(48 * time.Hour).Truncate(time.Second))
+	if err := bob.Update(l.ctx, renewed); err != nil {
+		t.Fatal(err)
+	}
+	r := acceptance(t, renewed)
+	l.record("renewal", map[string]any{"acceptance": r})
+	if r.Revision != 2 || r.Actor.Username != "bob" || r.Eligibility == nil || r.Eligibility.Effective != v1alpha1.ExceptionsSelfService {
+		t.Fatalf("renewal = %+v", r)
+	}
+	accepted := renewed.Annotations[exception.AcceptanceAnnotation]
+
+	// 5. Lifetime: beyond the profile's 720h maximum is rejected (task 2.3).
+	long := newEx("too-long", nil)
+	long.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(721 * time.Hour).Truncate(time.Second))
+	err = alice.Create(l.ctx, long)
+	if err == nil || !strings.Contains(err.Error(), exception.ReasonLifetimeExceeded) {
+		t.Fatalf("over-limit exception: %v", err)
+	}
+	l.record("lifetime-exceeded", map[string]any{"rejected": err.Error()})
+
+	// 6. A Forbidden contribution overlapping the namespace rejects new
+	// acceptances and renewals, and names the restrictive binding.
+	fp := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "exc-forbidden"},
+		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
+	fb := bindingObj("exc-pci", fp.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "exc-admission"})
+	for _, o := range []client.Object{fp, fb} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = l.c.Delete(l.ctx, fb)
+		_ = l.c.Delete(l.ctx, fp)
+	})
+	l.waitReady(fb.Name, 1)
+	err = alice.Create(l.ctx, newEx("blocked", nil))
+	if err == nil || !strings.Contains(err.Error(), exception.ReasonForbidden) || !strings.Contains(err.Error(), `"exc-pci"`) {
+		t.Fatalf("forbidden overlap: %v", err)
+	}
+	l.record("forbidden-overlap", map[string]any{"rejected": err.Error()})
+	renewAgain := renewed.DeepCopy()
+	renewAgain.Spec.AcceptanceRevision = 3
+	renewAgain.Spec.Reason = "renew under forbidden"
+	renewAgain.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(72 * time.Hour).Truncate(time.Second))
+	err = bob.Update(l.ctx, renewAgain)
+	if err == nil || !strings.Contains(err.Error(), exception.ReasonForbidden) {
+		t.Fatalf("renewal under forbidden overlap: %v", err)
+	}
+	l.record("forbidden-renewal", map[string]any{"rejected": err.Error()})
+	for _, o := range []client.Object{fb, fp} {
+		if err := l.c.Delete(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 7. Later configuration does not replace the accepted set on metadata
+	// edits, and a renewal needs a policy that still applies.
+	if err := l.c.Delete(l.ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	l.eventually("bindings removed", func() (bool, string) {
+		errB := l.c.Get(l.ctx, client.ObjectKeyFromObject(b), &v1alpha1.ComplianceBinding{})
+		errF := l.c.Get(l.ctx, client.ObjectKeyFromObject(fb), &v1alpha1.ComplianceBinding{})
+		return errB != nil && errF != nil, "still present"
+	})
+	current := &v1alpha1.ComplianceException{}
+	if err := bob.Get(l.ctx, client.ObjectKeyFromObject(created), current); err != nil {
+		t.Fatal(err)
+	}
+	edited := current.DeepCopy()
+	edited.Labels = map[string]string{"edited-by": "bob"}
+	if err := bob.Update(l.ctx, edited); err != nil {
+		t.Fatalf("metadata edit: %v", err)
+	}
+	if edited.Annotations[exception.AcceptanceAnnotation] != accepted {
+		t.Error("a metadata edit changed the acceptance")
+	}
+	l.record("metadata-edit-after-binding-deleted", map[string]any{"unchanged": true})
+
+	// 8. A caller cannot rewrite the record outside a renewal.
+	tampered := edited.DeepCopy()
+	tampered.Annotations[exception.AcceptanceAnnotation] = strings.Replace(accepted, `"username":"bob"`, `"username":"platform-admin"`, 1)
+	err = bob.Update(l.ctx, tampered)
+	if err == nil || !strings.Contains(err.Error(), "protected") {
+		t.Fatalf("tampered record: %v", err)
+	}
+	l.record("tamper", map[string]any{"rejected": err.Error()})
+
+	unapplied := edited.DeepCopy()
+	unapplied.Spec.AcceptanceRevision = 3
+	unapplied.Spec.Reason = "renew without a binding"
+	unapplied.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(72 * time.Hour).Truncate(time.Second))
+	err = bob.Update(l.ctx, unapplied)
+	if err == nil || !strings.Contains(err.Error(), exception.ReasonNotApplicable) {
+		t.Fatalf("renewal without an applicable binding: %v", err)
+	}
+	l.record("unapplied-renewal", map[string]any{"rejected": err.Error()})
 }

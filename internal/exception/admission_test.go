@@ -197,20 +197,6 @@ func TestCreateRecordsAuthenticatedAcceptance(t *testing.T) {
 	}
 }
 
-// Capture records the full resolved set, including restrictive contributions;
-// rejecting them is task 2.3.
-func TestCreateCapturesEveryContribution(t *testing.T) {
-	m, v := newHandlers(t, world(t), t0)
-	got, err := admit(t, m, v, request(t, admissionv1.Create, alice, exceptionObj("team-prod", 1, nil), nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := acceptanceOf(t, got)
-	if a.Eligibility.Effective != v1alpha1.ExceptionsForbidden || len(revisions(a)) != 2 {
-		t.Errorf("resolved set = %+v", a.Eligibility)
-	}
-}
-
 func TestDryRunMatchesAndWritesNothing(t *testing.T) {
 	c := world(t)
 	m, v := newHandlers(t, c, t0)
@@ -388,17 +374,17 @@ func TestAdmissionFailsClosed(t *testing.T) {
 
 type failing struct{}
 
-func (failing) Eligibility(context.Context, targeting.NamespaceRef, string) (*targeting.Eligibility, error) {
-	return nil, errors.New("api unavailable")
+func (failing) Resolve(context.Context, targeting.NamespaceRef, string) (Resolution, error) {
+	return Resolution{}, errors.New("api unavailable")
 }
 
 func TestRecreatedNamespaceIsNotResolved(t *testing.T) {
 	r := &ClusterResolver{Reader: world(t), Content: content{}, Cluster: cluster}
-	if _, err := r.Eligibility(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-0"}, policy); err == nil {
+	if _, err := r.Resolve(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-0"}, policy); err == nil {
 		t.Error("a stale namespace identity resolved")
 	}
-	el, err := r.Eligibility(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-1"}, "not-applied")
-	if err != nil || el != nil {
-		t.Errorf("unapplied policy: %v %v", el, err)
+	res, err := r.Resolve(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-1"}, "not-applied")
+	if err != nil || res.Eligibility != nil {
+		t.Errorf("unapplied policy: %v %v", res.Eligibility, err)
 	}
 }

@@ -54,7 +54,7 @@ type Acceptance struct {
 	Policy    string                 `json:"policy"`
 	// Eligibility is the resolved effective eligibility and the complete
 	// contribution/revision set for the policy in this namespace at
-	// acceptance. Nil when no binding applies the policy here.
+	// acceptance. Admission rejects an acceptance without one.
 	Eligibility *targeting.Eligibility `json:"eligibility"`
 }
 
@@ -65,10 +65,18 @@ type Actor struct {
 	Groups   []string `json:"groups,omitempty"`
 }
 
-// Resolver returns the effective eligibility of policy in namespace, or nil
-// when no contribution applies it there.
+// Resolver resolves a policy's current contributions in a namespace.
 type Resolver interface {
-	Eligibility(ctx context.Context, ns targeting.NamespaceRef, policy string) (*targeting.Eligibility, error)
+	Resolve(ctx context.Context, ns targeting.NamespaceRef, policy string) (Resolution, error)
+}
+
+// Resolution is the current targeting result for one policy in one namespace.
+type Resolution struct {
+	// Eligibility is nil when no contribution applies the policy there.
+	Eligibility *targeting.Eligibility
+	// Restrictive names the bindings whose contribution does not permit
+	// SelfService, sorted.
+	Restrictive []string
 }
 
 // Mutator records the acceptance on creation and explicit renewal. It only
@@ -85,7 +93,10 @@ type Mutator struct {
 func (m *Mutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	updated, err := m.record(ctx, req)
 	var bad badRequest
+	var denied *Denial
 	switch {
+	case errors.As(err, &denied):
+		return admission.Denied(denied.Error())
 	case errors.As(err, &bad):
 		return admission.Errored(http.StatusBadRequest, err)
 	case err != nil:
@@ -118,10 +129,11 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 		return nil, fmt.Errorf("read namespace identity: %w", err)
 	}
 	ref := targeting.NamespaceRef{Name: ns.Name, UID: ns.UID}
-	el, err := m.Resolver.Eligibility(ctx, ref, ex.Spec.Policy)
+	res, err := m.Resolver.Resolve(ctx, ref, ex.Spec.Policy)
 	if err != nil {
 		return nil, fmt.Errorf("resolve policy contributions: %w", err)
 	}
+	el := res.Eligibility
 	now := time.Now
 	if m.Now != nil {
 		now = m.Now
@@ -135,6 +147,9 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 		Namespace:   ref,
 		Policy:      ex.Spec.Policy,
 		Eligibility: el,
+	}
+	if d := admissible(a, ex.Spec.ExpiresAt.Time, res.Restrictive); d != nil {
+		return nil, d
 	}
 	raw, err := json.Marshal(a)
 	if err != nil {
@@ -211,6 +226,11 @@ func check(req admission.Request, ex, old *v1alpha1.ComplianceException, cluster
 	case a.AcceptedAt.Time.Sub(now).Abs() > acceptanceSkew:
 		return fmt.Errorf("%s acceptance time %s is not this request's", AcceptanceAnnotation, a.AcceptedAt.UTC().Format(time.RFC3339))
 	}
+	// The record must itself be admissible, so an acceptance never stands on
+	// an ineligible or over-long record even without the mutating webhook.
+	if d := admissible(a, ex.Spec.ExpiresAt.Time, nil); d != nil {
+		return d
+	}
 	return nil
 }
 
@@ -253,23 +273,28 @@ type ClusterResolver struct {
 	Cluster string
 }
 
-// Eligibility implements Resolver.
-func (r *ClusterResolver) Eligibility(ctx context.Context, ns targeting.NamespaceRef, policy string) (*targeting.Eligibility, error) {
+// Resolve implements Resolver.
+func (r *ClusterResolver) Resolve(ctx context.Context, ns targeting.NamespaceRef, policy string) (Resolution, error) {
+	el, restrictive, err := r.resolve(ctx, ns, policy)
+	return Resolution{Eligibility: el, Restrictive: restrictive}, err
+}
+
+func (r *ClusterResolver) resolve(ctx context.Context, ns targeting.NamespaceRef, policy string) (*targeting.Eligibility, []string, error) {
 	namespace := &corev1.Namespace{}
 	if err := r.Reader.Get(ctx, client.ObjectKey{Name: ns.Name}, namespace); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if namespace.UID != ns.UID {
-		return nil, fmt.Errorf("namespace %s was recreated during admission", ns.Name)
+		return nil, nil, fmt.Errorf("namespace %s was recreated during admission", ns.Name)
 	}
 	in := targeting.Input{Cluster: r.Cluster, Namespaces: []targeting.Namespace{{Name: namespace.Name, UID: namespace.UID, Labels: namespace.Labels}}}
 	var bindings v1alpha1.ComplianceBindingList
 	if err := r.Reader.List(ctx, &bindings); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var profiles v1alpha1.ComplianceProfileList
 	if err := r.Reader.List(ctx, &profiles); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	in.Bindings, in.Profiles = bindings.Items, profiles.Items
 	seen := map[string]bool{}
@@ -283,17 +308,44 @@ func (r *ClusterResolver) Eligibility(ctx context.Context, ns targeting.Namespac
 		case errors.Is(err, targeting.ErrContentUnavailable):
 			// The resolver reports ContentUnavailable, which forbids exceptions.
 		case err != nil:
-			return nil, err
+			return nil, nil, err
 		default:
 			in.Bundles = append(in.Bundles, c.Bundle)
 		}
 	}
-	for _, e := range targeting.Resolve(in).Eligibility {
-		if e.Namespace.UID == ns.UID && e.Policy == policy {
-			return &e, nil
+	res := targeting.Resolve(in)
+	var restrictive []string
+	var errs []targeting.ResolutionError
+	for _, b := range res.Bindings {
+		if !slices.ContainsFunc(b.Targets, func(t targeting.NamespaceRef) bool { return t.UID == ns.UID }) {
+			continue
+		}
+		for _, c := range b.Contributions {
+			if c.Policy == policy && (c.Exceptions.Eligibility != v1alpha1.ExceptionsSelfService || c.Exceptions.MaxLifetime == nil) {
+				restrictive = append(restrictive, b.Binding.Name)
+			}
+		}
+		for _, e := range b.Errors {
+			if e.Policy == "" || e.Policy == policy {
+				errs = append(errs, e)
+			}
 		}
 	}
-	return nil, nil
+	slices.Sort(restrictive)
+	restrictive = slices.Compact(restrictive)
+	for _, e := range res.Eligibility {
+		if e.Namespace.UID == ns.UID && e.Policy == policy {
+			return &e, restrictive, nil
+		}
+	}
+	if len(errs) > 0 {
+		// A binding that targets the namespace failed to resolve (for
+		// example its content is unavailable), so the policy may apply here:
+		// that is unresolved eligibility, not an unapplied policy.
+		return &targeting.Eligibility{Namespace: ns, Policy: policy, Effective: v1alpha1.ExceptionsForbidden,
+			Contributors: []targeting.ContributionRef{}, Errors: errs}, restrictive, nil
+	}
+	return nil, restrictive, nil
 }
 
 // NewHandlers builds the mutating and validating handlers.
