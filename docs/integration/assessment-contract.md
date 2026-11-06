@@ -11,6 +11,9 @@ collector, scoped export, and binding `spec.assessment` settings arrive in later
 task groups. Applying these CRDs schedules nothing yet. The capability spec is
 [continuous-assessments](../../openspec/changes/add-continuous-assessments/specs/continuous-assessments/spec.md).
 
+For operator and team workflows (schedules, on-demand runs, reading results,
+namespace download handoff), see [assessment workflows](assessment-workflows.md).
+
 ## Ownership
 
 | Path | Owner | Contents |

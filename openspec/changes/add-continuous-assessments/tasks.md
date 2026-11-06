@@ -56,7 +56,7 @@ change's entire task list before landing the shared contract or adapter.
 - [x] 5.3 Integrate exception snapshots, applicability, and independent check outcomes through final OSCAL export; verify accepted risk, failures, and repeated binding contributions do not inflate passing/control coverage. Applicability and independent check outcomes are exported without inflating coverage (5.2); exception snapshots and accepted-risk disposition are handed off to `add-self-service-policy-exceptions` task 5.1, which builds the exception API.
 - [x] 5.4 Freeze package bytes/digests and implement recoverable staging plus explicit CaptureLost handling; verify retry preserves the same snapshot and a restart without recoverable data cannot substitute newer observations under its identity.
 - [x] 5.5 Connect request status to sanitized summaries and opaque artifact references; verify team-visible status exposes no full-binding inventory, credentials, or sibling errors and request deletion does not remove retained publication records.
-- [ ] 5.6 Document scheduled/on-demand workflows, incomplete versus diagnostic results, and namespace download handoff; verify the published examples use only the intended namespace or platform permissions.
+- [x] 5.6 Document scheduled/on-demand workflows, incomplete versus diagnostic results, and namespace download handoff; verify the published examples use only the intended namespace or platform permissions.
 
 ## 6. Verify integrated continuous assessment
 

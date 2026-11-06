@@ -72,6 +72,12 @@ run() { # NAME SCOPE [TRIGGER]
 	fi
 }
 
+# The requester policies (config/admission/assessment-requester.yaml) also
+# become effective asynchronously: wait until a dry-run request is mutated.
+for _ in $(seq 60); do
+	[ "$(k create --as="$team_a" --dry-run=server -o jsonpath='{.spec.requester.username}' -f <(request team-a probe) 2>/dev/null)" = "$team_a" ] && break
+	sleep 1
+done
 expect ok "team-a creates a request in its namespace" -- create --as="$team_a" -f <(request team-a nightly)
 requester=$(k -n team-a get assessmentrequest nightly -o jsonpath='{.spec.requester.username}')
 if [ "$requester" = "$team_a" ]; then echo "PASS requester recorded from authenticated user" | tee -a "$log"; else echo "FAIL requester is '$requester'" | tee -a "$log"; failures=$((failures + 1)); fi
@@ -98,6 +104,19 @@ expect ok "controller writes run status" -- patch assessmentrun controller-ns --
 expect ok "controller writes request status" -- -n team-a patch assessmentrequest nightly --as="$controller" --subresource=status --type=merge -p '{"status":{"phase":"Running"}}'
 expect deny "run spec is immutable for the controller" -- patch assessmentrun controller-ns --as="$controller" --type=merge -p '{"spec":{"bindingRef":{"name":"other"}}}'
 expect ok "team-a still reads its own request and status" -- -n team-a get assessmentrequest nightly --as="$team_a"
+
+# The published workflow examples (docs/integration/assessment-workflows.md)
+# work as the documented identity and no other.
+examples=$root/testdata/assessments/examples/valid
+expect ok "workflow: team-a submits the published request example" -- create --as="$team_a" -f "$examples/request-team-a.yaml"
+expect deny "workflow: team-b cannot submit team-a's request example" -- create --as="$team_b" --dry-run=server -f "$examples/request-team-a.yaml"
+expect ok "workflow: platform submits the published run example" -- create --as="$platform" -f "$examples/run-platform-binding.yaml"
+expect deny "workflow: team-a cannot submit the run example" -- create --as="$team_a" --dry-run=server -f "$examples/run-platform-binding.yaml"
+expect deny "workflow: team-a cannot apply the binding example" -- apply --as="$team_a" --dry-run=server -f "$examples/binding-assessment.yaml"
+expect ok "workflow: team-a may download its own requests" -- auth can-i get assessmentrequests/download -n team-a --as="$team_a"
+expect deny "workflow: team-a may not download team-b requests" -- auth can-i get assessmentrequests/download -n team-b --as="$team_a"
+expect deny "workflow: team-a may not download runs" -- auth can-i get assessmentruns/download --as="$team_a"
+expect ok "workflow: platform may download runs" -- auth can-i get assessmentruns/download --as="$platform"
 
 # The controller identity is configuration, not policy text.
 custom=system:serviceaccount:konstapel-system:custom-controller
