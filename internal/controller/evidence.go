@@ -22,7 +22,8 @@ import (
 
 // EvidenceConfig selects the production evidence destination.
 type EvidenceConfig struct {
-	// Destination is the S3 destination YAML file (s3store.LoadDestination).
+	// Destination is the optional legacy S3 destination YAML file
+	// (s3store.LoadDestination) for runs without an EvidenceDestination.
 	Destination string
 	// StagingDir holds frozen captures and packages until publication.
 	StagingDir string
@@ -39,38 +40,51 @@ type EvidenceConfig struct {
 // readiness is probed while running, and scheduling stays disabled with the
 // reason on bindings until the probe passes.
 func EvidenceRuntime(ctx context.Context, cfg *rest.Config, ec EvidenceConfig) (AssessmentRuntime, error) {
-	d, err := s3store.LoadDestination(ec.Destination)
-	if err != nil {
-		return AssessmentRuntime{}, err
-	}
 	if filepath.Base(filepath.Clean(ec.ContentDir)) != "content" {
 		return AssessmentRuntime{}, fmt.Errorf("content root %s must be a directory named content", ec.ContentDir)
-	}
-	if d.CredentialSecret != nil && ec.Namespace == "" {
-		return AssessmentRuntime{}, fmt.Errorf("evidence destination %s uses a credential Secret but the controller namespace is unknown (set POD_NAMESPACE)", d.ID)
 	}
 	if ec.StagingDir == "" {
 		return AssessmentRuntime{}, fmt.Errorf("an evidence staging directory is required")
 	}
-	if err := os.MkdirAll(ec.StagingDir, 0o700); err != nil {
-		return AssessmentRuntime{}, fmt.Errorf("evidence staging directory: %w", err)
+	staging := ec.StagingDir
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		if ec.Destination != "" {
+			return AssessmentRuntime{}, fmt.Errorf("evidence staging directory: %w", err)
+		}
+		// Without a legacy destination the controller still starts; evidence
+		// runs report "no staging directory is configured" until it exists.
+		staging = ""
 	}
 	reader, err := client.New(cfg, client.Options{Scheme: Scheme()})
 	if err != nil {
 		return AssessmentRuntime{}, err
 	}
+	rt := AssessmentRuntime{
+		StagingDir:          staging,
+		ContentRoot:         filepath.Dir(filepath.Clean(ec.ContentDir)),
+		ControllerNamespace: ec.Namespace,
+		// Runs pinned to an EvidenceDestination publish there.
+		Destinations: &DestinationPublishers{Reader: reader, Namespace: ec.Namespace},
+	}
+	if ec.Destination == "" {
+		return rt, nil
+	}
+	// The legacy file destination serves unpinned runs (no selection).
+	d, err := s3store.LoadDestination(ec.Destination)
+	if err != nil {
+		return AssessmentRuntime{}, err
+	}
+	if d.CredentialSecret != nil && ec.Namespace == "" {
+		return AssessmentRuntime{}, fmt.Errorf("evidence destination %s uses a credential Secret but the controller namespace is unknown (set POD_NAMESPACE)", d.ID)
+	}
 	pub, err := s3store.NewPublisher(ctx, d, reader, ec.Namespace)
 	if err != nil {
 		return AssessmentRuntime{}, err
 	}
-	return AssessmentRuntime{
-		Publisher:           pub,
-		StagingDir:          ec.StagingDir,
-		ControllerNamespace: ec.Namespace,
-		ContentRoot:         filepath.Dir(filepath.Clean(ec.ContentDir)),
-		Ready: func(ctx context.Context) error {
-			_, err := pub.Ready(ctx)
-			return err
-		},
-	}, nil
+	rt.Publisher = pub
+	rt.Ready = func(ctx context.Context) error {
+		_, err := pub.Ready(ctx)
+		return err
+	}
+	return rt, nil
 }

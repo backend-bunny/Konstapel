@@ -60,11 +60,13 @@ func startS3(t *testing.T, l *live) *s3store.Publisher {
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
 	l.s3Container = name
+	l.s3Access, l.s3Secret = access, key
 	out, err := exec.Command("docker", "port", name, "9000/tcp").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := strings.TrimSpace(strings.Split(strings.Split(string(out), "\n")[0], ":")[1])
+	l.s3Endpoint = "http://127.0.0.1:" + port
 	d := s3store.Destination{ID: "live", Endpoint: "http://127.0.0.1:" + port, Bucket: "konstapel-live", Region: "us-east-1",
 		Prefix: "konstapel-test/live", Addressing: s3store.AddressingPath, CredentialSecret: &s3store.SecretRef{Name: "live"}, DevelopmentFixture: true}
 	c, err := s3store.NewClient(l.ctx, d, &s3store.StaticCredentials{AccessKeyID: access, SecretAccessKey: key})

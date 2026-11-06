@@ -300,3 +300,32 @@ func TestConcurrencyIsBounded(t *testing.T) {
 		t.Fatalf("slot not reusable: %d", w.Code)
 	}
 }
+
+// A run pinned to an EvidenceDestination is served from that destination,
+// never from the legacy publisher; an unreachable pin is unavailable.
+func TestPinnedRunIsServedFromItsDestination(t *testing.T) {
+	e := newEnv(t)
+	run := &v1alpha1.AssessmentRun{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: "nightly-run"}, run)
+	run.Status.Destination = &v1alpha1.DestinationPin{DestinationReference: v1alpha1.DestinationReference{Name: "primary", UID: "uid-primary"}}
+	if err := e.c.Status().Update(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	pinned := e.srv.Publisher
+	e.srv.Publisher = nil // no legacy destination
+	var asked string
+	e.srv.PublisherFor = func(_ context.Context, r *v1alpha1.AssessmentRun) (publication.Publisher, error) {
+		asked = r.Status.Destination.UID
+		return pinned, nil
+	}
+	if w := e.get(teamPath, "team-token"); w.Code != http.StatusOK || asked != "uid-primary" {
+		t.Fatalf("pinned download: %d asked %q", w.Code, asked)
+	}
+	e.srv.PublisherFor = func(context.Context, *v1alpha1.AssessmentRun) (publication.Publisher, error) {
+		return nil, errors.New("destination gone")
+	}
+	e.srv.Publisher = pinned // a legacy publisher must not be used for a pinned run
+	if w := e.get(teamPath, "team-token"); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unreachable pin: %d", w.Code)
+	}
+}

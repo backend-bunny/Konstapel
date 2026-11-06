@@ -149,6 +149,10 @@ type AssessmentRunStatus struct {
 	DescriptorSHA256 string `json:"descriptorSha256,omitempty"`
 	// +optional
 	Publication *PublicationStatus `json:"publication,omitempty"`
+	// destination is the evidence destination pinned when the run started.
+	// Absent for runs that use the controller's legacy file destination.
+	// +optional
+	Destination *DestinationPin `json:"destination,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type

@@ -262,6 +262,32 @@ type DestinationSelection struct {
 	Message string `json:"message,omitempty"`
 }
 
+// DestinationPin is the destination a run accepted when it started. The run
+// stages, publishes, retries, serves downloads, and cleans up there for its
+// whole life, whatever later selection edits say. It holds no credentials.
+type DestinationPin struct {
+	DestinationReference `json:",inline"`
+	// endpoint, bucket, region, and prefix snapshot the pinned location.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	Endpoint string `json:"endpoint"`
+	// +required
+	// +kubebuilder:validation:MaxLength=63
+	Bucket string `json:"bucket"`
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	Region string `json:"region"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Prefix string `json:"prefix,omitempty"`
+	// source is where the selection came from (Binding or Default).
+	// +required
+	Source DestinationSource `json:"source"`
+	// pinnedAt is when the pin was accepted.
+	// +required
+	PinnedAt metav1.Time `json:"pinnedAt"`
+}
+
 // EvidenceDestination is a cluster-scoped, platform-managed evidence storage
 // location. Runs pin it by name and UID when they start; later edits to the
 // default or a binding's selection affect only subsequent runs.

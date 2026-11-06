@@ -37,9 +37,14 @@ const (
 type Server struct {
 	// Reader reads requests, runs and namespaces. It should be uncached so
 	// a recreated namespace or deleted request is seen immediately.
-	Reader    client.Reader
-	Reviews   Reviewer
+	Reader  client.Reader
+	Reviews Reviewer
+	// Publisher serves runs without a destination pin (legacy file
+	// destination); it may be nil when every run is pinned.
 	Publisher publication.Publisher
+	// PublisherFor serves a run pinned to an EvidenceDestination, from that
+	// destination; downloads never follow later selection edits.
+	PublisherFor func(ctx context.Context, run *v1alpha1.AssessmentRun) (publication.Publisher, error)
 	// TempDir holds archives while they are verified. Files are removed
 	// after each response.
 	TempDir string
@@ -245,7 +250,22 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.Ass
 		return
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
-	body, st, err := s.Publisher.Open(ctx, ref)
+	pub := s.Publisher
+	if run.Status.Destination != nil {
+		pub = nil
+		if s.PublisherFor != nil {
+			if p, err := s.PublisherFor(ctx, run); err == nil {
+				pub = p
+			} else {
+				log.FromContext(ctx).Info("pinned destination unavailable", "run", run.Name, "error", err.Error())
+			}
+		}
+	}
+	if pub == nil {
+		fail(w, problem{http.StatusServiceUnavailable, "the package is unavailable"})
+		return
+	}
+	body, st, err := pub.Open(ctx, ref)
 	switch {
 	case errors.Is(err, publication.ErrExpired):
 		fail(w, problem{http.StatusGone, "the package expired and is no longer served"})
