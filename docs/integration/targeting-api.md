@@ -329,6 +329,21 @@ context and output directory. The `live`-tagged Go test
 Each step is recorded in `targeting/targeting-live.json` in the acceptance
 output.
 
+The same script then runs the controller's `live` tests against the running
+manager. Each writes its steps to `targeting/<TestName>.json`:
+
+| Test | Verifies |
+| --- | --- |
+| `TestLiveManager` | Manager delivery, the troubleshooting commands, restart without writes, relabel without new revisions, profile replacement, binding deletion. |
+| `TestLiveTargetingWorkflow` | Audit everywhere (`namespaceSelector: {}`) with Deny in production; audit evidence attributed to its binding; namespace creation, relabel and deletion; removing one overlapping binding leaves the other's policies unchanged and enforcing. |
+| `TestLiveTargetingFailures` | Missing content for new and working bindings (last applied policies kept), an ownership conflict found after a restart and its recovery, a Kyverno outage during replacement (`ReplacementPending`, old revision kept). No failure state reports Complete evidence. |
+| `TestLiveEnforcementEpoch` | Enforcement epoch admission, migration and reporting-only edits. |
+| `TestLiveAssessmentStatus`, `TestLiveAssessmentRuns`, `TestLiveEngineCorrelation` | The assessment side (see [assessment contract](assessment-contract.md)). |
+
+[targeting-acceptance.json](targeting-acceptance.json) records a full run from
+clean state: versions, rendered engine policy identities, test results, and the
+output package digests.
+
 The assessment-loop prototype's policy (`disallow-privileged-containers`,
 labelled `konstapel.io/owner`) has no Konstapel controller reference, and its
 name cannot collide with a rendered name. Delivery never adopts or removes it.
@@ -479,6 +494,14 @@ Other changes consume these files but do not edit them:
 | `add-self-service-policy-exceptions` | `targeting.Eligibility` (effective eligibility, shortest lifetime, contributor revisions) and `Contribution.Revision`. An acceptance is scoped to a revision and is never reused across revisions. |
 | `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`, and consumes `targeting.ExpectedEvidence`. |
 | `add-linux-workload-hardening-bundle` | Bundle policy metadata (logical name and resource scope) that the resolver reads. |
+
+The repository has one Go module (`go.mod` at the root) and one API group
+(`compliance.erenius.io/v1alpha1`, in `api/v1alpha1`). Downstream changes add
+files there and do not create their own module or group. The exceptions change
+compares accepted contributions by `Contribution.Revision` (its task 4.3). The
+bundle change keeps the root module and existing privileged policy (its task
+preamble). Neither is implemented yet; the contracts they name are exported
+from `internal/targeting` and pinned by tests.
 
 ### Expected evidence
 

@@ -48,4 +48,4 @@ the bundle agent owns new content. Do not rewrite the assessment-loop task list.
 
 - [x] 5.1 Run the complete targeting workflow through the foundation's engine/evidence path; verify namespace creation/relabel/deletion, profile updates, overlapping modes, and binding removal satisfy the capability scenarios while other contributions remain effective.
 - [x] 5.2 Exercise missing content, ownership conflicts, controller restart, engine unavailability, and failed replacement end to end; verify truthful status, retained owned enforcement where appropriate, and no fabricated complete assessment.
-- [ ] 5.3 Run the documented workflow from clean test state and retain the version matrix, rendered identities, and output package; verify the merged shared contracts are usable by the exceptions and bundle changes without duplicating root module or API ownership.
+- [x] 5.3 Run the documented workflow from clean test state and retain the version matrix, rendered identities, and output package; verify the merged shared contracts are usable by the exceptions and bundle changes without duplicating root module or API ownership.

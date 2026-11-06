@@ -1,0 +1,134 @@
+{
+  "date": "2026-11-06",
+  "command": "devbox run -- task acceptance OUTPUT=/tmp/konstapel-targeting-acceptance",
+  "result": {
+    "passed": true,
+    "exitCode": 0
+  },
+  "cluster": "kube-system:92e0efa4-9511-489b-8f37-17a3b4a9e15f",
+  "versions": {
+    "pinned": "versions.json",
+    "kubernetesServer": "v1.37.0",
+    "kubectl": "v1.37.2",
+    "runtimeImages": [
+      {
+        "image": "reg.kyverno.io/kyverno/background-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/background-controller@sha256:c46e124f21ef8a6bb4b48de57106808b1007edcd5ddd4ff7df5d23b9efa60ce2"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/cleanup-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/cleanup-controller@sha256:d7340aa7c9315080c3dafa7b765d090ced37353e89e5cd7a3f9ac69e8fb532b2"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/kyverno:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyverno@sha256:c8c4dd09e720d2cd7fd24ca73ac28e46651001372f988e0cba3f2f612f04b955"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/kyvernopre:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyvernopre@sha256:27f3cc52e628559b56d08363b85316819802086c9808606914f7805a244148f4"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/reports-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/reports-controller@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3"
+      }
+    ]
+  },
+  "renderedIdentities": {
+    "bundleDigest": "sha256:7d5cb88b2dad37d481220c4cdbaa452d10b531d99ab2a2898126b8fe7464c5d2",
+    "TestLiveDelivery": {
+      "audit": "konstapel-disallow-privileged-containers-529411702da4be14",
+      "deny": "konstapel-disallow-privileged-containers-0b9faea6fc26f4af",
+      "replacement": {
+        "at": "2026-11-06T09:30:39Z",
+        "from": "konstapel-disallow-privileged-containers-0b9faea6fc26f4af",
+        "step": "replaced",
+        "to": "konstapel-disallow-privileged-containers-077c27a84216958b"
+      }
+    },
+    "TestLiveTargetingWorkflow": {
+      "audit": [
+        "konstapel-disallow-privileged-containers-f0050e0cf546f825"
+      ],
+      "deny": [
+        "konstapel-disallow-privileged-containers-55608a5ebc4c54f9"
+      ]
+    },
+    "TestLiveTargetingFailures": {
+      "conflict": "konstapel-disallow-privileged-containers-5bef6c4e547cacab",
+      "duringOutage": [
+        "konstapel-disallow-privileged-containers-5bef6c4e547cacab",
+        "konstapel-disallow-privileged-containers-f83aff8f5bfbbb41"
+      ]
+    }
+  },
+  "tests": [
+    {
+      "test": "TestLiveDelivery",
+      "result": "PASS",
+      "seconds": 42.85
+    },
+    {
+      "test": "TestLiveAssessmentStatus",
+      "result": "PASS",
+      "seconds": 28.52
+    },
+    {
+      "test": "TestLiveAssessmentRuns",
+      "result": "PASS",
+      "seconds": 75.09
+    },
+    {
+      "test": "TestLiveEngineCorrelation",
+      "result": "PASS",
+      "seconds": 74.8
+    },
+    {
+      "test": "TestLiveEnforcementEpoch",
+      "result": "PASS",
+      "seconds": 27.66
+    },
+    {
+      "test": "TestLiveTargetingFailures",
+      "result": "PASS",
+      "seconds": 104.84
+    },
+    {
+      "test": "TestLiveManager",
+      "result": "PASS",
+      "seconds": 31.53
+    },
+    {
+      "test": "TestLiveTargetingWorkflow",
+      "result": "PASS",
+      "seconds": 20.55
+    }
+  ],
+  "package": {
+    "runManifest": {
+      "policyRevision": "fac1ccda72ab53594921ca1c040ac90b80afadcd",
+      "appliedPolicySha256": "4ba247bd9e171bc0f10146ebf64bb540ed5a0562cafae3210381df5bc801d8ed",
+      "sourcePolicySha256": "6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e",
+      "mappingSha256": "b90ebbe149b9a37e260763cb9eb14dfb11613b3a8799f4cc2e92fc72050bf5e0",
+      "nistRevision": "f0de6d8d8c059d374f15e0ae07508d82e370fc1d",
+      "complete": true,
+      "coverage": "Partial technical evidence for ac-6/ac-6_smt: prohibiting privileged containers reduces unnecessary process privileges; does not assess authorization, all process privileges, organizational procedures, or full AC-6/Moderate satisfaction."
+    },
+    "files": {
+      "acceptance.json": "sha256:6ac9a8cd42d5a3d01a4e5d63bae87e903df86802e0073871e382f2551922fa65",
+      "admission.json": "sha256:bcbf76f1ae52cae3963936f6b65928f33ef7b63794c97edf15d4d562c914fe89",
+      "assessment-plan.json": "sha256:fca3d04becdf58c386e984e75bd563c71d63bd54e144387aaae61a9cb9fea633",
+      "assessment-results.json": "sha256:033370bcee5f1ffefbc4b411555c32e32ae858cf83f2aee14ab0bea0ef223837",
+      "capture.json": "sha256:f795f78b7618dffe4c1a306a945e92aa4fb85ae365f49554e2b66b6f7bd25e4a",
+      "content-manifest.json": "sha256:99947230432a1549ed686c437ac272dadfd93ba583ab9cf28c69708ebb124465",
+      "events.json": "sha256:f9e44044a6e5d33574b1c79035e047e902963b856cdd725a8ae7bf8efef42e0d",
+      "evidence.json": "sha256:9f24e21ed5d511cd4035512727a2633b42d03950a87d26f466beecc5ff646086",
+      "final-policies.json": "sha256:efd5a5e5230c0d9595a91e2c62e8c079e3aa5e3a59a8a78f8b485a9a77bdc386",
+      "final-reports.json": "sha256:2bba1a696363da72db53ff5a44254a67e3ead347e2a21b1c5741e65bc1af8524",
+      "final-workloads.json": "sha256:4ca57b392781169e79ff1f7aed2a2284fd94d583d1401279dfccc98e6ccbe0d9",
+      "rendered-policy.json": "sha256:58eb20da9e8c59abe5ec49fd1eca30ad3233a9c31a4cb908a32fab69ceb1d8e7",
+      "run-manifest.json": "sha256:3e60c410685999e46fa77ef4fdc66192328806a1d56727cd633f77196813976c",
+      "system-security-plan.json": "sha256:062ebc618efc4f312eb934072adf067b6b0f635c1a9e632d91e216e4c8099ced"
+    }
+  },
+  "retained": "Full output (package, reconverted package, kind logs, per-test evidence) is kept outside version control at /tmp/konstapel-targeting-acceptance."
+}
