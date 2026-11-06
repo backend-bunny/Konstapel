@@ -4,11 +4,12 @@
 
 See [proposal.md](proposal.md) and the
 [helm-distribution contract](specs/helm-distribution/spec.md). The repository
-currently ships an assessment CLI and C2P provider, not a controller image or
-Helm charts. `scripts/environment.sh` installs Kyverno only in a disposable
-test cluster. `internal/assessment/target.go` already discovers policy/report
-resources and waits for policy RBAC/webhook conditions, but its synchronous CLI
-preflight is not the desired controller startup behavior.
+ships the controller, assessment CLI and C2P provider in one image, but no Helm
+charts yet. Existing Go live tests exercise real Kubernetes APIs with an
+in-process manager; they are run by local acceptance, while CI runs `task check`
+and image checks. `scripts/environment.sh` installs Kyverno in a disposable test
+cluster. Chart acceptance must add automated coverage of the installed image and
+the actual chart resources, including controller capability recovery.
 
 Release-please uses one `VERSION`, with checks in `scripts/check-version.sh`.
 The publishing workflow builds melange/apko images, signs their OCI digests with
@@ -314,6 +315,54 @@ same-identity reinstall. Test the certificate and exception behavior only when
 their real feature implementations are present; fixture success is not a release
 claim for an absent feature. Registry fixtures exercise mismatched subjects,
 tampered packages, partial publication and retry without production credentials.
+
+Implement the chart acceptance suite in Go. It drives Helm, Kubernetes APIs and
+the installed HTTPS endpoints as an external client. The controller runs only
+from the packaged image in cluster pods, under the chart's ServiceAccount/RBAC;
+the acceptance process must not start an in-process manager or substitute fake
+publishers for enabled evidence scenarios. Reuse API types, fixtures and client
+helpers where useful, while keeping existing unit and in-process integration
+tests. Chainsaw is not required for Konstapel CRD acceptance; upstream Kyverno
+policy fixtures remain supported by their existing workflow.
+
+The core CI matrix covers both TLS modes and the supported default replica
+configuration. Exercise API-server defaulting/validation, protected updates and
+status permissions for every shipped CRD, reconciliation and policy enforcement,
+and CRD install/upgrade/uninstall/reinstall with populated resources. Include the
+available assessment, download and exception behavior only with the owning
+features' real prerequisites satisfied. An unavailable optional feature must
+remain disabled and be listed as untested; it cannot be advertised based on a
+skipped case. Use the availability owner's full fault matrix as the existing
+replicated-runtime release gate.
+
+Add a separate GitHub Actions acceptance gate that runs
+`devbox run -- task charts:acceptance` on pull requests and pushes to `main`.
+Keep the workflow and stable gate check present on every PR, and require it in
+the repository's merge rules. Documentation-only changes may explicitly report
+not applicable; charts, Go/runtime code, generated APIs/RBAC/admission, content,
+image recipes, dependency/tool locks, acceptance helpers, version/release inputs
+and CI changes must trigger the tests. Unknown changed paths run the suite rather
+than silently opting out. Bot-created release PRs must receive the same checks
+through explicit dispatch where GitHub token-trigger rules require it.
+
+PR acceptance builds the image and packages from the tested revision, loads them
+into test-owned infrastructure, and needs no production registry writes or
+signing credentials. Use the pinned Devbox/Task helpers and recorded dependency
+versions, including a real disposable S3 service for enabled evidence cases.
+Bound runtime and resource use, isolate each job's cluster/registry/storage, and
+serialize live suites sharing a constrained runner. Always collect sanitized
+logs, Kubernetes events, resource Conditions, test results and cleanup outcomes,
+including on timeout or failure; do not upload kubeconfigs, tokens or private keys.
+
+Before chart publication, the trusted release workflow must run the full
+applicable acceptance matrix against the frozen chart archives and their exact
+verified image digest. Bind its results to the tested source revision, both
+archive checksums, image digest and dependency versions. The publisher must
+reject missing, failed, cancelled, inapplicably skipped or mismatched acceptance
+evidence. A green check for another revision, rebuilt image or differently
+rendered defaults is insufficient. Nightly and manual runs can supplement the
+PR and release gates, but cannot replace them. Cleanup of task-owned resources
+must run on success and failure without deleting unrelated infrastructure.
 
 ## Risks / Trade-offs
 

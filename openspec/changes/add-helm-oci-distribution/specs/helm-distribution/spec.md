@@ -185,6 +185,73 @@ availability contract without requiring a replica to hold leadership.
 - **THEN** the real enabled features pass the controller availability acceptance cases
 - **AND** chart rendering or fixture services alone cannot establish that release gate
 
+### Requirement: Go acceptance tests exercise the installed charts
+
+Chart acceptance SHALL use Go tests against the real image installed from both
+packaged charts in a disposable cluster, driving Helm, Kubernetes APIs and
+service endpoints. In-process managers, fake backends and rendering-only fixtures
+SHALL NOT satisfy this gate. The core matrix SHALL cover all shipped CRDs, both
+TLS modes and default replicas; releases SHALL also pass applicable availability
+cases. Optional features SHALL respect their owning runtime gates.
+
+#### Scenario: Exercise CRDs through the installed release
+
+- **WHEN** the acceptance suite installs the packaged CRD and controller charts
+- **THEN** real API requests demonstrate valid defaults, invalid-spec rejection, protected status/RBAC boundaries, reconciliation and policy enforcement
+- **AND** the controller uses the packaged image and chart-granted permissions rather than a manager started by the Go test process
+- **AND** supported upgrade and removal/reinstall operations preserve existing resource identities and data
+
+#### Scenario: Exercise optional capabilities
+
+- **WHEN** assessment, download or exception features are included in acceptance
+- **THEN** their implemented runtime and compatibility prerequisites are satisfied, including a real S3-compatible service for enabled evidence cases
+- **AND** disabled or skipped features are identified as untested and are not advertised as accepted or available
+
+### Requirement: CI execution gates merging
+
+CI SHALL run the shared Devbox `charts:acceptance` task on relevant pull requests
+and main pushes, separately from cluster-free checks. Merge rules SHALL require
+a stable acceptance gate. Documentation-only changes MAY explicitly report not
+applicable; relevant or unknown changes SHALL run tests. Bot release PRs SHALL
+receive the same gate, using explicit dispatch when needed. PR tests SHALL need
+no production credentials; manual or nightly-only testing SHALL NOT replace CI.
+
+#### Scenario: Select changes requiring acceptance
+
+- **WHEN** a pull request or main push changes charts, runtime code, APIs/RBAC/admission, content, image builds, dependencies, tools, test helpers, version/release inputs, CI or an unknown path
+- **THEN** the CI acceptance suite runs for the tested revision
+- **AND** documentation-only exclusions report not applicable through the stable gate rather than claiming tests passed
+
+#### Scenario: A runtime regression has passing unit tests
+
+- **WHEN** a pull request passes `task check` but fails installed-chart acceptance
+- **THEN** its required acceptance gate fails and merging is blocked
+- **AND** the failure is not downgraded to an advisory or continue-on-error result
+- **AND** missing, cancelled or skipped required results cannot satisfy the merge gate
+
+### Requirement: Acceptance evidence gates chart publication
+
+Trusted publication SHALL require passing acceptance for its exact source
+revision, frozen chart archive checksums, verified image digest and applicable
+release matrix. Missing, failed, cancelled, skipped or mismatched required
+results SHALL block publication. CI SHALL retain sanitized results, logs, events,
+Conditions, artifact identities and dependency versions on success or failure,
+and attempt cleanup of task-owned resources without deleting unrelated resources.
+
+#### Scenario: A release references different artifacts
+
+- **WHEN** publication inputs differ from the accepted source, chart archive checksums or controller image digest
+- **THEN** publication is blocked until the actual frozen inputs pass the applicable acceptance matrix
+- **AND** successful acceptance of an earlier PR or different development values does not satisfy the gate
+- **AND** the artifacts are not rebuilt or replaced between acceptance and publishing
+
+#### Scenario: Preserve diagnostics and clean up after failure
+
+- **WHEN** acceptance fails or times out
+- **THEN** CI retains sanitized diagnostics and tested input identities
+- **AND** cleanup runs for task-owned test resources and any cleanup failure is reported without deleting unrelated resources
+- **AND** retained evidence excludes kubeconfigs, tokens and private keys
+
 ### Requirement: Sign and attest each OCI chart digest
 
 Both charts SHALL be published to distinct GHCR OCI repositories. Each OCI
