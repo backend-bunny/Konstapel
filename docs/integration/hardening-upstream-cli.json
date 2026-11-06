@@ -1,0 +1,3241 @@
+{
+  "task": "add-linux-workload-hardening-bundle 1.3",
+  "observed": "2026-11-06",
+  "cli": {
+    "name": "kyverno (Devbox kyverno@1.19.2)",
+    "version": "v1.19.2"
+  },
+  "command": "devbox run -- kyverno test content/upstream/kyverno/<check> --require-tests --remove-color",
+  "scope": "Unmodified upstream policies, fixtures and exceptions at kyverno/policies fac1ccda72ab53594921ca1c040ac90b80afadcd. Agreement with upstream expectations only: not local variants, live admission, background reports or exceptions.",
+  "checks": {
+    "disallow-capabilities-strict": {
+      "matched": 156,
+      "failed": 0,
+      "suites": [
+        ".kyverno-test",
+        ".kyverno-test-controllers",
+        ".kyverno-test-exceptions"
+      ],
+      "byPolicy": {
+        "adding-capabilities-strict": 76,
+        "disallow-capabilities-strict": 80
+      }
+    },
+    "disallow-privilege-escalation": {
+      "matched": 50,
+      "failed": 0,
+      "suites": [
+        ".kyverno-test",
+        ".kyverno-test-controllers",
+        ".kyverno-test-exceptions"
+      ],
+      "byPolicy": {
+        "disallow-privilege-escalation": 50
+      }
+    },
+    "require-run-as-nonroot": {
+      "matched": 113,
+      "failed": 0,
+      "suites": [
+        ".kyverno-test",
+        ".kyverno-test-controllers",
+        ".kyverno-test-exceptions",
+        ".kyverno-test-regressions"
+      ],
+      "byPolicy": {
+        "require-run-as-nonroot": 113
+      }
+    },
+    "restrict-seccomp-strict": {
+      "matched": 78,
+      "failed": 0,
+      "suites": [
+        ".kyverno-test",
+        ".kyverno-test-controllers",
+        ".kyverno-test-exceptions"
+      ],
+      "byPolicy": {
+        "restrict-seccomp-strict": 78
+      }
+    }
+  },
+  "shippedVersusHelper": "disallow-capabilities-strict results include the upstream adding-capabilities-strict helper (.kyverno-test/adding-capabilities-strict.yaml), a Pod-only add-only test aid that is not shipped; byPolicy separates its results from the combined shipped policy.",
+  "results": [
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/badcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/baddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/badpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/goodcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/gooddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/goodpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/Deployment/default/unsafe-disallow-privilege-escalation-1",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/DaemonSet/default/unsafe-disallow-privilege-escalation-2",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/StatefulSet/default/unsafe-disallow-privilege-escalation-3",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "apps/v1/ReplicaSet/default/unsafe-disallow-privilege-escalation-4",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/ReplicationController/default/unsafe-disallow-privilege-escalation-5",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/Job/default/unsafe-disallow-privilege-escalation-6",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-privilege-escalation",
+      "resource": "batch/v1/CronJob/default/unsafe-disallow-privilege-escalation-7",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/exception-partial",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/exception-wrong",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/exception-sibling",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-privilege-escalation",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-privilege-escalation",
+      "resource": "v1/Pod/default/exception-whole",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob14",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob15",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob16",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob17",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/badcronjob18",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment14",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment15",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment16",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment17",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/baddeployment18",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod14",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod15",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod16",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod17",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod18",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod19",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/badpod20",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/goodcronjob12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/gooddeployment12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/goodpod13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/unsafe-require-run-as-nonroot-1",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/DaemonSet/default/unsafe-require-run-as-nonroot-2",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/StatefulSet/default/unsafe-require-run-as-nonroot-3",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/ReplicaSet/default/unsafe-require-run-as-nonroot-4",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/ReplicationController/default/unsafe-require-run-as-nonroot-5",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/Job/default/unsafe-require-run-as-nonroot-6",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-controllers",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/unsafe-require-run-as-nonroot-7",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/exception-partial",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/exception-wrong",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/exception-sibling",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/exception-whole",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/null-init-pass",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/null-ephemeral-pass",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/null-init-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/null-ephemeral-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/default-os-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/linux-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "v1/Pod/default/windows-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "apps/v1/Deployment/default/deployment-null-init-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "suite": ".kyverno-test-regressions",
+      "policy": "require-run-as-nonroot",
+      "resource": "batch/v1/CronJob/default/cronjob-null-ephemeral-root",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob06",
+      "result": "Pass",
+      "reason": "Excluded"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob02",
+      "result": "Pass",
+      "reason": "Excluded"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob04",
+      "result": "Pass",
+      "reason": "Excluded"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob07",
+      "result": "Pass",
+      "reason": "Excluded"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "adding-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/badpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/goodpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-badcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-baddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-badpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/addcap-goodcronjob13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/addcap-gooddeployment13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/addcap-goodpod13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/Deployment/default/unsafe-disallow-capabilities-strict-1",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/DaemonSet/default/unsafe-disallow-capabilities-strict-2",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/StatefulSet/default/unsafe-disallow-capabilities-strict-3",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "apps/v1/ReplicaSet/default/unsafe-disallow-capabilities-strict-4",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/ReplicationController/default/unsafe-disallow-capabilities-strict-5",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/Job/default/unsafe-disallow-capabilities-strict-6",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "disallow-capabilities-strict",
+      "resource": "batch/v1/CronJob/default/unsafe-disallow-capabilities-strict-7",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/exception-partial",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/exception-wrong",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/exception-sibling",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "disallow-capabilities-strict",
+      "resource": "v1/Pod/default/exception-whole",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/badcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/baddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/badpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/goodcronjob11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/gooddeployment11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod01",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod02",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod03",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod04",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod05",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod06",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod07",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod08",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod09",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod10",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod11",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod12",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/goodpod13",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/Deployment/default/unsafe-restrict-seccomp-strict-1",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/DaemonSet/default/unsafe-restrict-seccomp-strict-2",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/StatefulSet/default/unsafe-restrict-seccomp-strict-3",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "apps/v1/ReplicaSet/default/unsafe-restrict-seccomp-strict-4",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/ReplicationController/default/unsafe-restrict-seccomp-strict-5",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/Job/default/unsafe-restrict-seccomp-strict-6",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-controllers",
+      "policy": "restrict-seccomp-strict",
+      "resource": "batch/v1/CronJob/default/unsafe-restrict-seccomp-strict-7",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/exception-partial",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/exception-wrong",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/exception-sibling",
+      "result": "Pass",
+      "reason": "Ok"
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "suite": ".kyverno-test-exceptions",
+      "policy": "restrict-seccomp-strict",
+      "resource": "v1/Pod/default/exception-whole",
+      "result": "Pass",
+      "reason": "Ok"
+    }
+  ]
+}

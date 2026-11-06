@@ -201,8 +201,9 @@ func TestChangedOrConflictingEvidenceIsUnresolved(t *testing.T) {
 	NewTracker(&c).Workload(at, updated, false)
 	c.Reports = reportsAt(c, at.Add(time.Minute), func(Expected) string { return "pass" })
 	// A second, conflicting result for pod-prod/deny-production at the same time.
+	deny := renderedName(t, "deny-production.yaml")
 	for _, e := range c.Expected {
-		if e.Workload.UID == "pod-prod" && strings.HasSuffix(e.Check.EnginePolicy, "835a035b40c0af8f") {
+		if e.Workload.UID == "pod-prod" && e.Check.EnginePolicy == deny {
 			c.Reports = append(c.Reports, report("conflict", "ns", e.Workload.UID, result(e.Check.EnginePolicy, e.Check.Index, e.Workload.UID, "fail", at.Add(time.Minute))))
 		}
 	}
