@@ -1,0 +1,232 @@
+{
+  "controllerCurrentEvidence": [
+    {
+      "at": "2026-11-06T04:31:56.773113196Z",
+      "sinceUpdate": "1s",
+      "completeness": "Complete",
+      "evaluatedFromNextExpiry": "2026-11-06T04:31:45Z"
+    },
+    {
+      "at": "2026-11-06T04:31:57.781087328Z",
+      "sinceUpdate": "2s",
+      "completeness": "Incomplete"
+    },
+    {
+      "at": "2026-11-06T04:32:10.900838634Z",
+      "sinceUpdate": "15s",
+      "completeness": "Complete",
+      "evaluatedFromNextExpiry": "2026-11-06T04:32:00Z"
+    },
+    {
+      "at": "2026-11-06T04:32:26.042913807Z",
+      "sinceUpdate": "30s",
+      "completeness": "Complete",
+      "evaluatedFromNextExpiry": "2026-11-06T04:32:15Z"
+    },
+    {
+      "at": "2026-11-06T04:32:41.194011571Z",
+      "sinceUpdate": "45s",
+      "completeness": "Complete",
+      "evaluatedFromNextExpiry": "2026-11-06T04:32:30Z"
+    },
+    {
+      "at": "2026-11-06T04:32:56.339126053Z",
+      "sinceUpdate": "1m0s",
+      "completeness": "Complete",
+      "evaluatedFromNextExpiry": "2026-11-06T04:32:45Z"
+    }
+  ],
+  "date": "2026-11-06",
+  "purpose": "add-continuous-assessments task 4.3: evaluation-to-resource-state correlation in the pinned Kyverno release",
+  "reports": [
+    {
+      "at": "2026-11-06T04:31:56.671182768Z",
+      "reportResourceVersion": "2477",
+      "reportLabels": {
+        "app.kubernetes.io/managed-by": "kyverno"
+      },
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "subject",
+        "namespace": "corr-prod",
+        "uid": "a8368475-e695-4739-9fee-f8eab56b8ff1"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "policy": "konstapel-disallow-privileged-containers-7269fe6f5f92e288",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793939505
+          }
+        }
+      ],
+      "podResourceVersion": "2484",
+      "podGeneration": 1,
+      "podStateSha256": "45e7a7c3dfa4169c3f1e608a4f9440afbca21f396db159cbfa49d6d031e9e3a7"
+    },
+    {
+      "at": "2026-11-06T04:32:10.897631329Z",
+      "sinceUpdate": "15s",
+      "reportResourceVersion": "2553",
+      "reportLabels": {
+        "app.kubernetes.io/managed-by": "kyverno"
+      },
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "subject",
+        "namespace": "corr-prod",
+        "uid": "a8368475-e695-4739-9fee-f8eab56b8ff1"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "policy": "konstapel-disallow-privileged-containers-7269fe6f5f92e288",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793939520
+          }
+        }
+      ],
+      "podResourceVersion": "2537",
+      "podGeneration": 1,
+      "podStateSha256": "4388d003025570d32d98356474c8f74bce1fb2b6947c65668f8c7f9b0c5891a9"
+    },
+    {
+      "at": "2026-11-06T04:32:26.03991869Z",
+      "sinceUpdate": "30s",
+      "reportResourceVersion": "2614",
+      "reportLabels": {
+        "app.kubernetes.io/managed-by": "kyverno"
+      },
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "subject",
+        "namespace": "corr-prod",
+        "uid": "a8368475-e695-4739-9fee-f8eab56b8ff1"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "policy": "konstapel-disallow-privileged-containers-7269fe6f5f92e288",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793939535
+          }
+        }
+      ],
+      "podResourceVersion": "2537",
+      "podGeneration": 1,
+      "podStateSha256": "4388d003025570d32d98356474c8f74bce1fb2b6947c65668f8c7f9b0c5891a9"
+    },
+    {
+      "at": "2026-11-06T04:32:41.191027002Z",
+      "sinceUpdate": "45s",
+      "reportResourceVersion": "2678",
+      "reportLabels": {
+        "app.kubernetes.io/managed-by": "kyverno"
+      },
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "subject",
+        "namespace": "corr-prod",
+        "uid": "a8368475-e695-4739-9fee-f8eab56b8ff1"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "policy": "konstapel-disallow-privileged-containers-7269fe6f5f92e288",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793939550
+          }
+        }
+      ],
+      "podResourceVersion": "2663",
+      "podGeneration": 1,
+      "podStateSha256": "4388d003025570d32d98356474c8f74bce1fb2b6947c65668f8c7f9b0c5891a9"
+    },
+    {
+      "at": "2026-11-06T04:32:56.335238885Z",
+      "sinceUpdate": "1m0s",
+      "reportResourceVersion": "2737",
+      "reportLabels": {
+        "app.kubernetes.io/managed-by": "kyverno"
+      },
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "subject",
+        "namespace": "corr-prod",
+        "uid": "a8368475-e695-4739-9fee-f8eab56b8ff1"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Baseline) in ValidatingPolicy",
+          "message": "Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+          "policy": "konstapel-disallow-privileged-containers-7269fe6f5f92e288",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1793939565
+          }
+        }
+      ],
+      "podResourceVersion": "2720",
+      "podGeneration": 1,
+      "podStateSha256": "4388d003025570d32d98356474c8f74bce1fb2b6947c65668f8c7f9b0c5891a9"
+    }
+  ],
+  "versions": "versions.json",
+  "workloadUpdate": {
+    "at": "2026-11-06T04:31:56Z",
+    "change": "metadata.labels.state a→b (in place, same UID)"
+  }
+}
