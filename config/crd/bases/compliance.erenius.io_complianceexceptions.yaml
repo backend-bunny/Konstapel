@@ -176,6 +176,32 @@ spec:
             description: ComplianceExceptionStatus is written only by the Konstapel
               controller.
             properties:
+              acceptance:
+                description: |-
+                  acceptance references the immutable snapshot of the current acceptance
+                  revision. Earlier revisions keep their own snapshots.
+                properties:
+                  digest:
+                    description: digest is the sha256 of the snapshot document.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  revision:
+                    description: revision is the acceptance revision the snapshot
+                      records.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  snapshot:
+                    description: |-
+                      snapshot is the "<namespace>/<name>" of the immutable ConfigMap that
+                      holds the snapshot in the protected Konstapel namespace.
+                    maxLength: 317
+                    type: string
+                required:
+                - digest
+                - revision
+                - snapshot
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

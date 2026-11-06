@@ -65,6 +65,9 @@ type Options struct {
 	WebhookCertDir string
 	// WebhookPort is the webhook server's port; 0 means 9443.
 	WebhookPort int
+	// SnapshotNamespace holds acceptance snapshots; empty means
+	// DefaultSnapshotNamespace.
+	SnapshotNamespace string
 }
 
 // Scheme returns the scheme the manager uses.
@@ -140,6 +143,9 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		return nil, err
 	}
 	if err := setupAssessments(mgr, opts.Content, engine, br.Cluster, opts.EnginePoll); err != nil {
+		return nil, err
+	}
+	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
 		return nil, err
 	}
 	if opts.WebhookCertDir != "" {

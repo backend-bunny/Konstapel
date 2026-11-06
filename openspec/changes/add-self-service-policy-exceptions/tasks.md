@@ -33,7 +33,7 @@ enablement is blocked until the runtime expiry and governance gates pass.
 
 ## 3. Persist acceptances and govern native grants
 
-- [ ] 3.1 Persist immutable acceptance snapshots before grant delivery and expose their digest/reference; verify snapshots contain actor/reason, namespace UID, cluster identity, policy/configuration revisions, selector, and validity interval and survive restart without refreshing the accepted set.
+- [x] 3.1 Persist immutable acceptance snapshots before grant delivery and expose their digest/reference; verify snapshots contain actor/reason, namespace UID, cluster identity, policy/configuration revisions, selector, and validity interval and survive restart without refreshing the accepted set.
 - [ ] 3.2 Render managed v1 native exceptions with exact versioned policy refs, namespace name/UID and workload-selector conditions, `reportResult: skip`, and bounded `expiresAt`; verify selector operator/escaping cases, sibling isolation, absent namespace identity, and unchanged snapshots through rendering fixtures.
 - [ ] 3.3 Install restricted exception-namespace RBAC and fail-closed native admission governance covering every served version; verify direct create/update/widen attempts by application roles and invalid controller-generated refs/expiry are rejected before enabling exceptions.
 - [ ] 3.4 Implement deterministic ownership checks, safe retry behavior, and finalizer/orphan handling for central native objects; verify unmanaged collisions remain untouched and no invalid cross-namespace owner reference is used.

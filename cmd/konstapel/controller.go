@@ -58,6 +58,7 @@ func runController(args []string) error {
 		LeaderElectionNamespace: *leaderNS,
 		WebhookCertDir:          *webhookCerts,
 		WebhookPort:             *webhookPort,
+		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),
 	})
 	if err != nil {
 		return err

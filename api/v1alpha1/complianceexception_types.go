@@ -55,12 +55,46 @@ type ComplianceExceptionSpec struct {
 
 // ComplianceExceptionStatus is written only by the Konstapel controller.
 type ComplianceExceptionStatus struct {
+	// acceptance references the immutable snapshot of the current acceptance
+	// revision. Earlier revisions keep their own snapshots.
+	// +optional
+	Acceptance *AcceptanceSnapshotReference `json:"acceptance,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	// +kubebuilder:validation:MaxItems=16
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// AcceptanceSnapshotReference identifies a persisted acceptance snapshot.
+type AcceptanceSnapshotReference struct {
+	// revision is the acceptance revision the snapshot records.
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	Revision int64 `json:"revision"`
+	// snapshot is the "<namespace>/<name>" of the immutable ConfigMap that
+	// holds the snapshot in the protected Konstapel namespace.
+	// +required
+	// +kubebuilder:validation:MaxLength=317
+	Snapshot string `json:"snapshot"`
+	// digest is the sha256 of the snapshot document.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+}
+
+// Condition types and reasons on ComplianceException.
+const (
+	// ConditionAcceptanceRecorded is True once the current acceptance
+	// revision has an immutable snapshot.
+	ConditionAcceptanceRecorded = "AcceptanceRecorded"
+
+	ReasonSnapshotRecorded  = "Recorded"
+	ReasonAcceptanceMissing = "AcceptanceMissing"
+	ReasonAcceptanceInvalid = "AcceptanceInvalid"
+	ReasonAcceptancePending = "AcceptancePending"
+	ReasonSnapshotConflict  = "SnapshotConflict"
+)
 
 // ComplianceException is a namespace team's self-service, time-limited
 // exception from one eligible logical policy for selected workloads in its
