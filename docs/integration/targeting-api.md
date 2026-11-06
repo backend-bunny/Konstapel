@@ -14,7 +14,7 @@ engine delivery and the controller (`konstapel controller`) exist. Packaging
 the controller as a Helm chart is owned by `add-helm-oci-distribution`; feeding
 resolved scope into assessment evidence follows in this change. Applying these CRDs does not enforce anything
 yet. The capability spec is
-[compliance-targeting](../../openspec/changes/add-compliance-targeting-api/specs/compliance-targeting/spec.md).
+[compliance-targeting](../../openspec/specs/compliance-targeting/spec.md).
 
 ## Files
 

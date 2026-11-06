@@ -132,7 +132,7 @@ func readSpec(t *testing.T) []byte {
 	t.Helper()
 	for _, p := range []string{
 		"../../openspec/specs/compliance-targeting/spec.md",
-		"../../openspec/changes/add-compliance-targeting-api/specs/compliance-targeting/spec.md",
+		"../../openspec/specs/compliance-targeting/spec.md",
 	} {
 		if b, err := os.ReadFile(p); err == nil {
 			return b
