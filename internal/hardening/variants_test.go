@@ -203,3 +203,56 @@ func TestVariantsShareTheOSConvention(t *testing.T) {
 		}
 	}
 }
+
+// The recorded CLI evidence names the exact variant digests it tested; a
+// changed variant makes it stale until the suites are re-run and re-recorded.
+func TestVariantCLIEvidenceIsCurrent(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(root, "docs/integration/hardening-variant-cli.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev struct {
+		Variants []struct {
+			Check  string `json:"check"`
+			SHA256 string `json:"sha256"`
+		} `json:"variants"`
+		Suites []struct {
+			Fixture  string   `json:"fixture"`
+			Policies []string `json:"policies"`
+			Passed   int      `json:"passed"`
+			Failed   int      `json:"failed"`
+		} `json:"suites"`
+	}
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{}
+	for _, v := range loadVariants(t).Variants {
+		current[v.Check] = v.SHA256
+	}
+	if len(ev.Variants) != len(current) {
+		t.Fatalf("evidence covers %d variants, have %d", len(ev.Variants), len(current))
+	}
+	for _, v := range ev.Variants {
+		if current[v.Check] != v.SHA256 {
+			t.Errorf("%s: evidence tested %s, current variant is %s; re-run and re-record the CLI suites", v.Check, v.SHA256, current[v.Check])
+		}
+	}
+	tested := map[string]bool{}
+	for _, s := range ev.Suites {
+		if s.Failed != 0 || s.Passed == 0 {
+			t.Errorf("%s: %d passed, %d failed", s.Fixture, s.Passed, s.Failed)
+		}
+		if _, err := os.Stat(filepath.Join(root, s.Fixture, "kyverno-test.yaml")); err != nil {
+			t.Errorf("%s: %v", s.Fixture, err)
+		}
+		for _, p := range s.Policies {
+			tested[p] = true
+		}
+	}
+	for check := range current {
+		if !tested["content/linux-hardening/variants/"+check+".yaml"] {
+			t.Errorf("no recorded suite tests the %s variant", check)
+		}
+	}
+}
