@@ -209,6 +209,34 @@ policy per selected check. Each rendered instance carries:
 `internal/hardening/serve_test.go` checks this for a whole-bundle profile
 under an Audit and a Deny binding.
 
+### Rendered bundle instances (task 4.1)
+
+`testdata/linux-hardening/rendered/` holds the four checks rendered through a
+`linux-hardening` profile with two bindings: `audit-all` (empty selector:
+every namespace, Audit) and `deny-production` (`environment: production`,
+Deny). These eight golden policies are the input of a generated Kyverno CLI
+test. The workloads are, per namespace, one compliant Pod, one Pod per
+violated check, and a CronJob template violating all four, for 96 expected
+results. In each namespace a binding selects, each check fails only the
+workloads violating it; elsewhere it is skipped.
+
+`TestRenderedBundleInstances` checks every instance in Go:
+- it is a `policies.kyverno.io/v1` `ValidatingPolicy` with background
+  evaluation and exactly the binding's mode;
+- it carries revision, logical-policy and source-digest provenance;
+- its resource rules are unchanged from the variant;
+- `matchConstraints` holds nothing besides those rules and the namespace
+  selector, and no `matchConditions` are added, so there are no hidden
+  exclusions;
+- its namespace selector selects exactly the binding's namespaces. This
+  covers the Kyverno 1.19 CLI limitation that a selector-excluded resource
+  passes any expected result.
+
+The rendered names and annotations derive from the bundle digest. After any
+`content/` change, regenerate with
+`go test ./internal/hardening -run TestRenderedBundleFixtures -update`,
+together with the targeting goldens.
+
 ## NIST Moderate mappings
 
 `content/linux-hardening/component-definition.json` (OSCAL 1.1.3, trestle
@@ -278,4 +306,7 @@ policies with recorded digests.
 4. Re-run the CLI suites, regenerate `hardening-upstream-cli.json`, and review
    upstream changes before updating any local variant.
 5. `devbox run -- task check`. The vendored bundle digest is the sha256 of
-   `content/SHA256SUMS`, so targeting fixtures that pin it change as well.
+   `content/SHA256SUMS`, so fixtures that pin it change as well. Regenerate
+   them with `go test ./internal/targeting -run 'TestRenderMatchesGoldenCLIFixtures|TestExpectedEvidenceMatchesGolden' -update`
+   and `go test ./internal/hardening -run TestRenderedBundleFixtures -update`.
+   Then refresh the engine policy names in `testdata/targeting/rendered/kyverno-test.yaml`.
