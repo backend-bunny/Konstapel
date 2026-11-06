@@ -1,0 +1,670 @@
+# Lifecycle fixture matrix for add-self-service-policy-exceptions (task 1.1).
+# README.md in this directory documents the format and how to run it.
+#
+# Shared vocabulary used by the cases:
+#   policy  "disallow-privileged" (logical policy) at contribution revision r1/r2
+#   namespaces team-a (uid ns-a-1), team-b (uid ns-b-1); team-a recreated gets ns-a-2
+#   actors: alice (team-a editor), bob (team-b editor), argocd (GitOps SA),
+#           konstapel (controller SA)
+cases:
+  # --- acceptance -----------------------------------------------------------
+  - id: eligible-create-activates
+    category: acceptance
+    boundaries: [eligibility, attribution, namespace]
+    scenarios: ["An eligible team creates an exception", "Record an API acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv-debug, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "incident 42 debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect:
+          admission: admitted
+          acceptanceRevision: 1
+          snapshot: recorded
+          snapshotActor: alice
+          acceptedRevisions: [r1]
+          grant: active
+          approvalRequired: false
+          workload: {namespace: team-a, labels: {app: debug}, result: admitted}
+
+  - id: identical-labels-other-namespace
+    category: acceptance
+    boundaries: [namespace]
+    scenarios: ["Identical workload labels exist elsewhere"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}, {name: team-b, uid: ns-b-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv-debug, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, grant: active, workload: {namespace: team-b, labels: {app: debug}, result: denied}}
+      - at: "2026-01-01T00:01:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: reach-b, namespace: team-b, policy: disallow-privileged, selector: {app: debug}, reason: "cross-namespace", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: Forbidden, grant: none}
+
+  - id: empty-selector-is-whole-namespace
+    category: acceptance
+    boundaries: [namespace]
+    scenarios: ["An eligible team creates an exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}, {name: team-b, uid: ns-b-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: whole-ns, namespace: team-a, policy: disallow-privileged, selector: {}, reason: "legacy namespace", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, grant: active, workload: {namespace: team-b, labels: {}, result: denied}}
+      - at: "2026-01-01T00:01:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: no-selector, namespace: team-a, policy: disallow-privileged, selector: null, reason: "missing scope", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: InvalidScope, grant: none}
+
+  - id: blank-reason-rejected
+    category: acceptance
+    boundaries: [attribution]
+    scenarios: ["Reject an unexplained exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: blank, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "  \t ", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: BlankReason, grant: none, snapshot: none}
+
+  - id: forged-attribution-overwritten
+    category: acceptance
+    boundaries: [attribution]
+    scenarios: ["Record an API acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        forgedAttribution: {username: platform-admin}
+        exception: {name: forged, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, snapshotActor: alice, grant: active}
+      - at: "2026-01-01T00:05:00Z"
+        action: metadata-edit
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        forgedAttribution: {username: platform-admin}
+        expect: {admission: rejected, reason: ProtectedField, acceptanceRevision: 1, snapshot: unchanged}
+
+  - id: gitops-actor-distinct-from-claim
+    category: acceptance
+    boundaries: [attribution]
+    scenarios: ["Record an API acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: "system:serviceaccount:argocd:argocd-application-controller", uid: u-argocd, groups: ["system:serviceaccounts"]}
+        claimedBy: "commit author carol <carol@example.com>, ticket SEC-7"
+        exception: {name: gitops, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "SEC-7", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, snapshotActor: "system:serviceaccount:argocd:argocd-application-controller", snapshotClaim: "commit author carol <carol@example.com>, ticket SEC-7", grant: active}
+
+  - id: dry-run-has-no-side-effects
+    category: acceptance
+    boundaries: [attribution]
+    scenarios: ["Record an API acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        dryRun: true
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: dry, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "check", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, snapshot: none, grant: none}
+
+  # --- eligibility ----------------------------------------------------------
+  - id: forbidden-overlap-blocks
+    category: acceptance
+    boundaries: [eligibility]
+    scenarios: ["A non-negotiable policy also has a permissive binding"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+        - {binding: pci, policy: disallow-privileged, revision: r1, eligibility: Forbidden}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: Forbidden, restrictiveContribution: pci, grant: none, workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+
+  - id: unresolved-mapping-blocks
+    category: acceptance
+    boundaries: [eligibility]
+    scenarios: ["A non-negotiable policy also has a permissive binding"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: Unresolved}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: Unresolved, grant: none}
+      - at: "2026-01-01T00:01:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: unknown, namespace: team-a, policy: no-such-policy, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: UnknownPolicy, grant: none}
+
+  # --- lifetime and renewal ------------------------------------------------
+  - id: lifetime-limits
+    category: acceptance
+    boundaries: [lifetime]
+    scenarios: ["A lifetime exceeds a central limit"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+        - {binding: strict, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 24h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: absent, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "x"}
+        expect: {admission: rejected, reason: MissingExpiry, grant: none}
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: past, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "x", expiresAt: "2025-12-31T23:59:59Z"}
+        expect: {admission: rejected, reason: ExpiryElapsed, grant: none}
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: over, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "x", expiresAt: "2026-01-02T00:00:01Z"}
+        expect: {admission: rejected, reason: LifetimeExceeded, effectiveMaxLifetime: 24h, grant: none}
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: within, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "x", expiresAt: "2026-01-02T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+
+  - id: explicit-renewal
+    category: renewal
+    boundaries: [lifetime, attribution, eligibility]
+    scenarios: ["A team renews an expiring exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 1, snapshot: recorded, grant: active}
+      - at: "2026-01-07T00:00:00Z"
+        action: renew
+        actor: {username: dave, uid: u-dave, groups: [team-a-editors]}
+        renewal: {acceptanceRevision: 2, reason: "still needed", expiresAt: "2026-01-14T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 2, snapshot: new, previousSnapshot: retained, snapshotActor: dave, grant: active}
+      - at: "2026-01-07T00:01:00Z"
+        action: renew
+        stale: true
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        renewal: {acceptanceRevision: 2, reason: "concurrent", expiresAt: "2026-01-14T00:00:00Z"}
+        expect: {admission: rejected, reason: Conflict, acceptanceRevision: 2}
+      - at: "2026-01-07T00:02:00Z"
+        action: metadata-edit
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        expect: {admission: admitted, acceptanceRevision: 2, snapshot: unchanged}
+      - at: "2026-01-07T00:03:00Z"
+        action: change-scope
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {selector: {}}
+        expect: {admission: rejected, reason: ImmutableScope, acceptanceRevision: 2}
+
+  - id: renewal-rechecks-eligibility
+    category: renewal
+    boundaries: [eligibility, revision]
+    scenarios: ["A team renews an expiring exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: Forbidden}
+        expect: {grant: withdrawal-pending, eligibility: Ineligible}
+      - at: "2026-01-02T00:05:00Z"
+        action: renew
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        renewal: {acceptanceRevision: 2, reason: "renew anyway", expiresAt: "2026-01-09T00:00:00Z"}
+        expect: {admission: rejected, reason: Forbidden, acceptanceRevision: 1}
+
+  # --- revocation, expiry and withdrawal -------------------------------------
+  - id: expiry-restores-enforcement
+    category: revocation
+    boundaries: [lifetime, expired-context]
+    scenarios: ["An exception expires"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      existingWorkloads: [{namespace: team-a, name: debug-pod, labels: {app: debug}}]
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-02T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-02T00:00:01Z"
+        action: expire
+        expect: {grant: withdrawn, workload: {namespace: team-a, labels: {app: debug}, result: denied}, existingWorkloadsRetained: true, snapshot: retained, backgroundDisposition: unexcepted}
+
+  - id: delete-and-revoke
+    category: revocation
+    boundaries: [revision]
+    scenarios: ["An exception expires", "Central eligibility becomes Forbidden"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-02T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        expect: {admission: admitted, grant: withdrawal-pending, engineObserved: Unknown}
+      - at: "2026-01-01T01:00:30Z"
+        action: engine-converged
+        expect: {grant: withdrawn, engineObserved: "False", snapshot: retained}
+      - at: "2026-01-01T01:01:00Z"
+        action: renew
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        renewal: {acceptanceRevision: 2, reason: "reactivate", expiresAt: "2026-01-02T00:00:00Z"}
+        expect: {admission: rejected, reason: Revoked}
+
+  - id: forbidden-after-activation
+    category: revocation
+    boundaries: [eligibility]
+    scenarios: ["Central eligibility becomes Forbidden"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+          - {binding: pci, policy: disallow-privileged, revision: r1, eligibility: Forbidden}
+        expect: {eligibility: Ineligible, restrictiveContribution: pci, grant: withdrawal-pending, engineObserved: Unknown}
+      - at: "2026-01-02T00:00:30Z"
+        action: engine-unavailable
+        expect: {grant: withdrawal-pending, engineObserved: Unknown}
+
+  - id: controller-down-at-expiry
+    category: revocation
+    boundaries: [lifetime, engine]
+    scenarios: ["Konstapel is unavailable at expiry"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-01T00:02:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-01T00:01:00Z"
+        action: stop-controller
+        expect: {grant: active}
+      - at: "2026-01-01T00:02:15Z"
+        action: expire
+        expect: {workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+      - at: "2026-01-01T00:05:00Z"
+        action: start-controller
+        expect: {grant: withdrawn, snapshot: retained}
+      - at: "2026-01-01T00:05:00Z"
+        action: engine-runtime-check
+        engineExpiryVerified: false
+        expect: {featureEnabled: false, reason: EngineExpiryUnverified}
+
+  # --- acceptance does not silently expand -----------------------------------
+  - id: new-revision-needs-renewal
+    category: revocation
+    boundaries: [revision]
+    scenarios: ["Policy content changes after acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, acceptedRevisions: [r1], grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r2, eligibility: SelfService, maxLifetime: 168h}
+        expect: {grant: withdrawal-pending, reason: RenewalRequired, acceptedRevisions: [r1], workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+
+  - id: assessment-only-edit-keeps-grant
+    category: revocation
+    boundaries: [revision]
+    scenarios: ["Policy content changes after acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h, generation: 3}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: change-contribution
+        note: "spec.assessment interval edit: binding generation 3 -> 4, Contribution.Revision unchanged"
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h, generation: 4}
+        expect: {grant: active, acceptedRevisions: [r1]}
+
+  - id: extra-contribution-not-inherited
+    category: revocation
+    boundaries: [revision, eligibility]
+    scenarios: ["Policy content changes after acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+          - {binding: prod-extra, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+        expect: {grant: withdrawal-pending, reason: RenewalRequired, acceptedRevisions: [r1]}
+
+  - id: activation-race-cannot-broaden
+    category: acceptance
+    boundaries: [revision, eligibility]
+    scenarios: ["Policy content changes after acceptance"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: false
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, acceptedRevisions: [r1], grant: none}
+      - at: "2026-01-01T00:00:10Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r2, eligibility: SelfService, maxLifetime: 168h}
+        expect: {grant: none, reason: RenewalRequired, acceptedRevisions: [r1]}
+
+  - id: other-policy-still-denies
+    category: acceptance
+    boundaries: [namespace]
+    scenarios: ["Another policy still denies the workload"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+        - {binding: baseline, policy: disallow-host-path, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, grant: active, workload: {namespace: team-a, labels: {app: debug}, violates: [disallow-privileged, disallow-host-path], result: denied, deniedBy: disallow-host-path}}
+
+  - id: namespace-recreation-is-new-identity
+    category: revocation
+    boundaries: [namespace, missing-context]
+    scenarios: ["Identical workload labels exist elsewhere", "A native exception has been rendered"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, grant: active, nativeNamespaceUID: ns-a-1}
+      - at: "2026-01-01T01:00:00Z"
+        action: recreate-namespace
+        namespaces: [{name: team-a, uid: ns-a-2}]
+        expect: {grant: withdrawal-pending, workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+      - at: "2026-01-01T01:00:05Z"
+        action: namespace-identity-unavailable
+        expect: {workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+
+  # --- native governance -----------------------------------------------------
+  - id: native-bypass-rejected
+    category: native
+    boundaries: [native-governance, namespace]
+    scenarios: ["A workload user attempts a native bypass"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: Forbidden}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: native-write
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        native: {verb: create, apiVersion: policies.kyverno.io/v1, namespace: policy-exceptions}
+        expect: {admission: rejected, reason: Forbidden, workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+      - at: "2026-01-01T00:00:00Z"
+        action: native-write
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        native: {verb: create, apiVersion: policies.kyverno.io/v1, namespace: team-a}
+        expect: {admission: rejected, reason: Forbidden}
+      - at: "2026-01-01T00:00:00Z"
+        action: native-write
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        native: {verb: update, apiVersion: policies.kyverno.io/v1alpha1, namespace: policy-exceptions, change: widen-conditions}
+        expect: {admission: rejected, reason: Forbidden}
+      - at: "2026-01-01T00:00:00Z"
+        action: native-write
+        actor: {username: "system:serviceaccount:konstapel-system:konstapel-controller", uid: u-konstapel, groups: ["system:serviceaccounts"]}
+        native: {verb: create, apiVersion: policies.kyverno.io/v1, namespace: policy-exceptions, change: expiry-after-acceptance}
+        expect: {admission: rejected, reason: InvalidNativeGrant}
+
+  - id: native-render-bounds
+    category: native
+    boundaries: [native-governance, namespace, revision]
+    scenarios: ["A native exception has been rendered"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: "debug'quoted"}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect:
+          admission: admitted
+          grant: active
+          native:
+            apiVersion: policies.kyverno.io/v1
+            namespace: policy-exceptions
+            policyRefs: [disallow-privileged@r1]
+            reportResult: skip
+            expiresAtNotAfter: "2026-01-05T00:00:00Z"
+            conditions: [namespace-name, namespace-uid, workload-selector]
+            noImagesOrAllowedValues: true
+            referencesAcceptance: true
+      - at: "2026-01-01T00:01:00Z"
+        action: unmanaged-collision
+        expect: {grant: none, reason: OwnershipConflict, unmanagedUntouched: true}
+
+  # --- reports and evidence -------------------------------------------------
+  - id: report-skip-accepted-risk
+    category: report
+    boundaries: [attribution]
+    scenarios: ["Kyverno reports a skip caused by an active exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      acceptances: [{exception: priv, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-05T00:00:00Z", snapshot: present}]
+    steps:
+      - at: "2026-01-02T00:00:00Z"
+        action: report
+        report: {result: skip, evaluatedAt: "2026-01-02T00:00:00Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: skip, disposition: accepted-risk, countsAsPass: false, fabricatedFailure: false, dispositionReason: "first", dispositionActor: alice}
+
+  - id: report-pass-with-exception
+    category: report
+    boundaries: [attribution]
+    scenarios: ["A report records pass with exception context"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      acceptances: [{exception: priv, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-05T00:00:00Z", snapshot: present}]
+    steps:
+      - at: "2026-01-02T00:00:00Z"
+        action: report
+        report: {result: pass, evaluatedAt: "2026-01-02T00:00:00Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: pass, disposition: accepted-risk, countsAsPass: false}
+
+  - id: report-attribution-unresolved
+    category: report
+    boundaries: [missing-context, expired-context]
+    scenarios: ["Exception attribution cannot be resolved"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      acceptances: [{exception: priv, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-02T00:00:00Z", snapshot: present}]
+    steps:
+      - at: "2026-01-03T00:00:00Z"
+        action: report
+        note: "delayed report evaluated after the acceptance window"
+        report: {result: skip, evaluatedAt: "2026-01-02T12:00:00Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: skip, disposition: unresolved, countsAsPass: false, fabricatedFailure: false}
+      - at: "2026-01-03T00:00:00Z"
+        action: report
+        report: {result: skip, evaluatedAt: "2026-01-01T12:00:00Z", exceptionRefs: [ghost/1]}
+        expect: {rawResult: skip, disposition: unresolved, countsAsPass: false}
+      - at: "2026-01-03T00:00:00Z"
+        action: report
+        report: {result: skip, evaluatedAt: "2026-01-01T12:00:00Z", exceptionRefs: []}
+        expect: {rawResult: skip, disposition: unresolved, countsAsPass: false}
+
+  - id: multiple-exceptions-no-inflation
+    category: report
+    boundaries: [attribution, revision]
+    scenarios: ["Kyverno reports a skip caused by an active exception"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+        - {binding: prod-extra, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      acceptances:
+        - {exception: priv, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-05T00:00:00Z", snapshot: present}
+        - {exception: priv-2, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-05T00:00:00Z", snapshot: present}
+    steps:
+      - at: "2026-01-02T00:00:00Z"
+        action: report
+        report: {result: skip, evaluatedAt: "2026-01-02T00:00:00Z", exceptionRefs: [priv/1, priv-2/1]}
+        expect: {rawResult: skip, disposition: accepted-risk, exceptionRefs: 2, countsAsPass: false, controlCoverage: unchanged}
+
+  - id: evidence-after-expiry
+    category: report
+    boundaries: [expired-context, missing-context]
+    scenarios: ["Inspect evidence after expiry"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      acceptances: [{exception: priv, revision: 1, validFrom: "2026-01-01T00:00:00Z", validUntil: "2026-01-02T00:00:00Z", snapshot: present}]
+    steps:
+      - at: "2026-01-01T12:00:00Z"
+        action: report
+        report: {result: skip, evaluatedAt: "2026-01-01T12:00:00Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: skip, disposition: accepted-risk, packagedSnapshot: true}
+      - at: "2026-02-01T00:00:00Z"
+        action: delete-live-history
+        note: "live exception and snapshot removed after the package was retained"
+        expect: {offlineInterpretation: accepted-risk, rawResult: skip, snapshot: retained}

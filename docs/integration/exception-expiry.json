@@ -1,0 +1,73 @@
+{
+  "task": "add-self-service-policy-exceptions 1.2",
+  "observed": "2026-11-06",
+  "command": "devbox run -- scripts/exception-expiry.sh OUTPUT",
+  "kyvernoChart": "3.9.2",
+  "nodeImage": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5",
+  "kyvernoImages": [
+    "reg.kyverno.io/kyverno/background-controller:v1.19.2",
+    "reg.kyverno.io/kyverno/cleanup-controller:v1.19.2",
+    "reg.kyverno.io/kyverno/kyverno:v1.19.2",
+    "reg.kyverno.io/kyverno/reports-controller:v1.19.2"
+  ],
+  "admissionReplicas": 2,
+  "exceptionLifetimeSeconds": 120,
+  "expiresAt": "2026-11-06T11:23:19Z",
+  "konstapelRunning": false,
+  "policyEditedAfterException": false,
+  "phases": {
+    "active": {
+      "admitted": 20
+    },
+    "after-expiry": {
+      "admitted": 30
+    },
+    "after-expiry-75s": {
+      "admitted": 20
+    },
+    "after-restart": {
+      "denied": 20
+    },
+    "before-exception": {
+      "denied": 10
+    },
+    "created-expired": {
+      "denied": 10
+    }
+  },
+  "firstAdmittedAfterExpiry": "2026-11-06T11:23:35.639Z",
+  "lastAdmittedAfterExpiry": "2026-11-06T11:25:31.612Z",
+  "cachedGrantOutlivedExpiry": true,
+  "restartRestoredEnforcement": true,
+  "expiredAtCreationNeverGranted": true,
+  "engineImageDigests": [
+    "reg.kyverno.io/kyverno/background-controller@sha256:c46e124f21ef8a6bb4b48de57106808b1007edcd5ddd4ff7df5d23b9efa60ce2",
+    "reg.kyverno.io/kyverno/cleanup-controller@sha256:d7340aa7c9315080c3dafa7b765d090ced37353e89e5cd7a3f9ac69e8fb532b2",
+    "reg.kyverno.io/kyverno/kyverno@sha256:c8c4dd09e720d2cd7fd24ca73ac28e46651001372f988e0cba3f2f612f04b955",
+    "reg.kyverno.io/kyverno/reports-controller@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3"
+  ],
+  "policyExceptionVersions": [
+    {
+      "name": "v1",
+      "served": true,
+      "storage": false
+    },
+    {
+      "name": "v1alpha1",
+      "served": true,
+      "storage": false
+    },
+    {
+      "name": "v1beta1",
+      "served": true,
+      "storage": true
+    }
+  ],
+  "conclusion": "Kyverno 1.19.2 keeps honouring a policies.kyverno.io/v1 PolicyException in compiled admission policies after spec.expiresAt; only recompilation (here an admission-controller restart) restores enforcement. An exception that is already expired when created never grants. Native exception enablement stays blocked (design §5).",
+  "upstream": {
+    "issue": "https://github.com/kyverno/kyverno/issues/18150",
+    "fix": "https://github.com/kyverno/kyverno/pull/18152",
+    "fixCommit": "a015b2da0e7f44b9c3f0d45c94e9e8c936ac282e",
+    "fixMergedTo": "main (2026-11-03), after v1.20.0-rc.1; not on release-1.19 or release-1.20 as of 2026-11-06"
+  }
+}

@@ -17,8 +17,8 @@ enablement is blocked until the runtime expiry and governance gates pass.
 
 ## 1. Establish lifecycle fixtures and engine compatibility
 
-- [ ] 1.1 Add an acceptance/renewal/revocation/report fixture matrix covering namespace and revision boundaries, eligibility, attribution, and expired/missing context; verify every policy-exceptions scenario has an explicit expected outcome and document how to run these independent fixtures.
-- [ ] 1.2 Reproduce short-lived native v1 exception expiry on Kyverno 1.19.2 with Konstapel stopped and without policy edits that force recompilation; retain requests, timestamps, and image pins, verifying admission before/after expiry across cached engine replicas.
+- [x] 1.1 Add an acceptance/renewal/revocation/report fixture matrix covering namespace and revision boundaries, eligibility, attribution, and expired/missing context; verify every policy-exceptions scenario has an explicit expected outcome and document how to run these independent fixtures.
+- [x] 1.2 Reproduce short-lived native v1 exception expiry on Kyverno 1.19.2 with Konstapel stopped and without policy edits that force recompilation; retain requests, timestamps, and image pins, verifying admission before/after expiry across cached engine replicas.
 - [ ] 1.3 Resolve the observed expiry gap by pinning a corrected upstream runtime or a narrowly scoped upstream/backported engine fix; verify the regression from 1.2 passes during Konstapel downtime and engine restarts, and keep feature enablement disabled if it cannot pass.
 - [ ] 1.4 Verify native v1 fields, exception namespace settings, CEL namespace UID access, and report exception references against the chosen runtime; retain API/discovery fixtures and verify a recreated namespace or missing namespace identity never inherits an old grant.
 - [ ] 1.5 Document the supported engine matrix, expiry fix/provenance if needed, enablement gate, and operational clock/propagation limits; verify the chosen runtime also passes the merged initial assessment-loop acceptance before changing its shared pin.
