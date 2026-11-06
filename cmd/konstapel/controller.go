@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ func runController(args []string) error {
 	metrics := fs.String("metrics-bind-address", "0", "metrics address; \"0\" disables the metrics server")
 	probes := fs.String("health-probe-bind-address", ":8081", "address for /healthz and /readyz")
 	leader := fs.Bool("leader-elect", true, "use a Lease so only one replica reconciles")
+	evidence := fs.String("evidence-destination", "", "S3 evidence destination YAML file; empty disables scheduled snapshots")
+	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
@@ -35,6 +38,14 @@ func runController(args []string) error {
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("kubernetes configuration: %w", err)
+	}
+	if *evidence != "" {
+		rt, err := controller.EvidenceRuntime(context.Background(), cfg, controller.EvidenceConfig{
+			Destination: *evidence, StagingDir: *staging, ContentDir: *root, Namespace: os.Getenv("POD_NAMESPACE")})
+		if err != nil {
+			return fmt.Errorf("evidence destination: %w", err)
+		}
+		controller.ConfigureAssessments(rt)
 	}
 	mgr, err := controller.NewManager(cfg, controller.Options{
 		Content: targeting.LocalContent{Root: *root, Name: VendoredBundle,

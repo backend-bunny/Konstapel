@@ -109,6 +109,21 @@ workload identities:
 
 ## Controller use
 
+**Configuration.** `konstapel controller --evidence-destination=<file>` loads
+the destination YAML above and enables scheduled snapshots. Without the flag
+the controller runs with scheduling disabled and says so on every binding.
+`--evidence-staging-dir` (default `/var/lib/konstapel/staging`, created `0700`)
+must be writable and should survive restarts so staged captures can be
+recovered. `--content-root` must name the vendored `content` directory, which
+the exporter copies into each package. A `credentialSecret` is read from the
+controller's namespace (`POD_NAMESPACE`) with an uncached `get`; the generated
+controller Role grants `get` on Secrets in `konstapel-system` only. Values are
+reused for `s3store.CredentialRefresh` (5 minutes), so a rotated Secret takes
+effect without a restart. Starting the controller never contacts the backend:
+a missing Secret or an unreachable or incompatible endpoint shows up as the
+not-ready limitation below.
+
+
 **Retention selection.** When a run closes collection, the executor records
 the binding's resolved retention in the run's `status.retention`. At the first
 commit it uses the binding's current retention if the same binding (same UID)
