@@ -39,6 +39,7 @@ rules:
   resources:
   - assessmentrequests
   - compliancebindings
+  - complianceexceptions
   - complianceprofiles
   verbs:
   - get
@@ -50,6 +51,7 @@ rules:
   - assessmentrequests/status
   - assessmentruns/status
   - compliancebindings/status
+  - complianceexceptions/status
   - complianceprofiles/status
   verbs:
   - get

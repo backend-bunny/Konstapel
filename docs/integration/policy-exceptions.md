@@ -26,9 +26,35 @@ back. A selector has no namespace field, so scope cannot reach another
 namespace. Widening the scope means creating a new resource.
 
 Admission (below) records authenticated attribution and enforces
-eligibility and lifetime limits. Status is controller-only (task 2.4), and
+eligibility and lifetime limits. Status is controller-only (see Access control), and
 revocation arrives with the withdrawal lifecycle (group 4). Until then the
 resource has no effect: Konstapel grants nothing for it.
+
+## Access control
+
+| Identity | Access |
+| --- | --- |
+| Application team: ClusterRole `konstapel-exception-editor` (`config/rbac/exception-editor.yaml`), bound with a **RoleBinding in the team's namespace** | get, list, watch, create, update, patch and delete on `complianceexceptions` in that namespace; read-only status. Nothing else. |
+| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. |
+| Platform administrators: `konstapel-compliance-admin` | Central profiles and bindings. Does not write exceptions on a team's behalf. |
+
+The editor role is not aggregated into the built-in `admin`/`edit` roles:
+namespace edit rights alone do not grant authority to accept risk. It grants
+nothing outside `complianceexceptions`. In particular it gives no access to
+profiles, bindings, the protected `konstapel-system` namespace where
+acceptance snapshots will live (task 3.1), or native Kyverno
+`PolicyException`s. The protected acceptance record is enforced by admission,
+not RBAC (see below).
+
+`api/v1alpha1/exception_rbac_test.go` checks every shipped role. The live
+admission test confirms these as denied for a team member:
+- creating an exception in another team's namespace
+- writing exception status
+- creating profiles or bindings
+- writing in `konstapel-system`
+- creating a native `PolicyException`
+
+It also confirms that the controller identity can write status.
 
 ## Acceptance admission
 

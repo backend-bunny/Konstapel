@@ -29,7 +29,9 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -178,19 +180,24 @@ func TestLiveExceptionAdmission(t *testing.T) {
 		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)},
 			Policies: []v1alpha1.ProfilePolicy{{Name: pol, Exceptions: v1alpha1.ExceptionSettings{Eligibility: v1alpha1.ExceptionsSelfService, MaxLifetime: &metav1.Duration{Duration: 720 * time.Hour}}}}}}
 	b := bindingObj("exc-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "exc-admission"})
-	editor := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "exception-editor", Namespace: ns},
-		Rules: []rbacv1.PolicyRule{{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: []string{"complianceexceptions"}, Verbs: []string{"get", "list", "create", "update", "patch"}}}}
+	// The shipped namespace self-service role, bound per namespace (task 2.4).
+	editor := l.shippedClusterRole("../../config/rbac/exception-editor.yaml", "konstapel-exception-editor")
 	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exception-editors", Namespace: ns},
-		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: editor.Name},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: editor},
 		Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "team-a-editors"}}}
-	for _, o := range []client.Object{p, b, editor, rb} {
+	nsB := "exc-admission-b"
+	l.setNamespace(nsB, "exc-admission-b")
+	rbB := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exception-editors", Namespace: nsB},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: editor},
+		Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "team-b-editors"}}}
+	for _, o := range []client.Object{p, b, rb, rbB} {
 		if err := l.c.Create(l.ctx, o); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
 		_ = l.c.DeleteAllOf(l.ctx, &v1alpha1.ComplianceException{}, client.InNamespace(ns))
-		for _, o := range []client.Object{rb, editor, b, p} {
+		for _, o := range []client.Object{rbB, rb, b, p} {
 			_ = l.c.Delete(l.ctx, o)
 		}
 	})
@@ -229,6 +236,12 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	if a.Eligibility == nil || a.Eligibility.Effective != v1alpha1.ExceptionsSelfService || len(a.Eligibility.Contributors) != 1 || a.Eligibility.Contributors[0].Binding.Name != b.Name {
 		t.Fatalf("resolved set = %+v", a.Eligibility)
 	}
+	// 1b. Authorization (task 2.4): the team role writes only its own
+	// namespace's exceptions; status, central configuration, the protected
+	// namespace and native engine exceptions stay out of reach, while the
+	// controller identity can write exception status.
+	l.authorizationChecks(alice, created, nsB)
+
 	// 2. Dry run: the would-be record is returned and nothing is stored.
 	dry := newEx("dry", nil)
 	if err := bob.Create(l.ctx, dry, client.DryRunAll); err != nil {
@@ -254,7 +267,10 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	}
 
 	// 4. An explicit renewal records a new acceptance by the renewing caller.
-	renewed := created.DeepCopy()
+	renewed := &v1alpha1.ComplianceException{}
+	if err := bob.Get(l.ctx, client.ObjectKeyFromObject(created), renewed); err != nil {
+		t.Fatal(err)
+	}
 	renewed.Spec.AcceptanceRevision = 2
 	renewed.Spec.Reason = "renewed live"
 	renewed.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(48 * time.Hour).Truncate(time.Second))
@@ -354,4 +370,92 @@ func TestLiveExceptionAdmission(t *testing.T) {
 		t.Fatalf("renewal without an applicable binding: %v", err)
 	}
 	l.record("unapplied-renewal", map[string]any{"rejected": err.Error()})
+}
+
+// shippedClusterRole creates the ClusterRole from a config/rbac manifest
+// unless it already exists, and returns its name.
+func (l *live) shippedClusterRole(file, name string) string {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	dec := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
+	for {
+		cr := &rbacv1.ClusterRole{}
+		if err := dec.Decode(cr); err != nil {
+			l.t.Fatalf("ClusterRole %s not found in %s: %v", name, file, err)
+		}
+		if cr.Kind != "ClusterRole" || cr.Name != name {
+			continue
+		}
+		cr.ResourceVersion = ""
+		err := l.c.Create(l.ctx, cr)
+		switch {
+		case err == nil:
+			l.t.Cleanup(func() { _ = l.c.Delete(l.ctx, cr) })
+		case apierrors.IsAlreadyExists(err):
+			// Another test shipped it; it is identical by construction.
+		default:
+			l.t.Fatal(err)
+		}
+		return name
+	}
+}
+
+func (l *live) authorizationChecks(team client.Client, ex *v1alpha1.ComplianceException, otherNS string) {
+	t := l.t
+	forbidden := func(what string, err error) {
+		t.Helper()
+		if !apierrors.IsForbidden(err) {
+			t.Errorf("%s: want Forbidden by RBAC, got %v", what, err)
+			return
+		}
+		l.record("denied", map[string]any{"attempt": what})
+	}
+	other := ex.DeepCopy()
+	other.Namespace, other.ResourceVersion, other.UID, other.Name = otherNS, "", "", "cross-namespace"
+	forbidden("create an exception in another namespace", team.Create(l.ctx, other))
+
+	withStatus := &v1alpha1.ComplianceException{}
+	if err := team.Get(l.ctx, client.ObjectKeyFromObject(ex), withStatus); err != nil {
+		t.Fatal(err)
+	}
+	cond := metav1.Condition{Type: "Active", Status: metav1.ConditionTrue, Reason: "Forged", Message: "set by the team", LastTransitionTime: metav1.Now()}
+	withStatus.Status.Conditions = []metav1.Condition{cond}
+	forbidden("write exception status", team.Status().Update(l.ctx, withStatus.DeepCopy()))
+
+	prof := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "team-owned"},
+		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
+	forbidden("create a ComplianceProfile", team.Create(l.ctx, prof))
+	forbidden("create a ComplianceBinding", team.Create(l.ctx, bindingObj("team-owned", "team-owned", v1alpha1.ModeAudit, nil)))
+	snapshot := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "forged-acceptance", Namespace: "konstapel-system"}}
+	forbidden("write in the protected konstapel-system namespace", team.Create(l.ctx, snapshot))
+	native := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "policies.kyverno.io/v1", "kind": "PolicyException",
+		"metadata": map[string]any{"name": "bypass", "namespace": "policy-exceptions"},
+		"spec":     map[string]any{"policyRefs": []any{map[string]any{"name": "any", "kind": "ValidatingPolicy"}}},
+	}}
+	forbidden("create a native Kyverno PolicyException", team.Create(l.ctx, native))
+
+	// The controller's generated ClusterRole can write exception status.
+	controllerRole := l.shippedClusterRole("../../config/rbac/controller/role.yaml", "konstapel-controller")
+	sa := "konstapel-controller"
+	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exc-live-controller"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: controllerRole},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa, Namespace: "konstapel-system"}}}
+	if err := l.c.Create(l.ctx, crb); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, crb) })
+	ctrlClient := l.as("system:serviceaccount:konstapel-system:"+sa, "system:serviceaccounts", "system:serviceaccounts:konstapel-system", "system:authenticated")
+	l.eventually("controller may write exception status", func() (bool, string) {
+		cur := &v1alpha1.ComplianceException{}
+		if err := ctrlClient.Get(l.ctx, client.ObjectKeyFromObject(ex), cur); err != nil {
+			return false, err.Error()
+		}
+		cur.Status.Conditions = []metav1.Condition{{Type: "Probe", Status: metav1.ConditionUnknown, Reason: "LiveTest", Message: "controller status write", LastTransitionTime: metav1.Now()}}
+		err := ctrlClient.Status().Update(l.ctx, cur)
+		return err == nil, fmt.Sprint(err)
+	})
+	l.record("controller-status-write", map[string]any{"allowed": true})
 }
