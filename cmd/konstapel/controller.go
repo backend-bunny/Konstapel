@@ -51,7 +51,7 @@ func runController(args []string) error {
 	}
 	mgr, err := controller.NewManager(cfg, controller.Options{
 		Content: targeting.LocalContent{Root: *root, Name: VendoredBundle,
-			Policies: map[string]string{assessment.PolicyName: assessment.SourcePolicy}},
+			Policies: assessment.ShippedPolicies},
 		MetricsAddr:             *metrics,
 		ProbeAddr:               *probes,
 		LeaderElection:          *leader,
