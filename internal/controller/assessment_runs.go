@@ -179,7 +179,7 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 			pending = append(pending, schedule.Pending{Kind: schedule.Manual, Name: run.Name, UID: string(run.UID), Created: run.CreationTimestamp.Time})
 		}
 	}
-	requests, err := r.pendingRequests(ctx, b)
+	requests, err := r.pendingRequests(ctx, b, st.Active)
 	if err != nil {
 		return prev, latest, time.Time{}, "", err
 	}
@@ -266,7 +266,12 @@ const LabelRunRequest = "compliance.erenius.io/request-uid"
 // pendingRequests resolves the binding's unstarted AssessmentRequests. A
 // request whose namespace the binding does not select is rejected with an
 // explicit scope reason; no broader assessment is substituted.
-func (r *AssessmentReconciler) pendingRequests(ctx context.Context, b *v1alpha1.ComplianceBinding) ([]schedule.Pending, error) {
+//
+// A Running request whose run exists but is neither finished nor the active
+// run stays a candidate: its admission was not persisted (for example the
+// schedule write lost a compare-and-swap), and re-admitting it is idempotent
+// because the run name is deterministic.
+func (r *AssessmentReconciler) pendingRequests(ctx context.Context, b *v1alpha1.ComplianceBinding, active string) ([]schedule.Pending, error) {
 	var reqs v1alpha1.AssessmentRequestList
 	if err := r.Client.List(ctx, &reqs); err != nil {
 		return nil, err
@@ -275,7 +280,22 @@ func (r *AssessmentReconciler) pendingRequests(ctx context.Context, b *v1alpha1.
 	var out []schedule.Pending
 	for i := range reqs.Items {
 		req := &reqs.Items[i]
-		if req.Spec.BindingRef.Name != b.Name || !req.DeletionTimestamp.IsZero() || (req.Status.Phase != "" && req.Status.Phase != v1alpha1.RequestPending) {
+		if req.Spec.BindingRef.Name != b.Name || !req.DeletionTimestamp.IsZero() {
+			continue
+		}
+		switch req.Status.Phase {
+		case "", v1alpha1.RequestPending:
+		case v1alpha1.RequestRunning:
+			if req.Status.Run == nil || req.Status.Run.Name == active {
+				continue
+			}
+			run := &v1alpha1.AssessmentRun{}
+			if err := r.reader().Get(ctx, client.ObjectKey{Name: req.Status.Run.Name}, run); err != nil || runDone(run) {
+				continue
+			}
+			out = append(out, schedule.Pending{Kind: schedule.Request, Namespace: req.Namespace, Name: req.Name, UID: string(req.UID), Created: req.CreationTimestamp.Time})
+			continue
+		default:
 			continue
 		}
 		ns := &corev1.Namespace{}

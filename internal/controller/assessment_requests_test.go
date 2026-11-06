@@ -233,3 +233,44 @@ func TestRecreatedNamespaceIsNotAdopted(t *testing.T) {
 		t.Fatalf("run adopted a recreated namespace: %+v", r.Status.Phase)
 	}
 }
+
+// If the schedule write that admitted a request is lost (for example a
+// compare-and-swap conflict), the next plan re-admits the same run instead
+// of stranding the request as Running with an unadmitted run.
+func TestLostAdmissionIsReadmitted(t *testing.T) {
+	e := newTeamEnv(t)
+	e.request("dev", "nightly")
+	before := &v1alpha1.ComplianceBinding{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: "audit-all"}, before)
+	e.assess("audit-all")
+	st := e.requestStatus("dev", "nightly")
+	if st.Phase != v1alpha1.RequestRunning || st.Run == nil {
+		t.Fatalf("%+v", st)
+	}
+	// Simulate the lost schedule write: restore the pre-admission schedule.
+	b := &v1alpha1.ComplianceBinding{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: "audit-all"}, b)
+	b.Status.Assessment = before.Status.Assessment
+	if err := e.c.Status().Update(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	// The restored schedule names the finished initial run as active, so the
+	// planner sees a free slot and only a Running request whose run waits.
+	e.assess("audit-all")
+	if s := e.schedule("audit-all"); s.ActiveRun == nil || s.ActiveRun.Name != st.Run.Name {
+		t.Fatalf("run not re-admitted: %+v", s.ActiveRun)
+	}
+	runs := 0
+	for _, r := range e.runs() {
+		if r.Spec.Scope == v1alpha1.RunScopeNamespace {
+			runs++
+		}
+	}
+	if runs != 1 {
+		t.Fatalf("re-admission created %d namespace runs", runs)
+	}
+	e.step(st.Run.Name)
+	if e.run(st.Run.Name).Status.Phase != v1alpha1.RunCollecting {
+		t.Fatal("re-admitted run did not start")
+	}
+}

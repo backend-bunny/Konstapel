@@ -98,6 +98,11 @@ type CaptureV2 struct {
 	// ScopeChanges are changes observed during collection. They never alter
 	// the frozen subjects, workloads, or expected inventory.
 	ScopeChanges []ScopeChange `json:"scopeChanges,omitempty"`
+	// Contributions are the resolved contributions behind the subjects, and
+	// EnginePolicies the engine policies observed at freeze (sanitized). With
+	// the packaged content they let a verifier re-render every policy.
+	Contributions  []targeting.Contribution `json:"contributions,omitempty"`
+	EnginePolicies []assessment.Object      `json:"enginePolicies,omitempty"`
 	// Projection is set when the capture was projected to one namespace.
 	Projection *Projection `json:"projection,omitempty"`
 }
@@ -250,6 +255,7 @@ func FreezeScope(cluster string, started time.Time, mappingSHA256 string, subjec
 			return c, err
 		}
 		c.Checks = append(c.Checks, checks...)
+		c.EnginePolicies = append(c.EnginePolicies, SanitizeEnginePolicy(p))
 	}
 	for _, l := range listed {
 		meta := assessment.Map(l.Object["metadata"])

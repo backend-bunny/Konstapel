@@ -298,3 +298,26 @@ func TestCacheLagDoesNotReleaseActiveRun(t *testing.T) {
 		t.Fatalf("cache lag released the active run: %+v", s.ActiveRun)
 	}
 }
+
+// A plan computed from a stale binding must not overwrite a newer schedule:
+// the status apply is conditioned on the binding's resourceVersion.
+func TestStaleBindingCannotOverwriteSchedule(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	stale := &v1alpha1.ComplianceBinding{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: "audit-prod"}, stale); err != nil {
+		t.Fatal(err)
+	}
+	e.assess("audit-prod") // admits the initial run and persists the schedule
+	active := e.schedule("audit-prod").ActiveRun
+	if active == nil {
+		t.Fatal("no run admitted")
+	}
+	err := e.ar.apply(context.Background(), stale, &v1alpha1.BindingAssessmentStatus{Schedule: &v1alpha1.AssessmentSchedule{Anchor: metav1.NewTime(a0), Interval: "24h"}})
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("stale apply must conflict, got %v", err)
+	}
+	if s := e.schedule("audit-prod"); s.ActiveRun == nil || s.ActiveRun.Name != active.Name {
+		t.Fatalf("stale plan overwrote the schedule: %+v", s)
+	}
+}

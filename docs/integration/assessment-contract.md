@@ -424,6 +424,35 @@ captures stay in `internal/assessment`).
 Engine-provided state correlation (task 4.3) may later replace the
 conservative continuity boundary where it is verified.
 
+**Engine policy verification.** Every capture records its subjects'
+contributions and the engine policies observed at freeze (name, labels,
+annotations, spec). `collector.VerifyEnginePolicies` re-renders each policy
+with targeting's `Render`, from the contribution and the source manifest
+named by the subject's source digest. It then requires:
+
+- the same name, which binds binding, policy, and revision;
+- an identical spec;
+- the rendered labels and annotations;
+- checks enumerated from that spec.
+
+This is the comparison delivery uses to decide a policy is current.
+
+- At runtime, a live engine policy that differs from the render of the
+  verified content (drift, for example a hand edit) yields no evidence. It
+  counts as stale scope `EnginePolicyDrift` until delivery repairs it.
+- In packages, `collector.VerifyPackage` rebuilds the sources from the
+  packaged `content/`: `content/SHA256SUMS` must hash to every contribution's
+  pinned bundle digest, and every listed file must match its sum. Export runs
+  it before accepting an assessment package, and a failure becomes a
+  `Diagnostic` package. A changed policy expression or source digest
+  therefore cannot be legitimized by recomputing the capture's or the
+  descriptor's own hashes.
+- Limitation: a verifier cannot recompute `EnforcementRevision` from a
+  recorded contribution, because the contribution does not carry the binding
+  enforcement epoch. The revision is bound through the engine policy name and
+  its revision annotation, not recomputed. The prototype v1 capture keeps its
+  own `assessment.VerifyPolicy` provenance checks unchanged.
+
 ## Package export
 
 `collector.Export` packages one frozen, evaluated capture.

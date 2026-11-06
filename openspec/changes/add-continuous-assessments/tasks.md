@@ -46,7 +46,7 @@ change's entire task list before landing the shared contract or adapter.
 - [x] 4.2 Capture initial scope and track workload/namespace/configuration changes during collection; verify removed/replaced/updated subjects remain visible as changed evidence and newly matching namespaces do not silently broaden the snapshot.
 - [ ] 4.3 Investigate and exercise the pinned engine's evaluation-to-resource-state correlation using live in-place workload updates; retain results and verify unsupported or ambiguous correlation remains unknown rather than treating timestamp recency as proof.
 - [x] 4.4 Implement per-observation freshness checks and conservative continuity boundaries, including watch gaps/restarts; verify old-state results, missing/future timestamps, age-at-closure expiry, and unproven history cannot produce current passing evidence.
-- [ ] 4.5 Generalize source/render verification through the merged targeting/content contract; verify changed policy expressions or digests cannot be legitimized by a recomputed capture hash and the original prototype provenance regressions still pass.
+- [x] 4.5 Generalize source/render verification through the merged targeting/content contract; verify changed policy expressions or digests cannot be legitimized by a recomputed capture hash and the original prototype provenance regressions still pass.
 - [ ] 4.6 Document capture revisions, supported correlation, scope windows, and remaining engine limits; verify saved fixtures reproduce the documented incomplete and attributable cases without a live cluster.
 
 ## 5. Produce scoped snapshots and handle incomplete evidence
