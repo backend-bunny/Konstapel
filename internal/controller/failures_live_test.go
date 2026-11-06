@@ -62,17 +62,20 @@ func (l *live) setProfileDigest(name, digest string) {
 	}
 }
 
-func (l *live) scaleEngine(replicas int32) {
+func (l *live) scaleEngine(replicas int32) { l.scaleKyverno("kyverno-admission-controller", replicas) }
+
+// scaleKyverno scales one Kyverno deployment and waits for it.
+func (l *live) scaleKyverno(name string, replicas int32) {
 	l.t.Helper()
 	d := &appsv1.Deployment{}
-	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "kyverno", Name: "kyverno-admission-controller"}, d); err != nil {
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "kyverno", Name: name}, d); err != nil {
 		l.t.Fatal(err)
 	}
 	d.Spec.Replicas = &replicas
 	if err := l.c.Update(l.ctx, d); err != nil {
 		l.t.Fatal(err)
 	}
-	l.eventually("kyverno admission controller scaled", func() (bool, string) {
+	l.eventually(name+" scaled", func() (bool, string) {
 		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(d), d)
 		return d.Status.ReadyReplicas == replicas && d.Status.Replicas == replicas, toJSON(d.Status)
 	})

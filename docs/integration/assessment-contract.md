@@ -313,6 +313,9 @@ runs are created. Current evidence status (above) works without a publisher.
 - The first plan starts an initial scheduled run. Later runs are due at
   `anchor + k × interval`. Changing the interval re-anchors at the last
   scheduled time.
+- Runs are created only from the binding's current version, re-read without
+  the cache. A plan from a stale cached binding conflicts and replans, so
+  a scheduled run (named from its due time) is never created twice.
 - Missed due times coalesce into one run at the latest due time. The skipped
   times are recorded in `gaps` and `missedTotal` and never claimed as
   assessed.

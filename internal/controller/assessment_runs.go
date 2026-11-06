@@ -211,6 +211,18 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		}
 	}
 	if d.Start != nil {
+		// Creating a run is a side effect the status apply's resourceVersion
+		// check cannot undo. Scheduled run names derive from the anchor, so a
+		// plan from a stale (cached) binding would create a duplicate run.
+		// Plan only from the binding's current version.
+		current := &v1alpha1.ComplianceBinding{}
+		if err := r.reader().Get(ctx, client.ObjectKey{Name: b.Name}, current); err != nil {
+			return prev, latest, time.Time{}, "", err
+		}
+		if current.ResourceVersion != b.ResourceVersion {
+			return prev, latest, time.Time{}, "", apierrors.NewConflict(v1alpha1.GroupVersion.WithResource("compliancebindings").GroupResource(), b.Name,
+				errors.New("binding changed since it was read; replanning"))
+		}
 		var run *v1alpha1.AssessmentRun
 		switch d.Start.Kind {
 		case schedule.Scheduled:
