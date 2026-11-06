@@ -175,6 +175,13 @@ type Status struct {
 	Failure          *Failure      `json:"failure,omitempty"`
 }
 
+// Failure reasons for a committed package that is not intact before its
+// expiry. The assessment result is never rewritten; only availability is.
+const (
+	FailureObjectMissing   = "ObjectMissing"
+	FailureIntegrityFailed = "IntegrityFailed"
+)
+
 // Committed returns the status for a verified receipt.
 func Committed(r Receipt) Status {
 	return Status{

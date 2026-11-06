@@ -133,3 +133,66 @@ func TestRunDeletedDuringCollectionIsReleased(t *testing.T) {
 		t.Fatal("collecting run kept after deletion")
 	}
 }
+
+// Early loss or corruption marks the retained package Unavailable without
+// changing its assessment result; checks are rate-limited and recover.
+func TestEarlyLossAndCorruptionAreUnavailable(t *testing.T) {
+	e, name := completedRun(t, "")
+	e.rr.Runtime.IntegrityInterval = time.Hour
+	r := e.run(name)
+	summary, receipt := statusJSON(r.Status.Summary), r.Status.Publication.PackageSHA256
+	ref := e.ref(r)
+	original, _, err := e.pub.Open(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := make([]byte, 0)
+	buf := make([]byte, 4096)
+	for {
+		n, err := original.Read(buf)
+		good = append(good, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	e.step(name) // first check: intact
+	if r := e.run(name); r.Status.Publication.Availability != "Available" || r.Status.Publication.Failure != nil {
+		t.Fatalf("intact package: %+v", r.Status.Publication)
+	}
+	e.pub.Corrupt(ref, []byte("tampered"))
+	inspects := e.pub.Calls(fake.OpInspect)
+	e.step(name)
+	if e.pub.Calls(fake.OpInspect) != inspects {
+		t.Fatal("integrity re-checked before the interval")
+	}
+	e.now = e.now.Add(time.Hour)
+	e.step(name)
+	r = e.run(name)
+	p := r.Status.Publication
+	if p.Availability != "Unavailable" || p.Failure == nil || p.Failure.Reason != publication.FailureIntegrityFailed ||
+		statusJSON(r.Status.Summary) != summary || p.PackageSHA256 != receipt || r.Status.Phase != v1alpha1.RunCompleted {
+		t.Fatalf("corruption: %+v", p)
+	}
+	e.pub.Corrupt(ref, nil)
+	e.now = e.now.Add(time.Hour)
+	e.step(name)
+	if p := e.run(name).Status.Publication; p.Failure == nil || p.Failure.Reason != publication.FailureObjectMissing {
+		t.Fatalf("early loss: %+v", p)
+	}
+	// Restored (for example from a backup with the same bytes): available again.
+	e.pub.Corrupt(ref, good)
+	e.now = e.now.Add(time.Hour)
+	e.step(name)
+	if p := e.run(name).Status.Publication; p.Availability != "Available" || p.Failure != nil {
+		t.Fatalf("restored package: %+v", p)
+	}
+	// A backend outage does not flip availability.
+	e.pub.Corrupt(ref, nil)
+	e.pub.Fail(fake.OpInspect, publication.ErrUnavailable)
+	e.now = e.now.Add(time.Hour)
+	e.step(name)
+	if p := e.run(name).Status.Publication; p.Availability != "Available" {
+		t.Fatalf("outage changed availability: %+v", p)
+	}
+}

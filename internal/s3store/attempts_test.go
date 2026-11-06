@@ -219,3 +219,35 @@ func fullPackageFor(t *testing.T, run publication.RunRef) string {
 	}
 	return dir
 }
+
+func TestInspectReportsEarlyLossAndCorruption(t *testing.T) {
+	f := newFake()
+	p := newPublisher(t, f, time.Now)
+	ctx := context.Background()
+	s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("2160h")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := p.Inspect(ctx, testRun); err != nil || st.Availability != publication.AvailabilityAvailable || st.Failure != nil {
+		t.Fatalf("intact: %+v %v", st, err)
+	}
+	f.mu.Lock()
+	vs := f.objects[r.Commit.ArchiveKey]
+	saved := vs[len(vs)-1]
+	vs[len(vs)-1].body = saved.body[:len(saved.body)-1]
+	f.mu.Unlock()
+	if st, err := p.Inspect(ctx, testRun); err != nil || st.Availability != publication.AvailabilityUnavailable || st.Failure.Reason != publication.FailureIntegrityFailed {
+		t.Fatalf("truncated archive: %+v %v", st, err)
+	}
+	f.mu.Lock()
+	delete(f.objects, r.Commit.ArchiveKey)
+	f.mu.Unlock()
+	st, err := p.Inspect(ctx, testRun)
+	if err != nil || st.Availability != publication.AvailabilityUnavailable || st.Failure.Reason != publication.FailureObjectMissing || st.Phase != publication.PhaseCommitted {
+		t.Fatalf("missing archive: %+v %v", st, err)
+	}
+}

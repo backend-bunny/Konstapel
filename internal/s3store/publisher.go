@@ -405,8 +405,43 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 	st := publication.Committed(r)
 	if !p.now().Before(r.ExpiresAt) {
 		st.Phase, st.Availability, st.Cleanup.State = publication.PhaseExpired, publication.AvailabilityExpired, publication.CleanupPending
+		return st, nil
+	}
+	if f, err := p.archiveHealth(ctx, r); err != nil {
+		return publication.Status{}, err
+	} else if f != nil {
+		st.Availability, st.Failure = publication.AvailabilityUnavailable, f
 	}
 	return st, nil
+}
+
+// archiveHealth checks that a committed archive still exists with its
+// committed size and, where the service returns it, its SHA-256. It reads
+// only object metadata. A nil failure means the archive looks intact; an
+// error means the backend could not be asked.
+func (p *Publisher) archiveHealth(ctx context.Context, r publication.Receipt) (*publication.Failure, error) {
+	in := &s3.HeadObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(r.Commit.ArchiveKey), ChecksumMode: types.ChecksumModeEnabled}
+	if r.Commit.ArchiveVersionID != "" {
+		in.VersionId = aws.String(r.Commit.ArchiveVersionID)
+	}
+	head, err := p.Client.HeadObject(ctx, in)
+	now := p.now().UTC()
+	if err != nil {
+		if isNotFound(err) {
+			return &publication.Failure{Reason: publication.FailureObjectMissing, Message: "the committed archive is missing before its expiry", At: now}, nil
+		}
+		return nil, fmt.Errorf("%w: inspect archive: %v", publication.ErrUnavailable, sanitize(err))
+	}
+	if aws.ToInt64(head.ContentLength) != r.PackageSize {
+		return &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed archive has a different size", At: now}, nil
+	}
+	if c := aws.ToString(head.ChecksumSHA256); c != "" {
+		sum, err := hex.DecodeString(r.PackageSHA256)
+		if err != nil || c != base64.StdEncoding.EncodeToString(sum) {
+			return &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed archive has a different SHA-256", At: now}, nil
+		}
+	}
+	return nil, nil
 }
 
 // Delete removes every owned object version under the run's prefix after

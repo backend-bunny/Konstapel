@@ -405,8 +405,20 @@ write to storage. Runs carry no owner reference to their binding or request.
   last error, and retries with backoff from one minute to one hour. Konstapel
   never requests bypass permissions. An administrator resolves the lock or
   permission.
+- **Availability before expiry** is re-checked at most once a day
+  (`AssessmentRuntime.IntegrityInterval`) and after a controller restart. The
+  check reads only the archive's metadata: it must exist with its committed
+  size and, where the service returns it, its committed SHA-256. A missing
+  archive gives `availability: Unavailable` with failure reason
+  `ObjectMissing`; a size or checksum mismatch gives `IntegrityFailed`. The
+  assessment summary, receipt and expiry never change. If the same bytes are
+  restored, availability returns to `Available`. A storage outage leaves the
+  last known availability. Downloads verify the full SHA-256 on every request
+  regardless.
 - **External lifecycle rules** must not expire evidence before Konstapel's
-  recorded expiry. Konstapel does not change bucket rules.
+  recorded expiry. Konstapel does not change bucket rules. Early removal shows
+  up as `ObjectMissing`, never as successful retention, and the record is still
+  cleaned up at expiry.
 
 A run deleted while still collecting has written nothing to storage and is
 released immediately.
