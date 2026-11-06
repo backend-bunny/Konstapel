@@ -34,11 +34,11 @@ change's entire task list before landing the shared contract or adapter.
 ## 3. Reconcile current state and durable run scheduling
 
 - [x] 3.1 Implement persisted schedule anchors/due times and deterministic scheduled-run identities with a fake clock; verify independent intervals, initial runs, interval edits, and manual requests that do not reset cadence.
-- [ ] 3.2 Add one-active-run-per-binding coordination, leader recovery, bounded workers/queues, and deterministic request ordering; verify concurrent reconciles cannot duplicate a trigger and an overdue scheduled run is not starved by manual requests.
+- [x] 3.2 Add one-active-run-per-binding coordination, leader recovery, bounded workers/queues, and deterministic request ordering; verify concurrent reconciles cannot duplicate a trigger and an overdue scheduled run is not starved by manual requests.
 - [x] 3.3 Implement missed-interval coalescing and restart recovery; verify downtime records a gap and produces one current run without fabricated historical evaluations or an unbounded backlog.
 - [ ] 3.4 Add workload/namespace/policy/report/exception watches and age-expiry reconciliation for current status; verify a 2h-old result becomes stale before a 24h snapshot tick and zero targets does not establish a pass.
 - [x] 3.5 Implement bounded collection/export/publication execution and failure release of active slots; verify unready policies, plugin hangs, and publisher outages produce explicit limitations/failures without blocking the binding forever.
-- [ ] 3.6 Document scheduling, request quotas, pending/failed runs, and recovery; verify a fake-clock and disposable-cluster walkthrough reproduces cadence, gap, and concurrency behavior.
+- [x] 3.6 Document scheduling, request quotas, pending/failed runs, and recovery; verify a fake-clock and disposable-cluster walkthrough reproduces cadence, gap, and concurrency behavior.
 
 ## 4. Correlate changing resources with expected evidence
 
@@ -55,7 +55,7 @@ change's entire task list before landing the shared contract or adapter.
 - [x] 5.2 Produce schema-valid incomplete OSCAL and clearly typed diagnostic packages when valid export is impossible; verify missing/malformed evidence and zero-target cases never fabricate a pass or a successful OSCAL export.
 - [ ] 5.3 Integrate exception snapshots, applicability, and independent check outcomes through final OSCAL export; verify accepted risk, failures, and repeated binding contributions do not inflate passing/control coverage.
 - [ ] 5.4 Freeze package bytes/digests and implement recoverable staging plus explicit CaptureLost handling; verify retry preserves the same snapshot and a restart without recoverable data cannot substitute newer observations under its identity.
-- [ ] 5.5 Connect request status to sanitized summaries and opaque artifact references; verify team-visible status exposes no full-binding inventory, credentials, or sibling errors and request deletion does not remove retained publication records.
+- [x] 5.5 Connect request status to sanitized summaries and opaque artifact references; verify team-visible status exposes no full-binding inventory, credentials, or sibling errors and request deletion does not remove retained publication records.
 - [ ] 5.6 Document scheduled/on-demand workflows, incomplete versus diagnostic results, and namespace download handoff; verify the published examples use only the intended namespace or platform permissions.
 
 ## 6. Verify integrated continuous assessment
