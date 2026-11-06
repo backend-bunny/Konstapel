@@ -12,6 +12,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,7 +49,7 @@ func TestLiveDestinationPins(t *testing.T) {
 	p := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "dp-baseline"},
 		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
 	b := bindingObj("dp-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "dp-production"})
-	b.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "30s"}
+	b.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "30s", Retention: "150s"}
 	yes := true
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "privileged", Namespace: "dp-prod"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "registry.invalid/x:1", SecurityContext: &corev1.SecurityContext{Privileged: &yes}}}}}
@@ -160,4 +162,32 @@ func TestLiveDestinationPins(t *testing.T) {
 		t.Fatal("packages are not at their pinned destinations")
 	}
 	l.record("pins", map[string]any{"first": r1.Status.Destination.Name, "second": r2.Status.Destination.Name})
+
+	// Retirement (8.1): deleting both destinations keeps each until its
+	// retained package expires and is deleted, then releases it.
+	for name := range dests {
+		ed := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, ed)
+		if err := l.c.Delete(l.ctx, ed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.eventually("retiring destinations report their packages", func() (bool, string) {
+		ed := &v1alpha1.EvidenceDestination{}
+		if err := l.c.Get(l.ctx, client.ObjectKey{Name: "dp-primary"}, ed); err != nil {
+			return false, err.Error()
+		}
+		c := meta.FindStatusCondition(ed.Status.Conditions, v1alpha1.ConditionDestinationRetiring)
+		return c != nil && ed.Status.OutstandingPackages == 1 && ed.Status.LatestRetainedExpiry != nil, toJSON(ed.Status)
+	})
+	if commitsUnder("konstapel-test/dp-primary", string(r1.UID)) != 1 {
+		t.Fatal("retirement removed a package before its expiry")
+	}
+	for name, uid := range map[string]string{"dp-primary": string(r1.UID), "dp-secondary": string(r2.UID)} {
+		l.eventually(name+" released after its package expired and was deleted", func() (bool, string) {
+			err := l.c.Get(l.ctx, client.ObjectKey{Name: name}, &v1alpha1.EvidenceDestination{})
+			return apierrors.IsNotFound(err) && commitsUnder("konstapel-test/"+name, uid) == 0, fmt.Sprint(err)
+		})
+	}
+	l.record("retired", map[string]any{"destinations": 2})
 }

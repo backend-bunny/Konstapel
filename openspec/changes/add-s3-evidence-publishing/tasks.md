@@ -78,7 +78,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 
 ## 8. Retire destinations and support audited orphan handoff
 
-- [ ] 8.1 Reconcile normal destination retirement with existing pinned publications, authorized downloads, and cleanup; verify outstanding runs/uploads/packages hold the finalizer, blockers remain retryable, and status includes counts, latest known expiry, and unfinished work with unknown expiry.
+- [x] 8.1 Reconcile normal destination retirement with existing pinned publications, authorized downloads, and cleanup; verify outstanding runs/uploads/packages hold the finalizer, blockers remain retryable, and status includes counts, latest known expiry, and unfinished work with unknown expiry.
 - [ ] 8.2 Implement authenticated Orphan intent with required reason and protected actor/time, including escalation from blocked Retire; verify caller-forged identities are rejected, selecting a policy alone does not delete storage, and started orphan handoff cannot be reversed.
 - [ ] 8.3 Fence publication, recovery, downloads, probes, and both destination/run cleanup workers during orphan handoff; verify bounded cancellation/draining, restart, late responses, and uncertain remote outcomes do not resume operations, abort uploads, or claim remote rollback/deletion.
 - [ ] 8.4 Persist an independent protected, chunked orphan inventory with audit identity, original receipts, known attempts/versions/upload IDs, and uncertain outcomes; verify idempotence, object-size limits, backend outages, and inventory persistence failures preserve the fence and finalizers without exposing credentials.

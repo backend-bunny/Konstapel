@@ -566,6 +566,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 	}
 	if err := builder.ControllerManagedBy(mgr).Named("evidencedestination").
 		For(&v1alpha1.EvidenceDestination{}).
+		Watches(&v1alpha1.AssessmentRun{}, destinationForRun(mgr.GetClient())).
 		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace}); err != nil {
 		return err
 	}
@@ -612,4 +613,25 @@ func (w *engineWatches) Start(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+// destinationForRun requeues the destination a run is pinned to, so
+// retirement accounting follows run progress.
+func destinationForRun(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		uid := o.GetLabels()[LabelRunDestination]
+		if uid == "" {
+			return nil
+		}
+		var list v1alpha1.EvidenceDestinationList
+		if err := c.List(ctx, &list); err != nil {
+			return nil
+		}
+		for _, d := range list.Items {
+			if string(d.UID) == uid {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(&d)}}
+			}
+		}
+		return nil
+	})
 }
