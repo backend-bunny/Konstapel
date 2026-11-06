@@ -36,6 +36,20 @@ const RequestTimeout = 30 * time.Second
 // credentialSecret destination; workload identity uses the SDK's standard
 // chain (for example a projected web-identity token).
 func NewClient(ctx context.Context, d Destination, creds *StaticCredentials) (*s3.Client, error) {
+	var provider aws.CredentialsProvider
+	if d.CredentialSecret != nil {
+		if creds == nil || creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
+			return nil, fmt.Errorf("%w: secret %s", ErrCredentials, d.CredentialSecret.Name)
+		}
+		provider = credentials.NewStaticCredentialsProvider(creds.AccessKeyID, creds.SecretAccessKey, "")
+	}
+	return NewClientWithCredentials(ctx, d, provider)
+}
+
+// NewClientWithCredentials builds an S3 client for d. A credentialSecret
+// destination requires provider (see SecretCredentials); workload identity
+// ignores it and uses the SDK's standard chain.
+func NewClientWithCredentials(ctx context.Context, d Destination, provider aws.CredentialsProvider) (*s3.Client, error) {
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}
@@ -49,10 +63,10 @@ func NewClient(ctx context.Context, d Destination, creds *StaticCredentials) (*s
 		awsconfig.WithRetryMaxAttempts(3),
 	}
 	if d.CredentialSecret != nil {
-		if creds == nil || creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
+		if provider == nil {
 			return nil, fmt.Errorf("%w: secret %s", ErrCredentials, d.CredentialSecret.Name)
 		}
-		opts = append(opts, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(creds.AccessKeyID, creds.SecretAccessKey, "")))
+		opts = append(opts, awsconfig.WithCredentialsProvider(provider))
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {

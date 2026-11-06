@@ -27,6 +27,7 @@ type fakeS3 struct {
 	corrupt     bool                     // store truncated bytes and no checksum
 	objects     map[string][]fakeVersion // key -> versions, newest last
 	seq         int
+	accessKeys  []string // access key ID of each signed request
 }
 
 type fakeVersion struct {
@@ -56,6 +57,9 @@ func xmlError(w http.ResponseWriter, status int, code string) {
 func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, after, ok := strings.Cut(r.Header.Get("Authorization"), "Credential="); ok {
+		f.accessKeys = append(f.accessKeys, strings.SplitN(after, "/", 2)[0])
+	}
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)
 	if parts[0] != f.bucket {
 		xmlError(w, 404, "NoSuchBucket")
