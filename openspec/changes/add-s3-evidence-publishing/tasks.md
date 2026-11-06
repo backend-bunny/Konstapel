@@ -44,7 +44,7 @@ Planning artifact completion does not satisfy implementation prerequisites.
 - [x] 4.2 Resolve namespace downloads only through their request and original namespace UID; verify sibling namespaces, full-binding runs, recreated namespaces, deleted requests, guessed object keys, and forged identity headers cannot bypass authorization.
 - [x] 4.3 Add current-authorization checks on each download and scoped errors/status without credentials or reusable download tokens; verify revoking RBAC prevents subsequent requests and logs/errors expose no sibling evidence or secrets.
 - [x] 4.4 Fetch into bounded temporary storage, verify archive size/checksum, and serve private non-cacheable responses; verify corrupt, unavailable, expired, and uncommitted packages fail explicitly and concurrency/disk limits clean up temporary data.
-- [ ] 4.5 Document namespace/platform roles and the authenticated full OSCAL/evidence download workflow; verify real namespace credentials can download their complete package while the same credentials cannot retrieve a broader one.
+- [x] 4.5 Document namespace/platform roles and the authenticated full OSCAL/evidence download workflow; verify real namespace credentials can download their complete package while the same credentials cannot retrieve a broader one.
 
 ## 5. Enforce fixed per-binding retention
 

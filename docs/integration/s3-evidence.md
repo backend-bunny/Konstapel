@@ -289,6 +289,34 @@ A successful response is `Cache-Control: private, no-store`, with
 | 502 | the stored package does not match the receipt or fails integrity verification |
 | 503 | TokenReview/SubjectAccessReview unavailable (fail closed), storage unavailable, the archive missing before expiry, or temp space full (`Retry-After`) |
 
+Roles:
+
+- **Teams** get `konstapel-assessment-requester` through a RoleBinding in
+  their namespace. It allows creating and reading `AssessmentRequest`s and
+  `get` on `assessmentrequests/download` there. That reaches only their own
+  requests' namespace packages, never a full-binding run, a sibling
+  namespace, or a run through the platform route.
+- **Platform operators** get `konstapel-assessment-operator` through a
+  ClusterRoleBinding. It allows `get` on `assessmentruns/download` for every
+  run's package, including full-binding ones.
+- **The download service** gets `konstapel-evidence-download` (above). Nobody
+  else needs TokenReview or SubjectAccessReview.
+
+`TestLiveEvidenceDownload` (in `scripts/targeting-live.sh`) runs this workflow
+on a disposable cluster against the pinned S3 test service:
+
+1. The manager publishes a team request's package through the real
+   publisher.
+2. A namespace service account bound to the requester role gets a token for
+   the `konstapel-download` audience and downloads the package. The archive
+   unpacks into a namespace-scoped package of the team's own namespace UID,
+   and it passes the publisher's full validation (inventory, OSCAL schemas and
+   references, engine-policy provenance, namespace projection).
+3. The same token gets 403 for the full-binding run, for its own run through
+   the platform route, for a sibling namespace, and for a wrong request UID.
+   A token for the API server audience gets 401.
+4. After the RoleBinding is deleted, the next download gets 403.
+
 Error bodies never contain storage locations, credentials, tokens, or another
 scope's data. A team downloads its package like this:
 
