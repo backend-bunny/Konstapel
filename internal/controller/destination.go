@@ -3,6 +3,9 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -111,15 +114,113 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, "NotReady", truncate(err.Error())
 	}
-	old := meta.FindStatusCondition(ed.Status.Conditions, cond.Type)
-	if ed.Status.ObservedGeneration != ed.Generation || old == nil || old.Status != cond.Status || old.Message != cond.Message || old.ObservedGeneration != cond.ObservedGeneration {
-		ed.Status.ObservedGeneration = ed.Generation
-		meta.SetStatusCondition(&ed.Status.Conditions, cond)
+	ob, err := r.obligations(ctx, ed)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	status := ed.Status.DeepCopy()
+	status.ObservedGeneration = ed.Generation
+	meta.SetStatusCondition(&status.Conditions, cond)
+	ob.apply(status)
+	if !ed.DeletionTimestamp.IsZero() {
+		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed))
+	}
+	if !equality.Semantic.DeepEqual(&ed.Status, status) {
+		ed.Status = *status
 		if err := r.Client.Status().Update(ctx, ed); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
+	// Retirement finishes only when no accepted run, upload, retained
+	// package, or cleanup still needs this destination. The count comes
+	// from an uncached list of runs labelled with its UID, so a pin accepted
+	// before deletion (labelled before the finalizer was confirmed) is seen.
+	if !ed.DeletionTimestamp.IsZero() && ob.empty() && controllerutil.ContainsFinalizer(ed, DestinationFinalizer) {
+		controllerutil.RemoveFinalizer(ed, DestinationFinalizer)
+		if err := r.Client.Update(ctx, ed); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
 	return ctrl.Result{RequeueAfter: DestinationProbeInterval}, nil
+}
+
+// obligations are what a destination still owes its pinned runs.
+type obligations struct {
+	runs, packages, unknownExpiry, cleanup int32
+	latest                                 *metav1.Time
+	blockers                               []string
+}
+
+func (o obligations) empty() bool {
+	return o.runs == 0 && o.packages == 0 && o.cleanup == 0
+}
+
+func (o obligations) apply(s *v1alpha1.EvidenceDestinationStatus) {
+	s.OutstandingRuns, s.OutstandingPackages, s.UnknownExpiryRuns = o.runs, o.packages, o.unknownExpiry
+	s.LatestRetainedExpiry, s.CleanupBlockers = o.latest, o.blockers
+}
+
+func (o obligations) retiring(ed *v1alpha1.EvidenceDestination) metav1.Condition {
+	c := metav1.Condition{Type: v1alpha1.ConditionDestinationRetiring, Status: metav1.ConditionTrue, ObservedGeneration: ed.Generation}
+	note := ""
+	if ed.Spec.DeletionPolicy == v1alpha1.DeletionOrphan {
+		note = " (Orphan handoff is not available yet; retiring normally)"
+	}
+	switch {
+	case o.empty():
+		c.Reason, c.Message = "Retired", "no outstanding runs, packages, or cleanup"+note
+	case len(o.blockers) > 0:
+		c.Reason = "RetirementBlocked"
+		c.Message = truncate(fmt.Sprintf("%d runs, %d packages, %d cleanups outstanding (%d with unknown expiry); blocked: %s%s", o.runs, o.packages, o.cleanup, o.unknownExpiry, o.blockers[0], note))
+	default:
+		c.Reason = "Retiring"
+		c.Message = truncate(fmt.Sprintf("waiting for %d runs, %d packages, %d cleanups (%d with unknown expiry)%s", o.runs, o.packages, o.cleanup, o.unknownExpiry, note))
+	}
+	return c
+}
+
+// obligations counts the destination's outstanding work from the runs that
+// recorded it as their pin. A run still starting (labelled, not yet pinned)
+// is outstanding: it may still be accepted. Unfinished publication has no
+// known expiry and is never treated as an empty destination.
+func (r *DestinationReconciler) obligations(ctx context.Context, ed *v1alpha1.EvidenceDestination) (obligations, error) {
+	var runs v1alpha1.AssessmentRunList
+	if err := r.Reader.List(ctx, &runs, client.MatchingLabels{LabelRunDestination: string(ed.UID)}); err != nil {
+		return obligations{}, err
+	}
+	var o obligations
+	block := func(run, msg string) {
+		if len(o.blockers) < 16 {
+			o.blockers = append(o.blockers, truncate(run+": "+msg))
+		}
+	}
+	for i := range runs.Items {
+		run := &runs.Items[i]
+		pub := run.Status.Publication
+		switch {
+		case !runDone(run):
+			o.runs++
+			o.unknownExpiry++
+		case run.Status.Phase == v1alpha1.RunCompleted && pub != nil && pub.Cleanup.State != v1alpha1.CleanupState(publication.CleanupDeleted):
+			o.packages++
+			if pub.ExpiresAt != nil && (o.latest == nil || pub.ExpiresAt.After(o.latest.Time)) {
+				t := *pub.ExpiresAt
+				o.latest = &t
+			}
+			if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupRetentionBlocked) || pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeletionFailed) {
+				block(run.Name, string(pub.Cleanup.State)+": "+pub.Cleanup.Message)
+			}
+		case controllerutil.ContainsFinalizer(run, RetentionFinalizer):
+			// Terminal without a retained package, but attempt cleanup or
+			// release is still pending.
+			o.cleanup++
+			if c := meta.FindStatusCondition(run.Status.Conditions, v1alpha1.ConditionAttemptsCleaned); c != nil && c.Status == metav1.ConditionFalse {
+				block(run.Name, c.Reason+": "+c.Message)
+			}
+		}
+	}
+	return o, nil
 }
 
 // selectDestination resolves a binding's evidence destination: its own

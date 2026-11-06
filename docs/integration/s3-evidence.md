@@ -105,9 +105,28 @@ Scheduling follows the selection. While a binding's selected destination is
 unusable, no runs start and `status.assessment.current` names the reason.
 Bindings with no selection use the legacy destination file below. The file is
 now optional for `konstapel controller` and `konstapel download-server`.
-Releasing the finalizer when retirement completes, and migrating the file,
-follow (groups 8–9). Until then, deleting a destination that has pins leaves
-it terminating.
+Migrating the file follows (group 9).
+
+**Retirement.** Deleting a destination retires it (`deletionPolicy: Retire`).
+The destination reconciler counts what the destination still owes from an
+uncached list of runs labelled with its UID:
+- `outstandingRuns`: runs still starting or running. A labelled run that is
+  not pinned yet counts, because it may still be accepted.
+- `unknownExpiryRuns`: those same runs, whose expiry is not known yet.
+- `outstandingPackages`: completed runs whose package is not deleted yet.
+- `latestRetainedExpiry`: the latest expiry among those packages.
+- `cleanupBlockers`: runs whose expiry deletion or attempt cleanup is
+  `RetentionBlocked`, `DeletionFailed` or `CleanupPending`, with the message.
+
+While deleting, the `Retiring` condition is `Retiring`, or `RetirementBlocked`
+when blockers exist. New runs are refused, because selection reports
+`DestinationRetiring` with no fallback. Pinned runs finish publishing there,
+packages stay downloadable until expiry, and expiry deletion and attempt
+cleanup carry on with the original UID and credentials (which can still
+rotate). Blockers are retried. Unfinished publication is never treated as an
+empty destination. The finalizer is removed only when nothing is outstanding.
+`deletionPolicy: Orphan` (the audited handoff) is not available yet. Such a
+destination retires normally, and its condition says so.
 
 ## Destination configuration
 
