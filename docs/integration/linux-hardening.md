@@ -300,6 +300,37 @@ control, an unknown control, a control outside Moderate, an undeclared rule,
 a missing provider check, a wrong catalog source, a rule that is not a
 shipped policy, and a check mapped twice.
 
+## Exported assessment OSCAL (tasks 3.3 and 3.4)
+
+`internal/hardening/export_test.go` exports a bundle capture end to end
+through the collector's public API (`FreezeScope`, `Evaluate`, `Export`,
+`VerifyPackage`). The capture comes from the served bundle: all five checks,
+an Audit binding over two namespaces and a Deny binding over production, a
+compliant development Pod, and a production Pod that violates privilege
+escalation and added capabilities. That gives 21 expected observations, all
+attributable: 17 pass and 4 fail.
+
+- **Schema (3.3).** The package is an Assessment, not a Diagnostic, and it
+  re-verifies. The plan, results and SSP each validate against the OSCAL
+  1.1.3 schema they declare. The official NIST catalog and Moderate profile
+  (OSCAL 1.2.3) and both component definitions are packaged byte for byte.
+  Moderate membership is established from the raw 1.2.3 JSON, never through
+  the older model.
+- **Distinct checks (3.4).** There is one observation per logical check
+  (five), and each has one subject per expected evaluation. Every subject
+  carries its `binding-uid` and `engine-policy`, so the Audit and Deny
+  instances of a check stay distinct subjects of the same check.
+- **No multiplied controls (3.4).** There is one finding per control
+  statement (`ac-6_smt`, `cm-6_smt`, `cm-7_smt`), however many checks or
+  binding instances feed it. Each finding relates only to the checks that
+  actually failed. The SSP lists AC-6, CM-6 and CM-7 once each.
+- **No satisfaction claims (3.4).** The results state partial coverage. No
+  finding is ever `satisfied`, and an all-passing capture produces no findings
+  at all.
+
+C2P reports finding targets at the statement root (`cm-6_smt`), while the
+mapping and SSP name the part (`cm-6_smt.b`).
+
 ## Research results versus implementation acceptance
 
 The research and this run show that the **unmodified upstream** policies
