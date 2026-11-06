@@ -79,12 +79,23 @@ type exceptionInput struct {
 	Selector  *map[string]string `json:"selector"`
 	Reason    *string            `json:"reason,omitempty"`
 	ExpiresAt string             `json:"expiresAt,omitempty"`
+	Revoked   *bool              `json:"revoked,omitempty"`
 }
 
 type renewal struct {
 	AcceptanceRevision int    `json:"acceptanceRevision"`
 	Reason             string `json:"reason"`
 	ExpiresAt          string `json:"expiresAt"`
+	Revoked            *bool  `json:"revoked,omitempty"`
+}
+
+// revision and resourceVersion describe client preconditions, not additional
+// ComplianceException spec fields. Existing abstract cases may omit them.
+type revocationInput struct {
+	Revoked            bool   `json:"revoked"`
+	AcceptanceRevision int    `json:"acceptanceRevision"`
+	UID                string `json:"uid"`
+	ResourceVersion    string `json:"resourceVersion"`
 }
 
 type nativeWrite struct {
@@ -101,22 +112,23 @@ type report struct {
 }
 
 type step struct {
-	At                   string          `json:"at"`
-	Action               string          `json:"action"`
-	Note                 string          `json:"note,omitempty"`
-	DryRun               bool            `json:"dryRun,omitempty"`
-	Stale                bool            `json:"stale,omitempty"`
-	Actor                *actor          `json:"actor,omitempty"`
-	ForgedAttribution    *actor          `json:"forgedAttribution,omitempty"`
-	ClaimedBy            string          `json:"claimedBy,omitempty"`
-	Exception            *exceptionInput `json:"exception,omitempty"`
-	Renewal              *renewal        `json:"renewal,omitempty"`
-	Contributions        []contribution  `json:"contributions,omitempty"`
-	Namespaces           []namespace     `json:"namespaces,omitempty"`
-	Native               *nativeWrite    `json:"native,omitempty"`
-	Report               *report         `json:"report,omitempty"`
-	EngineExpiryVerified *bool           `json:"engineExpiryVerified,omitempty"`
-	Expect               map[string]any  `json:"expect"`
+	At                   string           `json:"at"`
+	Action               string           `json:"action"`
+	Note                 string           `json:"note,omitempty"`
+	DryRun               bool             `json:"dryRun,omitempty"`
+	Stale                bool             `json:"stale,omitempty"`
+	Actor                *actor           `json:"actor,omitempty"`
+	ForgedAttribution    *actor           `json:"forgedAttribution,omitempty"`
+	ClaimedBy            string           `json:"claimedBy,omitempty"`
+	Exception            *exceptionInput  `json:"exception,omitempty"`
+	Renewal              *renewal         `json:"renewal,omitempty"`
+	Revocation           *revocationInput `json:"revocation,omitempty"`
+	Contributions        []contribution   `json:"contributions,omitempty"`
+	Namespaces           []namespace      `json:"namespaces,omitempty"`
+	Native               *nativeWrite     `json:"native,omitempty"`
+	Report               *report          `json:"report,omitempty"`
+	EngineExpiryVerified *bool            `json:"engineExpiryVerified,omitempty"`
+	Expect               map[string]any   `json:"expect"`
 }
 
 var (
@@ -124,6 +136,7 @@ var (
 	boundaries = []string{"namespace", "revision", "eligibility", "attribution", "lifetime",
 		"expired-context", "missing-context", "native-governance", "engine"}
 	actions = []string{"create", "renew", "metadata-edit", "change-scope", "revoke", "expire",
+		"delete", "persist-history",
 		"change-contribution", "recreate-namespace", "namespace-identity-unavailable", "native-write",
 		"unmanaged-collision", "engine-converged", "engine-unavailable", "stop-controller",
 		"start-controller", "engine-runtime-check", "report", "delete-live-history"}
@@ -150,7 +163,10 @@ var (
 		"existingWorkloadsRetained", "backgroundDisposition", "featureEnabled", "nativeNamespaceUID",
 		"native", "unmanagedUntouched", "rawResult", "disposition", "countsAsPass", "fabricatedFailure",
 		"dispositionReason", "dispositionActor", "exceptionRefs", "controlCoverage", "packagedSnapshot",
-		"offlineInterpretation"}
+		"offlineInterpretation", "revocation", "exceptionRetained", "finalizerRetained",
+		"eligibilityRechecked", "earlierWithdrawalPending"}
+	// Expected lifecycle data remains separate from the immutable acceptance.
+	revocationKeys = []string{"revision", "actor", "requestedAt", "history"}
 )
 
 func loadMatrix(t *testing.T) matrix {
@@ -311,10 +327,43 @@ func checkStep(t *testing.T, i int, s step) {
 			}
 		}
 	}
+	for _, key := range []string{"exceptionRetained", "finalizerRetained", "eligibilityRechecked", "earlierWithdrawalPending"} {
+		if v, ok := s.Expect[key]; ok {
+			if _, ok := v.(bool); !ok {
+				t.Errorf("step %d: %s must be a boolean", i, key)
+			}
+		}
+	}
+	if v, ok := s.Expect["revocation"]; ok {
+		record, ok := v.(map[string]any)
+		if !ok || len(record) == 0 {
+			t.Errorf("step %d: revocation needs an expected record", i)
+		}
+		for key, value := range record {
+			if !slices.Contains(revocationKeys, key) {
+				t.Errorf("step %d: unknown revocation expectation %q", i, key)
+			}
+			switch key {
+			case "requestedAt":
+				at, _ := value.(string)
+				parseTime(t, at)
+			case "history":
+				state, _ := value.(string)
+				if !slices.Contains([]string{"pending", "persisted", "retained"}, state) {
+					t.Errorf("step %d: unknown revocation history %q", i, state)
+				}
+			}
+		}
+	}
+	if r := s.Revocation; r != nil {
+		if r.AcceptanceRevision < 1 || r.UID == "" || r.ResourceVersion == "" {
+			t.Errorf("step %d: revocation input needs revision, UID and resourceVersion preconditions", i)
+		}
+	}
 	// Operations by a caller must say who the authenticated caller is, and a
 	// rejection must say why.
 	switch s.Action {
-	case "create", "renew", "metadata-edit", "change-scope", "revoke", "native-write":
+	case "create", "renew", "metadata-edit", "change-scope", "revoke", "delete", "native-write":
 		if s.Actor == nil || s.Actor.Username == "" {
 			t.Errorf("step %d (%s): no authenticated actor", i, s.Action)
 		}

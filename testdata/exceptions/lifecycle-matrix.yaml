@@ -301,10 +301,10 @@ cases:
         action: expire
         expect: {grant: withdrawn, workload: {namespace: team-a, labels: {app: debug}, result: denied}, existingWorkloadsRetained: true, snapshot: retained, backgroundDisposition: unexcepted}
 
-  - id: delete-and-revoke
+  - id: revoke-and-renew
     category: revocation
     boundaries: [revision]
-    scenarios: ["An exception expires", "Central eligibility becomes Forbidden"]
+    scenarios: ["A team revokes an exception", "Explicitly renew a revoked exception"]
     setup:
       namespaces: [{name: team-a, uid: ns-a-1}]
       contributions:
@@ -326,7 +326,7 @@ cases:
       - at: "2026-01-01T01:01:00Z"
         action: renew
         actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
-        note: "revocation is terminal for revision 1; reactivation needs a new revision and fresh validation (design 1)"
+        note: "atomically clear spec.revoked with revision 2 after persisting revision 1 revocation history; fresh validation is required"
         renewal: {acceptanceRevision: 2, reason: "reactivate", expiresAt: "2026-01-02T00:00:00Z"}
         expect: {admission: admitted, acceptanceRevision: 2, snapshot: new, previousSnapshot: retained, grant: active}
 
@@ -383,6 +383,283 @@ cases:
         action: engine-runtime-check
         engineExpiryVerified: false
         expect: {featureEnabled: false, reason: EngineExpiryUnverified}
+
+  # --- explicit spec.revoked contract ---------------------------------------
+  # These are declarative expected outcomes. API/controller execution lands in
+  # tasks 2.6, 3.6 and group 4; passing the matrix checker does not implement it.
+  - id: revoke-retains-resource-and-renewal-is-explicit
+    category: revocation
+    boundaries: [revision, attribution, engine]
+    scenarios:
+      - A team revokes an exception
+      - A same-revision re-apply clears revocation
+      - Explicitly renew a revoked exception
+      - Revocation has been recorded but the engine has not converged
+    setup: &revocationSetup
+      namespaces: [{name: team-a, uid: ns-a-1}, {name: team-b, uid: ns-b-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+      existingWorkloads: [{namespace: team-a, name: debug, labels: {app: debug}}]
+    steps:
+      - &createRevocable
+        at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: &alice {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: &revocableException {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "incident 42", expiresAt: "2026-01-02T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 1, snapshot: recorded, snapshotActor: alice, grant: active}
+      - &revokeAcceptance
+        at: "2026-01-01T01:00:00Z"
+        action: revoke
+        actor: *alice
+        revocation: &revokeRevisionOne {revoked: true, acceptanceRevision: 1, uid: ex-1, resourceVersion: "10"}
+        note: "test UID/resourceVersion/revision then set spec.revoked true; retain reason and expiry"
+        expect:
+          admission: admitted
+          acceptanceRevision: 1
+          snapshot: unchanged
+          grant: withdrawal-pending
+          engineObserved: Unknown
+          exceptionRetained: true
+          finalizerRetained: true
+          existingWorkloadsRetained: true
+          revocation: &aliceRevocation {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: pending}
+      - at: "2026-01-01T01:00:10Z"
+        action: metadata-edit
+        actor: *alice
+        revocation: {revoked: false, acceptanceRevision: 1, uid: ex-1, resourceVersion: "11"}
+        note: "same-revision update clears spec.revoked, including an omitted field defaulting false"
+        expect: {admission: rejected, reason: RenewalRequired, grant: withdrawal-pending, snapshot: unchanged, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:00:20Z"
+        action: persist-history
+        expect: {revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: persisted}, grant: withdrawal-pending}
+      - at: "2026-01-01T01:00:30Z"
+        action: renew
+        actor: *alice
+        renewal: {acceptanceRevision: 2, revoked: false, reason: "fresh acceptance", expiresAt: "2026-01-03T00:00:00Z"}
+        note: "current preconditions; preserve old revoked record and its outstanding native ownership"
+        expect: {admission: admitted, acceptanceRevision: 2, snapshot: new, previousSnapshot: retained, eligibilityRechecked: true, earlierWithdrawalPending: true, revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: retained}}
+
+  - id: create-and-renew-must-start-unrevoked
+    category: acceptance
+    boundaries: [revision]
+    scenarios: ["Create or renew into a revoked state"]
+    setup: *revocationSetup
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: *alice
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "incident 42", expiresAt: "2026-01-02T00:00:00Z", revoked: true}
+        expect: {admission: rejected, reason: InvalidRevocationTransition, snapshot: none, grant: none}
+      - *createRevocable
+      - at: "2026-01-01T01:00:00Z"
+        action: renew
+        actor: *alice
+        renewal: {acceptanceRevision: 2, revoked: true, reason: "ambiguous renewal", expiresAt: "2026-01-03T00:00:00Z"}
+        expect: {admission: rejected, reason: InvalidRevocationTransition, acceptanceRevision: 1, snapshot: unchanged, grant: active}
+
+  - id: revoke-renew-client-preconditions
+    category: revocation
+    boundaries: [revision]
+    scenarios: ["Revocation races renewal"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-01T00:30:00Z"
+        action: renew
+        actor: *alice
+        renewal: {acceptanceRevision: 2, revoked: false, reason: "renew", expiresAt: "2026-01-03T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 2, snapshot: new, grant: active}
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        actor: *alice
+        revocation: *revokeRevisionOne
+        stale: true
+        note: "patch preconditions still target revision 1/rv 10 after revision 2 won"
+        expect: {admission: rejected, reason: Conflict, acceptanceRevision: 2, snapshot: unchanged, grant: active}
+      - action: revoke
+        actor: *alice
+        at: "2026-01-01T01:01:00Z"
+        revocation: {revoked: true, acceptanceRevision: 2, uid: ex-1, resourceVersion: "12"}
+        note: "deliberately re-read current state and revoke revision 2"
+        expect: {admission: admitted, acceptanceRevision: 2, grant: withdrawal-pending}
+      - at: "2026-01-01T01:02:00Z"
+        action: renew
+        actor: *alice
+        stale: true
+        renewal: {acceptanceRevision: 3, revoked: false, reason: "stale renewal", expiresAt: "2026-01-03T00:00:00Z"}
+        note: "renewal carries the resourceVersion from before the competing revoke"
+        expect: {admission: rejected, reason: Conflict, acceptanceRevision: 2, grant: withdrawal-pending}
+
+  - id: revoke-expired-forbidden-acceptance
+    category: revocation
+    boundaries: [eligibility, lifetime]
+    scenarios: ["Revoke an expired or currently ineligible acceptance"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-02T00:00:00Z"
+        action: expire
+        expect: {grant: withdrawn, snapshot: retained}
+      - at: "2026-01-02T00:00:10Z"
+        action: change-contribution
+        contributions: [{binding: baseline, policy: disallow-privileged, revision: r1, eligibility: Forbidden}]
+        expect: {eligibility: Ineligible, grant: withdrawn}
+      - action: revoke
+        actor: *alice
+        at: "2026-01-02T00:00:20Z"
+        revocation: {revoked: true, acceptanceRevision: 1, uid: ex-1, resourceVersion: "14"}
+        expect: {admission: admitted, eligibilityRechecked: false, grant: withdrawn, snapshot: unchanged, revocation: {revision: 1, actor: alice, requestedAt: "2026-01-02T00:00:20Z", history: pending}}
+
+  - id: revoke-with-unresolved-contributions
+    category: revocation
+    boundaries: [eligibility]
+    scenarios: ["Revoke an expired or currently ineligible acceptance"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-01T00:30:00Z"
+        action: change-contribution
+        note: "current policy mapping cannot be resolved"
+        contributions: [{binding: baseline, policy: disallow-privileged, revision: r1, eligibility: Unresolved}]
+        expect: {eligibility: Ineligible, grant: withdrawal-pending}
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        actor: *alice
+        revocation: {revoked: true, acceptanceRevision: 1, uid: ex-1, resourceVersion: "12"}
+        expect: {admission: admitted, eligibilityRechecked: false, snapshot: unchanged, grant: withdrawal-pending, revocation: *aliceRevocation}
+
+  - id: revocation-authentication-and-idempotence
+    category: revocation
+    boundaries: [attribution]
+    scenarios: ["Revoke through GitOps and repeat the request", "Forge identity or remove history protection"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        revocation: *revokeRevisionOne
+        actor: {username: "system:serviceaccount:argocd:argocd-application-controller", uid: u-argocd, groups: ["system:serviceaccounts"]}
+        claimedBy: "carol, ticket SEC-7"
+        forgedAttribution: {username: platform-admin}
+        expect:
+          admission: admitted
+          grant: withdrawal-pending
+          snapshot: unchanged
+          snapshotActor: alice
+          revocation: &gitopsRevocation {revision: 1, actor: "system:serviceaccount:argocd:argocd-application-controller", requestedAt: "2026-01-01T01:00:00Z", history: pending}
+      - action: revoke
+        at: "2026-01-01T01:01:00Z"
+        actor: {username: dave, uid: u-dave, groups: [team-a-editors]}
+        revocation: {revoked: true, acceptanceRevision: 1, uid: ex-1, resourceVersion: "11"}
+        note: "repeat true with current preconditions; keep first actor/time and accepting actor"
+        expect: {admission: admitted, grant: withdrawal-pending, snapshot: unchanged, snapshotActor: alice, revocation: *gitopsRevocation}
+      - at: "2026-01-01T01:02:00Z"
+        action: metadata-edit
+        actor: *alice
+        forgedAttribution: {username: platform-admin}
+        note: "attempt to rewrite protected revocation attribution"
+        expect: {admission: rejected, reason: ProtectedField, revocation: *gitopsRevocation}
+      - at: "2026-01-01T01:03:00Z"
+        action: metadata-edit
+        actor: *alice
+        note: "attempt to remove protected finalizer before history/withdrawal finish"
+        expect: {admission: rejected, reason: ProtectedField, finalizerRetained: true, revocation: *gitopsRevocation}
+
+  - id: revocation-namespace-authority
+    category: revocation
+    boundaries: [namespace]
+    scenarios: ["Revoke outside the team's namespace"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        revocation: *revokeRevisionOne
+        actor: {username: bob, uid: u-bob, groups: [team-b-editors]}
+        exception: {name: priv, namespace: team-a}
+        expect: {admission: rejected, reason: Forbidden, grant: active, snapshot: unchanged, exceptionRetained: true}
+
+  - id: revocation-history-before-renewal-or-deletion
+    category: revocation
+    boundaries: [revision, attribution, missing-context, engine]
+    scenarios: ["Revoke and immediately delete or renew", "Persisting revocation history fails", "Delete instead of revoke"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - *revokeAcceptance
+      - at: "2026-01-01T01:00:10Z"
+        action: persist-history
+        note: "inject denied writes to the protected lifecycle record"
+        expect: {reason: RevocationHistoryPending, finalizerRetained: true, exceptionRetained: true, grant: withdrawal-pending, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:00:20Z"
+        action: engine-converged
+        note: "history persistence failure does not delay native withdrawal"
+        expect: {grant: withdrawn, engineObserved: "False", finalizerRetained: true, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:00:30Z"
+        action: renew
+        actor: *alice
+        renewal: {acceptanceRevision: 2, revoked: false, reason: "renew", expiresAt: "2026-01-03T00:00:00Z"}
+        expect: {admission: rejected, reason: RevocationHistoryPending, acceptanceRevision: 1, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:00:40Z"
+        action: delete
+        actor: *alice
+        note: "delete accepted, but finalizer holds the object and last durable intent"
+        expect: {admission: admitted, finalizerRetained: true, exceptionRetained: true, grant: withdrawn, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:00:50Z"
+        action: start-controller
+        note: "restart while deletion is pending and persistence still fails"
+        expect: {finalizerRetained: true, exceptionRetained: true, revocation: *aliceRevocation}
+      - at: "2026-01-01T01:01:00Z"
+        action: persist-history
+        note: "restore writes; independently persist UID/revision history before finalization"
+        expect: {grant: withdrawn, finalizerRetained: false, exceptionRetained: false, existingWorkloadsRetained: true, snapshot: retained, revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: persisted}}
+
+  - id: revoke-with-reconciler-stopped
+    category: revocation
+    boundaries: [engine, attribution]
+    scenarios: ["Reconciliation is unavailable during revocation"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - at: "2026-01-01T00:30:00Z"
+        action: stop-controller
+        note: "stop reconciliation only; admission remains available"
+        expect: {grant: active}
+      - at: "2026-01-01T01:00:00Z"
+        action: revoke
+        actor: *alice
+        revocation: *revokeRevisionOne
+        note: "API records desired withdrawal; deployed native grant has not been removed"
+        expect: {admission: admitted, grant: withdrawal-pending, engineObserved: Unknown, exceptionRetained: true, revocation: *aliceRevocation, workload: {namespace: team-a, labels: {app: debug}, result: admitted}}
+      - at: "2026-01-01T01:01:00Z"
+        action: start-controller
+        expect: {grant: withdrawal-pending, engineObserved: Unknown, revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: persisted}}
+      - at: "2026-01-01T01:01:10Z"
+        action: engine-converged
+        expect: {grant: withdrawn, engineObserved: "False", exceptionRetained: true, workload: {namespace: team-a, labels: {app: debug}, result: denied}}
+
+  - id: reports-before-and-after-revocation-request
+    category: report
+    boundaries: [revision, attribution, expired-context]
+    scenarios: ["Inspect evidence around a revocation"]
+    setup: *revocationSetup
+    steps:
+      - *createRevocable
+      - *revokeAcceptance
+      - at: "2026-01-01T01:00:10Z"
+        action: persist-history
+        expect: {revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: persisted}, grant: withdrawal-pending}
+      - at: "2026-01-01T01:01:00Z"
+        action: report
+        note: "late report evaluated before the recorded revocation; package snapshot and lifecycle context"
+        report: {result: skip, evaluatedAt: "2026-01-01T00:30:00Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: skip, disposition: accepted-risk, countsAsPass: false, packagedSnapshot: true, revocation: {revision: 1, actor: alice, requestedAt: "2026-01-01T01:00:00Z", history: retained}}
+      - at: "2026-01-01T01:02:00Z"
+        action: report
+        note: "stale engine grant after request cannot establish authorized acceptance; offlineInterpretation refers to the earlier retained pre-revocation package"
+        report: {result: skip, evaluatedAt: "2026-01-01T01:00:30Z", exceptionRefs: [priv/1]}
+        expect: {rawResult: skip, disposition: unresolved, countsAsPass: false, fabricatedFailure: false, engineObserved: Unknown, offlineInterpretation: accepted-risk}
 
   # --- acceptance does not silently expand -----------------------------------
   - id: new-revision-needs-renewal
