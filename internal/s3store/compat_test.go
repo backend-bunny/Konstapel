@@ -9,16 +9,22 @@ package s3store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/publication/publicationtest"
 )
 
 func TestCompatibility(t *testing.T) {
@@ -89,4 +95,73 @@ func alreadyOwned(err error) bool {
 	var owned *types.BucketAlreadyOwnedByYou
 	var exists *types.BucketAlreadyExists
 	return errors.As(err, &owned) || errors.As(err, &exists)
+}
+
+// TestPublisherRoundTrip publishes a complete package to the real test
+// service in each versioning mode and checks the commit protocol there.
+func TestPublisherRoundTrip(t *testing.T) {
+	endpoint := os.Getenv("KONSTAPEL_S3_ENDPOINT")
+	creds := &StaticCredentials{AccessKeyID: os.Getenv("KONSTAPEL_S3_ACCESS_KEY"), SecretAccessKey: os.Getenv("KONSTAPEL_S3_SECRET_KEY")}
+	if endpoint == "" || creds.AccessKeyID == "" {
+		t.Fatal("KONSTAPEL_S3_ENDPOINT and credentials are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	for _, mode := range []Versioning{Unversioned, Enabled, Suspended} {
+		t.Run(string(mode), func(t *testing.T) {
+			d := Destination{ID: "compat", Endpoint: endpoint, Bucket: "konstapel-compat-" + lower(mode), Region: "us-east-1",
+				Prefix: "konstapel-test/publisher", Addressing: AddressingPath, CredentialSecret: &SecretRef{Name: "compat"}, DevelopmentFixture: true}
+			c, err := NewClient(ctx, d, creds)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock := time.Now()
+			p := &Publisher{Client: c, Dest: d, Now: func() time.Time { return clock }}
+			if _, err := p.Ready(ctx); err != nil {
+				t.Fatal(err)
+			}
+			run := testRun
+			run.RunUID = "run-" + lower(mode)
+			dir := filepath.Join(t.TempDir(), "pkg")
+			if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), dir, run); err != nil {
+				t.Fatal(err)
+			}
+			s, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if again, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("2160h")}); err != nil || !reflect.DeepEqual(again, r) {
+				t.Fatalf("retry changed the commit: %v", err)
+			}
+			other := filepath.Join(t.TempDir(), "other")
+			if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), other, run); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: other}); !errors.Is(err, publication.ErrConflict) {
+				t.Fatalf("conflicting content staged: %v", err)
+			}
+			b, err := p.read(ctx, r.Commit.ArchiveKey, r.Commit.ArchiveVersionID)
+			if sum := sha256.Sum256(b); err != nil || hex.EncodeToString(sum[:]) != r.PackageSHA256 {
+				t.Fatalf("downloaded archive does not match its commit: %v", err)
+			}
+			if drift := time.Since(r.PublishedAt); drift > MaxClockSkew || drift < -MaxClockSkew {
+				t.Fatalf("publishedAt %v is not the server's commit time", r.PublishedAt)
+			}
+			clock = r.ExpiresAt.Add(time.Second)
+			if cl, err := p.Delete(ctx, run); err != nil || cl.State != publication.CleanupDeleted {
+				t.Fatalf("cleanup %+v %v", cl, err)
+			}
+			if left := cleanup(ctx, c, d.Bucket, p.runPrefix(run)); len(left) != 0 {
+				t.Fatalf("cleanup left problems: %v", left)
+			}
+			v, err := c.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run))})
+			if err == nil && (len(v.Versions) > 0 || len(v.DeleteMarkers) > 0) {
+				t.Fatalf("owned versions survived deletion: %d versions, %d markers", len(v.Versions), len(v.DeleteMarkers))
+			}
+		})
+	}
 }

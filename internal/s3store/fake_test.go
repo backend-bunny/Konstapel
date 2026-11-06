@@ -24,6 +24,7 @@ type fakeS3 struct {
 	checksums   bool   // store and return x-amz-checksum-sha256
 	versionIDs  bool   // return version IDs when versioned
 	skew        time.Duration
+	corrupt     bool                     // store truncated bytes and no checksum
 	objects     map[string][]fakeVersion // key -> versions, newest last
 	seq         int
 }
@@ -69,6 +70,8 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `<VersioningConfiguration><Status>%s</Status></VersioningConfiguration>`, f.versioning)
 		case q.Has("versions"):
 			f.listVersions(w, q.Get("prefix"))
+		case q.Get("list-type") == "2":
+			f.listV2(w, q.Get("prefix"))
 		default:
 			xmlError(w, 501, "NotImplemented")
 		}
@@ -101,7 +104,9 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		v := fakeVersion{body: body, at: now}
-		if f.checksums {
+		if f.corrupt && len(body) > 1 {
+			v.body = body[:len(body)/2]
+		} else if f.checksums {
 			v.checksum = r.Header.Get("X-Amz-Checksum-Sha256")
 		}
 		if f.versioning == "Enabled" {
@@ -194,4 +199,25 @@ func probeFake(t *testing.T, f *fakeS3) (Compatibility, error) {
 		t.Fatal(err)
 	}
 	return Probe(context.Background(), c, d)
+}
+
+func (f *fakeS3) listV2(w http.ResponseWriter, prefix string) {
+	type obj struct {
+		Key string `xml:"Key"`
+	}
+	var res struct {
+		XMLName  xml.Name `xml:"ListBucketResult"`
+		Contents []obj    `xml:"Contents"`
+	}
+	keys := make([]string, 0, len(f.objects))
+	for k, vs := range f.objects {
+		if strings.HasPrefix(k, prefix) && len(vs) > 0 && !vs[len(vs)-1].deleted {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		res.Contents = append(res.Contents, obj{k})
+	}
+	_ = xml.NewEncoder(w).Encode(res)
 }

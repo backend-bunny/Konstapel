@@ -1,6 +1,6 @@
 {
   "date": "2026-11-06",
-  "endpoint": "http://127.0.0.1:32768",
+  "endpoint": "http://127.0.0.1:32770",
   "image": "docker.io/rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b",
   "modes": {
     "Enabled": {
@@ -9,7 +9,7 @@
       "checksum": "server-sha256",
       "conditionalCreate": true,
       "serverTime": true,
-      "clockSkew": 0,
+      "clockSkew": -1000000000,
       "versionIDs": true
     },
     "Suspended": {
@@ -27,7 +27,7 @@
       "checksum": "server-sha256",
       "conditionalCreate": true,
       "serverTime": true,
-      "clockSkew": 0,
+      "clockSkew": -1000000000,
       "versionIDs": true
     }
   }
