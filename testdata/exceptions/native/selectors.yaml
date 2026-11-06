@@ -1,0 +1,60 @@
+# Native exception match-condition fixtures (add-self-service-policy-exceptions
+# task 3.2). Each case renders the native exception for an acceptance of
+# `selector` in namespace team-a (uid ns-a-1), then evaluates the rendered CEL
+# match conditions against each probe. internal/exception native tests run
+# them with the Kubernetes CEL environment. A probe namespace of null models an
+# engine path that cannot supply the namespace object.
+cases:
+  - name: match-labels
+    selector: {matchLabels: {app: debug, tier: web}}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: debug, tier: web}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: debug, tier: web, extra: x}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: debug}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: Debug, tier: web}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: null, match: false}
+  - name: sibling-namespaces-and-identity
+    note: identical labels elsewhere, a recreated namespace and an absent namespace object never match
+    selector: {matchLabels: {app: debug}}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: debug}, match: true}
+      - {namespace: {name: team-b, uid: ns-b-1}, labels: {app: debug}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-2}, labels: {app: debug}, match: false}
+      - {namespace: {name: team-b, uid: ns-a-1}, labels: {app: debug}, match: false}
+      - {namespace: null, labels: {app: debug}, match: false}
+  - name: whole-namespace
+    selector: {}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: null, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {any: thing}, match: true}
+      - {namespace: {name: team-b, uid: ns-b-1}, labels: null, match: false}
+      - {namespace: null, labels: null, match: false}
+  - name: in
+    selector: {matchExpressions: [{key: app, operator: In, values: [debug, canary]}]}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: canary}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: prod}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {}, match: false}
+  - name: not-in
+    note: Kubernetes semantics - an object without the key matches NotIn
+    selector: {matchExpressions: [{key: app, operator: NotIn, values: [prod]}]}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: debug}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: null, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: prod}, match: false}
+  - name: exists-and-does-not-exist
+    selector: {matchExpressions: [{key: debug, operator: Exists}, {key: pci, operator: DoesNotExist}]}
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {debug: ""}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {debug: "", pci: "true"}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {}, match: false}
+  - name: prefixed-keys-and-punctuation
+    note: label keys with DNS prefixes and values with dots, dashes and underscores render as literal strings
+    selector:
+      matchLabels: {example.com/app: my_app.v-1}
+      matchExpressions: [{key: team.example.com/owner, operator: In, values: [a.b, c_d, e-f]}]
+    probes:
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {example.com/app: my_app.v-1, team.example.com/owner: c_d}, match: true}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {example.com/app: my_app.v-1, team.example.com/owner: a-b}, match: false}
+      - {namespace: {name: team-a, uid: ns-a-1}, labels: {app: my_app.v-1, team.example.com/owner: c_d}, match: false}
