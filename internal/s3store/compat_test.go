@@ -233,6 +233,22 @@ func TestPublisherRoundTrip(t *testing.T) {
 			if drift := time.Since(r.PublishedAt); drift > MaxClockSkew || drift < -MaxClockSkew {
 				t.Fatalf("publishedAt %v is not the server's commit time", r.PublishedAt)
 			}
+			if st, err := p.Inspect(ctx, run); err != nil || st.Availability != publication.AvailabilityAvailable {
+				t.Fatalf("intact package not available: %+v %v", st, err)
+			}
+			// Early loss (for example an external lifecycle rule): unavailable,
+			// still committed, and expiry cleanup still completes.
+			del := &s3.DeleteObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(r.Commit.ArchiveKey)}
+			if r.Commit.ArchiveVersionID != "" {
+				del.VersionId = aws.String(r.Commit.ArchiveVersionID)
+			}
+			if _, err := c.DeleteObject(ctx, del); err != nil {
+				t.Fatal(err)
+			}
+			if st, err := p.Inspect(ctx, run); err != nil || st.Availability != publication.AvailabilityUnavailable || st.Failure == nil ||
+				st.Failure.Reason != publication.FailureObjectMissing || st.Phase != publication.PhaseCommitted {
+				t.Fatalf("early loss not reported: %+v %v", st, err)
+			}
 			clock = r.ExpiresAt.Add(time.Second)
 			if cl, err := p.Delete(ctx, run); err != nil || cl.State != publication.CleanupDeleted {
 				t.Fatalf("cleanup %+v %v", cl, err)

@@ -249,6 +249,12 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 		if s.Cleanup.State == publication.CleanupNotDue {
 			s.Cleanup.State = publication.CleanupPending
 		}
+	case r.archive == nil:
+		s.Availability = publication.AvailabilityUnavailable
+		s.Failure = &publication.Failure{Reason: publication.FailureObjectMissing, Message: "the committed archive is missing before its expiry", At: p.now().UTC()}
+	case hex.EncodeToString(sha256Of(r.archive)) != r.receipt.PackageSHA256:
+		s.Availability = publication.AvailabilityUnavailable
+		s.Failure = &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed archive has a different SHA-256", At: p.now().UTC()}
 	}
 	return s, nil
 }
@@ -342,3 +348,5 @@ func (p *Publisher) Corrupt(run publication.RunRef, archive []byte) {
 		r.archive = archive
 	}
 }
+
+func sha256Of(b []byte) []byte { h := sha256.Sum256(b); return h[:] }

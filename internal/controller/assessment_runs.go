@@ -67,6 +67,10 @@ type AssessmentRuntime struct {
 	Ready func(context.Context) error
 	// ReadyInterval caches a Ready answer (default 5m).
 	ReadyInterval time.Duration
+	// IntegrityInterval is how often a retained package's storage is
+	// re-checked before expiry (default 24h). Losses or corruption mark it
+	// Unavailable without rewriting its assessment result.
+	IntegrityInterval time.Duration
 	// MaxQueue bounds pending AssessmentRequests per binding (default 100);
 	// newer requests beyond it are rejected. Namespace ResourceQuotas on
 	// count/assessmentrequests.compliance.erenius.io bound each team.
@@ -99,6 +103,9 @@ func currentRuntime() AssessmentRuntime {
 	}
 	if rt.Workers <= 0 {
 		rt.Workers = 4
+	}
+	if rt.IntegrityInterval <= 0 {
+		rt.IntegrityInterval = MaxRetentionRequeue
 	}
 	return rt
 }
@@ -410,6 +417,16 @@ type AssessmentRunReconciler struct {
 	// Instance identifies this controller process. A run resumed by another
 	// instance (restart or leader change) records a watch discontinuity.
 	Instance string
+
+	checkedMu sync.Mutex
+	checked   map[types.UID]time.Time // last integrity check per retained run
+}
+
+func (r *AssessmentRunReconciler) integrityInterval() time.Duration {
+	if r.Runtime.IntegrityInterval > 0 {
+		return r.Runtime.IntegrityInterval
+	}
+	return MaxRetentionRequeue
 }
 
 // closedRun is a run's frozen closure: the capture as closed and its
@@ -806,7 +823,8 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 	}
 	now := r.now()
 	if now.Before(pub.ExpiresAt.Time) {
-		return ctrl.Result{RequeueAfter: min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue)}, nil
+		wait := min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue, r.integrityInterval())
+		return ctrl.Result{RequeueAfter: wait}, r.checkIntegrity(ctx, run, now)
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
 	cl, err := r.Runtime.Publisher.Delete(ctx, ref)
@@ -839,6 +857,46 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 		return ctrl.Result{}, r.release(ctx, run)
 	}
 	return res, nil
+}
+
+// checkIntegrity re-inspects a retained package's storage at most once per
+// IntegrityInterval and records its availability. Early loss or corruption
+// is Unavailable with a failure reason; the assessment summary and receipt
+// are never changed. A backend outage leaves the last known availability.
+func (r *AssessmentRunReconciler) checkIntegrity(ctx context.Context, run *v1alpha1.AssessmentRun, now time.Time) error {
+	r.checkedMu.Lock()
+	if r.checked == nil {
+		r.checked = map[types.UID]time.Time{}
+	}
+	last, seen := r.checked[run.UID]
+	due := !seen || !now.Before(last.Add(r.integrityInterval()))
+	if due {
+		r.checked[run.UID] = now
+	}
+	r.checkedMu.Unlock()
+	if !due {
+		return nil
+	}
+	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
+	st, err := r.Runtime.Publisher.Inspect(ctx, ref)
+	if err != nil {
+		log.FromContext(ctx).Info("retained package could not be inspected", "run", run.Name, "error", err.Error())
+		return nil
+	}
+	pub := run.Status.Publication
+	var failure *v1alpha1.PublicationFailure
+	if st.Failure != nil {
+		failure = &v1alpha1.PublicationFailure{Reason: st.Failure.Reason, Message: truncate(st.Failure.Message), Retryable: st.Failure.Retryable, At: metav1.NewTime(st.Failure.At)}
+		if pub.Failure != nil && pub.Failure.Reason == failure.Reason {
+			failure.At = pub.Failure.At // first observed
+		}
+	}
+	availability := v1alpha1.Availability(st.Availability)
+	if pub.Availability == availability && (pub.Failure == nil) == (failure == nil) && (failure == nil || pub.Failure.Reason == failure.Reason) {
+		return nil
+	}
+	pub.Availability, pub.Failure = availability, failure
+	return r.Client.Status().Update(ctx, run)
 }
 
 // AttemptCleanupRetry is how often cleanup of a terminal run's uncommitted
