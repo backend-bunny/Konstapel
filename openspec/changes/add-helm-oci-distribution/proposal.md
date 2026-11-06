@@ -33,6 +33,10 @@ with the same confidence as the existing signed container images.
   Consume the lifecycle and release gates from `add-controller-high-availability`.
 - Exercise rendered charts and real install, upgrade, certificate rotation,
   dependency recovery, uninstall, and reinstall workflows before publication.
+- Require Go black-box acceptance against the Helm-installed controller image
+  in CI on relevant pull requests and pushes to `main`. Gate merges and chart
+  publication on passing results for the tested source, chart archives, and
+  image digest; retain diagnostics and clean up even when tests fail.
 
 ## Capabilities
 
@@ -50,9 +54,10 @@ adds its deployment contract.
 ## Impact
 
 Adds `charts/konstapel-crds`, `charts/konstapel`, chart helpers/tests, installation
-documentation, and chart publication integration with the existing release and
-image workflows. Packages the merged controller entry point in the existing
-image build and extends version checks and the small public Task interface.
+documentation, required CI acceptance, and chart publication integration with
+the existing release and image workflows. Packages the merged controller entry
+point in the existing image build and extends version checks and the small
+public Task interface.
 Controller integration consumes the manager, generated APIs/RBAC, admission
 handlers, and download service owned by the existing changes.
 
