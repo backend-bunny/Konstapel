@@ -2,9 +2,10 @@
 
 `add-s3-evidence-publishing` stores assessment packages in an S3-compatible
 bucket. This guide covers the parts implemented so far: the platform-controlled
-destination, client construction, the compatibility probe that decides whether
-a backend may be used, and the publisher's commit protocol. The download service
-and retention reconciliation come in later task groups.
+destination, setup and permissions, the compatibility probe that decides whether
+a backend may be used, package kinds, the publisher's commit protocol, recovery,
+and teardown. The download service and retention reconciliation come in later
+task groups.
 
 ## Destination configuration
 
@@ -42,6 +43,41 @@ Rules:
   string output.
 - Konstapel never creates buckets or changes bucket configuration.
 
+## Setup
+
+1. Create the bucket yourself. Konstapel never creates buckets or changes
+   their configuration. Versioning may be enabled, suspended, or off.
+2. Choose a dedicated `prefix`. Konstapel writes only below it:
+   `<prefix>/evidence/...` for packages, and `<prefix>/konstapel-probe/...` for
+   readiness probes, which it removes again.
+3. Grant the controller's identity the minimum permissions on that prefix:
+
+   | Operation | S3 action | Used for |
+   | --- | --- | --- |
+   | Bucket check | `s3:ListBucket` (`HeadBucket`, `ListObjectsV2`) | readiness, recovery, cleanup listing |
+   | Version listing | `s3:ListBucketVersions` | cleanup in versioned buckets |
+   | Upload | `s3:PutObject` | attempts, intents, the conditional commit |
+   | Read | `s3:GetObject`, `s3:GetObjectVersion` | verification, recovery, receipts |
+   | Delete | `s3:DeleteObject`, `s3:DeleteObjectVersion` | probe cleanup, attempt cleanup, expiry |
+   | Multipart cleanup | `s3:ListBucketMultipartUploads`, `s3:AbortMultipartUpload` | attempt cleanup |
+   | Versioning check | `s3:GetBucketVersioning` | readiness |
+
+   Scope object actions to `arn:aws:s3:::<bucket>/<prefix>/*`, and bucket
+   actions to the bucket with an `s3:prefix` condition of `<prefix>/*`. No
+   bucket-administration action is needed.
+4. Provide credentials in one of two ways. Either use workload identity
+   (`workloadIdentity: true`), or create a Secret in the controller namespace
+   and reference it as `credentialSecret`.
+5. Write the destination file (above) and start the controller with
+   `--evidence-destination=<file>` and a persistent `--evidence-staging-dir`.
+   Bindings show `scheduled snapshots are disabled: evidence backend is not
+   ready: ...` until the probe passes.
+
+**Credential rotation.** Update the Secret's data in place. The controller
+reads it again within 5 minutes (`s3store.CredentialRefresh`), with no
+restart. Keep the old key valid until then. Deleting the Secret or a key makes
+the backend not ready, with the Secret and key named but never their values.
+
 ## Compatibility probe
 
 `s3store.Probe` checks a destination under a unique
@@ -58,6 +94,30 @@ it wrote. It needs these semantics:
 
 Any failed check makes the backend not ready. Publication must then fail
 visibly; it never falls back to local storage.
+
+## Package kinds
+
+Every package has a `descriptor.json` with an inventory of its files, each
+with a role, size and SHA-256. Its `packageKind` says what the package means:
+
+| Kind | When | Contains | Meaning |
+| --- | --- | --- | --- |
+| `Assessment`, `Complete` | every expected check was attributable | OSCAL assessment results, plan, SSP, component definition, the vendored content they reference, the capture, a summary | a full assessment of the frozen scope; it still asserts only the mapped coverage |
+| `Assessment`, `Incomplete` | some expected evidence was missing, rejected, or stale | the same files, with missing evidence recorded as such | a valid, publishable assessment that says what it could not establish. It is never upgraded to complete |
+| `Assessment`, `NoTargets` | the scope selected no workloads | the same files with zero subjects | not a pass. It records that nothing was in scope |
+| `Diagnostic` | valid OSCAL could not be produced | `diagnostic.json` (`reason`, `missingExports`, detail, evidence counts) and a summary. No OSCAL at all | why no assessment exists. Invalid OSCAL is never packaged as an assessment |
+
+The publisher re-validates assessment packages before upload (schemas,
+reference closure, engine-policy provenance, and namespace projection for
+team packages). The archive is self-contained: every reference resolves
+inside it, and nothing depends on another package's lifetime or a live
+cluster object. `TestPublishedPackagesKeepTheirMeaningAfterDownload` publishes
+a complete, an incomplete and a diagnostic package, downloads and unpacks each
+archive, and checks the following:
+- the descriptor is unchanged (kind, completeness, outcomes, diagnostic reason)
+  and has the committed digest;
+- every inventoried file verifies;
+- assessment packages still pass full OSCAL reference validation.
 
 ## Publisher and commit protocol
 
@@ -193,10 +253,21 @@ same run publishes a complete package to each mode (`TestPublisherRoundTrip`):
 - refusal of conflicting content;
 - the downloaded archive matching its committed SHA-256;
 - `publishedAt` within clock tolerance of the server's commit time;
-- deletion after expiry, leaving no owned versions or delete markers. Cloud
-S3 and other self-hosted services are not claimed until the same suite passes
-against them. The MinIO community image is not used because it is no longer
-published to a public registry.
+- deletion after expiry, leaving no owned versions or delete markers;
+- no re-upload on retry, receipt recovery by a new leader, and attempt cleanup
+  (an interrupted attempt and a real incomplete multipart upload are removed,
+  an unrelated object in the same bucket survives).
+
+| Backend | Status |
+| --- | --- |
+| RustFS 1.0.3 (self-hosted) | **tested**, all three versioning modes |
+| AWS S3 | **untested.** It is expected to work (conditional writes and SHA-256 checksums are documented features) but not claimed |
+| Other S3-compatible services (Ceph RGW, Garage, SeaweedFS, MinIO) | **untested.** Run the suite against them before relying on them |
+
+The MinIO community image is not used because it is no longer published to a
+public registry. Known limits: conditional create is required, so services
+without `If-None-Match: *` support are refused at readiness. Archives are
+capped at 512 MiB because they are uploaded in a single request.
 
 Run the suite against a disposable, test-owned instance:
 
@@ -209,3 +280,20 @@ creates one test bucket per versioning mode inside that container, writes
 `s3-compat.json` and the log to the output directory, and always removes the
 container. Renovate updates the image pin; `task deps:check` requires it to
 carry a full digest.
+
+The suite refuses to run unless the endpoint is the loopback service the
+script started (`requireTestOwned`), because it creates buckets. Its objects
+live under `konstapel-test/` in `konstapel-compat-*` buckets inside that
+container.
+
+## Teardown
+
+- **Test service:** `scripts/s3-compat.sh` always removes its container, with
+  its buckets and data. Nothing outside it is touched.
+- **Disabling publication:** remove `--evidence-destination`. Scheduling stops
+  with a visible limitation. Published packages stay in the bucket until their
+  recorded expiry.
+- **Removing evidence:** packages are deleted only after expiry, by the
+  controller, within the run's own prefix. Deleting the prefix by hand also
+  removes evidence whose retention has not ended. Do that only when retiring
+  the evidence on purpose.

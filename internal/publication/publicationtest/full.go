@@ -36,9 +36,25 @@ const SavedCapture = "testdata/capture.json"
 // synthetic because the v1 capture format does not record them. OSCAL UUIDs
 // differ on every call; compare packages by descriptor, not bytes.
 func FullAssessmentPackage(root, dir string, run publication.RunRef) (publication.Descriptor, error) {
+	return AssessmentPackage(root, dir, run, nil)
+}
+
+// IncompleteAssessmentPackage is FullAssessmentPackage with the saved
+// capture's first PolicyReport dropped, so expected evidence is missing and
+// the package is a valid, Incomplete assessment.
+func IncompleteAssessmentPackage(root, dir string, run publication.RunRef) (publication.Descriptor, error) {
+	return AssessmentPackage(root, dir, run, func(c *assessment.Capture) { c.Reports = c.Reports[1:] })
+}
+
+// AssessmentPackage builds a package from the saved capture after applying
+// mutate (which may be nil).
+func AssessmentPackage(root, dir string, run publication.RunRef, mutate func(*assessment.Capture)) (publication.Descriptor, error) {
 	var c assessment.Capture
 	if err := assessment.Read(filepath.Join(root, SavedCapture), &c); err != nil {
 		return publication.Descriptor{}, err
+	}
+	if mutate != nil {
+		mutate(&c)
 	}
 	input, plan, err := assessment.Input(root)
 	if err != nil {
