@@ -18,7 +18,7 @@ import (
 const platformAdminRole = "konstapel-compliance-admin"
 
 var (
-	centralResources = []string{"complianceprofiles", "compliancebindings"}
+	centralResources = []string{"complianceprofiles", "compliancebindings", "evidencedestinations"}
 	writeVerbs       = []string{"create", "update", "patch", "delete", "deletecollection"}
 	// Labels that fold a ClusterRole into the built-in namespace roles held by
 	// application teams.
@@ -148,6 +148,23 @@ func TestStatusIsWritableOnlyByTheController(t *testing.T) {
 				if grants(r.rules, verb, res+"/status") {
 					t.Errorf("%s may %s %s/status; status is controller-owned", r.name, verb, res)
 				}
+			}
+		}
+	}
+}
+
+// Storage credentials and trust live in Secrets/ConfigMaps in the controller
+// namespace; only the controller and the evidence download service may read
+// Secrets, so no application or platform-user role exposes credential
+// material behind an EvidenceDestination reference.
+func TestOnlyStorageServicesReadSecrets(t *testing.T) {
+	for _, r := range loadRoles(t) {
+		if strings.HasPrefix(r.name, "konstapel-controller") || strings.HasPrefix(r.name, "konstapel-evidence-download") {
+			continue
+		}
+		for _, verb := range []string{"get", "list", "watch"} {
+			if grants(r.rules, verb, "secrets") {
+				t.Errorf("%s %s (%s) may %s secrets", r.kind, r.name, r.file, verb)
 			}
 		}
 	}

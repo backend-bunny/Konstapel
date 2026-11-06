@@ -15,6 +15,10 @@ import (
 // A credentialSecret destination's Secret is read, uncached, from the
 // controller's own namespace.
 // +kubebuilder:rbac:groups="",namespace=konstapel-system,resources=secrets,verbs=get
+// EvidenceDestinations are platform-managed; the controller reads them and
+// owns their status.
+// +kubebuilder:rbac:groups=compliance.erenius.io,resources=evidencedestinations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=compliance.erenius.io,resources=evidencedestinations/status,verbs=get;update;patch
 
 // EvidenceConfig selects the production evidence destination.
 type EvidenceConfig struct {

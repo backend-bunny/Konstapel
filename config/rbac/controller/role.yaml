@@ -41,6 +41,7 @@ rules:
   - compliancebindings
   - complianceexceptions
   - complianceprofiles
+  - evidencedestinations
   verbs:
   - get
   - list
@@ -53,6 +54,7 @@ rules:
   - compliancebindings/status
   - complianceexceptions/status
   - complianceprofiles/status
+  - evidencedestinations/status
   verbs:
   - get
   - patch
