@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,8 +29,20 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/publication/publicationtest"
 )
 
+// requireTestOwned refuses to run the suite, which creates buckets and
+// writes objects, against anything but the loopback service that
+// scripts/s3-compat.sh starts and removes.
+func requireTestOwned(t *testing.T, endpoint string) {
+	t.Helper()
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Hostname() != "127.0.0.1" {
+		t.Fatalf("the compatibility suite only runs against a test-owned loopback service, not %q", endpoint)
+	}
+}
+
 func TestCompatibility(t *testing.T) {
 	endpoint, out := os.Getenv("KONSTAPEL_S3_ENDPOINT"), os.Getenv("KONSTAPEL_S3_OUTPUT")
+	requireTestOwned(t, endpoint)
 	creds := &StaticCredentials{AccessKeyID: os.Getenv("KONSTAPEL_S3_ACCESS_KEY"), SecretAccessKey: os.Getenv("KONSTAPEL_S3_SECRET_KEY")}
 	if endpoint == "" || out == "" || creds.AccessKeyID == "" {
 		t.Fatal("KONSTAPEL_S3_ENDPOINT, KONSTAPEL_S3_ACCESS_KEY, KONSTAPEL_S3_SECRET_KEY and KONSTAPEL_S3_OUTPUT are required")
@@ -102,6 +115,7 @@ func alreadyOwned(err error) bool {
 // service in each versioning mode and checks the commit protocol there.
 func TestPublisherRoundTrip(t *testing.T) {
 	endpoint := os.Getenv("KONSTAPEL_S3_ENDPOINT")
+	requireTestOwned(t, endpoint)
 	creds := &StaticCredentials{AccessKeyID: os.Getenv("KONSTAPEL_S3_ACCESS_KEY"), SecretAccessKey: os.Getenv("KONSTAPEL_S3_SECRET_KEY")}
 	if endpoint == "" || creds.AccessKeyID == "" {
 		t.Fatal("KONSTAPEL_S3_ENDPOINT and credentials are required")

@@ -20,7 +20,7 @@ Planning artifact completion does not satisfy implementation prerequisites.
 - [x] 1.2 Support workload-identity credentials and protected controller-namespace Secret references with verified TLS/custom CA configuration; verify missing/rotated credentials and invalid trust fail visibly without leaking secrets or enabling public access.
 - [x] 1.3 Create isolated real-endpoint fixtures using a recorded S3-compatible service version and unique test prefix; verify conditional creation, server timestamps, checksum/readback, and supported versioning modes before treating the backend as ready.
 - [x] 1.4 Implement readiness checks against the required backend semantics through the shared publication interface; verify missing bucket/permissions or incompatible conditional-write behavior prevents ready publication rather than falling back to local storage.
-- [ ] 1.5 Document endpoint setup, minimum permissions, credential rotation, compatibility limits, and teardown; verify the commands use only test-owned prefixes/services and distinguish tested self-hosted behavior from untested cloud compatibility.
+- [x] 1.5 Document endpoint setup, minimum permissions, credential rotation, compatibility limits, and teardown; verify the commands use only test-owned prefixes/services and distinguish tested self-hosted behavior from untested cloud compatibility.
 
 ## 2. Validate packages and commit immutable publications
 
@@ -28,7 +28,7 @@ Planning artifact completion does not satisfy implementation prerequisites.
 - [x] 2.2 Implement archive upload and SHA-256 verification with checksum or readback support; verify multipart ETags are not treated as content hashes and corrupt/truncated bytes cannot produce Published status.
 - [x] 2.3 Implement one fixed create-if-absent commit key per run and durable receipts with destination/key/version ownership; verify concurrent attempts with different staging prefixes publish only once and conflicting bytes, scope, or run identity cannot overwrite the winner.
 - [x] 2.4 Resolve retention at first commit preparation and derive fixed publication/expiry times from the immutable commit object; verify retention edits, binding deletion/recreation, lost responses, and retry clocks preserve the documented selection boundary.
-- [ ] 2.5 Document assessment versus diagnostic packages and the commit protocol; verify complete/incomplete/diagnostic fixtures retain their original meaning and all required package references remain inspectable after download.
+- [x] 2.5 Document assessment versus diagnostic packages and the commit protocol; verify complete/incomplete/diagnostic fixtures retain their original meaning and all required package references remain inspectable after download.
 
 ## 3. Recover interrupted operations and preserve ownership
 
