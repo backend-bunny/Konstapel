@@ -1,0 +1,90 @@
+# Konstapel variant: hostUsers false is not an exemption; explicit Windows is out of scope.
+{
+  "apiVersion": "cli.kyverno.io/v1alpha1",
+  "kind": "Test",
+  "metadata": {
+    "name": "require-run-as-nonroot-variant"
+  },
+  "policies": [
+    "../../../../content/linux-hardening/variants/require-run-as-nonroot.yaml"
+  ],
+  "resources": [
+    "../resources.yaml"
+  ],
+  "results": [
+    {
+      "isValidatingPolicy": true,
+      "kind": "Pod",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "nr-container-true",
+        "nr-pod-inherit",
+        "nr-init-ephemeral-inherit",
+        "nr-null-lists-pass",
+        "nr-hostusers-with-flag",
+        "nr-windows-root",
+        "nr-windows-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "Pod",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "nr-missing",
+        "nr-container-false-pod-true",
+        "nr-pod-false-container-true",
+        "nr-init-missing",
+        "nr-init-false",
+        "nr-ephemeral-missing",
+        "nr-ephemeral-false",
+        "nr-null-lists-root",
+        "nr-hostusers-missing",
+        "nr-hostusers-pod-false",
+        "nr-hostusers-container-false",
+        "nr-hostusers-true-missing",
+        "nr-linux-root"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "Deployment",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "deploy-hostusers-missing",
+        "deploy-init-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "StatefulSet",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "sts-hostusers-with-flag"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "CronJob",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "cron-hostusers-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "CronJob",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "cron-pod-inherit",
+        "cron-windows-root"
+      ]
+    }
+  ]
+}

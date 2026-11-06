@@ -4,7 +4,7 @@ metadata:
   annotations:
     compliance.erenius.io/binding: deny-production
     compliance.erenius.io/bundle: konstapel-vendored
-    compliance.erenius.io/bundle-digest: sha256:678780c032c4d6b572b1e3769c8a52fbebc6b1d324c423129dc7d7f4f6c30818
+    compliance.erenius.io/bundle-digest: sha256:a08b056b1d60f001f2a9c37c8201a222bd698034edddb6d29848032736f94528
     compliance.erenius.io/cluster: kube-system:fixture
     compliance.erenius.io/configuration-digest: sha256:ea47d8a6f23e50ae6b15cad4609f8084484f783afae792d25a79569e049a91ed
     compliance.erenius.io/mode: Deny
@@ -12,7 +12,7 @@ metadata:
     compliance.erenius.io/profile: baseline
     compliance.erenius.io/profile-generation: "1"
     compliance.erenius.io/profile-uid: uid-baseline
-    compliance.erenius.io/revision: sha256:47a664962e7b176270255dc57f8f979ca8b22786c62aac0407108a257fc5f7ee
+    compliance.erenius.io/revision: sha256:74836b38d928eb6e9fdc2c974e9ea46f29ad21a5cd756eb77151f064a0b18ef0
     compliance.erenius.io/source-digest: sha256:6f59a347fde2c56a0a8c68cecef2ae43b29c5543bdcebdb388e480f5a6dd688e
     kyverno.io/kubernetes-version: 1.30+
     kyverno.io/kyverno-version: 1.14.0
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/managed-by: konstapel
     compliance.erenius.io/binding-uid: uid-deny-production
     compliance.erenius.io/policy-hash: ee99f03214bb69c15e4845c5af409ef4278477dc
-  name: konstapel-disallow-privileged-containers-1f8a532320ed7733
+  name: konstapel-disallow-privileged-containers-d4f6f6910a3a6987
   ownerReferences:
   - apiVersion: compliance.erenius.io/v1alpha1
     controller: true

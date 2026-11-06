@@ -1,0 +1,98 @@
+# Unmodified upstream policy on the same resources: shows the intentional differences.
+{
+  "apiVersion": "cli.kyverno.io/v1alpha1",
+  "kind": "Test",
+  "metadata": {
+    "name": "require-run-as-nonroot-upstream"
+  },
+  "policies": [
+    "../../../../content/upstream/kyverno/require-run-as-nonroot/require-run-as-nonroot.yaml"
+  ],
+  "resources": [
+    "../resources.yaml"
+  ],
+  "results": [
+    {
+      "isValidatingPolicy": true,
+      "kind": "Pod",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "nr-container-true",
+        "nr-pod-inherit",
+        "nr-init-ephemeral-inherit",
+        "nr-null-lists-pass",
+        "nr-hostusers-missing",
+        "nr-hostusers-pod-false",
+        "nr-hostusers-container-false",
+        "nr-hostusers-with-flag"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "Pod",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "nr-missing",
+        "nr-container-false-pod-true",
+        "nr-pod-false-container-true",
+        "nr-init-missing",
+        "nr-init-false",
+        "nr-ephemeral-missing",
+        "nr-ephemeral-false",
+        "nr-null-lists-root",
+        "nr-hostusers-true-missing",
+        "nr-linux-root",
+        "nr-windows-root",
+        "nr-windows-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "Deployment",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "deploy-hostusers-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "Deployment",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "deploy-init-missing"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "StatefulSet",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "sts-hostusers-with-flag"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "CronJob",
+      "policy": "require-run-as-nonroot",
+      "result": "pass",
+      "resources": [
+        "cron-hostusers-missing",
+        "cron-pod-inherit"
+      ]
+    },
+    {
+      "isValidatingPolicy": true,
+      "kind": "CronJob",
+      "policy": "require-run-as-nonroot",
+      "result": "fail",
+      "resources": [
+        "cron-windows-root"
+      ]
+    }
+  ]
+}

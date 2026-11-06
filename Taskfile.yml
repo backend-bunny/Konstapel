@@ -40,6 +40,7 @@ tasks:
     desc: Run the vendored and rendered-policy Kyverno CLI fixtures
     cmds:
       - kyverno test content/upstream/kyverno --require-tests --remove-color
+      - kyverno test testdata/linux-hardening --require-tests --remove-color
       - kyverno test testdata/targeting/rendered --require-tests --remove-color
 
   deps:check:
