@@ -10,6 +10,8 @@ kubeconfig=${1:?usage: targeting-live.sh KUBECONFIG CONTEXT OUTPUT}
 context=${2:?explicit context required}
 out=${3:?output directory required}
 mkdir -p "$out"
-KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
-  go test -mod=readonly -tags live -count=1 -p 1 -timeout 25m -run '^(TestLiveDelivery|TestLiveManager|TestLiveEnforcementEpoch|TestLiveAssessmentStatus|TestLiveAssessmentRuns|TestLiveEngineCorrelation|TestLiveTargetingWorkflow|TestLiveTargetingFailures)$' -v ./internal/targeting/ ./internal/controller/ \
+# The evidence download test runs the pinned test-owned S3 service.
+source scripts/runtime.env
+KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
+  go test -mod=readonly -tags live -count=1 -p 1 -timeout 25m -run '^(TestLiveDelivery|TestLiveManager|TestLiveEnforcementEpoch|TestLiveAssessmentStatus|TestLiveAssessmentRuns|TestLiveEngineCorrelation|TestLiveTargetingWorkflow|TestLiveTargetingFailures|TestLiveEvidenceDownload)$' -v ./internal/targeting/ ./internal/controller/ \
   > "$out/targeting-live.log" 2>&1 || { tail -40 "$out/targeting-live.log" >&2; exit 1; }
