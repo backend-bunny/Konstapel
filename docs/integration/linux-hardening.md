@@ -258,6 +258,33 @@ and ephemeral containers are admitted. In `hz-audit`, a Pod violating all
 four checks is admitted. The test removes its bindings and profile and waits
 until their policies are withdrawn. Its evidence goes to `<output>/live/TestLiveHardeningAdmission.json`.
 
+### User namespaces (task 4.3)
+
+`TestLiveHardeningUserNamespaces` (in `scripts/targeting-live.sh`) binds the
+non-root check in Deny mode and keeps two kinds of evidence apart.
+
+**Admission (policy evidence)** passes. A Pod with `hostUsers: false` is
+denied by the `require-run-as-nonroot` instance in each of these cases:
+- `runAsNonRoot` is not set;
+- it is set to `false` at the Pod level;
+- it is set to `false` at the container level.
+
+With `runAsNonRoot: true` the Pod is admitted. User namespaces are no
+exemption.
+
+**Runtime (container evidence, separate)** is **unvalidated** in the test
+environment. See [hardening-userns.json](hardening-userns.json): kind on
+Kubernetes 1.37.0, containerd 2.3.4, kernel 6.18.60. A `hostUsers: false`
+Pod in an unbound namespace never starts, because runc cannot mount `sysfs`
+inside the user-namespaced sandbox of a nested kind node ("operation not
+permitted"). No isolation is claimed.
+
+To validate the runtime side, run the test on a node that can start
+`hostUsers: false` Pods: Kubernetes user namespaces, and a containerd 2.x
+runtime with idmapped-mount support on a non-nested node. There the test
+reads `/proc/self/uid_map` and fails if container UID 0 maps to host UID 0.
+Even then, this is runtime evidence about one Pod, not about policy coverage.
+
 ## NIST Moderate mappings
 
 `content/linux-hardening/component-definition.json` (OSCAL 1.1.3, trestle
