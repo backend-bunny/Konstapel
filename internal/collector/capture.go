@@ -98,6 +98,8 @@ type CaptureV2 struct {
 	// ScopeChanges are changes observed during collection. They never alter
 	// the frozen subjects, workloads, or expected inventory.
 	ScopeChanges []ScopeChange `json:"scopeChanges,omitempty"`
+	// Projection is set when the capture was projected to one namespace.
+	Projection *Projection `json:"projection,omitempty"`
 }
 
 // PolicyChecks enumerates a rendered engine policy's sub-validations in

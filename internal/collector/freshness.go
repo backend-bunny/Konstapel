@@ -122,10 +122,10 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 				key := resultKey(assessment.Str(assessment.Map(ref)["uid"]), assessment.Str(r["policy"]), index)
 				t, err := evaluationTime(r)
 				if err != nil {
-					problems[key] = append(problems[key], fmt.Sprintf("report %s result %d: %v", reportUID, i, err))
+					problems[key] = append(problems[key], fmt.Sprintf("report %s result %d: %v", reportUID, sourceIndex(r, i), err))
 					continue
 				}
-				found[key] = append(found[key], candidate{outcome: assessment.Str(r["result"]), evaluated: t, report: reportUID, index: i})
+				found[key] = append(found[key], candidate{outcome: assessment.Str(r["result"]), evaluated: t, report: reportUID, index: sourceIndex(r, i)})
 			}
 		}
 	}
@@ -220,6 +220,15 @@ func (ev *Evaluation) add(o Observation) {
 	default:
 		ev.Evidence.Unresolved++
 	}
+}
+
+// sourceIndex is a result's index in its source report: the recorded
+// provenance for projected extracts, otherwise its position.
+func sourceIndex(r assessment.Object, i int) int {
+	if n, ok := integral(assessment.At(r, SourceField, "resultIndex")); ok {
+		return int(n)
+	}
+	return i
 }
 
 func resultKey(uid, policy, index string) string { return uid + "\x00" + policy + "\x00" + index }

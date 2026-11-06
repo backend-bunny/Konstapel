@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,18 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	}
 	if err := req.Capture.Validate(); err != nil {
 		return publication.Descriptor{}, fmt.Errorf("capture: %w", err)
+	}
+	switch {
+	case req.Scope.Kind == publication.ScopeNamespace:
+		// Projection happens before export; verify it independently.
+		if err := ValidateProjection(req.Capture); err != nil {
+			return publication.Descriptor{}, fmt.Errorf("namespace package: %w", err)
+		}
+		if req.Scope.Request == nil || req.Scope.Request.NamespaceUID != req.Capture.Projection.NamespaceUID {
+			return publication.Descriptor{}, errors.New("namespace package scope does not match its projection")
+		}
+	case req.Capture.Projection != nil:
+		return publication.Descriptor{}, errors.New("a namespace projection cannot be exported as a binding package")
 	}
 	for name, v := range map[string]any{"capture.json": req.Capture, "evaluation.json": req.Evaluation} {
 		if err := assessment.Write(filepath.Join(req.Out, name), v); err != nil {

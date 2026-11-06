@@ -51,7 +51,7 @@ change's entire task list before landing the shared contract or adapter.
 
 ## 5. Produce scoped snapshots and handle incomplete evidence
 
-- [ ] 5.1 Implement namespace evidence projection before export, including mixed report scopes, result messages, diagnostics, embedded resources, and links; verify sibling data and unsafe opaque content are excluded while source-result/digest provenance is retained.
+- [x] 5.1 Implement namespace evidence projection before export, including mixed report scopes, result messages, diagnostics, embedded resources, and links; verify sibling data and unsafe opaque content are excluded while source-result/digest provenance is retained.
 - [x] 5.2 Produce schema-valid incomplete OSCAL and clearly typed diagnostic packages when valid export is impossible; verify missing/malformed evidence and zero-target cases never fabricate a pass or a successful OSCAL export.
 - [ ] 5.3 Integrate exception snapshots, applicability, and independent check outcomes through final OSCAL export; verify accepted risk, failures, and repeated binding contributions do not inflate passing/control coverage.
 - [ ] 5.4 Freeze package bytes/digests and implement recoverable staging plus explicit CaptureLost handling; verify retry preserves the same snapshot and a restart without recoverable data cannot substitute newer observations under its identity.
