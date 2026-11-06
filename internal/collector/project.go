@@ -75,6 +75,14 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 		out.Stale = append(out.Stale, targeting.StaleScope{Binding: s.Binding, Policy: s.Policy, Reason: s.Reason, Message: "redacted in namespace scope"})
 	}
 	out.Checks = slices.DeleteFunc(slices.Clone(c.Checks), func(k Check) bool { return !policies[k.EnginePolicy] })
+	out.EnginePolicies = slices.DeleteFunc(slices.Clone(c.EnginePolicies), func(p assessment.Object) bool {
+		return !policies[assessment.Str(assessment.At(p, "metadata", "name"))]
+	})
+	out.Contributions = slices.DeleteFunc(slices.Clone(c.Contributions), func(x targeting.Contribution) bool {
+		return !slices.ContainsFunc(out.Subjects, func(s targeting.EvidenceSubject) bool {
+			return s.BindingUID == x.Binding.UID && s.LogicalPolicy == x.Policy && s.Revision == x.Revision
+		})
+	})
 	out.Workloads = slices.DeleteFunc(slices.Clone(c.Workloads), func(w Workload) bool { return w.NamespaceUID != namespaceUID })
 	out.Expected = slices.DeleteFunc(slices.Clone(c.Expected), func(e Expected) bool { return e.NamespaceUID != namespaceUID })
 	out.CollectionErrors = nil

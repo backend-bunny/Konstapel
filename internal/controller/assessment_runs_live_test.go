@@ -86,10 +86,13 @@ func TestLiveAssessmentRuns(t *testing.T) {
 		return r != nil && r.Status.Phase == v1alpha1.RunCompleted && r.Status.Publication != nil && r.Status.Publication.Phase == "Committed", toJSON(r.Status)
 	})
 	r := run(scheduled)
-	if r.Spec.Trigger == nil || r.Spec.Trigger.Type != v1alpha1.TriggerScheduled || r.Status.Summary == nil || r.Status.Summary.Evidence.Expected != 1 {
+	// Export state Assessment means the live engine policy re-rendered from
+	// the pinned content (a verification failure yields a Diagnostic package).
+	if r.Spec.Trigger == nil || r.Spec.Trigger.Type != v1alpha1.TriggerScheduled || r.Status.Summary == nil || r.Status.Summary.Evidence.Expected != 1 ||
+		r.Status.Summary.Export != "Assessment" {
 		t.Fatalf("scheduled run %s: %s", scheduled, toJSON(r))
 	}
-	l.record("scheduled-run", map[string]any{"run": scheduled, "evidence": r.Status.Summary.Evidence, "outcomes": r.Status.Summary.Outcomes, "publication": r.Status.Publication.PublicationID})
+	l.record("scheduled-run", map[string]any{"run": scheduled, "export": r.Status.Summary.Export, "evidence": r.Status.Summary.Evidence, "outcomes": r.Status.Summary.Outcomes, "publication": r.Status.Publication.PublicationID})
 
 	manual := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: "runs-audit-manual"},
 		Spec: v1alpha1.AssessmentRunSpec{BindingRef: v1alpha1.BindingReference{Name: b.Name}, Scope: v1alpha1.RunScopeBinding}}
@@ -143,7 +146,8 @@ func TestLiveAssessmentRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if nsRun.Spec.Scope != v1alpha1.RunScopeNamespace || nsRun.Status.Scope.NamespaceUID != string(ns.UID) || nsRun.Status.Scope.NamespaceCount != 1 ||
-		st.NamespaceUID != string(ns.UID) || st.Summary == nil || st.Summary.Evidence.Expected != 1 || st.ArtifactRef != nsRun.Status.Publication.PublicationID {
+		st.NamespaceUID != string(ns.UID) || st.Summary == nil || st.Summary.Evidence.Expected != 1 || st.ArtifactRef != nsRun.Status.Publication.PublicationID ||
+		st.Summary.Export != "Assessment" {
 		t.Fatalf("team run %s / request %s", toJSON(nsRun.Status), toJSON(st))
 	}
 	l.record("team-request", map[string]any{"run": nsRun.Name, "namespaceUID": st.NamespaceUID, "evidence": st.Summary.Evidence, "artifactRef": st.ArtifactRef})

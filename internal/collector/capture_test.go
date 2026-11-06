@@ -1,7 +1,12 @@
 package collector
 
 import (
+	"strconv"
+
+	"k8s.io/apimachinery/pkg/types"
+
 	"encoding/json"
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,6 +60,51 @@ func renderedChecks(t *testing.T) []Check {
 			}
 			out = append(out, c...)
 		}
+	}
+	return out
+}
+
+// renderedPolicies reads targeting's pinned rendered engine policies.
+func renderedPolicies(t *testing.T) []assessment.Object {
+	t.Helper()
+	var out []assessment.Object
+	for _, f := range []string{"audit-all.yaml", "deny-production.yaml"} {
+		raw, err := os.ReadFile(filepath.Join(repo(t), "testdata/targeting/rendered", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, doc := range strings.Split(string(raw), "\n---") {
+			var o assessment.Object
+			if err = yaml.Unmarshal([]byte(doc), &o); err != nil {
+				t.Fatal(err)
+			}
+			if o["kind"] == "ValidatingPolicy" {
+				out = append(out, SanitizeEnginePolicy(o))
+			}
+		}
+	}
+	return out
+}
+
+// contractContributions reconstructs the contributions behind targeting's
+// pinned rendered policies from their provenance annotations and spec.
+func contractContributions(t *testing.T) []targeting.Contribution {
+	t.Helper()
+	var out []targeting.Contribution
+	for _, p := range renderedPolicies(t) {
+		a := assessment.Map(assessment.At(p, "metadata", "annotations"))
+		get := func(k string) string { return assessment.Str(a["compliance.erenius.io/"+k]) }
+		gen, _ := strconv.ParseInt(get("profile-generation"), 10, 64)
+		var sel v1alpha1.NamespaceSelector
+		raw, _ := json.Marshal(assessment.At(p, "spec", "matchConstraints", "namespaceSelector"))
+		if err := json.Unmarshal(raw, &sel); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, targeting.Contribution{Cluster: get("cluster"), Policy: get("policy"),
+			Binding:    targeting.ObjectRevision{Name: get("binding"), UID: types.UID(assessment.Str(assessment.At(p, "metadata", "labels", targeting.LabelBindingUID)))},
+			Profile:    targeting.ObjectRevision{Name: get("profile"), UID: types.UID(get("profile-uid")), Generation: gen},
+			BundleName: get("bundle"), BundleDigest: get("bundle-digest"), ConfigurationDigest: get("configuration-digest"),
+			Mode: v1alpha1.EnforcementMode(get("mode")), NamespaceSelector: sel, Revision: get("revision")})
 	}
 	return out
 }
@@ -199,7 +249,8 @@ func captureV2(t *testing.T) CaptureV2 {
 	}
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	return CaptureV2{Version: CaptureV2Version, Cluster: subjects[0].Cluster, Window: CaptureWindow{Started: now, Closed: now.Add(5 * time.Minute)},
-		MappingSHA256: "mapping-1", Subjects: subjects, Stale: stale, Checks: checks, Workloads: workloads, Expected: inv, Reports: []assessment.Object{}}
+		MappingSHA256: "mapping-1", Subjects: subjects, Stale: stale, Checks: checks, Workloads: workloads, Expected: inv, Reports: []assessment.Object{},
+		Contributions: contractContributions(t), EnginePolicies: renderedPolicies(t)}
 }
 
 func TestCaptureV2RoundTripAndInventoryBinding(t *testing.T) {

@@ -233,7 +233,15 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 			return fmt.Errorf("%s schema: %w", name, err)
 		}
 	}
-	return assessment.ValidateReferences(req.Out)
+	if err := assessment.ValidateReferences(req.Out); err != nil {
+		return err
+	}
+	// Every engine policy must re-render from the packaged, digest-pinned
+	// source; otherwise the evidence is not attributable to that content.
+	if err := VerifyPackage(req.Out); err != nil {
+		return fmt.Errorf("engine policy verification: %w", err)
+	}
+	return nil
 }
 
 const ns = "https://konstapel.dev/ns"

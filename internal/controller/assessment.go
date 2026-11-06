@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -263,23 +264,53 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 
 	// Subjects whose engine policy is not delivered cannot have evidence; they
 	// count as stale scope rather than disappearing from the denominator.
-	have := map[string]bool{}
+	// Subjects whose engine policy is not delivered, or does not match what
+	// targeting renders from the verified content (drift), cannot have
+	// evidence; they count as stale scope instead of leaving the denominator.
+	byName := map[string]assessment.Object{}
 	for _, p := range rendered {
-		have[assessment.Str(assessment.At(p, "metadata", "name"))] = true
+		byName[assessment.Str(assessment.At(p, "metadata", "name"))] = p
 	}
+	var contributions []targeting.Contribution
+	for _, br := range res.Bindings {
+		contributions = append(contributions, br.Contributions...)
+	}
+	sources := collector.SourcesOf(slices.Collect(maps.Values(content))...)
 	kept := subjects[:0]
-	undelivered := map[string]bool{}
+	unusable := map[string]string{}
+	var used []targeting.Contribution
 	for _, s := range subjects {
-		if have[s.EnginePolicy] {
-			kept = append(kept, s)
-		} else {
-			undelivered[s.EnginePolicy] = true
+		p, delivered := byName[s.EnginePolicy]
+		if !delivered {
+			unusable[s.EnginePolicy] = "EngineNotDelivered"
+			continue
 		}
+		i := slices.IndexFunc(contributions, func(x targeting.Contribution) bool {
+			return x.Binding.UID == s.BindingUID && x.Policy == s.LogicalPolicy && x.Revision == s.Revision
+		})
+		if i < 0 {
+			unusable[s.EnginePolicy] = "EnginePolicyDrift"
+			continue
+		}
+		if err := collector.VerifyEnginePolicy(p, contributions[i], sources[s.SourceDigest]); err != nil {
+			unusable[s.EnginePolicy] = "EnginePolicyDrift"
+			continue
+		}
+		if !slices.ContainsFunc(used, func(x targeting.Contribution) bool {
+			return x.Revision == contributions[i].Revision && x.Policy == contributions[i].Policy
+		}) {
+			used = append(used, contributions[i])
+		}
+		kept = append(kept, s)
 	}
 	subjects = kept
-	for _, p := range sortedKeys(undelivered) {
+	for _, p := range sortedKeys(unusable) {
+		msg := "engine policy " + p + " is not delivered"
+		if unusable[p] == "EnginePolicyDrift" {
+			msg = "engine policy " + p + " differs from the policy rendered from the pinned content"
+		}
 		stale = append(stale, targeting.StaleScope{Binding: targeting.ObjectRevision{Name: b.Name, UID: b.UID, Generation: b.Generation},
-			Reason: "EngineNotDelivered", Message: "engine policy " + p + " is not delivered"})
+			Reason: targeting.Reason(unusable[p]), Message: msg})
 	}
 
 	// List the workloads the subjects can match, in their namespaces only.
@@ -336,6 +367,7 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 		return collector.CaptureV2{}, nil, 0, err
 	}
 	capture.Reports = reports
+	capture.Contributions = used
 	return capture, limits, maxAge, nil
 }
 
@@ -392,6 +424,11 @@ func (r *AssessmentReconciler) apply(ctx context.Context, b *v1alpha1.Compliance
 	u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"assessment": raw}}}
 	u.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind("ComplianceBinding"))
 	u.SetName(b.Name)
+	// Compare-and-swap: a plan computed from a stale binding (for example a
+	// cache that has not yet seen the schedule this controller just wrote)
+	// gets a Conflict and is recomputed, instead of overwriting the newer
+	// schedule and releasing an executing run's slot.
+	u.SetResourceVersion(b.ResourceVersion)
 	return r.Client.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(AssessmentFieldManager), client.ForceOwnership)
 }
 

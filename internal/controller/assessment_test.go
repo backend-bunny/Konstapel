@@ -260,3 +260,40 @@ func TestBoundaryTrackerRestartsOnStateChange(t *testing.T) {
 		t.Fatal("pruned workload kept history")
 	}
 }
+
+// An engine policy edited in the cluster after delivery no longer matches the
+// render of the pinned content: it yields no evidence until targeting repairs
+// it, and the binding reports the drift as stale scope.
+func TestEnginePolicyDriftIsNotEvidence(t *testing.T) {
+	e := newAssessEnv(t, nsObj("prod", "environment", "production"), profileObj(t, "baseline", pol),
+		epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}), privilegedPod("prod", "web", "pod-1"))
+	e.deliver("audit-prod")
+	name := e.enginePolicy()
+	e.assess("audit-prod")
+	e.report("prod", "pod-1", name, "pass", a0.Add(time.Minute))
+	e.now = a0.Add(2 * time.Minute)
+	e.assess("audit-prod")
+	if cur := e.current("audit-prod"); cur.Evidence.Completeness != "Complete" {
+		t.Fatalf("baseline not complete: %+v", cur.Evidence)
+	}
+	p := &unstructured.Unstructured{}
+	p.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: name}, p); err != nil {
+		t.Fatal(err)
+	}
+	vs, _, _ := unstructured.NestedSlice(p.Object, "spec", "validations")
+	vs[0].(map[string]any)["expression"] = "true"
+	_ = unstructured.SetNestedSlice(p.Object, vs, "spec", "validations")
+	if err := e.c.Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	e.now = a0.Add(3 * time.Minute)
+	e.assess("audit-prod")
+	cur := e.current("audit-prod")
+	if cur.Evidence.Completeness != "Incomplete" || cur.Evidence.StaleScopes != 1 || cur.Evidence.Expected != 0 || cur.Outcomes.Pass != 0 {
+		t.Fatalf("drifted policy produced evidence: %+v %+v", cur.Evidence, cur.Outcomes)
+	}
+	if !strings.Contains(strings.Join(cur.Limitations, ";"), "EnginePolicyDrift") {
+		t.Fatalf("drift not surfaced: %v", cur.Limitations)
+	}
+}
