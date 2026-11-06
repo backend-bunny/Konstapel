@@ -4,8 +4,7 @@
 bucket. This guide covers the parts implemented so far: the platform-controlled
 destination, setup and permissions, the compatibility probe that decides whether
 a backend may be used, package kinds, the publisher's commit protocol, recovery,
-the download service, and teardown. Retention reconciliation comes in a later
-task group.
+the download service, retention, and teardown.
 
 ## Destination configuration
 
@@ -378,6 +377,39 @@ The suite refuses to run unless the endpoint is the loopback service the
 script started (`requireTestOwned`), because it creates buckets. Its objects
 live under `konstapel-test/` in `konstapel-compat-*` buckets inside that
 container.
+
+## Retention
+
+Every run gets the finalizer `compliance.erenius.io/retention` before it can
+write to storage. Runs carry no owner reference to their binding or request.
+
+- **Expiry is fixed at the first commit.** `expiresAt` = commit time +
+  the binding's `spec.assessment.retention` at that moment (default `2160h`,
+  for scheduled and manual runs alike). Editing the binding's retention
+  later changes only new publications.
+- **Records outlive their owners.** Deleting the binding, the request, or the
+  run itself before expiry does not end retention. The run stays (marked for
+  deletion) as the package's cleanup record, and a controller restart
+  resumes it. A new namespace or request with the same name never gains
+  access, because downloads check UIDs.
+- **At expiry** new downloads are refused (410), and the executor deletes every
+  owned object version and delete marker under the run's prefix. Then it
+  verifies that none remain and records `publication.phase: Deleted`,
+  `availability: Expired` and `cleanup.state: Deleted`. Only then is the
+  finalizer removed. A run that was marked for deletion then goes away; one
+  that wasn't keeps that small tombstone.
+- **Failures are truthful and retried.** Storage refusing deletion (object
+  lock, legal hold, `AccessDenied`) is `RetentionBlocked`. Other errors, or
+  versions that remain after deletion, are `DeletionFailed`. Either way the
+  run keeps its commit and ownership metadata, records attempts and the
+  last error, and retries with backoff from one minute to one hour. Konstapel
+  never requests bypass permissions. An administrator resolves the lock or
+  permission.
+- **External lifecycle rules** must not expire evidence before Konstapel's
+  recorded expiry. Konstapel does not change bucket rules.
+
+A run deleted while still collecting has written nothing to storage and is
+released immediately.
 
 ## Teardown
 

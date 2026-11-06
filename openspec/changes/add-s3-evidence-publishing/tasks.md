@@ -48,9 +48,9 @@ Planning artifact completion does not satisfy implementation prerequisites.
 
 ## 5. Enforce fixed per-binding retention
 
-- [ ] 5.1 Implement expiry scheduling from immutable publication receipts for scheduled and manual packages; verify the 2160h default, shorter test durations, and retention edits affect only new publications while expired packages reject new downloads.
-- [ ] 5.2 Add retention finalization independent of binding/request ownership and restart recovery; verify deleting a binding, request, or namespace retains its cleanup record and original expiry until storage removal is confirmed.
-- [ ] 5.3 Delete owned archives, commit objects, attempt data, and applicable object versions/markers; verify enabled, suspended, and unversioned test modes remove owned retained bytes while separately retained packages and unrelated objects survive.
+- [x] 5.1 Implement expiry scheduling from immutable publication receipts for scheduled and manual packages; verify the 2160h default, shorter test durations, and retention edits affect only new publications while expired packages reject new downloads.
+- [x] 5.2 Add retention finalization independent of binding/request ownership and restart recovery; verify deleting a binding, request, or namespace retains its cleanup record and original expiry until storage removal is confirmed.
+- [x] 5.3 Delete owned archives, commit objects, attempt data, and applicable object versions/markers; verify enabled, suspended, and unversioned test modes remove owned retained bytes while separately retained packages and unrelated objects survive.
 - [ ] 5.4 Add truthful deletion/availability states and retry behavior for partial deletion, missing permissions, locks, early object loss, and corruption; verify failed cleanup preserves ownership metadata and never reports a remaining version as deleted.
 - [ ] 5.5 Document retention selection, new-publication-only edits, endpoint/credential retirement, external lifecycle interference, and recovery; verify short-duration tests demonstrate the full expiry lifecycle without waiting 90 days.
 

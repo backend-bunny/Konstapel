@@ -25,6 +25,10 @@ var (
 	// ErrExpired reports that a publication's retention ended; it is no
 	// longer served.
 	ErrExpired = errors.New("publication expired")
+	// ErrRetentionBlocked reports that storage refused deletion, for example
+	// an object lock or a missing delete permission. Konstapel never bypasses
+	// it; an administrator must resolve it.
+	ErrRetentionBlocked = errors.New("storage refused deletion")
 )
 
 // StageRequest hands a frozen, validated package directory to the publisher.

@@ -31,7 +31,8 @@ func TestTerminalRunCleansAttemptsWithRetry(t *testing.T) {
 		t.Fatalf("pending cleanup not visible: %+v", c)
 	}
 	e.restart()
-	if res := e.step(name); res.RequeueAfter != 0 {
+	// Attempt cleanup succeeds; the run then waits for its package's expiry.
+	if res := e.step(name); res.RequeueAfter == AttemptCleanupRetry {
 		t.Fatalf("cleanup still pending: %+v", res)
 	}
 	r := e.run(name)

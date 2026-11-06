@@ -29,6 +29,7 @@ type fakeS3 struct {
 	seq         int
 	accessKeys  []string          // access key ID of each signed request
 	uploads     map[string]string // incomplete multipart upload ID -> key
+	denyDelete  bool              // refuse object deletion (object lock / missing permission)
 }
 
 type fakeVersion struct {
@@ -159,6 +160,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(v.body)
 		}
 	case http.MethodDelete:
+		if f.denyDelete {
+			xmlError(w, 403, "AccessDenied")
+			return
+		}
 		vs := f.objects[key]
 		if vid := q.Get("versionId"); vid != "" {
 			kept := vs[:0]
