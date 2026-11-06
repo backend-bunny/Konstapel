@@ -1,0 +1,267 @@
+{
+  "date": "2026-11-06",
+  "commit": "4b1c72a",
+  "command": "flock /tmp/konstapel-live-cluster.lock devbox run -- task acceptance OUTPUT=/tmp/konstapel-ca-final-2",
+  "result": {
+    "passed": true,
+    "exitCode": 0
+  },
+  "summary": "Acceptance passed; admission, background findings, schema/reference validation, offline replay, targeting delivery and exception admission verified.",
+  "versions": {
+    "pinned": "versions.json",
+    "kubernetesServer": "v1.37.0",
+    "kubectl": "v1.37.2",
+    "s3TestService": "KONSTAPEL_S3_IMAGE in scripts/runtime.env (RustFS 1.0.3, digest-pinned)",
+    "runtimeImages": [
+      {
+        "image": "reg.kyverno.io/kyverno/background-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/background-controller@sha256:c46e124f21ef8a6bb4b48de57106808b1007edcd5ddd4ff7df5d23b9efa60ce2"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/cleanup-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/cleanup-controller@sha256:d7340aa7c9315080c3dafa7b765d090ced37353e89e5cd7a3f9ac69e8fb532b2"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/kyverno:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyverno@sha256:c8c4dd09e720d2cd7fd24ca73ac28e46651001372f988e0cba3f2f612f04b955"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/kyvernopre:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/kyvernopre@sha256:27f3cc52e628559b56d08363b85316819802086c9808606914f7805a244148f4"
+      },
+      {
+        "image": "reg.kyverno.io/kyverno/reports-controller:v1.19.2",
+        "imageID": "reg.kyverno.io/kyverno/reports-controller@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3"
+      }
+    ]
+  },
+  "liveTests": [
+    {
+      "test": "TestLiveDelivery",
+      "result": "PASS",
+      "seconds": 45.32
+    },
+    {
+      "test": "TestLiveAssessmentStatus",
+      "result": "PASS",
+      "seconds": 26.99
+    },
+    {
+      "test": "TestLiveAssessmentRuns",
+      "result": "PASS",
+      "seconds": 74.65
+    },
+    {
+      "test": "TestLiveEvidenceDownload",
+      "result": "PASS",
+      "seconds": 25.87
+    },
+    {
+      "test": "TestLiveEngineCorrelation",
+      "result": "PASS",
+      "seconds": 74.94
+    },
+    {
+      "test": "TestLiveEnforcementEpoch",
+      "result": "PASS",
+      "seconds": 29.63
+    },
+    {
+      "test": "TestLiveTargetingFailures",
+      "result": "PASS",
+      "seconds": 104.73
+    },
+    {
+      "test": "TestLiveAssessmentFaults",
+      "result": "PASS",
+      "seconds": 182.56
+    },
+    {
+      "test": "TestLiveIntegratedAssessments",
+      "result": "PASS",
+      "seconds": 42.63
+    },
+    {
+      "test": "TestLiveManager",
+      "result": "PASS",
+      "seconds": 29.59
+    },
+    {
+      "test": "TestLiveRetentionLifecycle",
+      "result": "PASS",
+      "seconds": 78.76
+    },
+    {
+      "test": "TestLiveTargetingWorkflow",
+      "result": "PASS",
+      "seconds": 20.65
+    }
+  ],
+  "exceptionAdmissionTests": [
+    {
+      "test": "TestLiveExceptionAdmission",
+      "result": "PASS",
+      "seconds": 8.98
+    }
+  ],
+  "evidence": {
+    "TestLiveAssessmentFaults": [
+      {
+        "changes": {
+          "WatchDiscontinuity": 1,
+          "WorkloadAdded": 1
+        },
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 1,
+          "attributable": 1,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "run": "ft-audit-s-50c17f8b3220c5e6",
+        "step": "restart"
+      },
+      {
+        "evidence": {
+          "completeness": "Incomplete",
+          "expected": 2,
+          "attributable": 1,
+          "missing": 0,
+          "rejected": 1,
+          "unresolved": 0
+        },
+        "run": "ft-audit-outage",
+        "step": "engine-outage"
+      },
+      {
+        "descriptor": "034672a25b903b68f2813417bb86f33caffa3381ffd1b1d42338137c3681456f",
+        "run": "ft-audit-interrupted",
+        "step": "storage-outage"
+      }
+    ],
+    "TestLiveIntegratedAssessments": [
+      {
+        "onlyA": "it-only-a-s-3287b6381d4cc675",
+        "step": "scheduled",
+        "wide": "it-wide-s-25128e7a25b24c82"
+      },
+      {
+        "it-a": "it-wide-r-f64a9e16762a4be5",
+        "it-b": "it-wide-r-a5bb0be9531e6dbb",
+        "step": "team-requests"
+      },
+      {
+        "bindings": 2,
+        "step": "integrated-passed",
+        "teams": 2
+      }
+    ],
+    "TestLiveRetentionLifecycle": [
+      {
+        "expiresAt": "2026-11-06T18:47:06Z",
+        "manual": "rl-audit-manual",
+        "scheduled": "rl-audit-s-191346bcc4e50a1a",
+        "step": "published"
+      },
+      {
+        "manual": "tombstone",
+        "scheduled": "released",
+        "step": "retention-lifecycle"
+      }
+    ],
+    "TestLiveEvidenceDownload": [
+      {
+        "artifactRef": "pub-5d95272041c1e8933d87e79a4e094e51",
+        "scheduled": "dl-audit-s-8703630bcdacfb6d",
+        "step": "published",
+        "teamRun": "dl-audit-r-71d7b186abddcf10"
+      },
+      {
+        "bytes": 835927,
+        "completeness": "Complete",
+        "files": 104,
+        "step": "team-download"
+      },
+      {
+        "step": "broader-denied"
+      },
+      {
+        "step": "revoked"
+      }
+    ],
+    "TestLiveAssessmentRuns": [
+      {
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 1,
+          "attributable": 1,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "export": "Assessment",
+        "outcomes": {
+          "pass": 0,
+          "fail": 1,
+          "error": 0,
+          "skip": 0,
+          "acceptedRisk": 0,
+          "notApplicable": 0,
+          "unknown": 0
+        },
+        "publication": "pub-553fb075e6410245c7ac647136d1e8de",
+        "run": "runs-audit-s-7447d879d05ed0bd",
+        "step": "scheduled-run"
+      },
+      {
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 1,
+          "attributable": 1,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "run": "runs-audit-manual",
+        "step": "manual-run"
+      },
+      {
+        "artifactRef": "pub-c7b405375311a21b14074abd485d56d1",
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 1,
+          "attributable": 1,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "namespaceUID": "3a4ae707-6e74-4070-86a4-508f502f524a",
+        "run": "runs-audit-r-2b3424c13c7148cd",
+        "step": "team-request"
+      }
+    ]
+  },
+  "prototypePackage": {
+    "acceptance.json": "sha256:694f65ed0f73ba08de760662ebbd57580ff13cf61d403f2536ab1344d0140660",
+    "admission.json": "sha256:b118df2bd3aba2c2498edf88f5055782e1184d1e5c48a720a0643235db906e46",
+    "assessment-plan.json": "sha256:83a1e3ab3548a05e5d57c075469badd63faca505d8b9fd3cf820c38a447a0241",
+    "assessment-results.json": "sha256:330fc88e52b58cb784298f5a689f586218d77b96dbb6b6528ee2bb0e07347fda",
+    "capture.json": "sha256:e97e8667c223aa2d9833baa45eb2d3e6608615acfd0ba251effa04b7fbf63966",
+    "content-manifest.json": "sha256:99947230432a1549ed686c437ac272dadfd93ba583ab9cf28c69708ebb124465",
+    "events.json": "sha256:870cc8277665c7cf69354b715e53d84d9675c90f20c489be8dd00fbdcbf974fc",
+    "evidence.json": "sha256:115d9046beb385c60c5b35d43bc74f0179416e5eb92637fa3795edbdf4f869c0",
+    "final-policies.json": "sha256:78ecb0eef32b9519ff322fc89b592328fbbf9c1a3243dd51b61c0b567385ff31",
+    "final-reports.json": "sha256:486a459c6fbebee87f796e545b9405ce03fcbea156cf9736c0349a9fb901c5c0",
+    "final-workloads.json": "sha256:da85bbf4c1808682e5dec1e5f7e365ac63a5f6523073a2f631c591d92fc0070c",
+    "rendered-policy.json": "sha256:58eb20da9e8c59abe5ec49fd1eca30ad3233a9c31a4cb908a32fab69ceb1d8e7",
+    "run-manifest.json": "sha256:b70630395829a1821de1623212002333f6b3bd6e6d4d52737880d0745cc2d275",
+    "system-security-plan.json": "sha256:27c1b696cf01e67aa189b94eaca4be28b78e068e818222a4b4e4b8a1f0e0dadc"
+  },
+  "teardown": "After the acceptance run, the separate access-check cluster, and a further live suite: `kind get clusters` reported none and `docker ps -a` listed no Konstapel or S3 test containers.",
+  "retained": "Full output (packages, kind logs, per-test evidence) is kept outside version control at /tmp/konstapel-ca-final-2.",
+  "accessCheck": {
+    "command": "scripts/check-assessment-access.sh on a separate disposable cluster (flock)",
+    "failures": 0
+  }
+}
