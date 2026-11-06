@@ -163,6 +163,39 @@ func TestPublisherRoundTrip(t *testing.T) {
 			if again, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("2160h")}); err != nil || !reflect.DeepEqual(again, r) {
 				t.Fatalf("retry changed the commit: %v", err)
 			}
+			// Orphan cleanup: an interrupted attempt, an incomplete multipart
+			// upload, and unrelated objects in the shared bucket/prefix.
+			put := func(key, body string) {
+				if _, err := c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key), Body: strings.NewReader(body)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			intent, _ := json.Marshal(attemptIntent{Run: run, Created: time.Now()})
+			put(p.runPrefix(run)+"attempts/interrupted/"+intentFile, string(intent))
+			put(p.runPrefix(run)+"attempts/interrupted/package.tar.gz", "partial")
+			unrelated := d.KeyPrefix() + "unrelated-" + lower(mode)
+			put(unrelated, "keep me")
+			mp, err := c.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{Bucket: aws.String(d.Bucket), Key: aws.String(p.runPrefix(run) + "attempts/interrupted/big")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := p.CleanupAttempts(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+			if l, _ := c.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run) + "attempts/interrupted/")}); len(l.Contents) != 0 {
+				t.Fatalf("interrupted attempt survived: %d objects", len(l.Contents))
+			}
+			if ups, err := c.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run))}); err != nil || len(ups.Uploads) != 0 {
+				_, _ = c.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: aws.String(d.Bucket), Key: mp.Key, UploadId: mp.UploadId})
+				t.Fatalf("multipart upload not aborted: %v", err)
+			}
+			if _, err := p.read(ctx, unrelated, ""); err != nil {
+				t.Fatalf("unrelated object removed: %v", err)
+			}
+			if st, err := p.Inspect(ctx, run); err != nil || st.Phase != publication.PhaseCommitted || archives() != 1 {
+				t.Fatalf("committed package damaged by cleanup: %+v %v", st, err)
+			}
+			cleanup(ctx, c, d.Bucket, unrelated)
 			other := filepath.Join(t.TempDir(), "other")
 			if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), other, run); err != nil {
 				t.Fatal(err)

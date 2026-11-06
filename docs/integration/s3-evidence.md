@@ -145,6 +145,22 @@ and publishes again. That uploads nothing and returns the original receipt,
 so the run records the original digest, `publishedAt`, `expiresAt` and
 namespace scope, and the request completes with the original publication ID.
 
+**Attempt cleanup.** Each attempt directory
+(`<run prefix>/attempts/<random id>/`) gets an `intent.json` naming its run
+before any bytes are uploaded, so an interrupted upload can always be
+identified. Once a run is `Completed` or `Failed`, the executor calls
+`CleanupAttempts`. That removes every version and delete marker of the run's
+other attempt directories, keeping the committed attempt and `commit.json`. It
+also aborts incomplete multipart uploads under the run's prefix. A directory
+without an owner record naming the run, a key outside an attempt directory,
+and anything outside the run's prefix are never deleted. The run's
+`AttemptsCleaned` condition records the result. A failure is
+`CleanupPending` and is retried every minute, and after a restart, since
+terminal runs are re-listed. Cleanup needs `ListBucketVersions` (or
+`ListBucket`), `GetObject`, `DeleteObject`/`DeleteObjectVersion`,
+`ListBucketMultipartUploads` and `AbortMultipartUpload` on the destination
+prefix.
+
 **Readiness gating.** When the controller runtime has a readiness check, the
 assessment scheduler calls it at most once per `ReadyInterval` (5 minutes by
 default). While the backend is not ready, scheduled snapshots are disabled and

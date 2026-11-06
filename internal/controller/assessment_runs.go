@@ -437,8 +437,11 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.Get(ctx, req.NamespacedName, run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if runDone(run) || !run.DeletionTimestamp.IsZero() {
+	if !run.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
+	}
+	if runDone(run) {
+		return r.cleanupAttempts(ctx, run)
 	}
 	if run.UID == "" {
 		return ctrl.Result{}, fmt.Errorf("run %s has no UID", run.Name)
@@ -750,6 +753,31 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	}
 	_ = os.RemoveAll(r.staging(run))
 	return ctrl.Result{}, r.finishRequest(ctx, run, "")
+}
+
+// AttemptCleanupRetry is how often cleanup of a terminal run's uncommitted
+// storage attempts is retried after a failure.
+const AttemptCleanupRetry = time.Minute
+
+// cleanupAttempts removes a terminal run's uncommitted storage attempts. Runs
+// that never froze a scope never staged anything. Failures are recorded on
+// the run and retried; a restart re-lists terminal runs and resumes.
+func (r *AssessmentRunReconciler) cleanupAttempts(ctx context.Context, run *v1alpha1.AssessmentRun) (ctrl.Result, error) {
+	if r.Runtime.Publisher == nil || run.Status.Scope == nil || run.Status.Binding == nil || meta.IsStatusConditionTrue(run.Status.Conditions, v1alpha1.ConditionAttemptsCleaned) {
+		return ctrl.Result{}, nil
+	}
+	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
+	cond := metav1.Condition{Type: v1alpha1.ConditionAttemptsCleaned, Status: metav1.ConditionTrue, Reason: v1alpha1.ReasonCleaned, Message: "uncommitted storage attempts removed"}
+	res := ctrl.Result{}
+	if err := r.Runtime.Publisher.CleanupAttempts(ctx, ref); err != nil {
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, v1alpha1.ReasonCleanupPending, truncate(err.Error())
+		res.RequeueAfter = AttemptCleanupRetry
+	}
+	if old := meta.FindStatusCondition(run.Status.Conditions, cond.Type); old != nil && old.Status == cond.Status && old.Reason == cond.Reason && old.Message == cond.Message {
+		return res, nil
+	}
+	meta.SetStatusCondition(&run.Status.Conditions, cond)
+	return res, r.Client.Status().Update(ctx, run)
 }
 
 // selectRetention chooses the retention for the first commit: a consistent

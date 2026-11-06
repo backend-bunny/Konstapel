@@ -14,11 +14,16 @@ const (
 	ConditionEvidenceComplete = "EvidenceComplete"
 	// ConditionPublished is True only after a verified storage commit.
 	ConditionPublished = "Published"
+	// ConditionAttemptsCleaned is True once a terminal run's uncommitted
+	// storage attempts have been removed. The committed package is kept.
+	ConditionAttemptsCleaned = "AttemptsCleaned"
 
 	ReasonBindingNotFound     = "BindingNotFound"
 	ReasonNamespaceNotInScope = "NamespaceNotInScope"
 	ReasonCaptureLost         = "CaptureLost"
 	ReasonPublicationFailed   = "PublicationFailed"
+	ReasonCleanupPending      = "CleanupPending"
+	ReasonCleaned             = "Cleaned"
 )
 
 // BindingReference names a cluster-scoped ComplianceBinding.

@@ -27,7 +27,8 @@ type fakeS3 struct {
 	corrupt     bool                     // store truncated bytes and no checksum
 	objects     map[string][]fakeVersion // key -> versions, newest last
 	seq         int
-	accessKeys  []string // access key ID of each signed request
+	accessKeys  []string          // access key ID of each signed request
+	uploads     map[string]string // incomplete multipart upload ID -> key
 }
 
 type fakeVersion struct {
@@ -74,6 +75,14 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `<VersioningConfiguration><Status>%s</Status></VersioningConfiguration>`, f.versioning)
 		case q.Has("versions"):
 			f.listVersions(w, q.Get("prefix"))
+		case q.Has("uploads"):
+			fmt.Fprint(w, `<ListMultipartUploadsResult>`)
+			for id, k := range f.uploads {
+				if strings.HasPrefix(k, q.Get("prefix")) {
+					fmt.Fprintf(w, `<Upload><Key>%s</Key><UploadId>%s</UploadId></Upload>`, k, id)
+				}
+			}
+			fmt.Fprint(w, `</ListMultipartUploadsResult>`)
 		case q.Get("list-type") == "2":
 			f.listV2(w, q.Get("prefix"))
 		default:
@@ -82,6 +91,15 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := parts[1]
+	if id := q.Get("uploadId"); id != "" && r.Method == http.MethodDelete {
+		if f.uploads[id] != key {
+			xmlError(w, 404, "NoSuchUpload")
+			return
+		}
+		delete(f.uploads, id)
+		w.WriteHeader(204)
+		return
+	}
 	now := time.Now().UTC().Add(f.skew)
 	current := func() (fakeVersion, bool) {
 		vs := f.objects[key]
