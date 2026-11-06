@@ -12,8 +12,11 @@ package controller
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -252,4 +255,125 @@ func (l *live) updateRetry(into, key client.Object, update func(client.Object) e
 		}
 	}
 	return err
+}
+
+// TestLiveHardeningUserNamespaces covers the changed non-root behavior (task
+// 4.3): hostUsers false is no exemption. Admission evidence (required) and
+// container-runtime evidence (recorded separately, never counted as policy
+// evidence) are kept apart; if the node cannot run user-namespaced Pods the
+// runtime result is recorded as unvalidated with the reason.
+func TestLiveHardeningUserNamespaces(t *testing.T) {
+	image := os.Getenv("KONSTAPEL_WORKLOAD_IMAGE")
+	if image == "" {
+		t.Fatal("KONSTAPEL_WORKLOAD_IMAGE is required (scripts/runtime.env)")
+	}
+	l := newLive(t)
+	l.installCRDs()
+	stop := l.startManager()
+	defer stop()
+
+	const denyNS, freeNS = "hz-userns-deny", "hz-userns-free"
+	l.setNamespace(denyNS, "hz-userns-deny")
+	l.setNamespace(freeNS, "hz-userns-free")
+	p := profileObj(t, "hz-userns", "require-run-as-nonroot")
+	b := bindingObj("hz-userns-deny", p.Name, v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{envLabel: "hz-userns-deny"})
+	for _, o := range []client.Object{p, b} {
+		o.SetUID("")
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var created []client.Object
+	t.Cleanup(func() {
+		for _, o := range created {
+			_ = l.c.Delete(l.ctx, o)
+		}
+		_ = l.c.Delete(l.ctx, b)
+		_ = l.c.Delete(l.ctx, p)
+		l.eventually("user-namespace policies withdrawn", func() (bool, string) {
+			left := l.policiesFor(b.Name)
+			return len(left) == 0, fmt.Sprint(left)
+		})
+	})
+	l.waitReady(b.Name, 1)
+	policies := l.hzPolicyNames(b.Name)
+
+	f, tr, uid := false, true, int64(1000)
+	userns := func(ns, name string, pod, ctr *corev1.SecurityContext, psc *corev1.PodSecurityContext) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}, Spec: corev1.PodSpec{
+			HostUsers: &f, RestartPolicy: corev1.RestartPolicyNever, SecurityContext: psc,
+			Containers: []corev1.Container{{Name: "app", Image: image, Command: []string{"sh", "-c", "cat /proc/self/uid_map; id -u; sleep 3600"}, SecurityContext: ctr}}}}
+	}
+	// Admission: without the flag, or with Pod-level false, hostUsers false
+	// is denied by the non-root policy; with the flag it is admitted.
+	l.expectDenied("userns/no-flag", l.c.Create(l.ctx, userns(denyNS, "hz-no-flag", nil, nil, nil), client.DryRunAll), policies, "require-run-as-nonroot")
+	l.expectDenied("userns/pod-false", l.c.Create(l.ctx, userns(denyNS, "hz-pod-false", nil, nil, &corev1.PodSecurityContext{RunAsNonRoot: &f}), client.DryRunAll), policies, "require-run-as-nonroot")
+	l.expectDenied("userns/container-false", l.c.Create(l.ctx, userns(denyNS, "hz-ctr-false", nil, &corev1.SecurityContext{RunAsNonRoot: &f}, &corev1.PodSecurityContext{RunAsNonRoot: &tr}), client.DryRunAll), policies, "require-run-as-nonroot")
+	flagged := userns(denyNS, "hz-userns-ok", nil, nil, &corev1.PodSecurityContext{RunAsNonRoot: &tr, RunAsUser: &uid})
+	if err := l.c.Create(l.ctx, flagged, client.DryRunAll); err != nil {
+		t.Errorf("hostUsers false with runAsNonRoot denied: %v", err)
+	}
+	l.record("userns-admission", map[string]any{"policy": policies["require-run-as-nonroot"], "noFlag": "denied", "podFalse": "denied", "containerFalse": "denied", "withFlag": "admitted"})
+
+	// Runtime (separate evidence): does this node run a user-namespaced Pod?
+	// Outside any binding, so policy is not involved.
+	probe := userns(freeNS, "hz-userns-runtime", nil, nil, &corev1.PodSecurityContext{RunAsNonRoot: &tr, RunAsUser: &uid})
+	if err := l.c.Create(l.ctx, probe); err != nil {
+		l.record("userns-runtime", map[string]any{"result": "unvalidated", "reason": "create: " + err.Error()})
+		return
+	}
+	created = append(created, probe)
+	var phase corev1.PodPhase
+	var reason string
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		cur := &corev1.Pod{}
+		if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(probe), cur); err == nil {
+			phase = cur.Status.Phase
+			for _, cs := range cur.Status.ContainerStatuses {
+				if w := cs.State.Waiting; w != nil && w.Reason != "ContainerCreating" {
+					reason = w.Reason + ": " + w.Message
+				}
+			}
+			if phase == corev1.PodRunning || phase == corev1.PodFailed || strings.Contains(reason, "CreateContainerError") || strings.Contains(reason, "RunContainerError") {
+				break
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+	if phase != corev1.PodRunning {
+		events, _ := exec.CommandContext(l.ctx, "kubectl", "--kubeconfig", os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"), "--context", os.Getenv("KONSTAPEL_LIVE_CONTEXT"),
+			"get", "events", "-n", freeNS, "--field-selector", "involvedObject.name="+probe.Name, "-o", "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message", "--no-headers").CombinedOutput()
+		reason = strings.TrimSpace(reason + "\n" + string(events))
+		l.record("userns-runtime", map[string]any{"result": "unvalidated", "phase": phase, "reason": reason})
+		t.Logf("user-namespace runtime unvalidated on this node: phase %s %s", phase, reason)
+		return
+	}
+	out, err := l.podLogs(freeNS, probe.Name)
+	if err != nil {
+		l.record("userns-runtime", map[string]any{"result": "unvalidated", "reason": "logs: " + err.Error()})
+		return
+	}
+	// In a user namespace, container UID 0 maps to a non-zero host UID.
+	isolated := !strings.Contains(out, "         0          0 4294967295")
+	l.record("userns-runtime", map[string]any{"result": map[bool]string{true: "isolated", false: "not-isolated"}[isolated], "uidMap": out})
+	if !isolated {
+		t.Errorf("hostUsers false Pod is running without a user namespace: %s", out)
+	}
+}
+
+// podLogs reads a container's log through kubectl with the live kubeconfig.
+func (l *live) podLogs(ns, name string) (string, error) {
+	var out string
+	var err error
+	for range 20 {
+		cmd := exec.CommandContext(l.ctx, "kubectl", "--kubeconfig", os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"), "--context", os.Getenv("KONSTAPEL_LIVE_CONTEXT"), "logs", "-n", ns, name)
+		b, e := cmd.CombinedOutput()
+		out, err = string(b), e
+		if e == nil && strings.Contains(out, "\n") {
+			return out, nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return out, err
 }

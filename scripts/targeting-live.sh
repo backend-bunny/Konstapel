@@ -12,6 +12,6 @@ out=${3:?output directory required}
 mkdir -p "$out"
 # The evidence download test runs the pinned test-owned S3 service.
 source scripts/runtime.env
-KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
-  go test -mod=readonly -tags live -count=1 -p 1 -timeout 25m -run '^(TestLiveDelivery|TestLiveManager|TestLiveEnforcementEpoch|TestLiveAssessmentStatus|TestLiveAssessmentRuns|TestLiveEngineCorrelation|TestLiveTargetingWorkflow|TestLiveTargetingFailures|TestLiveEvidenceDownload|TestLiveRetentionLifecycle|TestLiveIntegratedAssessments|TestLiveHardeningAdmission|TestLiveAssessmentFaults)$' -v ./internal/targeting/ ./internal/controller/ \
+KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_WORKLOAD_IMAGE=$KONSTAPEL_WORKLOAD_IMAGE KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
+  go test -mod=readonly -tags live -count=1 -p 1 -timeout 25m -run '^(TestLiveDelivery|TestLiveManager|TestLiveEnforcementEpoch|TestLiveAssessmentStatus|TestLiveAssessmentRuns|TestLiveEngineCorrelation|TestLiveTargetingWorkflow|TestLiveTargetingFailures|TestLiveEvidenceDownload|TestLiveRetentionLifecycle|TestLiveIntegratedAssessments|TestLiveHardeningAdmission|TestLiveHardeningUserNamespaces|TestLiveAssessmentFaults)$' -v ./internal/targeting/ ./internal/controller/ \
   > "$out/targeting-live.log" 2>&1 || { tail -40 "$out/targeting-live.log" >&2; exit 1; }

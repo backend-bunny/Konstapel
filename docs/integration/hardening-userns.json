@@ -1,0 +1,29 @@
+{
+  "task": "add-linux-workload-hardening-bundle 4.3",
+  "observed": "2026-11-06",
+  "command": "flock /tmp/konstapel-live-cluster.lock devbox run -- scripts/targeting-live.sh KUBECONFIG CONTEXT OUTPUT (TestLiveHardeningUserNamespaces)",
+  "environment": {
+    "cluster": "kind, scripts/runtime.env KONSTAPEL_NODE_IMAGE",
+    "kubelet": "v1.37.0",
+    "containerRuntime": "containerd://2.3.4",
+    "kernel": "6.18.60",
+    "osImage": "Debian GNU/Linux 13 (trixie)"
+  },
+  "admission": {
+    "policy": "konstapel-require-run-as-nonroot-6c6e24b7107a94ae",
+    "denied": [
+      "userns/no-flag",
+      "userns/pod-false",
+      "userns/container-false"
+    ],
+    "admitted": [
+      "hostUsers false with runAsNonRoot true"
+    ]
+  },
+  "runtime": {
+    "result": "unvalidated",
+    "phase": "Pending",
+    "reason": "Failed to create pod sandbox: rpc error: code = Unknown desc = failed to start sandbox \"b47e1a9e43ba567801173d6dbd15ff00853c1c39e2ddfa1cbd04b0681670837a\": failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error mounting \"sysfs\" to rootfs at \"/sys\": mount src=sysfs, dst=/sys, dstFd=/proc/thread-self/fd/11, flags=MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC: operation not permitted"
+  },
+  "conclusion": "Admission (policy evidence): hostUsers false without runAsNonRoot, with Pod-level false, or with container-level false is denied by the require-run-as-nonroot Deny instance; with runAsNonRoot true it is admitted. Runtime (separate, container evidence): UNVALIDATED here - runc cannot mount sysfs inside a user-namespaced sandbox on a nested kind node, so no user-namespaced Pod ran and no isolation is claimed. Prerequisite for the runtime check: a node whose runtime can start hostUsers false Pods (Kubernetes user namespaces, containerd 2.x with idmapped-mount support, non-nested)."
+}
