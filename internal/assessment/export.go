@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,105 @@ import (
 	"github.com/oscal-compass/oscal-sdk-go/settings"
 	"github.com/oscal-compass/oscal-sdk-go/transformers"
 )
+
+// InputFrom builds the C2P input context and assessment plan from several
+// component definitions (relative to root), each validated against the
+// shipped catalog, Moderate profile, and vendored policies. Components with
+// the same type and title in different definitions (the workload component
+// and the konstapel-kyverno validation component) are merged into one, so
+// C2P attaches each check's subjects once; rule-set identifiers of later
+// definitions are suffixed so they stay distinct. Input stays the
+// first-loop, single-check path used by `konstapel acceptance` and the C2P
+// provider plugin.
+//
+// rules limits the plan to the checks a package assesses (nil means every
+// check): other rule sets, statements, requirements, and definitions are
+// dropped, so the plan and results never mention or "satisfy" a control
+// through a check that was not assessed.
+func InputFrom(root string, defs, rules []string) (*actions.InputContext, *oscal.AssessmentPlan, error) {
+	var merged *oscal.ComponentDefinition
+	byKey := map[string]int{}
+	for i, rel := range defs {
+		def, _, err := ValidateDefinition(root, rel, ShippedPolicies)
+		if err != nil {
+			return nil, nil, err
+		}
+		if rules != nil {
+			if def = scopeDefinition(*def, rules); def == nil {
+				continue
+			}
+		}
+		if merged == nil {
+			copied := *def
+			copied.Components = &[]oscal.DefinedComponent{}
+			merged = &copied
+		}
+		for _, c := range *def.Components {
+			if i > 0 && c.Props != nil {
+				props := slices.Clone(*c.Props)
+				for j := range props {
+					if strings.HasPrefix(props[j].Remarks, "rule_set_") {
+						props[j].Remarks = fmt.Sprintf("%s_d%d", props[j].Remarks, i)
+					}
+				}
+				c.Props = &props
+			}
+			key := c.Type + "\x00" + c.Title
+			k, ok := byKey[key]
+			if !ok {
+				byKey[key] = len(*merged.Components)
+				*merged.Components = append(*merged.Components, c)
+				continue
+			}
+			into := &(*merged.Components)[k]
+			if c.Props != nil {
+				props := []oscal.Property{}
+				if into.Props != nil {
+					props = append(props, *into.Props...)
+				}
+				props = append(props, *c.Props...)
+				into.Props = &props
+			}
+			if c.ControlImplementations != nil {
+				cis := []oscal.ControlImplementationSet{}
+				if into.ControlImplementations != nil {
+					cis = append(cis, *into.ControlImplementations...)
+				}
+				cis = append(cis, *c.ControlImplementations...)
+				into.ControlImplementations = &cis
+			}
+		}
+	}
+	if merged == nil {
+		return nil, nil, fmt.Errorf("no component definitions")
+	}
+	plan, err := transformers.ComponentDefinitionsToAssessmentPlan(context.Background(), []oscal.ComponentDefinition{*merged}, "nist_800_53")
+	if err != nil {
+		return nil, nil, err
+	}
+	var comps []components.Component
+	var implementations []oscal.ControlImplementationSet
+	for _, c := range *merged.Components {
+		comps = append(comps, components.NewDefinedComponentAdapter(c))
+		if c.ControlImplementations != nil {
+			implementations = append(implementations, (*c.ControlImplementations)...)
+		}
+	}
+	input, err := actions.NewContextFromComponents(comps)
+	if err != nil {
+		return nil, nil, err
+	}
+	selected, _, err := settings.ByFramework("nist_800_53", implementations)
+	if err != nil {
+		return nil, nil, err
+	}
+	input.Settings = selected.AllSettings()
+	if _, err = input.ProviderTitle(plugin.ID(ProviderID)); err != nil {
+		return nil, nil, fmt.Errorf("required validation provider absent: %w", err)
+	}
+	plan.ImportSsp.Href = "system-security-plan.json"
+	return input, plan, nil
+}
 
 func Input(root string) (*actions.InputContext, *oscal.AssessmentPlan, error) {
 	def, err := ValidateMapping(root)
@@ -235,4 +335,81 @@ func ValidatePackage(root, out string) error {
 		return fmt.Errorf("package policy or mapping checksum mismatch")
 	}
 	return ValidateReferences(out)
+}
+
+// scopeDefinition keeps only the given rules' rule sets and the control
+// statements that reference them. It returns nil when none remain.
+func scopeDefinition(def oscal.ComponentDefinition, rules []string) *oscal.ComponentDefinition {
+	keep := func(id string) bool { return slices.Contains(rules, id) }
+	var comps []oscal.DefinedComponent
+	kept := false
+	for _, c := range *def.Components {
+		if c.Props != nil {
+			drop := map[string]bool{}
+			for _, p := range *c.Props {
+				if p.Name == ruleIDName && !keep(p.Value) {
+					drop[p.Remarks] = true
+				}
+			}
+			var props []oscal.Property
+			for _, p := range *c.Props {
+				if !drop[p.Remarks] || p.Remarks == "" {
+					props = append(props, p)
+					kept = kept || (p.Name == ruleIDName && c.Type != "validation")
+				}
+			}
+			c.Props = &props
+		}
+		if c.ControlImplementations != nil {
+			var sets []oscal.ControlImplementationSet
+			for _, ci := range *c.ControlImplementations {
+				var reqs []oscal.ImplementedRequirementControlImplementation
+				for _, req := range ci.ImplementedRequirements {
+					if req.Statements == nil {
+						continue
+					}
+					var stmts []oscal.ControlStatementImplementation
+					for _, st := range *req.Statements {
+						if st.Props == nil {
+							continue
+						}
+						var props []oscal.Property
+						referenced := false
+						for _, p := range *st.Props {
+							if p.Name == ruleIDName {
+								if !keep(p.Value) {
+									continue
+								}
+								referenced = true
+							}
+							props = append(props, p)
+						}
+						if referenced {
+							st.Props = &props
+							stmts = append(stmts, st)
+						}
+					}
+					if len(stmts) > 0 {
+						req.Statements = &stmts
+						reqs = append(reqs, req)
+					}
+				}
+				if len(reqs) > 0 {
+					ci.ImplementedRequirements = reqs
+					sets = append(sets, ci)
+				}
+			}
+			if len(sets) == 0 {
+				c.ControlImplementations = nil
+			} else {
+				c.ControlImplementations = &sets
+			}
+		}
+		comps = append(comps, c)
+	}
+	if !kept {
+		return nil
+	}
+	def.Components = &comps
+	return &def
 }

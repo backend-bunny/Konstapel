@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -129,7 +130,11 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 // writeOSCAL writes the plan, results, and SSP plus the content they
 // reference, then validates schemas and reference closure.
 func writeOSCAL(ctx context.Context, req ExportRequest) error {
-	input, plan, err := assessment.Input(req.Root)
+	cov, err := coverageFor(req.Root, req.Capture)
+	if err != nil {
+		return fmt.Errorf("mapping: %w", err)
+	}
+	input, plan, err := assessment.InputFrom(req.Root, assessment.ComponentDefinitions, cov.rules)
 	if err != nil {
 		return fmt.Errorf("mapping: %w", err)
 	}
@@ -179,7 +184,7 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 		r := &ar.Results[i]
 		r.Title = "Konstapel continuous assessment"
 		r.Description = fmt.Sprintf("Evidence %s: %d of %d expected observations attributable, %d stale scopes. %s",
-			ev.Completeness, ev.Attributable, ev.Expected, ev.StaleScopes, assessment.Coverage)
+			ev.Completeness, ev.Attributable, ev.Expected, ev.StaleScopes, cov.summary)
 		// Only an attributable failure is an observed violation. Missing,
 		// rejected, or unresolved evidence and zero targets make no claim.
 		if !attributableFail {
@@ -224,7 +229,7 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 	if err := assessment.Write(filepath.Join(req.Out, "assessment-results.json"), assessment.Object{"assessment-results": ar}); err != nil {
 		return err
 	}
-	if err := assessment.Write(filepath.Join(req.Out, "system-security-plan.json"), contextSSP(req.Capture.Cluster, req.Capture.Window.Closed)); err != nil {
+	if err := assessment.Write(filepath.Join(req.Out, "system-security-plan.json"), contextSSP(req.Capture.Cluster, req.Capture.Window.Closed, cov)); err != nil {
 		return err
 	}
 	schema := filepath.Join(req.Root, "content/schemas/oscal-1.1.3.json")
@@ -304,7 +309,7 @@ func pvpResults(c CaptureV2, ev Evaluation) ([]policy.PVPResult, bool) {
 
 // contextSSP is the minimal system context the results import. It states
 // what it is not: Konstapel does not author a system security plan.
-func contextSSP(cluster string, at time.Time) assessment.Object {
+func contextSSP(cluster string, at time.Time, cov coverage) assessment.Object {
 	id := func() string { return uuid.NewString() }
 	note := "Generated assessment context for a Konstapel-assessed cluster; not an authored system security plan."
 	return assessment.Object{"system-security-plan": assessment.Object{
@@ -321,8 +326,7 @@ func contextSSP(cluster string, at time.Time) assessment.Object {
 			"users":      []any{assessment.Object{"uuid": id(), "title": "Platform operator", "description": "Operates the assessed cluster."}},
 			"components": []any{assessment.Object{"uuid": id(), "type": "this-system", "title": "Assessed cluster", "description": cluster, "status": assessment.Object{"state": "operational"}}},
 		},
-		"control-implementation": assessment.Object{"description": assessment.Coverage,
-			"implemented-requirements": []any{assessment.Object{"uuid": id(), "control-id": "ac-6", "remarks": assessment.Coverage}}},
+		"control-implementation": assessment.Object{"description": cov.summary, "implemented-requirements": cov.requirements(id)},
 	}}
 }
 
@@ -364,4 +368,78 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-3] + "..."
+}
+
+// coverage is the bounded control mapping of the checks a capture assesses,
+// read from every shipped component definition.
+type coverage struct {
+	summary string
+	// controls maps control id -> statement id -> rationales, sorted on output.
+	controls map[string]map[string][]string
+	// rules are the assessed checks the plan is scoped to.
+	rules []string
+}
+
+// coverageFor collects the mappings of the logical policies in the capture's
+// scope. A capture with nothing in scope reports the first-loop coverage
+// statement, so the context SSP always names a requirement.
+func coverageFor(root string, c CaptureV2) (coverage, error) {
+	all, err := assessment.Mappings(root)
+	if err != nil {
+		return coverage{}, err
+	}
+	policies := map[string]bool{}
+	for _, s := range c.Subjects {
+		policies[s.LogicalPolicy] = true
+	}
+	for _, e := range c.Expected {
+		policies[e.Contribution.LogicalPolicy] = true
+	}
+	cov := coverage{controls: map[string]map[string][]string{}}
+	var parts []string
+	for _, p := range slices.Sorted(maps.Keys(policies)) {
+		ms, ok := all[p]
+		if !ok {
+			return coverage{}, fmt.Errorf("logical policy %s has no shipped control mapping", p)
+		}
+		var ids []string
+		for _, m := range ms {
+			if cov.controls[m.ControlID] == nil {
+				cov.controls[m.ControlID] = map[string][]string{}
+			}
+			if !slices.Contains(cov.controls[m.ControlID][m.StatementID], m.Rationale) {
+				cov.controls[m.ControlID][m.StatementID] = append(cov.controls[m.ControlID][m.StatementID], m.Rationale)
+			}
+			ids = append(ids, m.StatementID)
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s): %s", p, strings.Join(ids, ", "), ms[0].Rationale))
+	}
+	cov.rules = slices.Sorted(maps.Keys(policies))
+	if len(parts) == 0 {
+		// Nothing in scope: plan the first-loop check so the package still
+		// names the mapping it would have assessed.
+		cov.rules = []string{assessment.PolicyName}
+		cov.summary = assessment.Coverage
+		cov.controls["ac-6"] = map[string][]string{"ac-6_smt": {assessment.Coverage}}
+		return cov, nil
+	}
+	cov.summary = "Partial technical evidence only. " + strings.Join(parts, " ")
+	return cov, nil
+}
+
+// requirements renders one implemented requirement per mapped control, with
+// its statements and their partial-coverage rationales.
+func (c coverage) requirements(id func() string) []any {
+	var out []any
+	for _, ctl := range slices.Sorted(maps.Keys(c.controls)) {
+		var stmts []any
+		var remarks []string
+		for _, st := range slices.Sorted(maps.Keys(c.controls[ctl])) {
+			r := strings.Join(c.controls[ctl][st], " ")
+			stmts = append(stmts, assessment.Object{"statement-id": st, "uuid": id(), "remarks": r})
+			remarks = append(remarks, r)
+		}
+		out = append(out, assessment.Object{"uuid": id(), "control-id": ctl, "statements": stmts, "remarks": strings.Join(remarks, " ")})
+	}
+	return out
 }
