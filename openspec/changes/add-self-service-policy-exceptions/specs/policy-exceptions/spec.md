@@ -60,8 +60,8 @@ able to change central eligibility through their exception permissions.
 
 ### Requirement: Bounded lifetime and explicit renewal
 
-An exception SHALL have a future expiry within the shortest applicable central
-maximum lifetime, measured from its acceptance or explicit renewal. Permanent
+Creation and renewal SHALL require a future expiry within the shortest applicable
+central maximum lifetime, measured from that acceptance or renewal. Permanent
 exceptions SHALL be rejected. Renewal SHALL revalidate current scope and policy
 eligibility, record a new attributable acceptance, and require an explicit user
 operation rather than automatic extension.
@@ -76,6 +76,102 @@ operation rather than automatic extension.
 - **WHEN** an authorized user explicitly renews with a valid expiry and reason
 - **THEN** current eligibility is rechecked and a new acceptance snapshot is recorded
 - **AND** the previous snapshot remains distinguishable from the renewal
+
+#### Scenario: Explicitly renew a revoked exception
+
+- **WHEN** a team sets revoked false while incrementing acceptanceRevision by exactly one with a current reason and valid future expiry
+- **THEN** admission rechecks current eligibility and lifetime and records a distinct acceptance
+- **AND** the prior revision stays revoked and its revocation history is preserved before its protected intent is cleared
+- **AND** renewal cannot cancel outstanding withdrawal for that earlier revision
+
+### Requirement: Explicit revocation retains the exception resource
+
+ComplianceException SHALL expose spec.revoked defaulting to false. An authorized
+namespace editor SHALL revoke the current acceptance by setting it true without
+changing acceptanceRevision, reason, or expiresAt. Revocation SHALL retain the
+resource, request native withdrawal, and require no fresh eligibility or future
+expiry. A revoked revision SHALL NOT be reactivated without a new validated
+acceptance revision or resource.
+
+#### Scenario: A team revokes an exception
+
+- **WHEN** an authorized namespace editor sets revoked true for the current acceptance revision
+- **THEN** the API retains the ComplianceException and original acceptance fields while requesting withdrawal
+- **AND** no native exception write or manual approval is required
+- **AND** existing workloads remain present
+
+#### Scenario: Revoke an expired or currently ineligible acceptance
+
+- **WHEN** a team revokes after expiry or while the policy is Forbidden, unmapped, or cannot currently be resolved
+- **THEN** admission validates authority and the revocation transition without resolving fresh eligibility or demanding a future expiry
+- **AND** the operation cannot create or extend an exemption
+
+#### Scenario: A same-revision re-apply clears revocation
+
+- **WHEN** an update sets revoked false or omits it so it defaults to false without incrementing acceptanceRevision
+- **THEN** the API rejects reactivation of the revoked revision
+- **AND** metadata edits and controller reconciliation cannot reactivate it either
+
+#### Scenario: Create or renew into a revoked state
+
+- **WHEN** a create or revision-incrementing renewal sets revoked true
+- **THEN** the API rejects the operation because a new acceptance starts unrevoked
+- **AND** revocation must refer to an existing acceptance revision
+
+#### Scenario: Revocation races renewal
+
+- **WHEN** documented client workflows read an exception UID, resourceVersion, and acceptanceRevision and patch with those preconditions
+- **THEN** the API rejects a stale request after a concurrent change instead of silently targeting a newer acceptance
+- **AND** the client must re-read and deliberately retry rather than blindly refreshing preconditions
+
+### Requirement: Revocation records authenticated intent
+
+On the first false-to-true transition, admission SHALL record exception UID,
+acceptance revision, authenticated actor, and request time in protected revocation
+metadata. It SHALL preserve the original acceptance record. Repeated revocation
+SHALL preserve the first actor/time. Caller-forged attribution or unauthorized
+changes SHALL be rejected or replaced with authenticated values. Dry runs SHALL
+have no durable side effects.
+
+#### Scenario: Revoke through GitOps and repeat the request
+
+- **WHEN** a GitOps service account revokes an acceptance and later re-applies revoked true at that revision
+- **THEN** the first authenticated service account identity and revocation time are retained separately from any claimed human identity
+- **AND** the accepting actor, risk reason, expiry, and immutable acceptance snapshot are unchanged
+
+#### Scenario: Forge identity or remove history protection
+
+- **WHEN** a caller supplies false revocation attribution or changes an existing protected record
+- **THEN** admission replaces supplied attribution on a genuine revoke with authenticated values and rejects alteration outside that operation
+- **AND** application credentials cannot write controller-owned status, lifecycle records, or remove protected finalization safeguards
+
+#### Scenario: Revoke outside the team's namespace
+
+- **WHEN** application credentials attempt to revoke an exception outside their delegated namespace
+- **THEN** authorization rejects the operation
+- **AND** the other namespace's exception and history remain unchanged
+
+### Requirement: Revocation history survives renewal and deletion
+
+Konstapel SHALL preserve revocation intent and observed withdrawal context
+independently of the live exception and its namespace. Renewal SHALL NOT erase
+intent before its independent record is durable; deletion finalization SHALL
+also preserve it. Storage failure SHALL retain the intent and protection while
+native withdrawal continues. Historical acceptance snapshots and retained
+assessments SHALL NOT be rewritten by revocation.
+
+#### Scenario: Revoke and immediately delete or renew
+
+- **WHEN** revocation is followed by deletion or renewal before the controller copies its protected intent
+- **THEN** renewal cannot erase that intent and finalization cannot remove its last durable copy
+- **AND** independent immutable lifecycle records retain the exception UID, revision, authenticated revoking actor/time, and acceptance reference
+- **AND** restart or namespace deletion cannot garbage-collect the retained records
+
+#### Scenario: Persisting revocation history fails
+
+- **WHEN** the controller cannot save the independent lifecycle record
+- **THEN** the protected intent and finalization safeguards remain for retry
+- **AND** Konstapel still attempts native withdrawal without claiming history persistence or engine convergence succeeded
 
 ### Requirement: Controlled native Kyverno exceptions
 
@@ -117,6 +213,25 @@ delete or stop an existing workload.
 - **WHEN** the controller observes a new restrictive configuration
 - **THEN** affected acceptances stop being eligible and their native grants are withdrawn
 - **AND** reconciliation reports pending withdrawal until the engine state is confirmed
+
+#### Scenario: Revocation has been recorded but the engine has not converged
+
+- **WHEN** revoked is true and native grants remain effective or their withdrawal cannot be confirmed
+- **THEN** status distinguishes the requested withdrawal from pending or unknown engine state
+- **AND** API update/delete success alone does not establish completion
+- **AND** restart or a late native-create response cannot restore the desired grant for that revoked revision
+
+#### Scenario: Reconciliation is unavailable during revocation
+
+- **WHEN** the API admission path records revocation while the reconciler is stopped
+- **THEN** withdrawal remains unconfirmed and delivered native grants may persist until reconciliation resumes or independently enforced expiry
+- **AND** documentation does not promise immediate engine withdrawal during that outage
+
+#### Scenario: Delete instead of revoke
+
+- **WHEN** a team deletes the ComplianceException
+- **THEN** finalization withdraws outstanding native grants and preserves acceptance and revocation history before removing the resource
+- **AND** a revocation request alone retains the resource for inspection
 
 #### Scenario: Konstapel is unavailable at expiry
 
@@ -174,6 +289,14 @@ Exported assessment artifacts SHALL retain an immutable snapshot or a resolvable
 packaged reference containing acceptance identity, revision, actor, reason, scope,
 policy revisions, and validity interval. Historical assessments SHALL remain
 interpretable after live exception resources are renewed, expired, or deleted.
+
+#### Scenario: Inspect evidence around a revocation
+
+- **WHEN** an assessment captures evidence referencing a revoked acceptance
+- **THEN** its packaged lifecycle context distinguishes authenticated revocation request time from observed engine withdrawal
+- **AND** a delayed report from before revocation can retain its original accepted-risk attribution
+- **AND** a stale native exception reference after revocation does not by itself establish authorized acceptance at evaluation time
+- **AND** missing or ambiguous lifecycle context remains unresolved without rewriting raw outcomes or earlier retained assessments
 
 #### Scenario: Inspect evidence after expiry
 

@@ -21,6 +21,10 @@ assessment evidence, including when a native report records a pass or skip.
   the cached-policy expiry gap identified in the starting Kyverno 1.19.2 source.
 - Handle explicit renewal, expiry, revocation, scope changes, and policy revisions
   without silently broadening or indefinitely extending acceptance.
+- Define self-service revocation through `spec.revoked: true`, defaulting to
+  false. Preserve the resource and acceptance history, record the authenticated
+  revoking actor/time, and withdraw native grants without requiring fresh
+  eligibility. Clearing revocation requires a new validated acceptance revision.
 - Attach immutable acceptance context and lifecycle history to evaluation
   evidence and OSCAL output, preserving raw outcomes and coverage limits.
 
@@ -39,7 +43,10 @@ assessment pipeline through explicit exception context.
 ## Impact
 
 Adds a namespaced alpha CRD, admission validation and identity capture, an
-exception reconciler, native-engine governance, evidence enrichment, and tests.
+exception reconciler, protected revocation lifecycle records, native-engine
+governance, evidence enrichment, and tests. Revocation retains the API resource;
+deletion additionally removes it after withdrawal/history finalization. Neither
+operation removes workloads or rewrites retained assessment evidence.
 It depends on the profile/binding contract from `add-compliance-targeting-api`
 and the report/OSCAL boundary from `prove-kyverno-v1-assessment-loop`.
 
