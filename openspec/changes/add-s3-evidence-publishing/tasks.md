@@ -8,11 +8,20 @@ contract from `add-continuous-assessments`, not a second set of assessment APIs.
 The complete scheduler is not required to implement and merge the adapter.
 Full request/download acceptance requires the scheduler and scoped producer.
 
-This change owns S3 configuration/adapter, archive and commit logic, authenticated
-download transport, retention execution, and their tests/docs. Coordinate shared
-module/manager edits after rebasing. The continuous-assessment agent owns binding
-fields, request/run CRDs, package descriptors, and publication status schemas.
+This change owns EvidenceDestination and its CRD/controller/admission safeguards,
+S3 configuration/adapter, archive and commit logic, authenticated download
+transport, retention execution, durable orphan inventories, migration, and their
+tests/docs. Coordinate shared module/manager edits after rebasing. The
+continuous-assessment owner owns binding fields, request/run CRDs, package
+descriptors, and publication status schemas; coordinate the new destination and
+orphan contracts there. The Helm owner consumes generated destination CRD, RBAC,
+and admission resources and verifies chart installation/upgrade in required CI.
 Planning artifact completion does not satisfy implementation prerequisites.
+
+Checked tasks preserve the completed file-configured backend work. Groups 7–9
+extend it with the agreed destination lifecycle; complete those dependencies and
+the remaining recovery/documentation work before final integrated acceptance in
+group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 
 ## 1. Establish backend configuration and compatibility fixtures
 
@@ -35,8 +44,8 @@ Planning artifact completion does not satisfy implementation prerequisites.
 - [x] 3.1 Wire upload/commit/failure reconciliation into the shared run status with bounded network/retry limits; verify storage failure remains separate from assessment outcomes and terminal failure releases the binding's active run slot.
 - [x] 3.2 Add recovery after archive upload, commit-response loss, and Kubernetes receipt-update failure; verify recovery reconciles the original digest, publication time, expiry, and namespace scope instead of creating a second snapshot.
 - [x] 3.3 Implement cancellation and orphan cleanup for owned multipart uploads and uncommitted objects; verify restart can identify its attempts and never deletes unrelated objects under a shared bucket/prefix.
-- [ ] 3.4 Preserve historical destination snapshots and credential references across default endpoint changes; verify old artifacts can still be read/retired and missing old credentials remain a visible retryable problem.
-- [ ] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery; verify the fault-injection walkthrough retains useful diagnostics while cleaning its task-owned storage attempts.
+- [ ] 3.4 Route publication, retries, downloads, and cleanup through protected run-start destination UID/location pins and live credential/trust references; verify default/binding switches and rotation preserve historical access, UID mismatch never redirects history, and missing old credentials remain a visible retryable problem without fallback.
+- [ ] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery, including the distinction between automatic abandoned-attempt cleanup and explicit Orphan handoff; verify the fault-injection walkthrough preserves diagnostics and never resumes cleanup for intentionally orphaned evidence.
 
 ## 4. Authorize and verify full-package downloads
 
@@ -52,10 +61,34 @@ Planning artifact completion does not satisfy implementation prerequisites.
 - [x] 5.2 Add retention finalization independent of binding/request ownership and restart recovery; verify deleting a binding, request, or namespace retains its cleanup record and original expiry until storage removal is confirmed.
 - [x] 5.3 Delete owned archives, commit objects, attempt data, and applicable object versions/markers; verify enabled, suspended, and unversioned test modes remove owned retained bytes while separately retained packages and unrelated objects survive.
 - [x] 5.4 Add truthful deletion/availability states and retry behavior for partial deletion, missing permissions, locks, early object loss, and corruption; verify failed cleanup preserves ownership metadata and never reports a remaining version as deleted.
-- [ ] 5.5 Document retention selection, new-publication-only edits, endpoint/credential retirement, external lifecycle interference, and recovery; verify short-duration tests demonstrate the full expiry lifecycle without waiting 90 days.
+- [ ] 5.5 Document retention selection separately from run-start destination pinning, credential/CA rotation, normal and blocked destination retirement, external lifecycle interference, and recovery; verify short-duration tests demonstrate expiry and finalization without waiting 90 days.
 
 ## 6. Verify publication, access, and retention together
 
-- [ ] 6.1 With continuous assessments integrated, run full-binding and namespace-scoped scheduled/manual cases against the real test backend; verify complete/incomplete/diagnostic publications, full authorized downloads, and immutable expiry through the actual run APIs.
-- [ ] 6.2 Exercise lost responses, controller restart, RBAC revocation, binding/request deletion, retention edits, and cleanup failure end to end; verify recovery never changes historical bytes, leaks scope, or loses outstanding deletion work.
-- [ ] 6.3 Retain the final backend/version matrix and acceptance evidence, run the preserved local prototype validation, and tear down task-owned endpoints/objects/temporary data; verify cleanup leaves unrelated storage and infrastructure untouched.
+- [ ] 6.1 With continuous assessments integrated, run full-binding and namespace-scoped scheduled/manual cases against the real test backend using default and binding-specific destinations; verify complete/incomplete/diagnostic publications, full authorized downloads, immutable expiry, rotation, and run-start pinning through the actual run APIs.
+- [ ] 6.2 Exercise lost responses, controller restart, RBAC revocation, binding/request deletion, retention edits, destination switches/retirement/orphaning, and cleanup failure end to end; verify recovery never changes historical bytes, leaks scope, changes enforcement/exception identity, or loses outstanding ownership records.
+- [ ] 6.3 Retain the final backend/version matrix and CI acceptance evidence, run the preserved local prototype validation, and tear down task-owned endpoints/objects/temporary data; explicitly clean intentional orphan fixtures through the documented operator path and preserve sanitized inventory evidence while leaving unrelated infrastructure untouched.
+
+## 7. Introduce the destination API and run-start selection
+
+- [ ] 7.1 Add the cluster-scoped compliance.erenius.io/v1alpha1 EvidenceDestination type, generated schema, status, and Retire default; verify API-server rejection of endpoint/bucket/region/prefix mutations and acceptance of valid credential/CA rotation during normal operation and retirement.
+- [ ] 7.2 Add platform-only destination management and protected status/credential/trust access; verify application identities cannot change destinations or read credential material and references outside the controller namespace are rejected.
+- [ ] 7.3 Coordinate name/UID references for one central default and an optional spec.assessment.destinationRef with the shared-contract owner; verify AssessmentRequests inherit selection, recreated names fail UID checks, invalid overrides never fall back, and selection conditions remain separate from enforcement health.
+- [ ] 7.4 Implement durable pin admission before run storage writes and the destination finalizer before pin acceptance; verify deletion races, stale caches, concurrent replicas, and interrupted run updates cannot lose an accepted obligation or admit work after retirement.
+
+## 8. Retire destinations and support audited orphan handoff
+
+- [ ] 8.1 Reconcile normal destination retirement with existing pinned publications, authorized downloads, and cleanup; verify outstanding runs/uploads/packages hold the finalizer, blockers remain retryable, and status includes counts, latest known expiry, and unfinished work with unknown expiry.
+- [ ] 8.2 Implement authenticated Orphan intent with required reason and protected actor/time, including escalation from blocked Retire; verify caller-forged identities are rejected, selecting a policy alone does not delete storage, and started orphan handoff cannot be reversed.
+- [ ] 8.3 Fence publication, recovery, downloads, probes, and both destination/run cleanup workers during orphan handoff; verify bounded cancellation/draining, restart, late responses, and uncertain remote outcomes do not resume operations, abort uploads, or claim remote rollback/deletion.
+- [ ] 8.4 Persist an independent protected, chunked orphan inventory with audit identity, original receipts, known attempts/versions/upload IDs, and uncertain outcomes; verify idempotence, object-size limits, backend outages, and inventory persistence failures preserve the fence and finalizers without exposing credentials.
+- [ ] 8.5 Coordinate Orphaned disposition and finalizer release with the shared run/publication contract; verify records already pending deletion export ownership first, surviving records retain original references/checksums/expiry, prior Deleted records remain truthful, and interrupted publication ends and releases its binding slot without falsely claiming success.
+- [ ] 8.6 Exclude orphaned ownership from every automatic recovery/cleanup path, including a replacement destination at the same bucket/prefix; verify expiry, same-name recreation, and restart cannot adopt evidence or garbage-collect the independent inventory.
+- [ ] 8.7 Document normal deletion, Orphan selection/escalation commands with a reason, inventory export, external recovery/cleanup, and last-resort finalizer stripping; verify the walkthrough explains unreachable storage, uncertain operations, retained versions/uploads, disabled managed downloads, and operator ownership of future retention.
+
+## 9. Migrate legacy configuration and verify the lifecycle in CI
+
+- [ ] 9.1 Document and implement upgrade ordering, legacy-writer quiescence, file-to-resource conversion, and explicit verified legacy-ID/location-to-UID mappings; verify migration retries preserve immutable archive/commit bytes, keys, versions, checksums, publication time, and expiry while ambiguous records remain blocked with ownership intact.
+- [ ] 9.2 Add Go tests against a real Kubernetes API server for destination validation/RBAC, selection, retirement, and durable orphan audit; cover concurrency and restarts, already-deleting runs, forged actor metadata, missing inventory permissions, and prevention of enforcement/exception changes.
+- [ ] 9.3 Wire Go lifecycle acceptance into the existing required CI workflows with a real S3-compatible service; verify live rotation, destination switches, versioned retirement, backend-unreachable orphaning, pending/uncertain operations, and upgrade of retained legacy evidence, with sanitized diagnostics and explicit test-owned cleanup on success or failure.
+- [ ] 9.4 Coordinate generated destination CRD/RBAC/admission resources and migration prerequisites with the Helm owner; verify its separate, version-aligned charts install/upgrade them and its required CI covers those resources without duplicating assessment schema or chart ownership in this change.
