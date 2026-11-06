@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/publication"
 	"net"
 	"os"
 
@@ -25,7 +28,7 @@ func runDownload(args []string) error {
 	cert := fs.String("tls-cert-file", "", "TLS certificate (required)")
 	key := fs.String("tls-private-key-file", "", "TLS private key (required)")
 	audience := fs.String("audience", "konstapel-download", "token audience callers must request (kubectl create token --audience)")
-	dest := fs.String("evidence-destination", "", "S3 evidence destination YAML file (required)")
+	dest := fs.String("evidence-destination", "", "legacy S3 evidence destination YAML file for runs without a pinned EvidenceDestination")
 	tmp := fs.String("temp-dir", os.TempDir(), "directory for archives while they are verified")
 	maxConcurrent := fs.Int("max-concurrent", 4, "concurrent downloads")
 	maxDisk := fs.Int64("max-temp-bytes", 2<<30, "temporary disk bytes across concurrent downloads")
@@ -35,13 +38,6 @@ func runDownload(args []string) error {
 		return err
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zopts)))
-	if *dest == "" {
-		return fmt.Errorf("--evidence-destination is required")
-	}
-	d, err := s3store.LoadDestination(*dest)
-	if err != nil {
-		return err
-	}
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("kubernetes configuration: %w", err)
@@ -51,14 +47,27 @@ func runDownload(args []string) error {
 		return err
 	}
 	ctx := ctrl.SetupSignalHandler()
-	pub, err := s3store.NewPublisher(ctx, d, c, os.Getenv("POD_NAMESPACE"))
-	if err != nil {
-		return err
+	ns := os.Getenv("POD_NAMESPACE")
+	// Pinned runs are served from their EvidenceDestination; the optional
+	// legacy file destination serves unpinned runs.
+	destinations := &controller.DestinationPublishers{Reader: c, Namespace: ns}
+	var legacy publication.Publisher
+	if *dest != "" {
+		d, err := s3store.LoadDestination(*dest)
+		if err != nil {
+			return err
+		}
+		if legacy, err = s3store.NewPublisher(ctx, d, c, ns); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(*tmp, 0o700); err != nil {
 		return err
 	}
-	srv := &download.Server{Reader: c, Reviews: download.KubeReviewer{Client: c, Audience: *audience}, Publisher: pub,
+	srv := &download.Server{Reader: c, Reviews: download.KubeReviewer{Client: c, Audience: *audience}, Publisher: legacy,
+		PublisherFor: func(ctx context.Context, run *v1alpha1.AssessmentRun) (publication.Publisher, error) {
+			return destinations.For(ctx, run.Status.Destination)
+		},
 		TempDir: *tmp, MaxConcurrent: *maxConcurrent, MaxDiskBytes: *maxDisk}
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {

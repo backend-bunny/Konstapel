@@ -108,6 +108,10 @@ func TestOnlyPlatformAdminsCanWriteProfilesAndBindings(t *testing.T) {
 					if !allowed {
 						t.Errorf("%s must allow %s %s", r.name, verb, res)
 					}
+				case allowed && controllerFinalizerUpdate(r, verb, res):
+					// The controller adds and removes the destination
+					// finalizer (run pin protocol); Kubernetes has no
+					// finalizer-only verb for a resource's own finalizers.
 				case allowed:
 					t.Errorf("%s %s (%s) must not allow %s %s; only %s may", r.kind, r.name, r.file, verb, res, platformAdminRole)
 				}
@@ -168,4 +172,12 @@ func TestOnlyStorageServicesReadSecrets(t *testing.T) {
 			}
 		}
 	}
+}
+
+// controllerFinalizerUpdate is the one non-admin write: the generated
+// controller role may update/patch evidencedestinations to manage the
+// compliance.erenius.io/destination finalizer. It may not create or delete
+// them, and no other role or resource is exempt.
+func controllerFinalizerUpdate(r role, verb, res string) bool {
+	return r.kind == "ClusterRole" && r.name == "konstapel-controller" && res == "evidencedestinations" && (verb == "update" || verb == "patch")
 }

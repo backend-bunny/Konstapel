@@ -67,6 +67,10 @@ type AssessmentRuntime struct {
 	Ready func(context.Context) error
 	// ReadyInterval caches a Ready answer (default 5m).
 	ReadyInterval time.Duration
+	// Destinations builds publishers for runs pinned to an
+	// EvidenceDestination. Runs without a pin use Publisher (the legacy file
+	// destination).
+	Destinations *DestinationPublishers
 	// ControllerNamespace holds credentials, CA trust, and the default
 	// destination ConfigMap (default konstapel-system).
 	ControllerNamespace string
@@ -116,7 +120,7 @@ func currentRuntime() AssessmentRuntime {
 // ready reports whether runs can be executed and published.
 func (rt AssessmentRuntime) ready() (bool, string) {
 	switch {
-	case rt.Publisher == nil:
+	case rt.Publisher == nil && rt.Destinations == nil:
 		return false, "no evidence publisher is configured"
 	case rt.StagingDir == "":
 		return false, "no staging directory is configured"
@@ -164,8 +168,18 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 	if ok, why := r.Runtime.ready(); !ok {
 		return prev, latest, time.Time{}, "scheduled snapshots are disabled: " + why, nil
 	}
-	if err := r.backendReady(ctx); err != nil {
-		return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error()), nil
+	// A binding with a destination selection schedules only when that
+	// destination is usable; it never falls back to the legacy destination.
+	// Unselected bindings use the legacy destination and its probe.
+	switch sel := selectDestination(ctx, r.reader(), r.Runtime.ControllerNamespace, b); {
+	case sel.Source != v1alpha1.DestinationNone && !sel.Ready:
+		return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence destination " + sel.Reason + ": " + sel.Message), nil
+	case sel.Source == v1alpha1.DestinationNone && r.Runtime.Publisher == nil:
+		return prev, latest, time.Time{}, "scheduled snapshots are disabled: no evidence destination is selected and no legacy destination is configured", nil
+	case sel.Source == v1alpha1.DestinationNone:
+		if err := r.backendReady(ctx); err != nil {
+			return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error()), nil
+		}
 	}
 	interval, _, _, err := bindingDurations(b)
 	if err != nil {
@@ -560,6 +574,18 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 		}
 		limits = nil // binding-wide limitations may name other namespaces
 	}
+	// Pin the destination before anything can reach storage. The label
+	// update inside pinDestination happens before any status change here.
+	pin, err := r.pinDestination(ctx, run, b, metav1.NewTime(now))
+	switch {
+	case errors.Is(err, errDestinationLost):
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, ReasonDestinationUnavailable, truncateMsg(err.Error()))
+	case err != nil:
+		return ctrl.Result{}, err
+	case pin == nil && r.Runtime.Publisher == nil:
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, ReasonDestinationUnavailable, "no evidence destination is selected and no legacy destination is configured")
+	}
+	run.Status.Destination = pin
 	if err := os.MkdirAll(r.staging(run), 0o700); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -748,12 +774,16 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 
 func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
+	pub, err := r.publisherFor(ctx, run)
+	if err != nil {
+		return r.retry(ctx, run, now, err)
+	}
 	pkg := filepath.Join(r.staging(run), "package")
 	d, err := publication.LoadDescriptor(pkg)
 	if err != nil {
 		// The frozen bytes are gone: never re-export a newer cluster state
 		// under this run's identity.
-		staged, rerr := r.Runtime.Publisher.Recover(ctx, ref)
+		staged, rerr := pub.Recover(ctx, ref)
 		if rerr != nil {
 			return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "frozen package lost before publication: "+err.Error())
 		}
@@ -762,7 +792,7 @@ func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.Ass
 	if d.Digest() != run.Status.DescriptorSHA256 {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "staged package does not match the frozen descriptor")
 	}
-	staged, err := r.Runtime.Publisher.Stage(ctx, publication.StageRequest{Run: ref, Dir: pkg})
+	staged, err := pub.Stage(ctx, publication.StageRequest{Run: ref, Dir: pkg})
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
@@ -774,7 +804,11 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, err.Error())
 	}
-	receipt, err := r.Runtime.Publisher.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel})
+	store, err := r.publisherFor(ctx, run)
+	if err != nil {
+		return r.retry(ctx, run, now, err)
+	}
+	receipt, err := store.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel})
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
@@ -822,9 +856,11 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 	if run.Status.Scope == nil || run.Status.Binding == nil {
 		return ctrl.Result{}, r.release(ctx, run) // never staged anything
 	}
-	if r.Runtime.Publisher == nil {
-		// Storage is not configured in this process: keep the record.
-		return ctrl.Result{}, nil
+	store, err := r.publisherFor(ctx, run)
+	if err != nil {
+		// Storage for this run is not reachable from this process: keep the
+		// record and retry later.
+		return ctrl.Result{RequeueAfter: AttemptCleanupRetry}, nil
 	}
 	if res, err := r.cleanupAttempts(ctx, run); err != nil || res.RequeueAfter > 0 {
 		return res, err
@@ -842,7 +878,7 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 		return ctrl.Result{RequeueAfter: wait}, r.checkIntegrity(ctx, run, now)
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
-	cl, err := r.Runtime.Publisher.Delete(ctx, ref)
+	cl, err := store.Delete(ctx, ref)
 	at := metav1.NewTime(now)
 	pub.Availability = v1alpha1.Availability(publication.AvailabilityExpired)
 	pub.Cleanup.Attempts++
@@ -893,7 +929,11 @@ func (r *AssessmentRunReconciler) checkIntegrity(ctx context.Context, run *v1alp
 		return nil
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
-	st, err := r.Runtime.Publisher.Inspect(ctx, ref)
+	store, err := r.publisherFor(ctx, run)
+	if err != nil {
+		return nil
+	}
+	st, err := store.Inspect(ctx, ref)
 	if err != nil {
 		log.FromContext(ctx).Info("retained package could not be inspected", "run", run.Name, "error", err.Error())
 		return nil
@@ -914,6 +954,10 @@ func (r *AssessmentRunReconciler) checkIntegrity(ctx context.Context, run *v1alp
 	return r.Client.Status().Update(ctx, run)
 }
 
+// ReasonDestinationUnavailable fails a run whose destination selection lost
+// to deletion, replacement, or readiness; it made no storage writes.
+const ReasonDestinationUnavailable = "DestinationUnavailable"
+
 // AttemptCleanupRetry is how often cleanup of a terminal run's uncommitted
 // storage attempts is retried after a failure.
 const AttemptCleanupRetry = time.Minute
@@ -922,13 +966,17 @@ const AttemptCleanupRetry = time.Minute
 // that never froze a scope never staged anything. Failures are recorded on
 // the run and retried; a restart re-lists terminal runs and resumes.
 func (r *AssessmentRunReconciler) cleanupAttempts(ctx context.Context, run *v1alpha1.AssessmentRun) (ctrl.Result, error) {
-	if r.Runtime.Publisher == nil || run.Status.Scope == nil || run.Status.Binding == nil || meta.IsStatusConditionTrue(run.Status.Conditions, v1alpha1.ConditionAttemptsCleaned) {
+	if run.Status.Scope == nil || run.Status.Binding == nil || meta.IsStatusConditionTrue(run.Status.Conditions, v1alpha1.ConditionAttemptsCleaned) {
+		return ctrl.Result{}, nil
+	}
+	store, err := r.publisherFor(ctx, run)
+	if err != nil {
 		return ctrl.Result{}, nil
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
 	cond := metav1.Condition{Type: v1alpha1.ConditionAttemptsCleaned, Status: metav1.ConditionTrue, Reason: v1alpha1.ReasonCleaned, Message: "uncommitted storage attempts removed"}
 	res := ctrl.Result{}
-	if err := r.Runtime.Publisher.CleanupAttempts(ctx, ref); err != nil {
+	if err := store.CleanupAttempts(ctx, ref); err != nil {
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, v1alpha1.ReasonCleanupPending, truncate(err.Error())
 		res.RequeueAfter = AttemptCleanupRetry
 	}

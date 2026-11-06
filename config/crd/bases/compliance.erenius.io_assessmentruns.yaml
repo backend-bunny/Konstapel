@@ -227,6 +227,57 @@ spec:
                   descriptor.
                 pattern: ^[0-9a-f]{64}$
                 type: string
+              destination:
+                description: |-
+                  destination is the evidence destination pinned when the run started.
+                  Absent for runs that use the controller's legacy file destination.
+                properties:
+                  bucket:
+                    maxLength: 63
+                    type: string
+                  endpoint:
+                    description: endpoint, bucket, region, and prefix snapshot the
+                      pinned location.
+                    maxLength: 2048
+                    type: string
+                  name:
+                    description: name of the EvidenceDestination.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
+                  pinnedAt:
+                    description: pinnedAt is when the pin was accepted.
+                    format: date-time
+                    type: string
+                  prefix:
+                    maxLength: 512
+                    type: string
+                  region:
+                    maxLength: 64
+                    type: string
+                  source:
+                    description: source is where the selection came from (Binding
+                      or Default).
+                    enum:
+                    - Binding
+                    - Default
+                    - None
+                    type: string
+                  uid:
+                    description: uid of the EvidenceDestination.
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                required:
+                - bucket
+                - endpoint
+                - name
+                - pinnedAt
+                - region
+                - source
+                - uid
+                type: object
               enforcementRevisions:
                 items:
                   maxLength: 128

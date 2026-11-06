@@ -44,7 +44,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 - [x] 3.1 Wire upload/commit/failure reconciliation into the shared run status with bounded network/retry limits; verify storage failure remains separate from assessment outcomes and terminal failure releases the binding's active run slot.
 - [x] 3.2 Add recovery after archive upload, commit-response loss, and Kubernetes receipt-update failure; verify recovery reconciles the original digest, publication time, expiry, and namespace scope instead of creating a second snapshot.
 - [x] 3.3 Implement cancellation and orphan cleanup for owned multipart uploads and uncommitted objects; verify restart can identify its attempts and never deletes unrelated objects under a shared bucket/prefix.
-- [ ] 3.4 Route publication, retries, downloads, and cleanup through protected run-start destination UID/location pins and live credential/trust references; verify default/binding switches and rotation preserve historical access, UID mismatch never redirects history, and missing old credentials remain a visible retryable problem without fallback.
+- [x] 3.4 Route publication, retries, downloads, and cleanup through protected run-start destination UID/location pins and live credential/trust references; verify default/binding switches and rotation preserve historical access, UID mismatch never redirects history, and missing old credentials remain a visible retryable problem without fallback.
 - [ ] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery, including the distinction between automatic abandoned-attempt cleanup and explicit Orphan handoff; verify the fault-injection walkthrough preserves diagnostics and never resumes cleanup for intentionally orphaned evidence.
 
 ## 4. Authorize and verify full-package downloads
@@ -74,7 +74,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 - [x] 7.1 Add the cluster-scoped compliance.erenius.io/v1alpha1 EvidenceDestination type, generated schema, status, and Retire default; verify API-server rejection of endpoint/bucket/region/prefix mutations and acceptance of valid credential/CA rotation during normal operation and retirement.
 - [x] 7.2 Add platform-only destination management and protected status/credential/trust access; verify application identities cannot change destinations or read credential material and references outside the controller namespace are rejected.
 - [x] 7.3 Coordinate name/UID references for one central default and an optional spec.assessment.destinationRef with the shared-contract owner; verify AssessmentRequests inherit selection, recreated names fail UID checks, invalid overrides never fall back, and selection conditions remain separate from enforcement health.
-- [ ] 7.4 Implement durable pin admission before run storage writes and the destination finalizer before pin acceptance; verify deletion races, stale caches, concurrent replicas, and interrupted run updates cannot lose an accepted obligation or admit work after retirement.
+- [x] 7.4 Implement durable pin admission before run storage writes and the destination finalizer before pin acceptance; verify deletion races, stale caches, concurrent replicas, and interrupted run updates cannot lose an accepted obligation or admit work after retirement.
 
 ## 8. Retire destinations and support audited orphan handoff
 

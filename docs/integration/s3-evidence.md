@@ -74,9 +74,40 @@ other destination. It does not touch `Resolved`/`EngineReady`, and changing
 `destinationRef` is a reporting-only edit, so it never changes the enforcement
 epoch or engine policy identities.
 
-The controller still reads the destination file described below. Routing a run's
-publication through its selection (run-start pins), retiring destinations, and
-migrating the file follow (add-s3-evidence-publishing 7.4 and groups 8–9).
+**Run pins.** When a run starts, it pins its binding's selected destination
+before anything reaches storage:
+
+1. **Intent.** The run is labelled `compliance.erenius.io/destination-uid`
+   with the destination's UID. The label is never changed afterwards.
+2. **Confirmation.** The destination is re-read without the cache. It must
+   have the same UID and must not be retiring. The finalizer
+   `compliance.erenius.io/destination` is added with an update conditioned on
+   the destination's resourceVersion, so a deletion racing the confirmation
+   conflicts and the start retries.
+3. **Recording.** `status.destination` (name, UID, endpoint, bucket, region,
+   prefix, source, `pinnedAt`) is written with the run's transition to
+   `Collecting`.
+
+A selection that loses to deletion, replacement or readiness fails the run as
+`DestinationUnavailable` with no storage writes. A start interrupted after step
+1 keeps the labelled destination when it resumes, whatever the selection says
+by then.
+
+Staging, publication, retries, recovery, integrity checks, expiry deletion,
+attempt cleanup and downloads all use the pinned destination. Its publisher is
+built from that destination's current credentials and CA, and rebuilt when
+its generation changes, so rotation applies to historical packages. A pin is
+served only by the destination with its UID and recorded location. A recreated
+destination with the same name never serves it. Missing credentials are a
+visible, retryable failure of each operation, never a fallback.
+
+Scheduling follows the selection. While a binding's selected destination is
+unusable, no runs start and `status.assessment.current` names the reason.
+Bindings with no selection use the legacy destination file below. The file is
+now optional for `konstapel controller` and `konstapel download-server`.
+Releasing the finalizer when retirement completes, and migrating the file,
+follow (groups 8–9). Until then, deleting a destination that has pins leaves
+it terminating.
 
 ## Destination configuration
 

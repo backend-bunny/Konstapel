@@ -41,7 +41,6 @@ rules:
   - compliancebindings
   - complianceexceptions
   - complianceprofiles
-  - evidencedestinations
   verbs:
   - get
   - list
@@ -70,6 +69,22 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - compliance.erenius.io
+  resources:
+  - evidencedestinations
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - compliance.erenius.io
+  resources:
+  - evidencedestinations/finalizers
+  verbs:
+  - update
 - apiGroups:
   - policies.kyverno.io
   resources:
