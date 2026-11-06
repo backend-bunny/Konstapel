@@ -47,9 +47,36 @@ spec:
   `Retiring` conditions, outstanding run and package counts, runs whose
   expiry is still unknown, the latest retained expiry, and cleanup blockers.
 
-The controller still reads the destination file described below. Selecting a
-destination by reference, pinning it per run, retiring it, and migrating the
-file follow (add-s3-evidence-publishing groups 7–9).
+**Readiness.** The controller probes each destination's backend with its
+current credentials and CA trust when the spec changes and every 5 minutes. It
+records the `Ready` condition, with the probe's problem as the message, for the
+observed generation.
+
+**Selection.** A binding selects its destination with
+`spec.assessment.destinationRef: {name, uid}`. Without one it inherits the
+central default, set in the ConfigMap
+`konstapel-system/konstapel-evidence-destination` (keys
+`defaultDestinationName` and `defaultDestinationUID`). Only platform
+administrators should be able to write that ConfigMap. AssessmentRequests have
+no storage selector and always inherit their binding.
+
+The resolved selection appears in `status.assessment.destination`:
+
+| Field | Meaning |
+| --- | --- |
+| `source` | `Binding`, `Default`, or `None` |
+| `ref` | The selected destination |
+| `ready` | Whether the selection can be used |
+| `reason` | `Selected`, `NoDefaultDestination`, `InvalidDefaultDestination`, `DestinationNotFound`, `DestinationUIDMismatch` (the name now refers to a recreated destination), `DestinationRetiring`, or `DestinationNotReady` |
+
+An unusable selection is reported and never replaced by the default or any
+other destination. It does not touch `Resolved`/`EngineReady`, and changing
+`destinationRef` is a reporting-only edit, so it never changes the enforcement
+epoch or engine policy identities.
+
+The controller still reads the destination file described below. Routing a run's
+publication through its selection (run-start pins), retiring destinations, and
+migrating the file follow (add-s3-evidence-publishing 7.4 and groups 8–9).
 
 ## Destination configuration
 

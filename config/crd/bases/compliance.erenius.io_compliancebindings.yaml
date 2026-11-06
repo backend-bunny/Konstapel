@@ -79,6 +79,27 @@ spec:
                     - message: must be a positive duration
                       rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
                         || duration(self) > duration(''0s'')'
+                  destinationRef:
+                    description: |-
+                      destinationRef overrides the central default evidence destination for
+                      this binding by name and UID. Requests inherit it. An unusable
+                      selection fails visibly and never falls back to the default.
+                    properties:
+                      name:
+                        description: name of the EvidenceDestination.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        description: uid of the EvidenceDestination.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
                   interval:
                     default: 24h
                     description: interval between scheduled snapshots, measured from
@@ -362,6 +383,57 @@ spec:
                     - evaluatedAt
                     - evidence
                     - outcomes
+                    type: object
+                  destination:
+                    description: destination is the resolved evidence destination
+                      selection.
+                    properties:
+                      message:
+                        description: message explains the reason.
+                        maxLength: 1024
+                        type: string
+                      ready:
+                        description: |-
+                          ready is true only when the referenced destination exists with the
+                          same UID, is not retiring, and its backend is Ready.
+                        type: boolean
+                      reason:
+                        description: |-
+                          reason is Selected or why the selection cannot be used. There is never
+                          a fallback to another destination.
+                        maxLength: 64
+                        type: string
+                      ref:
+                        description: ref is the selected destination.
+                        properties:
+                          name:
+                            description: name of the EvidenceDestination.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                          uid:
+                            description: uid of the EvidenceDestination.
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        - uid
+                        type: object
+                      source:
+                        description: |-
+                          source is Binding (spec.assessment.destinationRef), Default (the central
+                          default), or None (no selection configured).
+                        enum:
+                        - Binding
+                        - Default
+                        - None
+                        type: string
+                    required:
+                    - ready
+                    - reason
+                    - source
                     type: object
                   latestRun:
                     description: latestRun is the newest run started for this binding.

@@ -67,6 +67,9 @@ type AssessmentRuntime struct {
 	Ready func(context.Context) error
 	// ReadyInterval caches a Ready answer (default 5m).
 	ReadyInterval time.Duration
+	// ControllerNamespace holds credentials, CA trust, and the default
+	// destination ConfigMap (default konstapel-system).
+	ControllerNamespace string
 	// IntegrityInterval is how often a retained package's storage is
 	// re-checked before expiry (default 24h). Losses or corruption mark it
 	// Unavailable without rewriting its assessment result.

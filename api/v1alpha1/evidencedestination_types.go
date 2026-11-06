@@ -199,6 +199,69 @@ type EvidenceDestinationStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// DestinationReference identifies an EvidenceDestination by name and UID. A
+// destination recreated with the same name has a new UID and is never
+// resolved through an old reference.
+type DestinationReference struct {
+	// name of the EvidenceDestination.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// uid of the EvidenceDestination.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	UID string `json:"uid"`
+}
+
+// DestinationSource says where a binding's destination selection came from.
+// +kubebuilder:validation:Enum=Binding;Default;None
+type DestinationSource string
+
+const (
+	DestinationFromBinding DestinationSource = "Binding"
+	DestinationFromDefault DestinationSource = "Default"
+	DestinationNone        DestinationSource = "None"
+)
+
+// Destination selection reasons on a binding's status.assessment.destination.
+const (
+	ReasonDestinationSelected    = "Selected"
+	ReasonNoDefaultDestination   = "NoDefaultDestination"
+	ReasonInvalidDefault         = "InvalidDefaultDestination"
+	ReasonDestinationNotFound    = "DestinationNotFound"
+	ReasonDestinationUIDMismatch = "DestinationUIDMismatch"
+	ReasonDestinationRetiring    = "DestinationRetiring"
+	ReasonDestinationNotReady    = "DestinationNotReady"
+)
+
+// DestinationSelection is the binding's resolved evidence destination. It is
+// evidence readiness only and never affects enforcement (EngineReady).
+type DestinationSelection struct {
+	// source is Binding (spec.assessment.destinationRef), Default (the central
+	// default), or None (no selection configured).
+	// +required
+	Source DestinationSource `json:"source"`
+	// ref is the selected destination.
+	// +optional
+	Ref *DestinationReference `json:"ref,omitempty"`
+	// ready is true only when the referenced destination exists with the
+	// same UID, is not retiring, and its backend is Ready.
+	// +required
+	Ready bool `json:"ready"`
+	// reason is Selected or why the selection cannot be used. There is never
+	// a fallback to another destination.
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	Reason string `json:"reason"`
+	// message explains the reason.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
+}
+
 // EvidenceDestination is a cluster-scoped, platform-managed evidence storage
 // location. Runs pin it by name and UID when they start; later edits to the
 // default or a binding's selection affect only subsequent runs.

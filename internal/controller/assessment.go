@@ -188,7 +188,11 @@ func (r *AssessmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if limit != "" {
 		current.Limitations = boundLimitations(append([]string{limit}, current.Limitations...))
 	}
-	if err := r.apply(ctx, b, &v1alpha1.BindingAssessmentStatus{Current: current, Schedule: sched, LatestRun: latest}); err != nil {
+	// Destination selection is evidence readiness only; it never touches
+	// enforcement status. It is not yet used to route publication (run pins
+	// do that, add-s3-evidence-publishing 7.4).
+	dest := selectDestination(ctx, r.reader(), r.Runtime.ControllerNamespace, b)
+	if err := r.apply(ctx, b, &v1alpha1.BindingAssessmentStatus{Current: current, Schedule: sched, LatestRun: latest, Destination: dest}); err != nil {
 		return ctrl.Result{}, err
 	}
 	// Re-evaluate when the oldest attributable evidence becomes stale (without
@@ -541,7 +545,8 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient())).
 		Watches(&v1alpha1.AssessmentRun{}, bindingForRun()).
-		Watches(&v1alpha1.AssessmentRequest{}, bindingForRequest())
+		Watches(&v1alpha1.AssessmentRequest{}, bindingForRequest()).
+		Watches(&v1alpha1.EvidenceDestination{}, allBindings(mgr.GetClient()))
 	for _, res := range sortedKeys(workloadKinds) {
 		obj, _ := workloadKinds[res]()
 		b = b.Watches(obj, allBindings(mgr.GetClient()), builder.WithPredicates(workloadStateChanged()))
@@ -557,6 +562,11 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Watches(&v1alpha1.ComplianceBinding{}, runsForBinding(mgr.GetClient())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: rt.Workers}).
 		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt, Instance: string(uuid.NewUUID())}); err != nil {
+		return err
+	}
+	if err := builder.ControllerManagedBy(mgr).Named("evidencedestination").
+		For(&v1alpha1.EvidenceDestination{}).
+		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace}); err != nil {
 		return err
 	}
 	// Engine policies and reports are watched once the engine API is served.

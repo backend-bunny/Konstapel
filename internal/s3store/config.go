@@ -53,6 +53,9 @@ type Destination struct {
 	CredentialSecret *SecretRef `json:"credentialSecret,omitempty"`
 	// CABundle is a PEM file with additional trusted roots.
 	CABundle string `json:"caBundle,omitempty"`
+	// CAPEM holds extra trusted PEM roots read from the destination's trust
+	// reference (EvidenceDestination); it is never serialized.
+	CAPEM []byte `json:"-"`
 	// DevelopmentFixture permits a plain-HTTP endpoint for an explicitly
 	// isolated local test service. TLS verification is never disabled.
 	DevelopmentFixture bool `json:"developmentFixture,omitempty"`

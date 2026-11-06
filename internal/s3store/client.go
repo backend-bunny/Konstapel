@@ -53,7 +53,7 @@ func NewClientWithCredentials(ctx context.Context, d Destination, provider aws.C
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}
-	httpClient, err := tlsClient(d.CABundle)
+	httpClient, err := tlsClient(d.CABundle, d.CAPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func NewClientWithCredentials(ctx context.Context, d Destination, provider aws.C
 
 // tlsClient trusts the system roots plus an optional PEM bundle. Certificate
 // verification is always on.
-func tlsClient(caBundle string) (*http.Client, error) {
+func tlsClient(caBundle string, caPEM []byte) (*http.Client, error) {
 	pool, err := x509.SystemCertPool()
 	if err != nil || pool == nil {
 		pool = x509.NewCertPool()
@@ -96,6 +96,9 @@ func tlsClient(caBundle string) (*http.Client, error) {
 		if !pool.AppendCertsFromPEM(pem) {
 			return nil, fmt.Errorf("caBundle %s contains no PEM certificates", caBundle)
 		}
+	}
+	if len(caPEM) > 0 && !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("CA trust contains no PEM certificates")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
