@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -554,7 +555,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		For(&v1alpha1.AssessmentRun{}).
 		Watches(&v1alpha1.ComplianceBinding{}, runsForBinding(mgr.GetClient())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: rt.Workers}).
-		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt}); err != nil {
+		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt, Instance: string(uuid.NewUUID())}); err != nil {
 		return err
 	}
 	// Engine policies and reports are watched once the engine API is served.

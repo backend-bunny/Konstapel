@@ -103,6 +103,9 @@ type CaptureV2 struct {
 	// the packaged content they let a verifier re-render every policy.
 	Contributions  []targeting.Contribution `json:"contributions,omitempty"`
 	EnginePolicies []assessment.Object      `json:"enginePolicies,omitempty"`
+	// Observer identifies the controller process collecting this capture. A
+	// different observer resuming it records a watch discontinuity.
+	Observer string `json:"observer,omitempty"`
 	// Projection is set when the capture was projected to one namespace.
 	Projection *Projection `json:"projection,omitempty"`
 }
