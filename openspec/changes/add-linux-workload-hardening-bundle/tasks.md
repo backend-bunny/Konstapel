@@ -36,7 +36,7 @@ the other agents' CRDs or task lists.
 - [x] 3.2 Author per-check Component Definition mappings and rationales for the design's AC-6/CM-6/CM-7 statements; verify each statement resolves in the pinned catalog and its control belongs to Moderate, with a failing invalid-reference fixture.
 - [x] 3.3 Validate authored/generated OSCAL at its supported declared schema while preserving official NIST inputs; verify the OSCAL 1.2.3 source files remain unchanged and no older-model round trip is used to establish membership.
 - [x] 3.4 Add saved-report conversion fixtures for distinct checks and repeated binding instances sharing controls; verify independent check results remain identifiable without multiplying control satisfaction or asserting full Moderate coverage.
-- [ ] 3.5 Document packaging, mappings, partial coverage, and artifact inspection commands; verify a saved output package resolves all selected content and evidence references.
+- [x] 3.5 Document packaging, mappings, partial coverage, and artifact inspection commands; verify a saved output package resolves all selected content and evidence references.
 
 ## 4. Integrate targeting and prove live policy behavior
 

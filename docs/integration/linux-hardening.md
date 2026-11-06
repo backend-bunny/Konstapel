@@ -335,6 +335,46 @@ names more of a control than was assessed. `ac-6_smt` is itself the mapped
 statement and is unchanged. The results also link every component definition
 that maps an assessed check.
 
+## Packaging and inspecting a saved assessment (task 3.5)
+
+An assessment package of the bundle is self-contained. It holds:
+- `descriptor.json`, `capture.json` and `evaluation.json`;
+- the OSCAL plan, results and SSP;
+- the verified `content/` tree: the vendored sources and variants, both
+  component definitions, the NIST catalog and profile, and the schemas.
+
+Every reference in the OSCAL documents is either a fragment (`#uuid`) that
+resolves inside the package, or a relative path to a file in the package.
+The results link every component definition that maps an assessed check, so
+for the bundle both `content/component-definition.json` and
+`content/linux-hardening/component-definition.json` are linked. Every
+engine policy in the capture re-renders from the packaged, digest-pinned
+source (`collector.VerifyPackage`). A package therefore stays interpretable
+after it is copied elsewhere, with no cluster or repository access.
+
+Inspect a saved package with these commands. `$PKG` is the package
+directory, and `jq` is in the Devbox environment:
+
+```sh
+# Package kind, evidence completeness and outcome counts
+jq '{packageKind, evidence, outcomes}' "$PKG/descriptor.json"
+# One observation per logical check
+jq -r '.["assessment-results"].results[0].observations[].title' "$PKG/assessment-results.json"
+# Control findings: statement and state (absent when nothing failed)
+jq -r '.["assessment-results"].results[0].findings[]? | .target["target-id"] + " " + .target.status.state' "$PKG/assessment-results.json"
+# Each check's subjects with binding, engine policy and result
+jq -r '.["assessment-results"].results[0].observations[] | .title as $c | .subjects[] | [$c, (.props[] | select(.name == "binding-uid" or .name == "engine-policy" or .name == "result") | .value)] | @tsv' "$PKG/assessment-results.json"
+# The authored mappings the results rely on
+jq -r '.["assessment-results"].metadata.links[] | select(.text == "Authored partial mapping") | .href' "$PKG/assessment-results.json"
+# Mapped controls in the context SSP
+jq -r '.["system-security-plan"]["control-implementation"]["implemented-requirements"][]["control-id"]' "$PKG/system-security-plan.json"
+```
+
+`internal/hardening/export_test.go` exports a bundle capture, copies the
+package to a new location and checks that location. All references must
+resolve and the package must re-verify. The test also runs every command
+above against the copy and requires each to succeed with output.
+
 ## Research results versus implementation acceptance
 
 The research and this run show that the **unmodified upstream** policies

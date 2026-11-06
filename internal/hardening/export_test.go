@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -294,5 +295,105 @@ func TestAllPassingBundleExportMakesNoControlClaim(t *testing.T) {
 	r := assessment.Map(readOSCAL(t, filepath.Join(out, "assessment-results.json"), "assessment-results")["results"].([]any)[0])
 	if findings, ok := r["findings"]; ok {
 		t.Fatalf("all-passing bundle evidence produced control findings: %v", findings)
+	}
+}
+
+// Task 3.5: a saved package, copied away from where it was written, resolves
+// every content and evidence reference, re-verifies from its packaged
+// content, and the documented inspection commands work on it.
+func TestSavedBundlePackageResolvesAllReferences(t *testing.T) {
+	out, _ := exportBundle(t, bundleCapture(t))
+	saved := filepath.Join(t.TempDir(), "saved")
+	if err := os.CopyFS(saved, os.DirFS(out)); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.VerifyPackage(saved); err != nil {
+		t.Fatalf("saved package does not re-verify: %v", err)
+	}
+	ids := map[string]bool{}
+	var hrefs []string
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, y := range x {
+				switch k {
+				case "uuid":
+					ids[assessment.Str(y)] = true
+				case "href":
+					hrefs = append(hrefs, assessment.Str(y))
+				}
+				walk(y)
+			}
+		case []any:
+			for _, y := range x {
+				walk(y)
+			}
+		}
+	}
+	for _, doc := range []string{"assessment-plan.json", "assessment-results.json", "system-security-plan.json"} {
+		var d any
+		if err := assessment.Read(filepath.Join(saved, doc), &d); err != nil {
+			t.Fatal(err)
+		}
+		walk(d)
+	}
+	if len(hrefs) == 0 {
+		t.Fatal("no references found")
+	}
+	linked := map[string]bool{}
+	for _, h := range hrefs {
+		switch {
+		case strings.HasPrefix(h, "#"):
+			if !ids[strings.TrimPrefix(h, "#")] {
+				t.Errorf("fragment %s does not resolve in the package", h)
+			}
+		case strings.Contains(h, "://") || filepath.IsAbs(h) || strings.HasPrefix(filepath.Clean(h), ".."):
+			t.Errorf("reference %q leaves the package", h)
+		default:
+			if _, err := os.Stat(filepath.Join(saved, h)); err != nil {
+				t.Errorf("reference %q is not in the package: %v", h, err)
+			}
+			linked[filepath.Clean(h)] = true
+		}
+	}
+	for _, def := range assessment.ComponentDefinitions {
+		if !linked[def] {
+			t.Errorf("the package does not reference the mapping %s", def)
+		}
+	}
+	for _, f := range []string{"capture.json", "evaluation.json"} {
+		if !linked[f] {
+			t.Errorf("the results do not reference the evidence %s", f)
+		}
+	}
+
+	// The documented inspection commands run against the saved package.
+	raw, err := os.ReadFile(filepath.Join(root, "docs/integration/linux-hardening.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(raw), "Inspect a saved package with these commands.")
+	_, rest, ok2 := strings.Cut(section, "```sh\n")
+	block, _, ok3 := strings.Cut(rest, "```")
+	if !ok || !ok2 || !ok3 {
+		t.Fatal("inspection commands not found in docs/integration/linux-hardening.md")
+	}
+	ran := 0
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		cmd := exec.Command("sh", "-c", line)
+		cmd.Env = append(os.Environ(), "PKG="+saved)
+		b, err := cmd.CombinedOutput()
+		if err != nil || len(strings.TrimSpace(string(b))) == 0 {
+			t.Errorf("documented command failed or printed nothing: %s\n%v\n%s", line, err, b)
+		}
+		ran++
+	}
+	if ran < 5 {
+		t.Errorf("only %d documented commands ran", ran)
 	}
 }
