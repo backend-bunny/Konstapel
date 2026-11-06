@@ -188,6 +188,19 @@ func TestBundleExportKeepsChecksDistinctWithoutMultiplyingControls(t *testing.T)
 	out, _ := exportBundle(t, bundleCapture(t))
 	results := readOSCAL(t, filepath.Join(out, "assessment-results.json"), "assessment-results")
 	r := assessment.Map(results["results"].([]any)[0])
+	// The results link every mapping definition the bundle's checks rely on.
+	mappingLinks := map[string]bool{}
+	links, _ := assessment.At(results, "metadata", "links").([]any)
+	for _, l := range links {
+		if lm := assessment.Map(l); assessment.Str(lm["text"]) == "Authored partial mapping" {
+			mappingLinks[assessment.Str(lm["href"])] = true
+		}
+	}
+	for _, want := range []string{"content/component-definition.json", "content/linux-hardening/component-definition.json"} {
+		if !mappingLinks[want] {
+			t.Errorf("results do not link mapping %s (links %v)", want, mappingLinks)
+		}
+	}
 
 	perPolicy := map[string]int{}
 	bindingsPerPolicy := map[string]map[string]bool{}
@@ -241,7 +254,7 @@ func TestBundleExportKeepsChecksDistinctWithoutMultiplyingControls(t *testing.T)
 			}
 		}
 	}
-	for _, want := range []string{"ac-6_smt", "cm-6_smt", "cm-7_smt"} {
+	for _, want := range []string{"ac-6_smt", "cm-6_smt.b", "cm-7_smt.b"} {
 		if !targets[want] {
 			t.Errorf("no finding for %s (targets %v)", want, targets)
 		}

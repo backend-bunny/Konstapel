@@ -178,7 +178,11 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 	ar.Metadata.Links = &[]oscal.Link{
 		{Href: "capture.json", Rel: "related", Text: "Frozen scope, expected inventory, and raw reports"},
 		{Href: "evaluation.json", Rel: "related", Text: "Per-observation evidence states and reasons"},
-		{Href: "content/component-definition.json", Rel: "related", Text: "Authored partial mapping"},
+	}
+	for _, def := range cov.definitions {
+		// Each definition that maps an assessed check is referenced, so the
+		// package resolves every mapping it relies on.
+		*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: def, Rel: "related", Text: "Authored partial mapping"})
 	}
 	for i := range ar.Results {
 		r := &ar.Results[i]
@@ -190,6 +194,7 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 		if !attributableFail {
 			r.Findings = nil
 		}
+		retargetFindings(r.Findings, cov)
 		if r.LocalDefinitions != nil && r.LocalDefinitions.InventoryItems != nil {
 			for j := range *r.LocalDefinitions.InventoryItems {
 				if item := &(*r.LocalDefinitions.InventoryItems)[j]; item.Props != nil && len(*item.Props) == 0 {
@@ -378,6 +383,9 @@ type coverage struct {
 	controls map[string]map[string][]string
 	// rules are the assessed checks the plan is scoped to.
 	rules []string
+	// definitions are the component definitions (package-relative) that map
+	// the assessed checks, sorted.
+	definitions []string
 }
 
 // coverageFor collects the mappings of the logical policies in the capture's
@@ -415,10 +423,18 @@ func coverageFor(root string, c CaptureV2) (coverage, error) {
 		parts = append(parts, fmt.Sprintf("%s (%s): %s", p, strings.Join(ids, ", "), ms[0].Rationale))
 	}
 	cov.rules = slices.Sorted(maps.Keys(policies))
+	defs := map[string]bool{}
+	for _, p := range cov.rules {
+		for _, m := range all[p] {
+			defs[m.Definition] = true
+		}
+	}
+	cov.definitions = slices.Sorted(maps.Keys(defs))
 	if len(parts) == 0 {
 		// Nothing in scope: plan the first-loop check so the package still
 		// names the mapping it would have assessed.
 		cov.rules = []string{assessment.PolicyName}
+		cov.definitions = []string{assessment.ComponentDefinitions[0]}
 		cov.summary = assessment.Coverage
 		cov.controls["ac-6"] = map[string][]string{"ac-6_smt": {assessment.Coverage}}
 		return cov, nil
@@ -442,4 +458,23 @@ func (c coverage) requirements(id func() string) []any {
 		out = append(out, assessment.Object{"uuid": id(), "control-id": ctl, "statements": stmts, "remarks": strings.Join(remarks, " ")})
 	}
 	return out
+}
+
+// retargetFindings narrows C2P's findings, which target the whole control
+// statement (<control>_smt), to the single statement part a mapping claims
+// (for example cm-6_smt.b), so a finding never names more of a control than
+// was assessed. Controls mapped to several statements keep C2P's target.
+func retargetFindings(findings *[]oscal.Finding, cov coverage) {
+	if findings == nil {
+		return
+	}
+	for j := range *findings {
+		tgt := &(*findings)[j].Target
+		ctl, ok := strings.CutSuffix(tgt.TargetId, "_smt")
+		if stmts := cov.controls[ctl]; ok && len(stmts) == 1 {
+			for st := range stmts {
+				tgt.TargetId = st
+			}
+		}
+	}
 }
