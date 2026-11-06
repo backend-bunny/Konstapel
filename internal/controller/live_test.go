@@ -62,7 +62,8 @@ func newLive(t *testing.T) *live {
 	l := &live{t: t, ctx: ctx, cfg: cfg, c: c, out: out}
 	t.Cleanup(func() {
 		b, _ := json.MarshalIndent(l.log, "", "  ")
-		_ = os.WriteFile(filepath.Join(out, "manager-live.json"), b, 0o644)
+		// One evidence file per test, so a later test never overwrites it.
+		_ = os.WriteFile(filepath.Join(out, t.Name()+".json"), b, 0o644)
 	})
 	return l
 }
