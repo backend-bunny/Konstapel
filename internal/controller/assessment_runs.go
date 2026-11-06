@@ -372,6 +372,17 @@ type AssessmentRunReconciler struct {
 	Assess  *AssessmentReconciler
 	Runtime AssessmentRuntime
 	Now     func() time.Time
+	// Instance identifies this controller process. A run resumed by another
+	// instance (restart or leader change) records a watch discontinuity.
+	Instance string
+}
+
+// closedRun is a run's frozen closure: the capture as closed and its
+// evaluation. It is written before export, so a retry after a crash
+// re-exports the same snapshot instead of collecting newer observations.
+type closedRun struct {
+	Capture    collector.CaptureV2  `json:"capture"`
+	Evaluation collector.Evaluation `json:"evaluation"`
 }
 
 func (r *AssessmentRunReconciler) now() time.Time {
@@ -448,6 +459,7 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 		return ctrl.Result{}, err
 	}
 	c.Reports = []assessment.Object{}
+	c.Observer = r.Instance
 	if nsUID := runNamespaceUID(run); run.Spec.Scope == v1alpha1.RunScopeNamespace {
 		// Recheck membership at execution and freeze only this namespace.
 		if c, err = collector.Project(c, nsUID); errors.Is(err, collector.ErrNotInScope) {
@@ -534,6 +546,20 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		}
 		return ctrl.Result{}, err
 	}
+	var frozen closedRun
+	switch err := assessment.Read(filepath.Join(r.staging(run), "closed.json"), &frozen); {
+	case err == nil:
+		// Closed before a crash: finish the same frozen snapshot.
+		return r.finish(ctx, run, b, frozen)
+	case !errors.Is(err, os.ErrNotExist):
+		return ctrl.Result{}, err
+	}
+	if c.Observer != r.Instance {
+		// Another process collected until now; continuity across the gap
+		// cannot be proven, so earlier evaluations no longer count.
+		collector.NewTracker(&c).Discontinuity(now, "controller restart or leader change; earlier observations are not continuous")
+		c.Observer = r.Instance
+	}
 	cur, _, maxAge, err := r.Assess.snapshot(ctx, b, now)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -584,8 +610,20 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		}
 		return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
 	}
-	// Close the bounded window and freeze the package bytes.
-	c = trial
+	// Close the bounded window: freeze the capture and its evaluation first.
+	frozen = closedRun{Capture: trial, Evaluation: ev}
+	if err := assessment.Write(filepath.Join(r.staging(run), "closed.json"), frozen); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.finish(ctx, run, b, frozen)
+}
+
+// finish exports a frozen closure and records it. Export is repeated from
+// the same frozen snapshot if a crash interrupted it; once the descriptor
+// digest is recorded, publication only ever uses those package bytes.
+func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, frozen closedRun) (ctrl.Result, error) {
+	c, ev := frozen.Capture, frozen.Evaluation
+	now := c.Window.Closed
 	pkg := filepath.Join(r.staging(run), "package")
 	if err := os.RemoveAll(pkg); err != nil {
 		return ctrl.Result{}, err

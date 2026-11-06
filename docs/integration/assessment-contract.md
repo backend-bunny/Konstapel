@@ -344,6 +344,36 @@ Failure reasons:
 - `RequestNotFound`: the request was deleted or recreated before the run
   started.
 
+**Recovery and frozen snapshots.** A run's staging directory holds:
+
+- `capture.json`: the frozen scope plus the observations so far;
+- `closed.json`: written at closure, before export, holding the closed
+  capture and its evaluation;
+- `package/`: the exported package.
+
+Recovery follows from these:
+
+- **Restart during collection.** The run resumes the same frozen capture:
+  window, scope, and expected inventory are unchanged. Each capture records the
+  controller instance observing it. A different instance (restart or leader
+  change) records a `WatchDiscontinuity`, so evaluations from before the gap no
+  longer count as current evidence.
+- **Crash after closure.** If export or the status update did not complete, the
+  retry exports the same `closed.json` snapshot, with the same closing time and
+  evaluation. It never collects newer observations under the run's identity.
+- **After the descriptor digest is recorded.** Publication uses only package
+  bytes with that digest. A changed staged package fails the run as
+  `CaptureLost`. If the local package is gone, the publisher's durable staging
+  is recovered (`Publisher.Recover`). If that is gone too, the run fails as
+  `CaptureLost`, with export state `CaptureLost`.
+- **Lost responses.** Stage and publish are idempotent per run, so a lost
+  response converges on the original commit receipt.
+
+`AssessmentRuntime.StagingDir` must be on a persistent volume for runs to
+survive a controller restart. On ephemeral storage, a restart turns in-flight
+runs into explicit `CaptureLost` failures, and a later run assesses current
+state.
+
 **Team requests.** A team creates an `AssessmentRequest` in its namespace:
 
 1. The controller resolves the binding UID and namespace UID into the
