@@ -5,6 +5,32 @@ Status: **not enabled.** This page tracks the work under the
 stays disabled for Konstapel until the engine expiry gate below passes (design
 §5).
 
+## ComplianceException API
+
+`ComplianceException` (`compliance.erenius.io/v1alpha1`, namespaced, short
+name `cexc`) records one acceptance of risk for one logical policy in its own
+namespace. The CRD itself enforces these rules
+(`api/v1alpha1/complianceexception_types.go`):
+
+| Field | Rule |
+| --- | --- |
+| `spec.policy` | Logical policy name, as in `ComplianceProfile` `spec.policies[].name`. Immutable. |
+| `spec.workloadSelector` | Required standard label selector. Missing or `null` is rejected. `{}` selects every applicable workload in the namespace. Immutable. |
+| `spec.reason` | Required. Blank or whitespace-only values are rejected. |
+| `spec.expiresAt` | Required RFC 3339 time. |
+| `spec.acceptanceRevision` | `1` at creation. A renewal increments it by exactly one. |
+
+`reason` and `expiresAt` can change only together with a renewal (the
+revision +1). Metadata edits do not renew, and a revision never skips or goes
+back. A selector has no namespace field, so scope cannot reach another
+namespace. Widening the scope means creating a new resource.
+
+The API does not yet check time or eligibility: future expiry, maximum
+lifetime, `Forbidden` contributions, authenticated attribution, and dry-run
+handling belong to admission (tasks 2.2 and 2.3). Status is controller-only
+(task 2.4), and revocation arrives with the withdrawal lifecycle (group 4).
+Until then the resource has no effect: Konstapel grants nothing for it.
+
 ## Lifecycle fixture matrix
 
 [`testdata/exceptions/lifecycle-matrix.yaml`](../../testdata/exceptions/lifecycle-matrix.yaml)
