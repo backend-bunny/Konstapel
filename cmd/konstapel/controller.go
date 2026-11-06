@@ -28,6 +28,8 @@ func runController(args []string) error {
 	leader := fs.Bool("leader-elect", true, "use a Lease so only one replica reconciles")
 	evidence := fs.String("evidence-destination", "", "S3 evidence destination YAML file; empty disables scheduled snapshots")
 	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
+	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
+	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
@@ -54,6 +56,8 @@ func runController(args []string) error {
 		ProbeAddr:               *probes,
 		LeaderElection:          *leader,
 		LeaderElectionNamespace: *leaderNS,
+		WebhookCertDir:          *webhookCerts,
+		WebhookPort:             *webhookPort,
 	})
 	if err != nil {
 		return err

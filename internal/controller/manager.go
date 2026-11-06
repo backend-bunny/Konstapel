@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -58,6 +60,11 @@ type Options struct {
 	// EnginePoll is how often discovery is retried until the engine API is
 	// served, and how long an availability answer is cached.
 	EnginePoll time.Duration
+	// WebhookCertDir holds tls.crt and tls.key for the exception admission
+	// webhooks. Empty serves no webhooks and starts no webhook server.
+	WebhookCertDir string
+	// WebhookPort is the webhook server's port; 0 means 9443.
+	WebhookPort int
 }
 
 // Scheme returns the scheme the manager uses.
@@ -75,7 +82,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if opts.EnginePoll == 0 {
 		opts.EnginePoll = 15 * time.Second
 	}
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+	mopts := ctrl.Options{
 		Scheme:                  Scheme(),
 		Metrics:                 metricsserver.Options{BindAddress: opts.MetricsAddr},
 		HealthProbeBindAddress:  opts.ProbeAddr,
@@ -83,7 +90,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		LeaderElectionID:        LeaderElectionID,
 		LeaderElectionNamespace: opts.LeaderElectionNamespace,
 		Controller:              config.Controller{SkipNameValidation: &opts.SkipControllerNameValidation},
-	})
+	}
+	if opts.WebhookCertDir != "" {
+		mopts.WebhookServer = webhook.NewServer(webhook.Options{Port: opts.WebhookPort, CertDir: opts.WebhookCertDir, CertName: "tls.crt", KeyName: "tls.key"})
+	}
+	mgr, err := ctrl.NewManager(cfg, mopts)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +141,12 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}
 	if err := setupAssessments(mgr, opts.Content, engine, br.Cluster, opts.EnginePoll); err != nil {
 		return nil, err
+	}
+	if opts.WebhookCertDir != "" {
+		// Admission runs on every replica; the server needs no leader. It
+		// reads through the API reader so acceptance sees current configuration.
+		m, v := exception.NewHandlers(mgr.GetScheme(), mgr.GetAPIReader(), opts.Content, br.Cluster)
+		exception.Register(mgr.GetWebhookServer(), m, v)
 	}
 	return mgr, nil
 }

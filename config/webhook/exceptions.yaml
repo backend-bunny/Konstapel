@@ -1,0 +1,44 @@
+# ComplianceException acceptance webhooks (add-self-service-policy-exceptions
+# task 2.2). The Konstapel controller serves both on every replica when started
+# with --webhook-cert-dir. The deployment supplies the Service and injects
+# clientConfig.caBundle (cert-manager or an operator-managed CA; see
+# add-helm-oci-distribution). Both fail closed: without the webhook no
+# acceptance can be recorded.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: konstapel-exception-acceptance
+webhooks:
+  - name: record.acceptance.compliance.erenius.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    reinvocationPolicy: Never
+    timeoutSeconds: 10
+    clientConfig:
+      service: {name: konstapel-webhook, namespace: konstapel-system, path: /exceptions/mutate, port: 443}
+    rules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [complianceexceptions]
+        scope: Namespaced
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: konstapel-exception-acceptance
+webhooks:
+  - name: verify.acceptance.compliance.erenius.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    timeoutSeconds: 10
+    clientConfig:
+      service: {name: konstapel-webhook, namespace: konstapel-system, path: /exceptions/validate, port: 443}
+    rules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [complianceexceptions]
+        scope: Namespaced
