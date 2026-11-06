@@ -10,8 +10,8 @@ metadata:
     app.kubernetes.io/part-of: konstapel
 rules:
   - apiGroups: [compliance.erenius.io]
-    resources: [complianceprofiles, compliancebindings]
+    resources: [complianceprofiles, compliancebindings, evidencedestinations]
     verbs: [get, list, watch, create, update, patch, delete, deletecollection]
   - apiGroups: [compliance.erenius.io]
-    resources: [complianceprofiles/status, compliancebindings/status]
+    resources: [complianceprofiles/status, compliancebindings/status, evidencedestinations/status]
     verbs: [get]

@@ -118,6 +118,29 @@ expect deny "workflow: team-a may not download team-b requests" -- auth can-i ge
 expect deny "workflow: team-a may not download runs" -- auth can-i get assessmentruns/download --as="$team_a"
 expect ok "workflow: platform may download runs" -- auth can-i get assessmentruns/download --as="$platform"
 
+# EvidenceDestinations are platform-managed: location immutable, access rotatable,
+# credentials only in the controller namespace, invisible to application teams.
+admin=platform-admin
+k create clusterrolebinding platform-admin --clusterrole=konstapel-compliance-admin --user="$admin" --dry-run=client -o yaml | k apply -f - >>"$log"
+destination() { # ENDPOINT BUCKET PREFIX SECRET [SECRET_NAMESPACE]
+	printf 'apiVersion: compliance.erenius.io/v1alpha1\nkind: EvidenceDestination\nmetadata: {name: primary}\nspec:\n  s3:\n    endpoint: %s\n    bucket: %s\n    region: eu-north-1\n    prefix: %s\n    credentialSecret: {name: %s%s}\n' \
+		"$1" "$2" "$3" "$4" "${5:+, namespace: $5}"
+}
+expect ok "destination: platform admin creates a destination" -- create --as="$admin" -f <(destination https://s3.example.internal evidence clusters/prod konstapel-s3)
+expect deny "destination: team-a cannot create a destination" -- create --as="$team_a" --dry-run=server -f <(destination https://s3.team.example evidence team konstapel-s3 | sed 's/name: primary/name: team-owned/')
+expect deny "destination: assessment operator cannot create a destination" -- create --as="$platform" --dry-run=server -f <(destination https://s3.example.internal evidence other konstapel-s3 | sed 's/name: primary/name: operator-owned/')
+expect deny "destination: team-a cannot read destinations" -- get evidencedestination primary --as="$team_a"
+expect deny "destination: team-a cannot read controller-namespace Secrets" -- -n konstapel-system get secrets --as="$team_a"
+expect deny "destination: team-a cannot write destination status" -- patch evidencedestination primary --as="$team_a" --subresource=status --type=merge -p '{"status":{"outstandingRuns":0}}'
+expect deny "destination: admin cannot write destination status" -- patch evidencedestination primary --as="$admin" --subresource=status --type=merge -p '{"status":{"outstandingRuns":0}}'
+expect deny "destination: endpoint is immutable" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"endpoint":"https://moved.example.internal"}}}'
+expect deny "destination: bucket is immutable" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"bucket":"moved"}}}'
+expect deny "destination: prefix is immutable" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"prefix":"moved"}}}'
+expect ok "destination: credentials rotate" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"credentialSecret":{"name":"konstapel-s3-rotated"}}}}'
+expect ok "destination: CA trust rotates" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"caTrust":{"name":"s3-ca"}}}}'
+expect deny "destination: cross-namespace credentials are rejected" -- create --as="$admin" --dry-run=server -f <(destination https://s3.example.internal evidence x konstapel-s3 team-a | sed 's/name: primary/name: crossns/')
+k get evidencedestination primary -o yaml >"$out/evidencedestination.yaml"
+
 # The controller identity is configuration, not policy text.
 custom=system:serviceaccount:konstapel-system:custom-controller
 k create clusterrolebinding custom-controller-assessments --clusterrole=konstapel-controller-assessments --serviceaccount=konstapel-system:custom-controller --dry-run=client -o yaml | k apply -f - >>"$log"

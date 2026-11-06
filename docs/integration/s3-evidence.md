@@ -6,6 +6,51 @@ destination, setup and permissions, the compatibility probe that decides whether
 a backend may be used, package kinds, the publisher's commit protocol, recovery,
 the download service, retention, and teardown.
 
+## EvidenceDestination (API)
+
+Destinations are moving from a deployment file to the cluster-scoped,
+platform-managed `EvidenceDestination` resource
+(`compliance.erenius.io/v1alpha1`, short name `evdest`):
+
+```yaml
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceDestination
+metadata: {name: primary}
+spec:
+  s3:
+    endpoint: https://s3.example.internal   # immutable
+    bucket: konstapel-evidence              # immutable
+    region: eu-north-1                      # immutable
+    prefix: clusters/prod                   # immutable (adding or removing it too)
+    addressing: path                        # default
+    credentialSecret: {name: konstapel-s3}  # or workloadIdentity: true; rotatable
+    caTrust: {name: s3-ca, key: ca.crt}     # optional ConfigMap; rotatable
+  deletionPolicy: Retire                    # default; Orphan is the audited handoff
+```
+
+- **Immutable location.** The API server rejects any change to endpoint, bucket,
+  region or prefix, including while the destination is retiring. A new location
+  is a new resource and an explicit reference switch, so no edit moves
+  evidence. Credentials, CA trust and the credential source can rotate.
+- **Credential and trust references.** These resolve only in the controller
+  namespace. Setting a `namespace` on them is rejected, and there are no file
+  paths.
+- **Validation.** Exactly one credential source must be set. `https` is
+  required, except for an isolated `developmentFixture`.
+- **Access.** Only `konstapel-compliance-admin` can create or change
+  destinations, and `konstapel-compliance-viewer` can read them. Only the
+  controller writes status. Application teams and the assessment operator
+  cannot create, read or change destinations, or read Secrets in the
+  controller namespace. `scripts/check-assessment-access.sh` verifies this
+  against a real API server.
+- **Status.** Status reports the observed generation, the `Ready` and
+  `Retiring` conditions, outstanding run and package counts, runs whose
+  expiry is still unknown, the latest retained expiry, and cleanup blockers.
+
+The controller still reads the destination file described below. Selecting a
+destination by reference, pinning it per run, retiring it, and migrating the
+file follow (add-s3-evidence-publishing groups 7–9).
+
 ## Destination configuration
 
 The evidence destination is deployment configuration, read by

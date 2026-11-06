@@ -71,8 +71,8 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 
 ## 7. Introduce the destination API and run-start selection
 
-- [ ] 7.1 Add the cluster-scoped compliance.erenius.io/v1alpha1 EvidenceDestination type, generated schema, status, and Retire default; verify API-server rejection of endpoint/bucket/region/prefix mutations and acceptance of valid credential/CA rotation during normal operation and retirement.
-- [ ] 7.2 Add platform-only destination management and protected status/credential/trust access; verify application identities cannot change destinations or read credential material and references outside the controller namespace are rejected.
+- [x] 7.1 Add the cluster-scoped compliance.erenius.io/v1alpha1 EvidenceDestination type, generated schema, status, and Retire default; verify API-server rejection of endpoint/bucket/region/prefix mutations and acceptance of valid credential/CA rotation during normal operation and retirement.
+- [x] 7.2 Add platform-only destination management and protected status/credential/trust access; verify application identities cannot change destinations or read credential material and references outside the controller namespace are rejected.
 - [ ] 7.3 Coordinate name/UID references for one central default and an optional spec.assessment.destinationRef with the shared-contract owner; verify AssessmentRequests inherit selection, recreated names fail UID checks, invalid overrides never fall back, and selection conditions remain separate from enforcement health.
 - [ ] 7.4 Implement durable pin admission before run storage writes and the destination finalizer before pin acceptance; verify deletion races, stale caches, concurrent replicas, and interrupted run updates cannot lose an accepted obligation or admit work after retirement.
 
