@@ -138,6 +138,11 @@ type AssessmentRunStatus struct {
 	Window *CaptureWindow `json:"window,omitempty"`
 	// +optional
 	Summary *AssessmentSummary `json:"summary,omitempty"`
+	// retention is the binding's retention resolved when collection closed.
+	// Publication uses the binding's current retention while it is the same
+	// binding, and this recorded value if the binding was deleted or replaced.
+	// +optional
+	Retention Duration `json:"retention,omitempty"`
 	// descriptorSha256 is the digest of the frozen package descriptor.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`

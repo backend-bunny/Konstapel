@@ -107,6 +107,26 @@ workload identities:
 6. **Ready** runs the compatibility probe. An incompatible or unreachable
    backend is `ErrUnavailable`.
 
+## Controller use
+
+**Retention selection.** When a run closes collection, the executor records
+the binding's resolved retention in the run's `status.retention`. At the first
+commit it uses the binding's current retention if the same binding (same UID)
+still exists, so an edit made before the first commit applies. If the binding
+was deleted, or replaced by a new binding with the same name, the run publishes
+with the retention recorded at closure and says so in
+`publication.retention.bindingConfiguration`. A replacement binding is never
+adopted. After the first commit, the recorded commit retention is fixed (see
+above).
+
+**Readiness gating.** When the controller runtime has a readiness check, the
+assessment scheduler calls it at most once per `ReadyInterval` (5 minutes by
+default). While the backend is not ready, scheduled snapshots are disabled and
+the binding's current assessment carries the limitation
+`scheduled snapshots are disabled: evidence backend is not ready: <reason>`.
+Evidence never falls back to local storage. Scheduling resumes on the first
+successful check.
+
 Credentials for a `credentialSecret` destination are read from that Secret in
 the controller's own namespace (keys `accessKeyID` and `secretAccessKey` by
 default) each time a client is built, so a rotated Secret takes effect. A

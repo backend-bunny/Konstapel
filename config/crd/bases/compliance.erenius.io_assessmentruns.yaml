@@ -451,6 +451,21 @@ spec:
                 - phase
                 - publicationID
                 type: object
+              retention:
+                description: |-
+                  retention is the binding's retention resolved when collection closed.
+                  Publication uses the binding's current retention while it is the same
+                  binding, and this recorded value if the binding was deleted or replaced.
+                maxLength: 32
+                minLength: 2
+                type: string
+                x-kubernetes-validations:
+                - message: must be a duration such as 24h, 90m or 2160h; days, cron
+                    expressions and signs are not supported
+                  rule: self.matches('^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$')
+                - message: must be a positive duration
+                  rule: '!self.matches(''^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$'')
+                    || duration(self) > duration(''0s'')'
               scope:
                 description: |-
                   FrozenScope summarizes the scope frozen at run start. The full inventory

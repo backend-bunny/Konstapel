@@ -146,6 +146,7 @@ type AssessmentReconciler struct {
 	Now        func() time.Time
 	// Runtime enables scheduled runs when ready; see AssessmentRuntime.
 	Runtime AssessmentRuntime
+	ready   readiness
 	// Reader reads runs uncached. A run created moments ago may be missing
 	// from the informer cache, and treating that as "finished" would free
 	// the binding's slot while the run executes. Defaults to Client.
