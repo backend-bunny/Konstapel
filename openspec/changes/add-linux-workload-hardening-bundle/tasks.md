@@ -40,7 +40,7 @@ the other agents' CRDs or task lists.
 
 ## 4. Integrate targeting and prove live policy behavior
 
-- [ ] 4.1 Render bundle instances through merged profiles/bindings with explicit Audit/Deny and namespace selectors; verify rendered CLI cases and API schemas retain v1, background evaluation, revision provenance, and no hidden namespace exclusions.
+- [x] 4.1 Render bundle instances through merged profiles/bindings with explicit Audit/Deny and namespace selectors; verify rendered CLI cases and API schemas retain v1, background evaluation, revision provenance, and no hidden namespace exclusions.
 - [ ] 4.2 Add live admission cases for every check on Pods and supported controller templates, with applicable UPDATE/ephemeral-container cases; verify ready policies reject only the intended unexcepted violation by policy-specific reason and Audit admits the otherwise-valid request.
 - [ ] 4.3 Exercise the changed non-root user-namespace case in the documented Linux environment; verify `hostUsers: false` without the required flag is denied and record Kubernetes/runtime prerequisites or an explicit failing/unvalidated acceptance result if unavailable.
 - [ ] 4.4 Seed pre-existing violating and compliant subjects and collect background evidence through the first loop; verify raw outcomes, source times, UIDs, cluster/policy identities, and expected inventory while existing violations remain present and denied creates are not required report subjects.
