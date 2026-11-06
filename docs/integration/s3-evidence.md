@@ -423,6 +423,42 @@ write to storage. Runs carry no owner reference to their binding or request.
 A run deleted while still collecting has written nothing to storage and is
 released immediately.
 
+**Recovery.** Each failure state has a fix, and nothing needs restarting:
+
+- `RetentionBlocked`: remove the object lock or legal hold, or grant the delete
+  permissions listed under Setup, on the run's prefix. The next retry (within an
+  hour) deletes the package and releases the record.
+- `DeletionFailed`: check `publication.cleanup.message` and the backend's
+  health. Retries continue with backoff, and the commit and owned-object
+  metadata stay on the run until deletion is confirmed.
+- `availability: Unavailable` before expiry: restore the archive's original
+  bytes (same key and version, for example from a backup), and the next
+  daily check reports `Available`. Konstapel never re-uploads or
+  re-exports under the old identity.
+- Removing the finalizer by hand releases the record without deleting storage.
+  Do this only after cleaning up the run's prefix yourself.
+
+**Changing the destination or credentials.** Rotating the credential Secret is
+supported (see Setup). A retired destination cannot yet stay addressable for
+its packages' read and cleanup: receipts record its ID, endpoint, bucket and
+prefix, but the controller connects only to the current destination. Until
+that is resolved (add-s3-evidence-publishing 3.4), keep the destination
+unchanged while it holds unexpired packages. Otherwise their downloads and
+expiry cleanup fail as `DeletionFailed` or `Unavailable` and keep retrying.
+
+**Short-duration verification.** `TestLiveRetentionLifecycle` (in
+`scripts/targeting-live.sh`) runs the whole lifecycle on a disposable cluster
+against the pinned S3 test service, with a 45s binding retention instead of 90
+days:
+1. A scheduled and a manual run publish, with `expiresAt = publishedAt + 45s`
+   and the finalizer set.
+2. A platform operator downloads the scheduled package.
+3. The scheduled run is deleted before expiry. Its record stays until expiry,
+   then new downloads are refused, its storage versions are deleted, and the
+   record is released.
+4. The undeleted manual run's storage is deleted and it keeps a `Deleted`
+   tombstone.
+
 ## Teardown
 
 - **Test service:** `scripts/s3-compat.sh` always removes its container, with
