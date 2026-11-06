@@ -140,7 +140,7 @@ func requireSpecScenario(t *testing.T, file, scenario string) {
 	t.Helper()
 	for _, spec := range []string{
 		"../../openspec/specs/compliance-targeting/spec.md",
-		"../../openspec/changes/add-compliance-targeting-api/specs/compliance-targeting/spec.md",
+		"../../openspec/specs/compliance-targeting/spec.md",
 	} {
 		raw, err := os.ReadFile(spec)
 		if err == nil && bytes.Contains(raw, []byte("#### Scenario: "+scenario+"\n")) {
