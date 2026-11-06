@@ -60,6 +60,12 @@ type AssessmentRuntime struct {
 	PublishTimeout time.Duration
 	// Workers bounds concurrently executing runs across all bindings.
 	Workers int
+	// Ready optionally checks that the publisher's backend supports the
+	// required semantics (for example s3store.Publisher.Ready). While it
+	// fails, scheduling is disabled with the reason shown on bindings.
+	Ready func(context.Context) error
+	// ReadyInterval caches a Ready answer (default 5m).
+	ReadyInterval time.Duration
 	// MaxQueue bounds pending AssessmentRequests per binding (default 100);
 	// newer requests beyond it are rejected. Namespace ResourceQuotas on
 	// count/assessmentrequests.compliance.erenius.io bound each team.
@@ -146,6 +152,9 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 	}
 	if ok, why := r.Runtime.ready(); !ok {
 		return prev, latest, time.Time{}, "scheduled snapshots are disabled: " + why, nil
+	}
+	if err := r.backendReady(ctx); err != nil {
+		return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error()), nil
 	}
 	interval, _, _, err := bindingDurations(b)
 	if err != nil {
@@ -241,6 +250,31 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		activeUID = ""
 	}
 	return schedule.ToStatus(d.State, d.NextDue, activeUID), latest, d.NextDue, "", nil
+}
+
+// readiness caches the backend readiness answer.
+type readiness struct {
+	mu  sync.Mutex
+	at  time.Time
+	err error
+}
+
+// backendReady runs the runtime's Ready check at most once per interval.
+func (r *AssessmentReconciler) backendReady(ctx context.Context) error {
+	if r.Runtime.Ready == nil {
+		return nil
+	}
+	interval := r.Runtime.ReadyInterval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	r.ready.mu.Lock()
+	defer r.ready.mu.Unlock()
+	if !r.ready.at.IsZero() && time.Since(r.ready.at) < interval {
+		return r.ready.err
+	}
+	r.ready.err, r.ready.at = r.Runtime.Ready(ctx), time.Now()
+	return r.ready.err
 }
 
 // runsForBinding maps a binding to its runs, and a run to its binding.
@@ -410,12 +444,24 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, fmt.Errorf("run %s has no UID", run.Name)
 	}
 	b := &v1alpha1.ComplianceBinding{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Name: run.Spec.BindingRef.Name}, b); apierrors.IsNotFound(err) {
-		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, v1alpha1.ReasonBindingNotFound, "binding "+run.Spec.BindingRef.Name+" does not exist")
-	} else if err != nil {
+	err := r.Client.Get(ctx, client.ObjectKey{Name: run.Spec.BindingRef.Name}, b)
+	if err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
-	if run.Status.Binding != nil && run.Status.Binding.UID != string(b.UID) {
+	gone := apierrors.IsNotFound(err) || (run.Status.Binding != nil && run.Status.Binding.UID != string(b.UID))
+	if gone && run.Status.Phase == v1alpha1.RunPublishing {
+		// Collection closed and the package is frozen: publish it with the
+		// retention recorded at closure. A replacement binding with the same
+		// name is never resolved or adopted.
+		if ok, why := r.Runtime.ready(); !ok {
+			return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, why)
+		}
+		return r.publish(ctx, run, nil, r.now())
+	}
+	if apierrors.IsNotFound(err) {
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, v1alpha1.ReasonBindingNotFound, "binding "+run.Spec.BindingRef.Name+" does not exist")
+	}
+	if gone {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionScoped, v1alpha1.ReasonBindingNotFound, "binding was replaced after the run started; the new binding is never adopted")
 	}
 	admitted := b.Status.Assessment != nil && b.Status.Assessment.Schedule != nil && b.Status.Assessment.Schedule.ActiveRun != nil &&
@@ -638,6 +684,9 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	closed := metav1.NewTime(now)
 	run.Status.Window.Closed = &closed
 	run.Status.Summary = &sum
+	if _, _, retention, err := bindingDurations(b); err == nil {
+		run.Status.Retention = v1alpha1.Duration(retention.String())
+	}
 	run.Status.DescriptorSHA256 = d.Digest()
 	run.Status.Phase = v1alpha1.RunPublishing
 	evidence := metav1.ConditionFalse
@@ -653,7 +702,7 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 }
 
 func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
-	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: string(b.UID), RunUID: string(run.UID)}
+	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
 	pkg := filepath.Join(r.staging(run), "package")
 	d, err := publication.LoadDescriptor(pkg)
 	if err != nil {
@@ -676,12 +725,11 @@ func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.Ass
 }
 
 func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, staged publication.Staged, now time.Time) (ctrl.Result, error) {
-	_, _, retention, err := bindingDurations(b)
+	sel, err := selectRetention(run, b, now)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, err.Error())
 	}
-	receipt, err := r.Runtime.Publisher.Publish(ctx, publication.PublishRequest{Staged: staged,
-		Retention: publication.Retention{Duration: retention.String(), BindingConfiguration: bindingConfiguration(b), SelectedAt: now}})
+	receipt, err := r.Runtime.Publisher.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel})
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
@@ -702,6 +750,24 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	}
 	_ = os.RemoveAll(r.staging(run))
 	return ctrl.Result{}, r.finishRequest(ctx, run, "")
+}
+
+// selectRetention chooses the retention for the first commit: a consistent
+// read of the run's own binding while it exists, otherwise the retention
+// recorded on the run at closure. The publisher keeps an existing commit's
+// retention on retries, so this only affects the first commit.
+func selectRetention(run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (publication.Retention, error) {
+	if b != nil && run.Status.Binding != nil && string(b.UID) == run.Status.Binding.UID {
+		_, _, retention, err := bindingDurations(b)
+		if err != nil {
+			return publication.Retention{}, err
+		}
+		return publication.Retention{Duration: retention.String(), BindingConfiguration: bindingConfiguration(b), SelectedAt: now}, nil
+	}
+	if run.Status.Retention == "" {
+		return publication.Retention{}, errors.New("the binding is gone and no retention was recorded at closure")
+	}
+	return publication.Retention{Duration: string(run.Status.Retention), BindingConfiguration: run.Status.BindingConfiguration + " (binding deleted or replaced; retention recorded at closure)", SelectedAt: now}, nil
 }
 
 // retry keeps a publishing run retrying within PublishTimeout after closure,
