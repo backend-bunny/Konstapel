@@ -130,11 +130,34 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 		}
 	}
 
+	// Kyverno reports a ValidatingPolicy that passes every validation for a
+	// resource as one result without cel.validationIndex; only failing
+	// validations carry an index. An unindexed pass therefore attests every
+	// validation of that engine policy for that resource. Any other
+	// unindexed outcome cannot identify its validation, so it is evidence
+	// only when the policy has a single validation.
+	validations := map[string]map[int]bool{}
+	for _, e := range c.Expected {
+		if validations[e.Check.EnginePolicy] == nil {
+			validations[e.Check.EnginePolicy] = map[int]bool{}
+		}
+		validations[e.Check.EnginePolicy][e.Check.Index] = true
+	}
+
 	ev := Evaluation{Observations: []Observation{}, Evidence: publication.EvidenceSummary{Expected: len(c.Expected), StaleScopes: len(c.Stale)}}
 	for _, e := range c.Expected {
 		o := Observation{Key: e.Key()}
 		key := resultKey(e.Workload.UID, e.Check.EnginePolicy, strconv.Itoa(e.Check.Index))
+		policyKey := resultKey(e.Workload.UID, e.Check.EnginePolicy, "")
+		candidates := slices.Clone(found[key])
+		single := len(validations[e.Check.EnginePolicy]) == 1
+		for _, cand := range found[policyKey] {
+			if cand.outcome == "pass" || single {
+				candidates = append(candidates, cand)
+			}
+		}
 		o.Reasons = append(o.Reasons, problems[key]...)
+		o.Reasons = append(o.Reasons, problems[policyKey]...)
 		if ch, changed := c.ChangeFor(e); changed {
 			o.State = Unresolved
 			o.Reasons = append(o.Reasons, fmt.Sprintf("%s during collection at %s", ch.Kind, ch.Observed.Format(time.RFC3339)))
@@ -149,7 +172,7 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 			boundary = discontinuity
 		}
 		var usable []candidate
-		for _, cand := range found[key] {
+		for _, cand := range candidates {
 			switch {
 			case cand.evaluated.After(closed):
 				o.Reasons = append(o.Reasons, fmt.Sprintf("report %s result %d: evaluation time %s is after closure", cand.report, cand.index, cand.evaluated.Format(time.RFC3339)))
@@ -165,7 +188,7 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 		}
 		slices.SortFunc(usable, func(a, b candidate) int { return b.evaluated.Compare(a.evaluated) })
 		switch {
-		case len(usable) == 0 && len(found[key]) == 0 && len(problems[key]) == 0:
+		case len(usable) == 0 && len(candidates) == 0 && len(problems[key]) == 0 && len(problems[policyKey]) == 0:
 			o.State = Missing
 		case len(usable) == 0:
 			o.State = Rejected

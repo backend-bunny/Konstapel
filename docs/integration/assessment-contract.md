@@ -433,7 +433,15 @@ captures stay in `internal/assessment`).
 - **Attributable evidence.** `CaptureV2.Evaluate` counts an expected
   observation as attributable only if a report result meets all of these:
   - it names the observation's engine policy (whose name binds the binding,
-    policy, and revision), sub-validation index, and workload UID
+    policy, and revision) and workload UID, and either the observation's
+    sub-validation index or no index at all. Kyverno reports a policy whose
+    validations all pass as one `pass` without `cel.validationIndex`. That
+    result attests every validation of the policy for that workload. An
+    unindexed result with another outcome cannot name its validation, so it
+    counts only for a single-validation policy. When a validation fails,
+    Kyverno reports only that indexed failure. The policy's other validations
+    on that workload get no result and stay Missing. They are never assumed to
+    pass (see `testdata/assessments/kyverno-1.19.2-background`).
   - it has a valid source evaluation time, no later than closure
   - it was evaluated strictly after the workload's continuity boundary and
     after the last watch discontinuity
@@ -561,8 +569,9 @@ after an in-place label update; the raw reports are in
 - A PolicyReport's `scope` names the resource by apiVersion, kind, namespace,
   name, and UID only. It has no `resourceVersion`, generation, or state
   digest.
-- Results carry outcome, timestamp, and `properties` (`cel.validationIndex` and
-  `process: background scan`). Report metadata has only a `managed-by` label.
+- Results carry outcome, timestamp, and `properties` (`process: background
+  scan`, and `cel.validationIndex` on failing validations only; an all-pass
+  policy is one unindexed `pass`). Report metadata has only a `managed-by` label.
 - An in-place label change keeps the pod's `metadata.generation` at 1.
 - The background scan (15s in the test environment) rewrites the report with a
   new timestamp whether or not anything changed.

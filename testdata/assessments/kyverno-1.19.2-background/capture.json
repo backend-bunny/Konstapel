@@ -1,0 +1,2341 @@
+{
+  "version": 2,
+  "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+  "window": {
+    "started": "2026-11-06T21:25:57Z",
+    "closed": "2026-11-06T21:27:29Z"
+  },
+  "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4",
+  "subjects": [
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "bindingName": "hz-bg-deny",
+      "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+      "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+      "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+      "logicalPolicy": "disallow-capabilities-strict",
+      "mode": "Deny",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "hz-bg-hardening",
+      "profileUID": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "sourceDigest": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "bindingName": "hz-bg-deny",
+      "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+      "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+      "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+      "logicalPolicy": "disallow-privilege-escalation",
+      "mode": "Deny",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "hz-bg-hardening",
+      "profileUID": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "sourceDigest": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "bindingName": "hz-bg-deny",
+      "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+      "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+      "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+      "logicalPolicy": "require-run-as-nonroot",
+      "mode": "Deny",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "hz-bg-hardening",
+      "profileUID": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "sourceDigest": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "bindingName": "hz-bg-deny",
+      "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+      "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+      "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+      "logicalPolicy": "restrict-seccomp-strict",
+      "mode": "Deny",
+      "checks": [],
+      "resources": [
+        "/v1/pods",
+        "/v1/pods/ephemeralcontainers",
+        "/v1/replicationcontrollers",
+        "apps/v1/daemonsets",
+        "apps/v1/deployments",
+        "apps/v1/replicasets",
+        "apps/v1/statefulsets",
+        "batch/v1/cronjobs",
+        "batch/v1/jobs"
+      ],
+      "profileName": "hz-bg-hardening",
+      "profileUID": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+      "profileGeneration": 1,
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "sourceDigest": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96"
+    }
+  ],
+  "stale": [],
+  "checks": [
+    {
+      "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+      "validationIndex": 0,
+      "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+    },
+    {
+      "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+      "validationIndex": 1,
+      "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+    },
+    {
+      "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+      "validationIndex": 0,
+      "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+    },
+    {
+      "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+      "validationIndex": 0,
+      "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+    },
+    {
+      "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+      "validationIndex": 0,
+      "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+    },
+    {
+      "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+      "validationIndex": 1,
+      "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+    }
+  ],
+  "workloads": [
+    {
+      "resource": "/v1/pods",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "name": "hz-bg-compliant",
+      "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+    },
+    {
+      "resource": "/v1/pods",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "name": "hz-bg-violates-capabilities",
+      "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+    },
+    {
+      "resource": "/v1/pods",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "name": "hz-bg-violates-privilege",
+      "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+    },
+    {
+      "resource": "/v1/pods",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "name": "hz-bg-violates-run",
+      "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+    },
+    {
+      "resource": "/v1/pods",
+      "namespace": "hz-bg",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "name": "hz-bg-violates-seccomp",
+      "uid": "811253a0-0bab-4690-b904-3997ee972489",
+      "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+    }
+  ],
+  "expected": [
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 0,
+        "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 1,
+        "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "validationIndex": 0,
+        "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "logicalPolicy": "disallow-privilege-escalation",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "validationIndex": 0,
+        "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "logicalPolicy": "require-run-as-nonroot",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 0,
+        "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-run",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "stateSha256": "ddf64ac37ef29cb3d23fe353117e34c4c14d4df13eb624cb97786448deeef2da"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 1,
+        "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 0,
+        "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 1,
+        "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "validationIndex": 0,
+        "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "logicalPolicy": "disallow-privilege-escalation",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "validationIndex": 0,
+        "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "logicalPolicy": "require-run-as-nonroot",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 0,
+        "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-privilege",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "stateSha256": "6ea6d058efec4086cea584492552212606b2a85d94c5539a673fde9de6966243"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 1,
+        "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 0,
+        "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 1,
+        "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "validationIndex": 0,
+        "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "logicalPolicy": "disallow-privilege-escalation",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "validationIndex": 0,
+        "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "logicalPolicy": "require-run-as-nonroot",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 0,
+        "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-seccomp",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489",
+        "stateSha256": "598363ec5c573fef914355b8ef93bfbf5e60cbd0ca8a2253023e823efff121ba"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 1,
+        "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 0,
+        "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 1,
+        "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "validationIndex": 0,
+        "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "logicalPolicy": "disallow-privilege-escalation",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "validationIndex": 0,
+        "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "logicalPolicy": "require-run-as-nonroot",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 0,
+        "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-compliant",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "stateSha256": "065848a3e61735dfe25eb8515d45322705b42d31ae68d0c0e0e595c9470eb414"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 1,
+        "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 0,
+        "sha256": "c76df3c64c23d902df20dcff7b7c3f1052f73263c555b99b615cf79cc0d9dd9a"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "validationIndex": 1,
+        "sha256": "10e12beaf6cc14fb21a0bed760f3aa3787ca7f2454432fc7058561bc74143556"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+        "enginePolicy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+        "logicalPolicy": "disallow-capabilities-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "validationIndex": 0,
+        "sha256": "39a3ac0866d1327e1a11c0081eab0b708f16e6a1b9c008e010dc39da9962de45"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+        "enginePolicy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+        "logicalPolicy": "disallow-privilege-escalation",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "validationIndex": 0,
+        "sha256": "f9a45639c08e2132b10c1c909c0bc062d8cbc059666083a78993b5a27ce1bc15"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+        "enginePolicy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+        "logicalPolicy": "require-run-as-nonroot",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 0,
+        "sha256": "163d7fb210da8322cb22b5de4cb9dd5f80a4ea2c68d52e22bbed4fb8c98eecac"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+      "workload": {
+        "resource": "/v1/pods",
+        "namespace": "hz-bg",
+        "namespaceUID": "d3e0f594-ee85-42e7-a254-2892babf49ae",
+        "name": "hz-bg-violates-capabilities",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "stateSha256": "880ce12c1601b20e2c1cd55044fd7424a0bae2713b2d8657b3ea89a208df2860"
+      },
+      "check": {
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "validationIndex": 1,
+        "sha256": "84957135711f720fb8aa6e524e8763cd9ed7833fbefe940255322e45b7b4fb32"
+      },
+      "contribution": {
+        "bindingUID": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+        "enginePolicy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+        "logicalPolicy": "restrict-seccomp-strict",
+        "mode": "Deny"
+      },
+      "sourceSha256": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "mappingSha256": "sha256:9851a56a645821111060e18bd689706f79ff9ea836f065e6974414c3bccbefd4"
+    }
+  ],
+  "reports": [
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "creationTimestamp": "2026-11-06T21:26:07Z",
+        "generation": 6,
+        "labels": {
+          "app.kubernetes.io/managed-by": "kyverno"
+        },
+        "managedFields": [
+          {
+            "apiVersion": "wgpolicyk8s.io/v1alpha2",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:app.kubernetes.io/managed-by": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"39ee35a7-d253-4129-bc2e-13870a64f18f\"}": {}
+                }
+              },
+              "f:results": {},
+              "f:scope": {},
+              "f:summary": {
+                ".": {},
+                "f:error": {},
+                "f:fail": {},
+                "f:pass": {},
+                "f:skip": {},
+                "f:warn": {}
+              }
+            },
+            "manager": "reports-controller",
+            "operation": "Update",
+            "time": "2026-11-06T21:27:22Z"
+          }
+        ],
+        "name": "39ee35a7-d253-4129-bc2e-13870a64f18f",
+        "namespace": "hz-bg",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "hz-bg-violates-run",
+            "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f"
+          }
+        ],
+        "resourceVersion": "1716",
+        "uid": "004b20c2-6ee1-4a51-bee0-293b65b8b66c"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "Running as root is not allowed. Every container (spec.containers[*], spec.initContainers[*], and spec.ephemeralContainers[*]) must set securityContext.runAsNonRoot to `true`, or inherit `true` from spec.securityContext.runAsNonRoot. Neither spec.securityContext.runAsNonRoot nor container-level securityContext.runAsNonRoot may be set to `false`. Setting spec.hostUsers to `false` does not exempt a Pod. Windows Pods are exempt.",
+          "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "hz-bg-violates-run",
+        "namespace": "hz-bg",
+        "uid": "39ee35a7-d253-4129-bc2e-13870a64f18f"
+      },
+      "summary": {
+        "error": 0,
+        "fail": 1,
+        "pass": 3,
+        "skip": 0,
+        "warn": 0
+      }
+    },
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "creationTimestamp": "2026-11-06T21:26:07Z",
+        "generation": 6,
+        "labels": {
+          "app.kubernetes.io/managed-by": "kyverno"
+        },
+        "managedFields": [
+          {
+            "apiVersion": "wgpolicyk8s.io/v1alpha2",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:app.kubernetes.io/managed-by": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"5c5eba72-df12-494c-86ae-0ea7ad51d3db\"}": {}
+                }
+              },
+              "f:results": {},
+              "f:scope": {},
+              "f:summary": {
+                ".": {},
+                "f:error": {},
+                "f:fail": {},
+                "f:pass": {},
+                "f:skip": {},
+                "f:warn": {}
+              }
+            },
+            "manager": "reports-controller",
+            "operation": "Update",
+            "time": "2026-11-06T21:27:22Z"
+          }
+        ],
+        "name": "5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+        "namespace": "hz-bg",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "hz-bg-violates-privilege",
+            "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db"
+          }
+        ],
+        "resourceVersion": "1721",
+        "uid": "1e419330-501d-4111-9132-3cdbf40d12cb"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "Privilege escalation is disallowed.  All containers must set the securityContext.allowPrivilegeEscalation field to `false`. Windows Pods are exempt.",
+          "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "hz-bg-violates-privilege",
+        "namespace": "hz-bg",
+        "uid": "5c5eba72-df12-494c-86ae-0ea7ad51d3db"
+      },
+      "summary": {
+        "error": 0,
+        "fail": 1,
+        "pass": 3,
+        "skip": 0,
+        "warn": 0
+      }
+    },
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "creationTimestamp": "2026-11-06T21:26:07Z",
+        "generation": 6,
+        "labels": {
+          "app.kubernetes.io/managed-by": "kyverno"
+        },
+        "managedFields": [
+          {
+            "apiVersion": "wgpolicyk8s.io/v1alpha2",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:app.kubernetes.io/managed-by": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"811253a0-0bab-4690-b904-3997ee972489\"}": {}
+                }
+              },
+              "f:results": {},
+              "f:scope": {},
+              "f:summary": {
+                ".": {},
+                "f:error": {},
+                "f:fail": {},
+                "f:pass": {},
+                "f:skip": {},
+                "f:warn": {}
+              }
+            },
+            "manager": "reports-controller",
+            "operation": "Update",
+            "time": "2026-11-06T21:27:22Z"
+          }
+        ],
+        "name": "811253a0-0bab-4690-b904-3997ee972489",
+        "namespace": "hz-bg",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "hz-bg-violates-seccomp",
+            "uid": "811253a0-0bab-4690-b904-3997ee972489"
+          }
+        ],
+        "resourceVersion": "1707",
+        "uid": "659d6094-53ff-4ce5-928e-67160c28b208"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "Use of custom Seccomp profiles is disallowed. The fields spec.containers[*].securityContext.seccompProfile.type, spec.initContainers[*].securityContext.seccompProfile.type, and spec.ephemeralContainers[*].securityContext.seccompProfile.type must be set to `RuntimeDefault` or `Localhost`, or inherited from spec.securityContext.seccompProfile.type. Windows Pods are exempt.",
+          "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+          "properties": {
+            "cel.validationIndex": "1",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "hz-bg-violates-seccomp",
+        "namespace": "hz-bg",
+        "uid": "811253a0-0bab-4690-b904-3997ee972489"
+      },
+      "summary": {
+        "error": 0,
+        "fail": 1,
+        "pass": 3,
+        "skip": 0,
+        "warn": 0
+      }
+    },
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "creationTimestamp": "2026-11-06T21:26:07Z",
+        "generation": 6,
+        "labels": {
+          "app.kubernetes.io/managed-by": "kyverno"
+        },
+        "managedFields": [
+          {
+            "apiVersion": "wgpolicyk8s.io/v1alpha2",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:app.kubernetes.io/managed-by": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"c449a7fd-5403-4ab0-bc14-61d9045c7260\"}": {}
+                }
+              },
+              "f:results": {},
+              "f:scope": {},
+              "f:summary": {
+                ".": {},
+                "f:error": {},
+                "f:fail": {},
+                "f:pass": {},
+                "f:skip": {},
+                "f:warn": {}
+              }
+            },
+            "manager": "reports-controller",
+            "operation": "Update",
+            "time": "2026-11-06T21:27:22Z"
+          }
+        ],
+        "name": "c449a7fd-5403-4ab0-bc14-61d9045c7260",
+        "namespace": "hz-bg",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "hz-bg-compliant",
+            "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260"
+          }
+        ],
+        "resourceVersion": "1719",
+        "uid": "9da33e13-17c5-4e1f-867f-5ee1c1884c79"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "hz-bg-compliant",
+        "namespace": "hz-bg",
+        "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260"
+      },
+      "summary": {
+        "error": 0,
+        "fail": 0,
+        "pass": 4,
+        "skip": 0,
+        "warn": 0
+      }
+    },
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": {
+        "creationTimestamp": "2026-11-06T21:26:07Z",
+        "generation": 6,
+        "labels": {
+          "app.kubernetes.io/managed-by": "kyverno"
+        },
+        "managedFields": [
+          {
+            "apiVersion": "wgpolicyk8s.io/v1alpha2",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:app.kubernetes.io/managed-by": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"c4606546-30f8-4de0-b92c-4c38ca4353bd\"}": {}
+                }
+              },
+              "f:results": {},
+              "f:scope": {},
+              "f:summary": {
+                ".": {},
+                "f:error": {},
+                "f:fail": {},
+                "f:pass": {},
+                "f:skip": {},
+                "f:warn": {}
+              }
+            },
+            "manager": "reports-controller",
+            "operation": "Update",
+            "time": "2026-11-06T21:27:23Z"
+          }
+        ],
+        "name": "c4606546-30f8-4de0-b92c-4c38ca4353bd",
+        "namespace": "hz-bg",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "name": "hz-bg-violates-capabilities",
+            "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd"
+          }
+        ],
+        "resourceVersion": "1722",
+        "uid": "74d8b781-1f2d-4e4a-acde-5496b7846e76"
+      },
+      "results": [
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "Containers must drop `ALL` capabilities. Windows Pods are exempt.",
+          "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          },
+          "result": "fail",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        },
+        {
+          "category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "message": "success",
+          "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+          "properties": {
+            "process": "background scan"
+          },
+          "result": "pass",
+          "scored": true,
+          "severity": "medium",
+          "source": "KyvernoValidatingPolicy",
+          "timestamp": {
+            "nanos": 0,
+            "seconds": 1794000432
+          }
+        }
+      ],
+      "scope": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "hz-bg-violates-capabilities",
+        "namespace": "hz-bg",
+        "uid": "c4606546-30f8-4de0-b92c-4c38ca4353bd"
+      },
+      "summary": {
+        "error": 0,
+        "fail": 1,
+        "pass": 3,
+        "skip": 0,
+        "warn": 0
+      }
+    }
+  ],
+  "contributions": [
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "binding": {
+        "name": "hz-bg-deny",
+        "uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "generation": 1
+      },
+      "profile": {
+        "name": "hz-bg-hardening",
+        "uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+        "generation": 1
+      },
+      "policy": "disallow-capabilities-strict",
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "mode": "Deny",
+      "namespaceSelector": {
+        "matchLabels": {
+          "manager-test.konstapel.dev/environment": "hz-bg"
+        }
+      },
+      "exceptions": {
+        "eligibility": "Forbidden"
+      },
+      "revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "binding": {
+        "name": "hz-bg-deny",
+        "uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "generation": 1
+      },
+      "profile": {
+        "name": "hz-bg-hardening",
+        "uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+        "generation": 1
+      },
+      "policy": "disallow-privilege-escalation",
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "mode": "Deny",
+      "namespaceSelector": {
+        "matchLabels": {
+          "manager-test.konstapel.dev/environment": "hz-bg"
+        }
+      },
+      "exceptions": {
+        "eligibility": "Forbidden"
+      },
+      "revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "binding": {
+        "name": "hz-bg-deny",
+        "uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "generation": 1
+      },
+      "profile": {
+        "name": "hz-bg-hardening",
+        "uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+        "generation": 1
+      },
+      "policy": "require-run-as-nonroot",
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "mode": "Deny",
+      "namespaceSelector": {
+        "matchLabels": {
+          "manager-test.konstapel.dev/environment": "hz-bg"
+        }
+      },
+      "exceptions": {
+        "eligibility": "Forbidden"
+      },
+      "revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1"
+    },
+    {
+      "cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+      "binding": {
+        "name": "hz-bg-deny",
+        "uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+        "generation": 1
+      },
+      "profile": {
+        "name": "hz-bg-hardening",
+        "uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+        "generation": 1
+      },
+      "policy": "restrict-seccomp-strict",
+      "bundleName": "konstapel-vendored",
+      "bundleDigest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+      "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+      "mode": "Deny",
+      "namespaceSelector": {
+        "matchLabels": {
+          "manager-test.konstapel.dev/environment": "hz-bg"
+        }
+      },
+      "exceptions": {
+        "eligibility": "Forbidden"
+      },
+      "revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b"
+    }
+  ],
+  "enginePolicies": [
+    {
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "metadata": {
+        "annotations": {
+          "compliance.erenius.io/binding": "hz-bg-deny",
+          "compliance.erenius.io/bundle": "konstapel-vendored",
+          "compliance.erenius.io/bundle-digest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+          "compliance.erenius.io/cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+          "compliance.erenius.io/configuration-digest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "compliance.erenius.io/mode": "Deny",
+          "compliance.erenius.io/policy": "disallow-capabilities-strict",
+          "compliance.erenius.io/profile": "hz-bg-hardening",
+          "compliance.erenius.io/profile-generation": "1",
+          "compliance.erenius.io/profile-uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+          "compliance.erenius.io/revision": "sha256:49f9b756cd1876e8162e3fa8f8216bd23f79e703aa0a9f3935fbdd47272acc5f",
+          "compliance.erenius.io/source-digest": "sha256:6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+          "compliance.erenius.io/source-sha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+          "compliance.erenius.io/variant-of": "kyverno/policies@fac1ccda72ab53594921ca1c040ac90b80afadcd pod-security-vpol/restricted/disallow-capabilities-strict",
+          "kyverno.io/kubernetes-version": "1.30+",
+          "kyverno.io/kyverno-version": "1.14.0",
+          "policies.kyverno.io/category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "policies.kyverno.io/description": "Adding capabilities other than `NET_BIND_SERVICE` is disallowed. In addition, all containers must explicitly drop `ALL` capabilities.",
+          "policies.kyverno.io/minversion": "1.19.1",
+          "policies.kyverno.io/severity": "medium",
+          "policies.kyverno.io/subject": "Pod",
+          "policies.kyverno.io/title": "Disallow Capabilities (Strict) in ValidatingPolicy"
+        },
+        "labels": {
+          "app.kubernetes.io/managed-by": "konstapel",
+          "compliance.erenius.io/binding-uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+          "compliance.erenius.io/policy-hash": "0e30effa71cbf84c805e73fcfab00dd96fb20cc0"
+        },
+        "name": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58"
+      },
+      "spec": {
+        "evaluation": {
+          "background": {
+            "enabled": true
+          }
+        },
+        "matchConstraints": {
+          "namespaceSelector": {
+            "matchLabels": {
+              "manager-test.konstapel.dev/environment": "hz-bg"
+            }
+          },
+          "resourceRules": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "pods",
+                "replicationcontrollers"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "deployments",
+                "daemonsets",
+                "statefulsets",
+                "replicasets"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "jobs",
+                "cronjobs"
+              ]
+            },
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "UPDATE"
+              ],
+              "resources": [
+                "pods/ephemeralcontainers"
+              ]
+            }
+          ]
+        },
+        "validationActions": [
+          "Deny"
+        ],
+        "validations": [
+          {
+            "expression": "variables.isWindowsPod || variables.allContainers.all(container,\n  container.?securityContext.?capabilities.?drop.orValue([]).exists(capability, capability == 'ALL'))",
+            "message": "Containers must drop `ALL` capabilities. Windows Pods are exempt."
+          },
+          {
+            "expression": "variables.isWindowsPod || variables.allContainers.all(container,\n  container.image in exceptions.allowedImages ||\n  container.?securityContext.?capabilities.?add.orValue([]).all(capability,\n    capability == 'NET_BIND_SERVICE' || capability in exceptions.allowedValues))",
+            "message": "Any capabilities added other than NET_BIND_SERVICE are disallowed. Windows Pods are exempt."
+          }
+        ],
+        "variables": [
+          {
+            "expression": "object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))",
+            "name": "podSpec"
+          },
+          {
+            "expression": "variables.podSpec.?containers.orValue([]) + variables.podSpec.?initContainers.orValue([]) + variables.podSpec.?ephemeralContainers.orValue([])",
+            "name": "allContainers"
+          },
+          {
+            "expression": "variables.podSpec.?os.?name.orValue('') == 'windows'",
+            "name": "isWindowsPod"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "metadata": {
+        "annotations": {
+          "compliance.erenius.io/binding": "hz-bg-deny",
+          "compliance.erenius.io/bundle": "konstapel-vendored",
+          "compliance.erenius.io/bundle-digest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+          "compliance.erenius.io/cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+          "compliance.erenius.io/configuration-digest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "compliance.erenius.io/mode": "Deny",
+          "compliance.erenius.io/policy": "disallow-privilege-escalation",
+          "compliance.erenius.io/profile": "hz-bg-hardening",
+          "compliance.erenius.io/profile-generation": "1",
+          "compliance.erenius.io/profile-uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+          "compliance.erenius.io/revision": "sha256:457157391b9ebd382878d1f2ed3b8a2286c4e4e6dece1caebc6c2fe76d664fd9",
+          "compliance.erenius.io/source-digest": "sha256:e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+          "compliance.erenius.io/source-sha256": "8298294ae338afca75bd016a327d9b64343344d3f10421134ca6e2351c0589ea",
+          "compliance.erenius.io/variant-of": "kyverno/policies@fac1ccda72ab53594921ca1c040ac90b80afadcd pod-security-vpol/restricted/disallow-privilege-escalation",
+          "kyverno.io/kubernetes-version": "1.30+",
+          "kyverno.io/kyverno-version": "1.14.0",
+          "policies.kyverno.io/category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "policies.kyverno.io/description": "Privilege escalation, such as via set-user-ID or set-group-ID file mode, should not be allowed. This policy ensures the `allowPrivilegeEscalation` field is set to `false`.",
+          "policies.kyverno.io/minversion": "1.19.1",
+          "policies.kyverno.io/severity": "medium",
+          "policies.kyverno.io/subject": "Pod",
+          "policies.kyverno.io/title": "Disallow Privilege Escalation in ValidatingPolicy"
+        },
+        "labels": {
+          "app.kubernetes.io/managed-by": "konstapel",
+          "compliance.erenius.io/binding-uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+          "compliance.erenius.io/policy-hash": "5626a522ac5ae8895b4fce1c449f87c0ae9b2b2b"
+        },
+        "name": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9"
+      },
+      "spec": {
+        "evaluation": {
+          "background": {
+            "enabled": true
+          }
+        },
+        "matchConstraints": {
+          "namespaceSelector": {
+            "matchLabels": {
+              "manager-test.konstapel.dev/environment": "hz-bg"
+            }
+          },
+          "resourceRules": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "pods",
+                "replicationcontrollers"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "deployments",
+                "daemonsets",
+                "statefulsets",
+                "replicasets"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "jobs",
+                "cronjobs"
+              ]
+            },
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "UPDATE"
+              ],
+              "resources": [
+                "pods/ephemeralcontainers"
+              ]
+            }
+          ]
+        },
+        "validationActions": [
+          "Deny"
+        ],
+        "validations": [
+          {
+            "expression": "variables.isWindowsPod || variables.allContainers.all(container,\n  container.image in exceptions.allowedImages ||\n  container.?securityContext.?allowPrivilegeEscalation.orValue(true) == false)",
+            "message": "Privilege escalation is disallowed.  All containers must set the securityContext.allowPrivilegeEscalation field to `false`. Windows Pods are exempt."
+          }
+        ],
+        "variables": [
+          {
+            "expression": "object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))",
+            "name": "podSpec"
+          },
+          {
+            "expression": "variables.podSpec.containers + variables.podSpec.?initContainers.orValue([]) + variables.podSpec.?ephemeralContainers.orValue([])",
+            "name": "allContainers"
+          },
+          {
+            "expression": "variables.podSpec.?os.?name.orValue('') == 'windows'",
+            "name": "isWindowsPod"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "metadata": {
+        "annotations": {
+          "compliance.erenius.io/binding": "hz-bg-deny",
+          "compliance.erenius.io/bundle": "konstapel-vendored",
+          "compliance.erenius.io/bundle-digest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+          "compliance.erenius.io/cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+          "compliance.erenius.io/configuration-digest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "compliance.erenius.io/mode": "Deny",
+          "compliance.erenius.io/policy": "require-run-as-nonroot",
+          "compliance.erenius.io/profile": "hz-bg-hardening",
+          "compliance.erenius.io/profile-generation": "1",
+          "compliance.erenius.io/profile-uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+          "compliance.erenius.io/revision": "sha256:f3e03006b64c73bab210a155b98520077c74ddb298d73544d7f433d3978856a1",
+          "compliance.erenius.io/source-digest": "sha256:17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+          "compliance.erenius.io/source-sha256": "5276cb3c4f3d782604334d40cb40e659ee5d9ffefb190b9d52ab880e74bbb3b8",
+          "compliance.erenius.io/variant-of": "kyverno/policies@fac1ccda72ab53594921ca1c040ac90b80afadcd pod-security-vpol/restricted/require-run-as-nonroot",
+          "kyverno.io/kubernetes-version": "1.30+",
+          "kyverno.io/kyverno-version": "1.14.0",
+          "policies.kyverno.io/category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "policies.kyverno.io/description": "Containers must run as non-root users. This policy ensures that every container sets `runAsNonRoot` to `true` or inherits it from the Pod, and that neither sets it to `false`. Missing or null init and ephemeral container lists are treated as empty. Konstapel variant: `spec.hostUsers: false` is not an exemption (a workload that cannot run as non-root needs a recorded exception), and explicit Windows Pods are outside scope.",
+          "policies.kyverno.io/minversion": "1.19.1",
+          "policies.kyverno.io/severity": "medium",
+          "policies.kyverno.io/subject": "Pod",
+          "policies.kyverno.io/title": "Require runAsNonRoot in ValidatingPolicy"
+        },
+        "labels": {
+          "app.kubernetes.io/managed-by": "konstapel",
+          "compliance.erenius.io/binding-uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+          "compliance.erenius.io/policy-hash": "205f077c64fdaabf7aeb70c755d33776e5dccffb"
+        },
+        "name": "konstapel-require-run-as-nonroot-1e869ab60b470d58"
+      },
+      "spec": {
+        "evaluation": {
+          "background": {
+            "enabled": true
+          }
+        },
+        "matchConstraints": {
+          "namespaceSelector": {
+            "matchLabels": {
+              "manager-test.konstapel.dev/environment": "hz-bg"
+            }
+          },
+          "resourceRules": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "pods",
+                "replicationcontrollers"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "deployments",
+                "daemonsets",
+                "statefulsets",
+                "replicasets"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "jobs",
+                "cronjobs"
+              ]
+            },
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "UPDATE"
+              ],
+              "resources": [
+                "pods/ephemeralcontainers"
+              ]
+            }
+          ]
+        },
+        "validationActions": [
+          "Deny"
+        ],
+        "validations": [
+          {
+            "expression": "variables.isWindowsPod || (variables.podSpec.?securityContext.?runAsNonRoot.orValue(true) == true \u0026\u0026\n  variables.ctnrs.all(c,\n    c.image in exceptions.allowedImages ||\n    c.?securityContext.?runAsNonRoot.orValue(\n      variables.podSpec.?securityContext.?runAsNonRoot.orValue(false)) == true))",
+            "message": "Running as root is not allowed. Every container (spec.containers[*], spec.initContainers[*], and spec.ephemeralContainers[*]) must set securityContext.runAsNonRoot to `true`, or inherit `true` from spec.securityContext.runAsNonRoot. Neither spec.securityContext.runAsNonRoot nor container-level securityContext.runAsNonRoot may be set to `false`. Setting spec.hostUsers to `false` does not exempt a Pod. Windows Pods are exempt."
+          }
+        ],
+        "variables": [
+          {
+            "expression": "object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))",
+            "name": "podSpec"
+          },
+          {
+            "expression": "variables.podSpec.containers + (variables.podSpec.?initContainers.orValue([]) == null ? [] : variables.podSpec.?initContainers.orValue([])) + (variables.podSpec.?ephemeralContainers.orValue([]) == null ? [] : variables.podSpec.?ephemeralContainers.orValue([]))",
+            "name": "ctnrs"
+          },
+          {
+            "expression": "variables.podSpec.?os.?name.orValue('') == 'windows'",
+            "name": "isWindowsPod"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "metadata": {
+        "annotations": {
+          "compliance.erenius.io/binding": "hz-bg-deny",
+          "compliance.erenius.io/bundle": "konstapel-vendored",
+          "compliance.erenius.io/bundle-digest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71",
+          "compliance.erenius.io/cluster": "kube-system:fe66a9c2-c554-4181-80e4-7bcbff5fd50a",
+          "compliance.erenius.io/configuration-digest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "compliance.erenius.io/mode": "Deny",
+          "compliance.erenius.io/policy": "restrict-seccomp-strict",
+          "compliance.erenius.io/profile": "hz-bg-hardening",
+          "compliance.erenius.io/profile-generation": "1",
+          "compliance.erenius.io/profile-uid": "82b881f0-ff18-4dbf-af47-63afe53ac89b",
+          "compliance.erenius.io/revision": "sha256:69c6ca9f478f4c3e6e4905f106d4c1a939bea6ad9faca59c36185ac4d0a1866b",
+          "compliance.erenius.io/source-digest": "sha256:239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+          "compliance.erenius.io/source-sha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+          "compliance.erenius.io/variant-of": "kyverno/policies@fac1ccda72ab53594921ca1c040ac90b80afadcd pod-security-vpol/restricted/restrict-seccomp-strict",
+          "kyverno.io/kubernetes-version": "1.30+",
+          "kyverno.io/kyverno-version": "1.14.0",
+          "policies.kyverno.io/category": "Pod Security Standards (Restricted) in ValidatingPolicy",
+          "policies.kyverno.io/description": "The Restricted profile requires a seccomp profile of `RuntimeDefault` or `Localhost`. The Pod-level seccomp profile must be unset or set to one of these values. Each container must set one of these values or inherit a valid Pod-level profile, so a Pod with no valid profile at either level is denied. Windows Pods are exempt.",
+          "policies.kyverno.io/minversion": "1.19.1",
+          "policies.kyverno.io/severity": "medium",
+          "policies.kyverno.io/subject": "Pod",
+          "policies.kyverno.io/title": "Restrict Seccomp (Strict) in ValidatingPolicy"
+        },
+        "labels": {
+          "app.kubernetes.io/managed-by": "konstapel",
+          "compliance.erenius.io/binding-uid": "127c77ed-f96d-4e9a-9b3c-f45514659a78",
+          "compliance.erenius.io/policy-hash": "a6fbf953c145c1f4fcce004136292bc097f18b3d"
+        },
+        "name": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66"
+      },
+      "spec": {
+        "evaluation": {
+          "background": {
+            "enabled": true
+          }
+        },
+        "matchConstraints": {
+          "namespaceSelector": {
+            "matchLabels": {
+              "manager-test.konstapel.dev/environment": "hz-bg"
+            }
+          },
+          "resourceRules": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "pods",
+                "replicationcontrollers"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "deployments",
+                "daemonsets",
+                "statefulsets",
+                "replicasets"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "CREATE",
+                "UPDATE"
+              ],
+              "resources": [
+                "jobs",
+                "cronjobs"
+              ]
+            },
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "operations": [
+                "UPDATE"
+              ],
+              "resources": [
+                "pods/ephemeralcontainers"
+              ]
+            }
+          ]
+        },
+        "validationActions": [
+          "Deny"
+        ],
+        "validations": [
+          {
+            "expression": "variables.isWindowsPod || !variables.podSpec.?securityContext.?seccompProfile.?type.hasValue() || variables.podSpec.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost'] || ('seccomp.type:' + variables.podSpec.securityContext.seccompProfile.type) in exceptions.allowedValues",
+            "message": "Use of custom Seccomp profiles is disallowed. The field spec.securityContext.seccompProfile.type must be unset or set to `RuntimeDefault` or `Localhost`. Windows Pods are exempt."
+          },
+          {
+            "expression": "variables.isWindowsPod || variables.allContainers.all(container,\n  container.?securityContext.?seccompProfile.?type.orValue('') in ['RuntimeDefault', 'Localhost'] ||\n  (container.?securityContext.?seccompProfile.?type.hasValue() \u0026\u0026\n   (container.image in exceptions.allowedImages ||\n    ('seccomp.type:' + container.securityContext.seccompProfile.type) in exceptions.allowedValues)) ||\n  (!container.?securityContext.?seccompProfile.?type.hasValue() \u0026\u0026\n   (variables.podSpec.?securityContext.?seccompProfile.?type.orValue('') in ['RuntimeDefault', 'Localhost'] ||\n    ('seccomp.type:' + variables.podSpec.?securityContext.?seccompProfile.?type.orValue('')) in exceptions.allowedValues)))",
+            "message": "Use of custom Seccomp profiles is disallowed. The fields spec.containers[*].securityContext.seccompProfile.type, spec.initContainers[*].securityContext.seccompProfile.type, and spec.ephemeralContainers[*].securityContext.seccompProfile.type must be set to `RuntimeDefault` or `Localhost`, or inherited from spec.securityContext.seccompProfile.type. Windows Pods are exempt."
+          }
+        ],
+        "variables": [
+          {
+            "expression": "object.spec.?jobTemplate.?spec.?template.?spec.orValue( object.spec.?template.?spec.orValue(object.spec))",
+            "name": "podSpec"
+          },
+          {
+            "expression": "variables.podSpec.containers + variables.podSpec.?initContainers.orValue([]) + variables.podSpec.?ephemeralContainers.orValue([])",
+            "name": "allContainers"
+          },
+          {
+            "expression": "variables.podSpec.?os.?name.orValue('') == 'windows'",
+            "name": "isWindowsPod"
+          }
+        ]
+      }
+    }
+  ],
+  "observer": "7acdaf65-84e3-422e-8a98-26904e3e5b75"
+}
