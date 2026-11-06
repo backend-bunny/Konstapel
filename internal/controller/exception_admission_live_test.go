@@ -158,6 +158,9 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	certs := t.TempDir()
 	ca := servingCert(t, certs, host)
 
+	if err := l.c.Create(l.ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DefaultSnapshotNamespace}}); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
 	mgr, err := NewManager(l.cfg, Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second,
 		SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: exceptionWebhookPort})
 	if err != nil {
@@ -236,6 +239,11 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	if a.Eligibility == nil || a.Eligibility.Effective != v1alpha1.ExceptionsSelfService || len(a.Eligibility.Contributors) != 1 || a.Eligibility.Contributors[0].Binding.Name != b.Name {
 		t.Fatalf("resolved set = %+v", a.Eligibility)
 	}
+	// 1a. The controller persists an immutable snapshot of the acceptance
+	// in the protected namespace before anything is granted (task 3.1).
+	snap1 := l.waitSnapshot(created, 1)
+	l.record("snapshot", map[string]any{"configmap": snap1.Name, "digest": snap1.Annotations[exception.AnnotationSnapshotDigest]})
+
 	// 1b. Authorization (task 2.4): the team role writes only its own
 	// namespace's exceptions; status, central configuration, the protected
 	// namespace and native engine exceptions stay out of reach, while the
@@ -274,7 +282,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	renewed.Spec.AcceptanceRevision = 2
 	renewed.Spec.Reason = "renewed live"
 	renewed.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(48 * time.Hour).Truncate(time.Second))
-	if err := bob.Update(l.ctx, renewed); err != nil {
+	if err := l.patchException(bob, renewed); err != nil {
 		t.Fatal(err)
 	}
 	r := acceptance(t, renewed)
@@ -283,6 +291,12 @@ func TestLiveExceptionAdmission(t *testing.T) {
 		t.Fatalf("renewal = %+v", r)
 	}
 	accepted := renewed.Annotations[exception.AcceptanceAnnotation]
+
+	snap2 := l.waitSnapshot(created, 2)
+	if again := l.snapshotConfigMap(snap1.Name); again == nil || again.ResourceVersion != snap1.ResourceVersion {
+		t.Error("the first acceptance snapshot changed or disappeared after renewal")
+	}
+	l.record("renewal-snapshot", map[string]any{"configmap": snap2.Name, "retained": snap1.Name})
 
 	// 5. Lifetime: beyond the profile's 720h maximum is rejected (task 2.3).
 	long := newEx("too-long", nil)
@@ -317,7 +331,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	renewAgain.Spec.AcceptanceRevision = 3
 	renewAgain.Spec.Reason = "renew under forbidden"
 	renewAgain.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(72 * time.Hour).Truncate(time.Second))
-	err = bob.Update(l.ctx, renewAgain)
+	err = l.patchException(bob, renewAgain)
 	if err == nil || !strings.Contains(err.Error(), exception.ReasonForbidden) {
 		t.Fatalf("renewal under forbidden overlap: %v", err)
 	}
@@ -344,7 +358,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	}
 	edited := current.DeepCopy()
 	edited.Labels = map[string]string{"edited-by": "bob"}
-	if err := bob.Update(l.ctx, edited); err != nil {
+	if err := l.patchException(bob, edited); err != nil {
 		t.Fatalf("metadata edit: %v", err)
 	}
 	if edited.Annotations[exception.AcceptanceAnnotation] != accepted {
@@ -355,7 +369,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	// 8. A caller cannot rewrite the record outside a renewal.
 	tampered := edited.DeepCopy()
 	tampered.Annotations[exception.AcceptanceAnnotation] = strings.Replace(accepted, `"username":"bob"`, `"username":"platform-admin"`, 1)
-	err = bob.Update(l.ctx, tampered)
+	err = l.patchException(bob, tampered)
 	if err == nil || !strings.Contains(err.Error(), "protected") {
 		t.Fatalf("tampered record: %v", err)
 	}
@@ -365,7 +379,7 @@ func TestLiveExceptionAdmission(t *testing.T) {
 	unapplied.Spec.AcceptanceRevision = 3
 	unapplied.Spec.Reason = "renew without a binding"
 	unapplied.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(72 * time.Hour).Truncate(time.Second))
-	err = bob.Update(l.ctx, unapplied)
+	err = l.patchException(bob, unapplied)
 	if err == nil || !strings.Contains(err.Error(), exception.ReasonNotApplicable) {
 		t.Fatalf("renewal without an applicable binding: %v", err)
 	}
@@ -458,4 +472,61 @@ func (l *live) authorizationChecks(team client.Client, ex *v1alpha1.ComplianceEx
 		return err == nil, fmt.Sprint(err)
 	})
 	l.record("controller-status-write", map[string]any{"allowed": true})
+}
+
+// patchException writes want's spec, labels and annotations as the given
+// identity with a merge patch, so concurrent controller status writes do not
+// conflict. want is updated from the response.
+func (l *live) patchException(c client.Client, want *v1alpha1.ComplianceException) error {
+	cur := &v1alpha1.ComplianceException{}
+	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(want), cur); err != nil {
+		return err
+	}
+	mod := cur.DeepCopy()
+	mod.Spec, mod.Labels, mod.Annotations = want.Spec, want.Labels, want.Annotations
+	if err := c.Patch(l.ctx, mod, client.MergeFrom(cur)); err != nil {
+		return err
+	}
+	*want = *mod
+	return nil
+}
+
+func (l *live) snapshotConfigMap(name string) *corev1.ConfigMap {
+	cm := &corev1.ConfigMap{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: DefaultSnapshotNamespace, Name: name}, cm); err != nil {
+		return nil
+	}
+	return cm
+}
+
+// waitSnapshot waits until the exception's status references the snapshot
+// of revision and returns the verified, immutable snapshot ConfigMap.
+func (l *live) waitSnapshot(ex *v1alpha1.ComplianceException, revision int64) *corev1.ConfigMap {
+	l.t.Helper()
+	var ref *v1alpha1.AcceptanceSnapshotReference
+	l.eventually(fmt.Sprintf("acceptance snapshot of revision %d", revision), func() (bool, string) {
+		cur := &v1alpha1.ComplianceException{}
+		if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(ex), cur); err != nil {
+			return false, err.Error()
+		}
+		ref = cur.Status.Acceptance
+		return ref != nil && ref.Revision == revision, toJSON(cur.Status)
+	})
+	cm := l.snapshotConfigMap(strings.TrimPrefix(ref.Snapshot, DefaultSnapshotNamespace+"/"))
+	if cm == nil {
+		l.t.Fatalf("snapshot %s not found", ref.Snapshot)
+	}
+	snap, digest, err := exception.SnapshotFrom(cm)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	if cm.Immutable == nil || !*cm.Immutable || digest != ref.Digest || snap.AcceptanceRevision != revision || snap.Exception.UID != ex.UID {
+		l.t.Fatalf("snapshot %s: immutable=%v digest=%s ref=%+v snapshot=%+v", cm.Name, cm.Immutable, digest, ref, snap)
+	}
+	for _, c := range snap.Eligibility.Contributors {
+		if cm.Labels[exception.RevisionLabel(c.Revision)] != "true" {
+			l.t.Errorf("snapshot %s lacks the label for revision %s", cm.Name, c.Revision)
+		}
+	}
+	return cm
 }

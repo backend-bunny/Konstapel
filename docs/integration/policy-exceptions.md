@@ -140,6 +140,53 @@ The script runs the compiled test in a container on the kind network, so the
 API server can reach the webhook even when a host firewall blocks
 container-to-host traffic.
 
+## Acceptance snapshots
+
+For every acceptance revision, the controller persists an immutable snapshot
+before anything is granted. The snapshot is a `ConfigMap` with
+`immutable: true` in the controller namespace (`konstapel-system`). It is
+named `acceptance-<exception UID>-<revision>`, so a recreated exception never
+reuses a name. Its `acceptance.json` (snapshot `version: 1`) holds:
+
+- the exception name, namespace and UID, and the acceptance revision;
+- the namespace name and UID, and the cluster identity;
+- the policy, workload selector and reason;
+- the authenticated actor and the unverified claim;
+- `acceptedAt` and `expiresAt` (the validity interval);
+- the accepted contribution/revision set.
+
+It is copied from the admission record and the spec at that revision. The
+controller never re-resolves targeting, so a restart or later configuration
+cannot change what was accepted.
+
+The exception's `status.acceptance` holds `{revision, snapshot, digest}`, and
+the condition `AcceptanceRecorded` is `True` (`Recorded`). It is `False` in
+these cases:
+
+| Reason | Meaning |
+| --- | --- |
+| `AcceptanceMissing` | No admission record exists. |
+| `AcceptanceInvalid` | The admission record cannot be used. |
+| `AcceptancePending` | The record does not yet match the spec revision. |
+| `SnapshotConflict` | A ConfigMap with the snapshot's name exists but is not an identical immutable Konstapel snapshot. It is never overwritten. |
+
+A renewal creates a new snapshot and keeps the earlier ones, so each
+acceptance stays distinguishable.
+
+Snapshot labels support selection without listing every ConfigMap:
+`app.kubernetes.io/component=acceptance-snapshot`,
+`compliance.erenius.io/exception-uid`, `compliance.erenius.io/namespace-uid`,
+`compliance.erenius.io/acceptance-revision`, and
+`compliance.erenius.io/policy-hash`. Each accepted contribution revision also
+gets a label `revision.compliance.erenius.io/<first 40 hex of the
+revision>=true`. The `compliance.erenius.io/snapshot-digest` annotation is
+verified on every read.
+
+The controller may only `get` and `create` ConfigMaps in its namespace;
+application roles have no access there. Snapshots have no owner reference,
+because they outlive the exception for retained evidence. Their retention is
+documented with task 3.5.
+
 ## Lifecycle fixture matrix
 
 [`testdata/exceptions/lifecycle-matrix.yaml`](../../testdata/exceptions/lifecycle-matrix.yaml)
