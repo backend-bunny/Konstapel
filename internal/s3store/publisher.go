@@ -129,10 +129,22 @@ func (p *Publisher) Stage(ctx context.Context, req publication.StageRequest) (pu
 	sum := sha256.Sum256(archive)
 	staged := publication.Staged{Run: req.Run, PublicationID: req.Run.PublicationID(), DescriptorSHA256: d.Digest(),
 		PackageSHA256: hex.EncodeToString(sum[:]), PackageSize: int64(len(archive))}
-	// A committed publication for this run with other content is a conflict.
-	if m, _, err := p.readManifest(ctx, req.Run); err == nil && (m.PackageSHA256 != staged.PackageSHA256 || m.DescriptorSHA256 != staged.DescriptorSHA256) {
-		return publication.Staged{}, fmt.Errorf("run already committed different content: %w", publication.ErrConflict)
-	} else if err != nil && !errors.Is(err, publication.ErrNotFound) {
+	// A committed publication for this run with other content is a conflict;
+	// with the same content (a lost response or a failed receipt update) it
+	// is already staged and nothing is uploaded again.
+	if m, _, err := p.readManifest(ctx, req.Run); err == nil {
+		if m.PackageSHA256 != staged.PackageSHA256 || m.DescriptorSHA256 != staged.DescriptorSHA256 {
+			return publication.Staged{}, fmt.Errorf("run already committed different content: %w", publication.ErrConflict)
+		}
+		return staged, nil
+	} else if !errors.Is(err, publication.ErrNotFound) {
+		return publication.Staged{}, err
+	}
+	// An earlier attempt that uploaded the same bytes and still verifies is
+	// reused, so a retry after an upload never uploads a second copy.
+	if prior, err := p.Recover(ctx, req.Run); err == nil && prior.PackageSHA256 == staged.PackageSHA256 && prior.DescriptorSHA256 == staged.DescriptorSHA256 {
+		return staged, nil
+	} else if err != nil && !errors.Is(err, publication.ErrCaptureLost) {
 		return publication.Staged{}, err
 	}
 	id := make([]byte, 8)

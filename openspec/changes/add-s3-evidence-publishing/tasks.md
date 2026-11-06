@@ -33,7 +33,7 @@ Planning artifact completion does not satisfy implementation prerequisites.
 ## 3. Recover interrupted operations and preserve ownership
 
 - [x] 3.1 Wire upload/commit/failure reconciliation into the shared run status with bounded network/retry limits; verify storage failure remains separate from assessment outcomes and terminal failure releases the binding's active run slot.
-- [ ] 3.2 Add recovery after archive upload, commit-response loss, and Kubernetes receipt-update failure; verify recovery reconciles the original digest, publication time, expiry, and namespace scope instead of creating a second snapshot.
+- [x] 3.2 Add recovery after archive upload, commit-response loss, and Kubernetes receipt-update failure; verify recovery reconciles the original digest, publication time, expiry, and namespace scope instead of creating a second snapshot.
 - [ ] 3.3 Implement cancellation and orphan cleanup for owned multipart uploads and uncommitted objects; verify restart can identify its attempts and never deletes unrelated objects under a shared bucket/prefix.
 - [ ] 3.4 Preserve historical destination snapshots and credential references across default endpoint changes; verify old artifacts can still be read/retired and missing old credentials remain a visible retryable problem.
 - [ ] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery; verify the fault-injection walkthrough retains useful diagnostics while cleaning its task-owned storage attempts.

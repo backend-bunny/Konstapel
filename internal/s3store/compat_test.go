@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,9 +131,34 @@ func TestPublisherRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			archives := func() int {
+				l, err := c.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run) + "attempts/")})
+				if err != nil {
+					t.Fatal(err)
+				}
+				n := 0
+				for _, o := range l.Contents {
+					if strings.HasSuffix(aws.ToString(o.Key), "/package.tar.gz") {
+						n++
+					}
+				}
+				return n
+			}
+			// A retry after the upload reuses it.
+			if again, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: dir}); err != nil || again != s || archives() != 1 {
+				t.Fatalf("retried stage uploaded again: %v archives %d", err, archives())
+			}
 			r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h")})
 			if err != nil {
 				t.Fatal(err)
+			}
+			// The receipt never reached Kubernetes: a new leader stages and
+			// publishes again, uploads nothing, and gets the original receipt.
+			leader := &Publisher{Client: c, Dest: d, Now: func() time.Time { return clock.Add(time.Minute) }}
+			if s2, err := leader.Stage(ctx, publication.StageRequest{Run: run, Dir: dir}); err != nil || s2 != s || archives() != 1 {
+				t.Fatalf("stage after commit: %v archives %d", err, archives())
+			} else if got, err := leader.Publish(ctx, publication.PublishRequest{Staged: s2, Retention: retention("24h")}); err != nil || !reflect.DeepEqual(got, r) {
+				t.Fatalf("recovered receipt differs: %v", err)
 			}
 			if again, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("2160h")}); err != nil || !reflect.DeepEqual(again, r) {
 				t.Fatalf("retry changed the commit: %v", err)

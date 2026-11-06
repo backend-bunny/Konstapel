@@ -299,3 +299,70 @@ func TestTLSTrustIsExplicit(t *testing.T) {
 		t.Fatalf("trusted CA bundle not used: %+v %v", r, err)
 	}
 }
+
+func (f *fakeS3) archives() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for k, v := range f.objects {
+		if strings.Contains(k, "/attempts/") && strings.HasSuffix(k, "/package.tar.gz") && !v[len(v)-1].deleted {
+			n++
+		}
+	}
+	return n
+}
+
+// Retries after an upload, a lost commit response, or a failed receipt
+// update reuse the uploaded archive and converge on the original receipt.
+func TestRetriedStageReusesUploadAndCommit(t *testing.T) {
+	f := newFake()
+	p := newPublisher(t, f, time.Now)
+	ctx := context.Background()
+	dir := fullPackage(t)
+	s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Upload finished but its response was lost: the retry uploads nothing.
+	again, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir})
+	if err != nil || again != s || f.archives() != 1 {
+		t.Fatalf("retried stage uploaded again: %d archives %v", f.archives(), err)
+	}
+	r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("2160h")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The receipt never reached Kubernetes: a new leader stages and publishes
+	// again and gets the original receipt without new objects.
+	restarted := &Publisher{Client: p.Client, Dest: p.Dest, Now: func() time.Time { return time.Now().Add(time.Hour) }}
+	s2, err := restarted.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir})
+	if err != nil || s2 != s || f.archives() != 1 {
+		t.Fatalf("stage after commit: %v archives %d", err, f.archives())
+	}
+	got, err := restarted.Publish(ctx, publication.PublishRequest{Staged: s2, Retention: retention("24h")})
+	if err != nil || !reflect.DeepEqual(got, r) {
+		t.Fatalf("receipt changed on recovery: %v\nwant %+v\ngot  %+v", err, r, got)
+	}
+}
+
+// An earlier attempt whose archive no longer verifies is not reused.
+func TestCorruptPriorAttemptIsReuploaded(t *testing.T) {
+	f := newFake()
+	p := newPublisher(t, f, time.Now)
+	ctx := context.Background()
+	dir := fullPackage(t)
+	if _, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	for k, v := range f.objects {
+		if strings.HasSuffix(k, "/package.tar.gz") {
+			last := &v[len(v)-1]
+			last.body, last.checksum = last.body[:len(last.body)/2], ""
+		}
+	}
+	f.mu.Unlock()
+	if _, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir}); err != nil || f.archives() != 2 {
+		t.Fatalf("corrupt attempt reused: %v archives %d", err, f.archives())
+	}
+}
