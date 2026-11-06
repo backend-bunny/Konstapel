@@ -533,6 +533,66 @@ projection:
   reference that original index, so team evidence stays traceable to the
   cluster-wide report without disclosing it.
 
+## Capture revisions, correlation, and engine limits
+
+**Capture revisions.** Prototype captures are version 1 (`internal/assessment`,
+unchanged). Controller captures are version 2 (`internal/collector`).
+`CaptureVersion` dispatches between them, and neither path accepts the
+other's format. A v2 capture records:
+
+- its frozen scope: subjects, stale scopes, checks, workloads, and the derived
+  expected inventory;
+- the contributions and engine policies needed to re-verify;
+- reports, scope changes, and the observing controller instance;
+- for namespace packages, the projection.
+
+**Supported correlation.** Evidence from the pinned engine (Kyverno 1.19.2,
+see [versions.json](versions.json)) cannot be attributed to a workload state by
+the engine's own data. `TestLiveEngineCorrelation` recorded a pod before and
+after an in-place label update; the raw reports are in
+[engine-correlation.json](engine-correlation.json):
+
+- A PolicyReport's `scope` names the resource by apiVersion, kind, namespace,
+  name, and UID only. It has no `resourceVersion`, generation, or state
+  digest.
+- Results carry outcome, timestamp, and `properties` (`cel.validationIndex` and
+  `process: background scan`). Report metadata has only a `managed-by` label.
+- An in-place label change keeps the pod's `metadata.generation` at 1.
+- The background scan (15s in the test environment) rewrites the report with a
+  new timestamp whether or not anything changed.
+
+Engine-provided correlation is therefore unsupported, and Konstapel uses only
+the conservative rule:
+
+- a result counts for a workload state only if it was evaluated strictly after
+  the controller observed that state;
+- no watch discontinuity may lie between that observation and the evaluation;
+- the state must be unchanged at closure.
+
+In the recorded run, current evidence went `Incomplete` within a second of the
+update. It became `Complete` again only with the first background evaluation
+after the update. `TestSavedEngineCorrelationEvidence` replays the recorded
+reports without a cluster: the pre-update result is rejected for the new state,
+and the next evaluation is attributable.
+
+**Scope windows.** A run's snapshot is a bounded observation window from
+freeze to closure (at most `collectionTimeout`), not an atomic transaction
+across the cluster. Changes inside the window are recorded against the frozen
+scope and never broaden or shrink it.
+
+**Remaining engine limits.**
+
+- Kyverno's background scan evaluates from its own informer cache. A result
+  stamped after the controller's observation could, in principle, describe a
+  cached object older than the one the controller observed. No report field
+  can rule this out, so the rule above bounds the risk by ordering and the
+  state recheck; it does not prove it absent.
+- After a controller start, restart, or leader change, earlier evaluations no
+  longer count. Evidence becomes attributable again only after the next
+  engine evaluation (one background scan interval).
+- Admission results (`process` other than background scan) describe the
+  admitted object. They follow the same rule and get no special trust.
+
 ## Integration sequence
 
 1. This contract merges first. It needs no scheduler.
