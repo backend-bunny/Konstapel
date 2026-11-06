@@ -237,6 +237,27 @@ The rendered names and annotations derive from the bundle digest. After any
 `go test ./internal/hardening -run TestRenderedBundleFixtures -update`,
 together with the targeting goldens.
 
+### Live admission (task 4.2)
+
+`TestLiveHardeningAdmission` (`internal/controller`, `live` tag) is part of
+`scripts/targeting-live.sh`, so `task acceptance` runs it. The in-process
+controller serves the vendored bundle. The test binds a profile of the four
+checks in Deny mode to `hz-deny` and in Audit mode to `hz-audit`, then waits
+for both bindings to be engine-ready.
+
+In `hz-deny`, each check is violated on its own in:
+- a Pod, a Deployment template and a CronJob template;
+- an init container;
+- an UPDATE that turns an existing compliant Deployment non-compliant;
+- an ephemeral container added through the `pods/ephemeralcontainers`
+  subresource to a running compliant Pod.
+
+Every one of the 24 attempts is denied, and the denial names that check's
+rendered engine policy and no other. Compliant Pods, Deployments, CronJobs
+and ephemeral containers are admitted. In `hz-audit`, a Pod violating all
+four checks is admitted. The test removes its bindings and profile and waits
+until their policies are withdrawn. Its evidence goes to `<output>/live/TestLiveHardeningAdmission.json`.
+
 ## NIST Moderate mappings
 
 `content/linux-hardening/component-definition.json` (OSCAL 1.1.3, trestle
