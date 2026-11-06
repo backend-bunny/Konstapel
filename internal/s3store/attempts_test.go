@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/backend-bunny/Konstapel/internal/publication/publicationtest"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -152,4 +154,68 @@ func TestOpenServesOnlyCommittedUnexpiredArchives(t *testing.T) {
 	if _, _, err := p.Open(ctx, testRun); !errors.Is(err, publication.ErrExpired) {
 		t.Fatalf("expired archive: %v", err)
 	}
+}
+
+// Expiry deletion removes every owned version of one run and nothing else;
+// a refused deletion is RetentionBlocked and keeps the commit.
+func TestDeleteAfterExpiryIsScopedAndTruthful(t *testing.T) {
+	for _, mode := range []string{"", "Enabled", "Suspended"} {
+		f := newFake()
+		f.versioning = mode
+		clock := time.Now()
+		p := newPublisher(t, f, func() time.Time { return clock })
+		ctx := context.Background()
+		publish := func(run publication.RunRef, retention string) publication.Receipt {
+			s, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: fullPackageFor(t, run)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retentionOf(retention)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+		short := publish(testRun, "1h")
+		other := testRun
+		other.RunUID = "run-uid-kept"
+		publish(other, "2160h")
+		f.put("unrelated/object", "x")
+		if _, err := p.Delete(ctx, testRun); !errors.Is(err, publication.ErrRetentionActive) {
+			t.Fatalf("%s deleted before expiry: %v", mode, err)
+		}
+		clock = short.ExpiresAt.Add(time.Second)
+		f.denyDelete = true
+		cl, err := p.Delete(ctx, testRun)
+		if !errors.Is(err, publication.ErrRetentionBlocked) || cl.State != publication.CleanupRetentionBlocked {
+			t.Fatalf("%s refused deletion reported as %+v %v", mode, cl, err)
+		}
+		if _, err := p.read(ctx, short.Commit.ManifestKey, ""); err != nil {
+			t.Fatalf("%s commit lost after a refused deletion: %v", mode, err)
+		}
+		f.denyDelete = false
+		if cl, err := p.Delete(ctx, testRun); err != nil || cl.State != publication.CleanupDeleted {
+			t.Fatalf("%s deletion: %+v %v", mode, cl, err)
+		}
+		if left := f.keys(p.runPrefix(testRun)); len(left) != 0 {
+			t.Fatalf("%s owned objects survived: %v", mode, left)
+		}
+		if st, err := p.Inspect(ctx, other); err != nil || st.Phase != publication.PhaseCommitted {
+			t.Fatalf("%s separately retained package affected: %+v %v", mode, st, err)
+		}
+		if len(f.keys("unrelated/")) != 1 {
+			t.Fatalf("%s unrelated object removed", mode)
+		}
+	}
+}
+
+func retentionOf(d string) publication.Retention { return retention(d) }
+
+func fullPackageFor(t *testing.T, run publication.RunRef) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "pkg")
+	if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), dir, run); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }

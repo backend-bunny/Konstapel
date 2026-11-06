@@ -210,7 +210,6 @@ func TestPublisherRoundTrip(t *testing.T) {
 			if st, err := p.Inspect(ctx, run); err != nil || st.Phase != publication.PhaseCommitted || archives() != 1 {
 				t.Fatalf("committed package damaged by cleanup: %+v %v", st, err)
 			}
-			cleanup(ctx, c, d.Bucket, unrelated)
 			other := filepath.Join(t.TempDir(), "other")
 			if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), other, run); err != nil {
 				t.Fatal(err)
@@ -241,6 +240,11 @@ func TestPublisherRoundTrip(t *testing.T) {
 			if left := cleanup(ctx, c, d.Bucket, p.runPrefix(run)); len(left) != 0 {
 				t.Fatalf("cleanup left problems: %v", left)
 			}
+			// Expiry deletion is scoped to the run's own prefix.
+			if _, err := p.read(ctx, unrelated, ""); err != nil {
+				t.Fatalf("expiry deletion removed an unrelated object: %v", err)
+			}
+			cleanup(ctx, c, d.Bucket, unrelated)
 			v, err := c.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run))})
 			if err == nil && (len(v.Versions) > 0 || len(v.DeleteMarkers) > 0) {
 				t.Fatalf("owned versions survived deletion: %d versions, %d markers", len(v.Versions), len(v.DeleteMarkers))

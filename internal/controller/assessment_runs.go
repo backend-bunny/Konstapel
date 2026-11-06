@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -437,11 +438,20 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.Get(ctx, req.NamespacedName, run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if !run.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
-	}
 	if runDone(run) {
-		return r.cleanupAttempts(ctx, run)
+		return r.retain(ctx, run)
+	}
+	if !run.DeletionTimestamp.IsZero() && run.Status.Phase != v1alpha1.RunPublishing {
+		// Deleted before closing collection: nothing reached storage.
+		_ = os.RemoveAll(r.staging(run))
+		return ctrl.Result{}, r.release(ctx, run)
+	}
+	// The retention finalizer is in place before anything can reach storage,
+	// so deleting the run never orphans published or staged evidence.
+	if run.DeletionTimestamp.IsZero() && controllerutil.AddFinalizer(run, RetentionFinalizer) {
+		if err := r.Client.Update(ctx, run); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	if run.UID == "" {
 		return ctrl.Result{}, fmt.Errorf("run %s has no UID", run.Name)
@@ -753,6 +763,82 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	}
 	_ = os.RemoveAll(r.staging(run))
 	return ctrl.Result{}, r.finishRequest(ctx, run, "")
+}
+
+// RetentionFinalizer keeps an AssessmentRun, the cleanup record of its
+// published package, until the package's storage is removed after expiry.
+// Deleting the run, its binding, or its request does not end retention.
+const RetentionFinalizer = "compliance.erenius.io/retention"
+
+// MaxRetentionRequeue caps how long a retained run waits before it is
+// re-checked, so a long expiry still sees periodic reconciliation.
+const MaxRetentionRequeue = 24 * time.Hour
+
+// release removes the retention finalizer.
+func (r *AssessmentRunReconciler) release(ctx context.Context, run *v1alpha1.AssessmentRun) error {
+	if controllerutil.RemoveFinalizer(run, RetentionFinalizer) {
+		return r.Client.Update(ctx, run)
+	}
+	return nil
+}
+
+// retain reconciles a terminal run: uncommitted attempts are cleaned up,
+// a published package is kept until its recorded expiry and then deleted
+// from storage, and the finalizer is released only when nothing owned
+// remains. Expiry comes from the immutable receipt, never from the binding.
+func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.AssessmentRun) (ctrl.Result, error) {
+	if run.Status.Scope == nil || run.Status.Binding == nil {
+		return ctrl.Result{}, r.release(ctx, run) // never staged anything
+	}
+	if r.Runtime.Publisher == nil {
+		// Storage is not configured in this process: keep the record.
+		return ctrl.Result{}, nil
+	}
+	if res, err := r.cleanupAttempts(ctx, run); err != nil || res.RequeueAfter > 0 {
+		return res, err
+	}
+	pub := run.Status.Publication
+	if run.Status.Phase != v1alpha1.RunCompleted || pub == nil || pub.ExpiresAt == nil {
+		return ctrl.Result{}, r.release(ctx, run)
+	}
+	if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeleted) {
+		return ctrl.Result{}, r.release(ctx, run)
+	}
+	now := r.now()
+	if now.Before(pub.ExpiresAt.Time) {
+		return ctrl.Result{RequeueAfter: min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue)}, nil
+	}
+	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
+	cl, err := r.Runtime.Publisher.Delete(ctx, ref)
+	at := metav1.NewTime(now)
+	pub.Availability = v1alpha1.Availability(publication.AvailabilityExpired)
+	pub.Cleanup.Attempts++
+	pub.Cleanup.LastAttempt = &at
+	res := ctrl.Result{}
+	switch {
+	case err == nil || errors.Is(err, publication.ErrNotFound):
+		pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleted)
+		pub.Cleanup.State, pub.Cleanup.Message = v1alpha1.CleanupState(publication.CleanupDeleted), ""
+	default:
+		pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleting)
+		pub.Cleanup.State = v1alpha1.CleanupState(publication.CleanupDeletionFailed)
+		if errors.Is(err, publication.ErrRetentionBlocked) {
+			pub.Cleanup.State = v1alpha1.CleanupState(publication.CleanupRetentionBlocked)
+		}
+		pub.Cleanup.Message = truncate(err.Error())
+		if cl.Message != "" {
+			pub.Cleanup.Message = truncate(cl.Message)
+		}
+		// Back off from one minute to an hour; ownership metadata stays.
+		res.RequeueAfter = min(time.Minute<<min(pub.Cleanup.Attempts-1, 6), time.Hour)
+	}
+	if err := r.Client.Status().Update(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
+	if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeleted) {
+		return ctrl.Result{}, r.release(ctx, run)
+	}
+	return res, nil
 }
 
 // AttemptCleanupRetry is how often cleanup of a terminal run's uncommitted

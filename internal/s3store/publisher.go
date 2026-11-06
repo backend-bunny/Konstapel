@@ -421,11 +421,34 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 		return st.Cleanup, publication.ErrRetentionActive
 	}
 	now := p.now().UTC()
-	if problems := cleanup(ctx, p.Client, p.Dest.Bucket, p.runPrefix(run)); len(problems) > 0 {
-		return publication.Cleanup{State: publication.CleanupDeletionFailed, LastAttempt: &now, Message: truncateMsg(strings.Join(problems, "; "))},
+	problems := cleanup(ctx, p.Client, p.Dest.Bucket, p.runPrefix(run))
+	// Deletion is confirmed only when no owned version or marker remains.
+	if left, err := p.listVersions(ctx, p.runPrefix(run)); err != nil {
+		problems = append(problems, fmt.Sprintf("verify deletion: %v", sanitize(err)))
+	} else if len(left) > 0 {
+		problems = append(problems, fmt.Sprintf("%d owned object versions remain", len(left)))
+	}
+	if len(problems) > 0 {
+		msg := truncateMsg(strings.Join(problems, "; "))
+		if blocked(msg) {
+			return publication.Cleanup{State: publication.CleanupRetentionBlocked, LastAttempt: &now, Message: msg},
+				fmt.Errorf("%w: %s", publication.ErrRetentionBlocked, problems[0])
+		}
+		return publication.Cleanup{State: publication.CleanupDeletionFailed, LastAttempt: &now, Message: msg},
 			fmt.Errorf("%w: %s", publication.ErrUnavailable, problems[0])
 	}
 	return publication.Cleanup{State: publication.CleanupDeleted, LastAttempt: &now}, nil
+}
+
+// blocked recognizes refusals an administrator must resolve: object locks,
+// legal holds, and missing delete permission.
+func blocked(msg string) bool {
+	for _, code := range []string{"AccessDenied", "ObjectLocked", "InvalidRetentionPeriod", "legal hold", "object lock", "Object is WORM protected"} {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(code)) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateMsg(s string) string {

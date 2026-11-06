@@ -274,8 +274,6 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 	return r.cleanup, lost(f, nil)
 }
 
-// packageDigest stands in for an archive checksum: a SHA-256 over the
-// descriptor bytes and every inventoried file in path order.
 // packageBytes is the fake's archive: each file's name, length and bytes in
 // descriptor order. It is deterministic, like the real archive.
 func packageBytes(dir string, d publication.Descriptor) ([]byte, error) {
