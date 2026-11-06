@@ -25,7 +25,7 @@ enablement is blocked until the runtime expiry and governance gates pass.
 
 ## 2. Add the self-service API and authenticated acceptance
 
-- [ ] 2.1 After targeting lands, add the namespaced `ComplianceException` API/CRD with immutable logical policy/selector, reason, expiry, and explicit acceptance revision; verify API-server cases reject missing/null scope, blank reasons, invalid renewals, and scope mutation while accepting explicit `{}` within one namespace.
+- [x] 2.1 After targeting lands, add the namespaced `ComplianceException` API/CRD with immutable logical policy/selector, reason, expiry, and explicit acceptance revision; verify API-server cases reject missing/null scope, blank reasons, invalid renewals, and scope mutation while accepting explicit `{}` within one namespace.
 - [ ] 2.2 Implement admission identity/time and resolved-contribution capture with protected validation for creation/renewal and dry-run safety; verify forged fields cannot survive admission, later configuration cannot replace the accepted set, metadata-only edits do not renew, and GitOps identities remain distinct from claimed human attribution.
 - [ ] 2.3 Connect admission to current targeting eligibility and lifetime limits; verify Forbidden contributions, unresolved mappings, absent/past/over-limit expiry, and a shorter overlapping maximum reject acceptance.
 - [ ] 2.4 Add namespace self-service roles and controller-only status/snapshot writes; verify application credentials cannot write central profiles/bindings, another namespace's exception, protected snapshots, or status.

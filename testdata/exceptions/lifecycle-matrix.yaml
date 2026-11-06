@@ -326,8 +326,9 @@ cases:
       - at: "2026-01-01T01:01:00Z"
         action: renew
         actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        note: "revocation is terminal for revision 1; reactivation needs a new revision and fresh validation (design 1)"
         renewal: {acceptanceRevision: 2, reason: "reactivate", expiresAt: "2026-01-02T00:00:00Z"}
-        expect: {admission: rejected, reason: Revoked}
+        expect: {admission: admitted, acceptanceRevision: 2, snapshot: new, previousSnapshot: retained, grant: active}
 
   - id: forbidden-after-activation
     category: revocation

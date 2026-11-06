@@ -39,8 +39,9 @@ type Validator struct {
 
 // namespacedKinds are the only kinds allowed to be namespace-scoped; every
 // other kind must be cluster-scoped. Owner: AssessmentRequest belongs to
-// add-continuous-assessments.
-var namespacedKinds = map[string]bool{"AssessmentRequest": true}
+// add-continuous-assessments; ComplianceException to
+// add-self-service-policy-exceptions.
+var namespacedKinds = map[string]bool{"AssessmentRequest": true, "ComplianceException": true}
 
 // Load reads every CRD in dir, checks it as the API server would at creation,
 // and returns a validator for each kind at the served v1alpha1 version.
