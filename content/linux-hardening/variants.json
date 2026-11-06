@@ -1,0 +1,70 @@
+{
+  "convention": {
+    "windows": "A Pod or template with spec.os.name: windows is outside the bundle scope: every validation short-circuits through variables.isWindowsPod. Assessment must record it as out of scope, never as passing Linux coverage (task 4.5).",
+    "omittedOs": "A Pod or template without spec.os.name is evaluated with the Linux rules. This is a configuration convention; it does not attest the observed node OS.",
+    "templates": "variables.podSpec extracts CronJob jobTemplate, controller template and Pod specs, so the convention applies to every matched workload form."
+  },
+  "provenanceAnnotations": [
+    "compliance.erenius.io/variant-of",
+    "compliance.erenius.io/source-sha256"
+  ],
+  "variants": [
+    {
+      "check": "disallow-privilege-escalation",
+      "file": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+      "sha256": "e24055b5145d0473f311ed32d47a5cb874572e0f52064017a1dad85eb16a3c84",
+      "source": "content/upstream/kyverno/disallow-privilege-escalation/disallow-privilege-escalation.yaml",
+      "sourceSha256": "8298294ae338afca75bd016a327d9b64343344d3f10421134ca6e2351c0589ea",
+      "changes": []
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "file": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+      "sha256": "6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+      "source": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "sourceSha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+      "changes": []
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "file": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+      "sha256": "17af842e2efcf20aa960e457c718eb99c8535688e386850312a0789afdf687b6",
+      "source": "content/upstream/kyverno/require-run-as-nonroot/require-run-as-nonroot.yaml",
+      "sourceSha256": "5276cb3c4f3d782604334d40cb40e659ee5d9ffefb190b9d52ab880e74bbb3b8",
+      "changes": [
+        {
+          "id": "no-host-users-bypass",
+          "paths": [
+            "spec.variables[2]",
+            "spec.validations[0].expression"
+          ],
+          "detail": "Removes the userNamespacePod variable and its unconditional `spec.hostUsers: false` bypass; inheritance, explicit container false and explicit Pod-level false semantics are unchanged."
+        },
+        {
+          "id": "windows-out-of-scope",
+          "paths": [
+            "spec.variables[2]",
+            "spec.validations[0].expression"
+          ],
+          "detail": "Adds the isWindowsPod guard the other three checks already use: explicit spec.os.name windows is outside scope; an omitted OS gets the Linux rules."
+        },
+        {
+          "id": "documentation",
+          "paths": [
+            "metadata.annotations.policies.kyverno.io/description",
+            "spec.validations[0].message"
+          ],
+          "detail": "Description and message state the two changes."
+        }
+      ]
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "file": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+      "sha256": "239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+      "source": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "sourceSha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+      "changes": []
+    }
+  ]
+}

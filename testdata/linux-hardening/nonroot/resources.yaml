@@ -1,0 +1,675 @@
+# Non-root fixtures (add-linux-workload-hardening-bundle task 2.2): shared by variant/ (Konstapel
+# expectations) and upstream/ (the unmodified upstream policy). Resource names state the case.
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-container-true",
+    "namespace": "default"
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": true
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-pod-inherit",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-container-false-pod-true",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-pod-false-container-true",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": false
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": true
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-init-ephemeral-inherit",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "busybox:1.38.0"
+      }
+    ],
+    "ephemeralContainers": [
+      {
+        "name": "debug",
+        "image": "busybox:1.38.0"
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-init-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "busybox:1.38.0"
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": true
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-init-false",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-ephemeral-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "ephemeralContainers": [
+      {
+        "name": "debug",
+        "image": "busybox:1.38.0"
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": true
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-ephemeral-false",
+    "namespace": "default"
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "ephemeralContainers": [
+      {
+        "name": "debug",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-null-lists-pass",
+    "namespace": "default"
+  },
+  "spec": {
+    "initContainers": null,
+    "ephemeralContainers": null,
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": true
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-null-lists-root",
+    "namespace": "default"
+  },
+  "spec": {
+    "initContainers": null,
+    "ephemeralContainers": null,
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-hostusers-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "hostUsers": false,
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-hostusers-pod-false",
+    "namespace": "default"
+  },
+  "spec": {
+    "hostUsers": false,
+    "securityContext": {
+      "runAsNonRoot": false
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-hostusers-container-false",
+    "namespace": "default"
+  },
+  "spec": {
+    "hostUsers": false,
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-hostusers-with-flag",
+    "namespace": "default"
+  },
+  "spec": {
+    "hostUsers": false,
+    "securityContext": {
+      "runAsNonRoot": true
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-hostusers-true-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "hostUsers": true,
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-linux-root",
+    "namespace": "default"
+  },
+  "spec": {
+    "os": {
+      "name": "linux"
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-windows-root",
+    "namespace": "default"
+  },
+  "spec": {
+    "os": {
+      "name": "windows"
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0",
+        "securityContext": {
+          "runAsNonRoot": false
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "nr-windows-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "os": {
+      "name": "windows"
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox:1.38.0"
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "deploy-hostusers-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "selector": {
+      "matchLabels": {
+        "app": "w"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "w"
+        }
+      },
+      "spec": {
+        "hostUsers": false,
+        "containers": [
+          {
+            "name": "app",
+            "image": "busybox:1.38.0"
+          }
+        ]
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "deploy-init-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "selector": {
+      "matchLabels": {
+        "app": "w"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "w"
+        }
+      },
+      "spec": {
+        "initContainers": [
+          {
+            "name": "init",
+            "image": "busybox:1.38.0"
+          }
+        ],
+        "containers": [
+          {
+            "name": "app",
+            "image": "busybox:1.38.0",
+            "securityContext": {
+              "runAsNonRoot": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "apps/v1",
+  "kind": "StatefulSet",
+  "metadata": {
+    "name": "sts-hostusers-with-flag",
+    "namespace": "default"
+  },
+  "spec": {
+    "selector": {
+      "matchLabels": {
+        "app": "w"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "w"
+        }
+      },
+      "spec": {
+        "hostUsers": false,
+        "securityContext": {
+          "runAsNonRoot": true
+        },
+        "containers": [
+          {
+            "name": "app",
+            "image": "busybox:1.38.0"
+          }
+        ]
+      }
+    },
+    "serviceName": "svc"
+  }
+}
+---
+{
+  "apiVersion": "batch/v1",
+  "kind": "CronJob",
+  "metadata": {
+    "name": "cron-hostusers-missing",
+    "namespace": "default"
+  },
+  "spec": {
+    "schedule": "0 * * * *",
+    "jobTemplate": {
+      "spec": {
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "w"
+            }
+          },
+          "spec": {
+            "hostUsers": false,
+            "containers": [
+              {
+                "name": "app",
+                "image": "busybox:1.38.0"
+              }
+            ],
+            "restartPolicy": "Never"
+          }
+        }
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "batch/v1",
+  "kind": "CronJob",
+  "metadata": {
+    "name": "cron-pod-inherit",
+    "namespace": "default"
+  },
+  "spec": {
+    "schedule": "0 * * * *",
+    "jobTemplate": {
+      "spec": {
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "w"
+            }
+          },
+          "spec": {
+            "securityContext": {
+              "runAsNonRoot": true
+            },
+            "initContainers": [
+              {
+                "name": "init",
+                "image": "busybox:1.38.0"
+              }
+            ],
+            "containers": [
+              {
+                "name": "app",
+                "image": "busybox:1.38.0"
+              }
+            ],
+            "restartPolicy": "Never"
+          }
+        }
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "batch/v1",
+  "kind": "CronJob",
+  "metadata": {
+    "name": "cron-windows-root",
+    "namespace": "default"
+  },
+  "spec": {
+    "schedule": "0 * * * *",
+    "jobTemplate": {
+      "spec": {
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "w"
+            }
+          },
+          "spec": {
+            "os": {
+              "name": "windows"
+            },
+            "containers": [
+              {
+                "name": "app",
+                "image": "busybox:1.38.0",
+                "securityContext": {
+                  "runAsNonRoot": false
+                }
+              }
+            ],
+            "restartPolicy": "Never"
+          }
+        }
+      }
+    }
+  }
+}

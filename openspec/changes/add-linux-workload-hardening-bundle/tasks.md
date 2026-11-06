@@ -23,8 +23,8 @@ the other agents' CRDs or task lists.
 
 ## 2. Implement and test explicit Linux variants
 
-- [ ] 2.1 Add separately tracked local variants with consistent explicit-Windows exclusion and missing-OS Linux-rule convention for Pods/controller templates; verify CLI fixtures cover Pods, Deployments, CronJobs, and all source-supported template forms without changing upstream originals.
-- [ ] 2.2 Remove the non-root `hostUsers: false` bypass while preserving flag inheritance and explicit-false semantics; verify regular/init/ephemeral, Pod/template, null-list, user-namespace, and Windows cases against local expectations distinct from upstream results.
+- [x] 2.1 Add separately tracked local variants with consistent explicit-Windows exclusion and missing-OS Linux-rule convention for Pods/controller templates; verify CLI fixtures cover Pods, Deployments, CronJobs, and all source-supported template forms without changing upstream originals.
+- [x] 2.2 Remove the non-root `hostUsers: false` bypass while preserving flag inheritance and explicit-false semantics; verify regular/init/ephemeral, Pod/template, null-list, user-namespace, and Windows cases against local expectations distinct from upstream results.
 - [ ] 2.3 Exercise allowPrivilegeEscalation false/true/missing across all applicable container forms; verify only explicit false passes for unexcepted Linux containers and no Pod-level inheritance is invented.
 - [ ] 2.4 Add the complete drop/add cross-product against the shipped combined capabilities policy; verify missing drop ALL, disallowed additions, case sensitivity, permitted NET_BIND_SERVICE, and each container form independently of the upstream helper.
 - [ ] 2.5 Add seccomp Pod/container inheritance and override fixtures; verify RuntimeDefault/Localhost acceptance, missing both rejection, and invalid Pod-level rejection across applicable container/template forms.
