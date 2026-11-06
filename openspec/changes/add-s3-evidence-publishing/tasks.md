@@ -16,9 +16,9 @@ Planning artifact completion does not satisfy implementation prerequisites.
 
 ## 1. Establish backend configuration and compatibility fixtures
 
-- [ ] 1.1 Add the central S3 destination configuration and pin the Go SDK dependency; verify endpoint/bucket/region/prefix/addressing validation and that application requests cannot override destination fields.
+- [x] 1.1 Add the central S3 destination configuration and pin the Go SDK dependency; verify endpoint/bucket/region/prefix/addressing validation and that application requests cannot override destination fields.
 - [ ] 1.2 Support workload-identity credentials and protected controller-namespace Secret references with verified TLS/custom CA configuration; verify missing/rotated credentials and invalid trust fail visibly without leaking secrets or enabling public access.
-- [ ] 1.3 Create isolated real-endpoint fixtures using a recorded S3-compatible service version and unique test prefix; verify conditional creation, server timestamps, checksum/readback, and supported versioning modes before treating the backend as ready.
+- [x] 1.3 Create isolated real-endpoint fixtures using a recorded S3-compatible service version and unique test prefix; verify conditional creation, server timestamps, checksum/readback, and supported versioning modes before treating the backend as ready.
 - [ ] 1.4 Implement readiness checks against the required backend semantics through the shared publication interface; verify missing bucket/permissions or incompatible conditional-write behavior prevents ready publication rather than falling back to local storage.
 - [ ] 1.5 Document endpoint setup, minimum permissions, credential rotation, compatibility limits, and teardown; verify the commands use only test-owned prefixes/services and distinguish tested self-hosted behavior from untested cloud compatibility.
 
