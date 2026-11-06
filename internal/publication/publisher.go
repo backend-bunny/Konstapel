@@ -62,4 +62,10 @@ type Publisher interface {
 	Inspect(ctx context.Context, run RunRef) (Status, error)
 	// Delete removes owned objects after expiry and reports cleanup state.
 	Delete(ctx context.Context, run RunRef) (Cleanup, error)
+	// CleanupAttempts removes the run's uncommitted attempt data once the run
+	// is terminal: every staged attempt except the committed one, and any
+	// incomplete uploads. It never touches the commit or the committed
+	// archive, and leaves anything whose ownership by this run cannot be
+	// established. It is idempotent and safe to retry.
+	CleanupAttempts(ctx context.Context, run RunRef) error
 }

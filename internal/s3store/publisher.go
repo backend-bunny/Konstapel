@@ -150,6 +150,12 @@ func (p *Publisher) Stage(ctx context.Context, req publication.StageRequest) (pu
 	id := make([]byte, 8)
 	_, _ = rand.Read(id)
 	at := p.runPrefix(req.Run) + "attempts/" + hex.EncodeToString(id) + "/"
+	// Record the attempt's owner before any bytes, so an interrupted upload
+	// can always be identified and cleaned up.
+	intent, _ := json.Marshal(attemptIntent{Run: req.Run, Created: p.now().UTC()})
+	if _, err := p.putVerified(ctx, at+intentFile, intent); err != nil {
+		return publication.Staged{}, err
+	}
 	vid, err := p.putVerified(ctx, at+"package.tar.gz", archive)
 	if err != nil {
 		return publication.Staged{}, err

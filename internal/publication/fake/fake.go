@@ -25,6 +25,7 @@ const (
 	OpPublish Op = "Publish"
 	OpInspect Op = "Inspect"
 	OpDelete  Op = "Delete"
+	OpCleanup Op = "CleanupAttempts"
 )
 
 type fault struct {
@@ -290,4 +291,18 @@ func paths(d publication.Descriptor) []string {
 		out[i] = f.Path
 	}
 	return out
+}
+
+// CleanupAttempts drops uncommitted staging for the run.
+func (p *Publisher) CleanupAttempts(ctx context.Context, run publication.RunRef) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, err := p.enter(ctx, OpCleanup)
+	if err != nil {
+		return err
+	}
+	if r, ok := p.records[run.PublicationID()]; ok && r.receipt == nil {
+		delete(p.records, run.PublicationID())
+	}
+	return lost(f, nil)
 }
