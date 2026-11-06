@@ -1,0 +1,58 @@
+{
+  "task": "add-self-service-policy-exceptions design §4 / 1.4 (namespace identity)",
+  "observed": "2026-11-06",
+  "command": "flock /tmp/konstapel-live-cluster.lock devbox run -- scripts/exception-namespace-uid.sh OUTPUT",
+  "kyvernoChart": "3.9.2",
+  "nodeImage": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5",
+  "variants": {
+    "upper": {
+      "variant": "upper",
+      "expression": "namespaceObject != null && namespaceObject.metadata.name == 'uid-probe-upper' && namespaceObject.metadata.UID == '6401b65b-0ac0-4d58-aa1a-06ad3fd99aa0'",
+      "exceptionAccepted": true,
+      "admission": "denied",
+      "admissionMessage": "Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy uid-probe-priv error: failed to load context: no such key: UID",
+      "background": [
+        {
+          "result": "error",
+          "properties": {
+            "process": "background scan"
+          }
+        }
+      ]
+    },
+    "lower": {
+      "variant": "lower",
+      "expression": "namespaceObject != null && namespaceObject.metadata.name == 'uid-probe-lower' && namespaceObject.metadata.uid == '228f3aa2-ada9-40ac-a854-45fa4cc0510c'",
+      "exceptionAccepted": false,
+      "admission": "denied",
+      "admissionMessage": "Error from server: error when creating \"STDIN\": admission webhook \"vpol.validate.kyverno.svc-fail\" denied the request: Policy uid-probe-priv failed: Privileged mode is disallowed. All containers must set the securityContext.privileged field to `false` or unset the field.",
+      "background": [
+        {
+          "result": "fail",
+          "properties": {
+            "cel.validationIndex": "0",
+            "process": "background scan"
+          }
+        }
+      ]
+    },
+    "name": {
+      "variant": "name",
+      "expression": "namespaceObject != null && namespaceObject.metadata.name == 'uid-probe-name'",
+      "exceptionAccepted": true,
+      "admission": "admitted",
+      "admissionMessage": "pod/privileged created (server dry run)",
+      "background": [
+        {
+          "result": "skip",
+          "properties": {
+            "exceptions": "uid-probe-name",
+            "process": "background scan"
+          }
+        }
+      ]
+    }
+  },
+  "namespaceUIDMatchSupported": false,
+  "conclusion": "Kyverno 1.19.2 cannot bind a native PolicyException to a namespace UID: namespaceObject.metadata.uid is rejected at exception creation (the Kubernetes CEL Namespace type declares the field as UID), and namespaceObject.metadata.UID compiles but fails at evaluation (no such key: UID), so admission errors closed and background reports error. Only the namespace name can be matched. A recreated namespace with the same name would therefore inherit a native grant; native exception enablement stays blocked on this as well as on the expiry gap."
+}

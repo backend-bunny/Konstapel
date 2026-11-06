@@ -279,3 +279,37 @@ take one of these runtimes and re-run this probe:
 
 The probe must show `after-expiry` denied with Konstapel stopped. Do not work
 around the gap with a Konstapel workload webhook (design §5).
+
+## Engine namespace-identity gate (Kyverno 1.19.2)
+
+Design §4 binds a native grant to a namespace *instance*: its name **and** UID.
+That way a namespace deleted and recreated under the same name never inherits
+an old grant. `scripts/exception-namespace-uid.sh` checks whether the pinned
+runtime can express this in `PolicyException` match conditions:
+
+```sh
+flock /tmp/konstapel-live-cluster.lock devbox run -- scripts/exception-namespace-uid.sh /tmp/konstapel-exc-nsuid
+```
+
+The [2026-11-06 result](exception-namespace-uid.json) on Kyverno 1.19.2:
+
+| Condition | Exception accepted | Admission | Background |
+| --- | --- | --- | --- |
+| `namespaceObject.metadata.uid == …` | no: `undefined field 'uid'` | (policy enforced) | `fail` |
+| `namespaceObject.metadata.UID == …` | yes | **denied**: `no such key: UID` (evaluation error, fails closed) | `error` |
+| `namespaceObject.metadata.name == …` only | yes | admitted | `skip` |
+
+The Kubernetes CEL Namespace type that Kyverno uses for exception conditions
+declares the field `UID`. The namespace value at evaluation carries the JSON
+field `uid`. So a UID condition is either rejected or never matches, and only
+the namespace name can be matched.
+
+**Native exception enablement therefore stays blocked on this too.** A
+name-only grant would let a recreated namespace inherit it, which the spec
+forbids. Lifting this gate needs one of:
+- a runtime that resolves namespace UIDs in exception conditions;
+- a narrowly scoped engine fix;
+- an agreed alternative design for namespace identity.
+
+Re-run this probe whenever the engine pin changes, together with the expiry
+probe.
