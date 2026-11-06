@@ -2,7 +2,11 @@ package s3store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -111,4 +115,41 @@ func TestCleanupAttemptsWithoutCommit(t *testing.T) {
 func statusJSONRun(r publication.RunRef) string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+func TestOpenServesOnlyCommittedUnexpiredArchives(t *testing.T) {
+	f := newFake()
+	clock := time.Now()
+	p := newPublisher(t, f, func() time.Time { return clock })
+	ctx := context.Background()
+	s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.Open(ctx, testRun); !errors.Is(err, publication.ErrNotFound) {
+		t.Fatalf("uncommitted archive opened: %v", err)
+	}
+	r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, st, err := p.Open(ctx, testRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(body)
+	_ = body.Close()
+	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != r.PackageSHA256 || st.PackageSHA256 != r.PackageSHA256 || st.PublicationID != r.PublicationID {
+		t.Fatal("opened bytes or status differ from the commit")
+	}
+	f.mu.Lock()
+	delete(f.objects, r.Commit.ArchiveKey)
+	f.mu.Unlock()
+	if _, _, err := p.Open(ctx, testRun); !errors.Is(err, publication.ErrUnavailable) {
+		t.Fatalf("missing archive: %v", err)
+	}
+	clock = r.ExpiresAt.Add(time.Second)
+	if _, _, err := p.Open(ctx, testRun); !errors.Is(err, publication.ErrExpired) {
+		t.Fatalf("expired archive: %v", err)
+	}
 }
