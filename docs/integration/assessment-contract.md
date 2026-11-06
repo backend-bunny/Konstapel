@@ -421,8 +421,29 @@ conservative continuity boundary where it is verified.
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is
   verified against the directory before `Export` returns.
 
-Binding-scope packages are exported today. Namespace packages require evidence
-projection (task 5.1) before export.
+**Namespace packages.** A namespace package is exported only from
+`collector.Project(capture, namespaceUID)`, and `Export` re-checks the
+projection with `ValidateProjection`. It refuses an unprojected capture with
+namespace scope, and a projection relabelled as a binding package. The
+projection:
+
+- keeps only the namespace's subjects, checks, workloads, expected
+  observations, and scope changes;
+- keeps stale-scope reasons and policies, but drops their messages and
+  configuration-change details, which may name other namespaces;
+- rebuilds every report result from allowlisted fields (policy, outcome,
+  rule, validation index, timestamp, in-scope resource references).
+  Report-level labels, summaries, annotations, and any other fields are
+  dropped;
+- copies a result's message only when all of its resources are in the
+  namespace (`exact`). A mixed-scope result keeps only its in-scope references
+  and loses its message (`resource-filtered/v1`);
+- withholds results whose resources lack a namespace or UID, recording only
+  the source report UID and result index;
+- records each extract's source report UID, report SHA-256, and original
+  result index under `konstapelSource`. Evaluation and OSCAL subjects
+  reference that original index, so team evidence stays traceable to the
+  cluster-wide report without disclosing it.
 
 ## Integration sequence
 
