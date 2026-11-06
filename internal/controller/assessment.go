@@ -144,6 +144,17 @@ type AssessmentReconciler struct {
 	Now        func() time.Time
 	// Runtime enables scheduled runs when ready; see AssessmentRuntime.
 	Runtime AssessmentRuntime
+	// Reader reads runs uncached. A run created moments ago may be missing
+	// from the informer cache, and treating that as "finished" would free
+	// the binding's slot while the run executes. Defaults to Client.
+	Reader client.Reader
+}
+
+func (r *AssessmentReconciler) reader() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
 }
 
 func (r *AssessmentReconciler) now() time.Time {
@@ -485,12 +496,13 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 // setupAssessments registers the assessment reconciler with the manager.
 func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine EngineAvailable, cluster string, poll time.Duration) error {
 	rt := currentRuntime()
-	r := &AssessmentReconciler{Client: mgr.GetClient(), Content: content, Engine: engine, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
+	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
 		For(&v1alpha1.ComplianceBinding{}).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient())).
-		Watches(&v1alpha1.AssessmentRun{}, bindingForRun())
+		Watches(&v1alpha1.AssessmentRun{}, bindingForRun()).
+		Watches(&v1alpha1.AssessmentRequest{}, bindingForRequest())
 	for _, res := range sortedKeys(workloadKinds) {
 		obj, _ := workloadKinds[res]()
 		b = b.Watches(obj, allBindings(mgr.GetClient()), builder.WithPredicates(workloadStateChanged()))

@@ -339,8 +339,37 @@ Failure reasons:
   a restart without durable staging. The run is never reconstructed from the
   changed cluster, and a later run assesses current state.
 - `BindingNotFound`: the binding is missing or was replaced.
-- `NamespaceRunsNotSupported`: namespace runs need evidence projection (task
-  5.1), so `AssessmentRequest`s are not executed yet.
+- `NamespaceNotInScope`: the binding no longer selects the request's
+  namespace when the run starts, or the namespace was recreated.
+- `RequestNotFound`: the request was deleted or recreated before the run
+  started.
+
+**Team requests.** A team creates an `AssessmentRequest` in its namespace:
+
+1. The controller resolves the binding UID and namespace UID into the
+   request's status. If the binding's selector does not match the namespace,
+   the request becomes `Rejected` with reason `NamespaceNotInScope`, and no
+   broader run is substituted.
+2. In-scope requests queue behind the binding's single slot, in creation
+   order, after any overdue scheduled run. Each binding queues at most
+   `AssessmentRuntime.MaxQueue` (default 100) pending requests; newer ones are
+   `Rejected` with reason `QueueFull`. Bound each team with a ResourceQuota on
+   `count/assessmentrequests.compliance.erenius.io` in its namespace.
+3. An admitted request gets a namespace run named
+   `<binding>-r-<hash(binding UID, request UID)>`, and the request becomes
+   `Running` with a reference to it. When the run starts, it rechecks that the
+   request and namespace UIDs are unchanged and that the binding still
+   selects the namespace. Its capture is projected to the namespace at freeze
+   and on every poll, and the package is exported with namespace scope.
+4. When the run ends, the request becomes `Completed`, `Failed`, or
+   `Rejected`, with a sanitized status: evidence and outcome counts, the run
+   reference, and `artifactRef` (the opaque publication ID). Condition
+   messages are fixed, team-safe texts. Operator detail such as storage
+   errors stays on the platform-scoped run.
+
+Deleting a request does not cancel a run that has started; its publication
+record is retained. A recreated request or namespace is never adopted.
+Requests never change the binding's schedule, settings, or enforcement.
 
 ## Collector evidence rules
 

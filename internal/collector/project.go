@@ -53,7 +53,7 @@ const maxWithheld = 100
 // stale scopes and configuration changes are dropped because they may name
 // other namespaces.
 func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
-	if err := c.Validate(); err != nil {
+	if err := validateOpen(c); err != nil {
 		return CaptureV2{}, err
 	}
 	var ns string
@@ -68,7 +68,7 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 		}
 	}
 	if ns == "" {
-		return CaptureV2{}, fmt.Errorf("namespace %s is not in the frozen scope", namespaceUID)
+		return CaptureV2{}, fmt.Errorf("namespace %s: %w", namespaceUID, ErrNotInScope)
 	}
 	out.Stale = []targeting.StaleScope{}
 	for _, s := range c.Stale {
@@ -89,9 +89,32 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 		}
 	}
 
-	p := Projection{Namespace: ns, NamespaceUID: namespaceUID, SourceReports: len(c.Reports)}
-	out.Reports = []assessment.Object{}
-	for _, report := range c.Reports {
+	p := Projection{Namespace: ns, NamespaceUID: namespaceUID}
+	out.Reports = ProjectReports(c.Reports, &p)
+	slices.SortFunc(p.Withheld, func(a, b Withheld) int { return cmp.Or(cmp.Compare(a.Report, b.Report), cmp.Compare(a.Index, b.Index)) })
+	out.Projection = &p
+	return out, validateOpen(out)
+}
+
+// ErrNotInScope means the namespace is not part of the frozen scope.
+var ErrNotInScope = errors.New("namespace is not in the frozen scope")
+
+// validateOpen validates a capture whose collection window may still be open.
+func validateOpen(c CaptureV2) error {
+	if c.Window.Closed.IsZero() {
+		c.Window.Closed = c.Window.Started
+	}
+	return c.Validate()
+}
+
+// ProjectReports rebuilds reports as namespace extracts for p.Namespace (see
+// Project), adding to p's source, extract, and withheld counts. It works
+// without the rest of the capture, so a run whose namespace left scope can
+// still project new reports for the frozen namespace.
+func ProjectReports(reports []assessment.Object, p *Projection) []assessment.Object {
+	out := []assessment.Object{}
+	p.SourceReports += len(reports)
+	for _, report := range reports {
 		uid := assessment.Str(assessment.At(report, "metadata", "uid"))
 		digest := assessment.Digest(report)
 		results, _ := report["results"].([]any)
@@ -112,7 +135,7 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 					attributable = false
 					break
 				}
-				if assessment.Str(m["namespace"]) == ns {
+				if assessment.Str(m["namespace"]) == p.Namespace {
 					inScope = append(inScope, assessment.Object{"apiVersion": m["apiVersion"], "kind": m["kind"], "namespace": m["namespace"], "name": m["name"], "uid": m["uid"]})
 				}
 			}
@@ -150,15 +173,14 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 			continue
 		}
 		p.Extracts += len(kept)
-		out.Reports = append(out.Reports, assessment.Object{
+		out = append(out, assessment.Object{
 			"apiVersion": report["apiVersion"], "kind": report["kind"],
-			"metadata": assessment.Object{"uid": uid, "namespace": ns},
+			"metadata": assessment.Object{"uid": uid, "namespace": p.Namespace},
 			"results":  kept,
 		})
 	}
 	slices.SortFunc(p.Withheld, func(a, b Withheld) int { return cmp.Or(cmp.Compare(a.Report, b.Report), cmp.Compare(a.Index, b.Index)) })
-	out.Projection = &p
-	return out, out.Validate()
+	return out
 }
 
 // ValidateProjection independently checks that a projected capture contains

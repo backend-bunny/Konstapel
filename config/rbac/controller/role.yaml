@@ -37,17 +37,17 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
-  - assessmentruns
+  - assessmentrequests
+  - compliancebindings
+  - complianceprofiles
   verbs:
-  - create
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - compliance.erenius.io
   resources:
+  - assessmentrequests/status
   - assessmentruns/status
   - compliancebindings/status
   - complianceprofiles/status
@@ -58,11 +58,13 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
-  - compliancebindings
-  - complianceprofiles
+  - assessmentruns
   verbs:
+  - create
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - policies.kyverno.io

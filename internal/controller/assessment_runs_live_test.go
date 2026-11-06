@@ -8,6 +8,7 @@ package controller
 // no backend yet, so the in-memory fake publisher stands in for storage.
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,12 +16,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/publication/fake"
 )
 
 func TestLiveAssessmentRuns(t *testing.T) {
+	// Route controller logs into the test log so reconcile errors are visible.
+	ctrllog.SetLogger(zap.New(zap.WriteTo(os.Stderr), zap.UseDevMode(true)))
 	l := newLive(t)
 	l.installCRDs()
 	root, _ := filepath.Abs("../..")
@@ -103,4 +108,43 @@ func TestLiveAssessmentRuns(t *testing.T) {
 		t.Fatalf("want 2 commits, got %d", pub.Commits())
 	}
 	l.record("manual-run", map[string]any{"run": manual.Name, "evidence": run(manual.Name).Status.Summary.Evidence})
+
+	// A team request in a second selected namespace runs as a namespace run
+	// and assesses only that namespace.
+	l.setNamespace("runs-team", "runs-production")
+	teamPod := pod.DeepCopy()
+	teamPod.ResourceVersion, teamPod.UID, teamPod.Namespace = "", "", "runs-team"
+	req := &v1alpha1.AssessmentRequest{ObjectMeta: metav1.ObjectMeta{Name: "nightly", Namespace: "runs-team"},
+		Spec: v1alpha1.AssessmentRequestSpec{BindingRef: v1alpha1.BindingReference{Name: b.Name}}}
+	for _, o := range []client.Object{teamPod, req} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, req); _ = l.c.Delete(l.ctx, teamPod) })
+	var st v1alpha1.AssessmentRequestStatus
+	l.eventually("team request completed", func() (bool, string) {
+		got := &v1alpha1.AssessmentRequest{}
+		if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(req), got); err != nil {
+			return false, err.Error()
+		}
+		st = got.Status
+		detail := toJSON(st) + " schedule: " + toJSON(l.binding(b.Name).Status.Assessment.Schedule)
+		if st.Run != nil {
+			if r := run(st.Run.Name); r != nil {
+				detail += " run: " + toJSON(r.Status)
+			}
+		}
+		return st.Phase == v1alpha1.RequestCompleted && st.ArtifactRef != "", detail
+	})
+	nsRun := run(st.Run.Name)
+	ns := &corev1.Namespace{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Name: "runs-team"}, ns); err != nil {
+		t.Fatal(err)
+	}
+	if nsRun.Spec.Scope != v1alpha1.RunScopeNamespace || nsRun.Status.Scope.NamespaceUID != string(ns.UID) || nsRun.Status.Scope.NamespaceCount != 1 ||
+		st.NamespaceUID != string(ns.UID) || st.Summary == nil || st.Summary.Evidence.Expected != 1 || st.ArtifactRef != nsRun.Status.Publication.PublicationID {
+		t.Fatalf("team run %s / request %s", toJSON(nsRun.Status), toJSON(st))
+	}
+	l.record("team-request", map[string]any{"run": nsRun.Name, "namespaceUID": st.NamespaceUID, "evidence": st.Summary.Evidence, "artifactRef": st.ArtifactRef})
 }

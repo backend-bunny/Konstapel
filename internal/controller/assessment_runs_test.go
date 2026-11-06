@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -252,7 +253,9 @@ func TestManualRunWaitsForScheduledFirst(t *testing.T) {
 	}
 }
 
-func TestNamespaceRunFailsExplicitly(t *testing.T) {
+// A namespace run the binding's schedule did not admit (for example, one
+// created by someone other than the planner) never executes; it waits.
+func TestUnadmittedNamespaceRunWaits(t *testing.T) {
 	e := newRunEnv(t, epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}))
 	r := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: "ns-run"}, Spec: v1alpha1.AssessmentRunSpec{
 		BindingRef: v1alpha1.BindingReference{Name: "audit-prod"}, Scope: v1alpha1.RunScopeNamespace,
@@ -261,8 +264,37 @@ func TestNamespaceRunFailsExplicitly(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.step("ns-run")
-	got := e.run("ns-run")
-	if c := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionScoped); got.Status.Phase != v1alpha1.RunFailed || c == nil || c.Reason != "NamespaceRunsNotSupported" {
+	if got := e.run("ns-run"); got.Status.Phase != v1alpha1.RunPending || got.Status.Scope != nil {
 		t.Fatalf("%+v", got.Status)
+	}
+}
+
+// laggingCache hides AssessmentRuns from Get, like an informer cache that
+// has not yet observed a run created moments ago.
+type laggingCache struct{ client.Client }
+
+func (c laggingCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1alpha1.AssessmentRun); ok {
+		return apierrors.NewNotFound(v1alpha1.GroupVersion.WithResource("assessmentruns").GroupResource(), key.Name)
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// A cache that has not yet seen the active run must not free the binding's
+// slot: the planner reads runs through the uncached reader.
+func TestCacheLagDoesNotReleaseActiveRun(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	e.ar.Reader = e.c
+	e.ar.Client = laggingCache{e.c}
+	e.assess("audit-prod")
+	active := e.schedule("audit-prod").ActiveRun
+	if active == nil {
+		t.Fatal("no run admitted")
+	}
+	e.now = a0.Add(time.Minute)
+	e.assess("audit-prod")
+	if s := e.schedule("audit-prod"); s.ActiveRun == nil || s.ActiveRun.Name != active.Name || len(e.runs()) != 1 {
+		t.Fatalf("cache lag released the active run: %+v", s.ActiveRun)
 	}
 }
