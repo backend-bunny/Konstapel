@@ -25,9 +25,8 @@ revision +1). Metadata edits do not renew, and a revision never skips or goes
 back. A selector has no namespace field, so scope cannot reach another
 namespace. Widening the scope means creating a new resource.
 
-Authenticated attribution is recorded by admission (below). Time and
-eligibility checks (future expiry, maximum lifetime, `Forbidden`
-contributions) come with task 2.3. Status is controller-only (task 2.4), and
+Admission (below) records authenticated attribution and enforces
+eligibility and lifetime limits. Status is controller-only (task 2.4), and
 revocation arrives with the withdrawal lifecycle (group 4). Until then the
 resource has no effect: Konstapel grants nothing for it.
 
@@ -54,7 +53,7 @@ overwritten. The annotation holds:
 | `claim` | the caller-owned `compliance.erenius.io/claimed-by` annotation, unverified |
 | `cluster`, `namespace` | the cluster identity, and the namespace name and UID |
 | `policy` | `spec.policy` |
-| `eligibility` | the targeting resolver's effective eligibility for the policy in this namespace: the complete contribution set with each `Contribution.Revision`, the shortest `maxLifetime`, and any resolution errors. `null` when no binding applies the policy here. |
+| `eligibility` | the targeting resolver's effective eligibility for the policy in this namespace: the complete contribution set with each `Contribution.Revision`, the shortest `maxLifetime`, and any resolution errors. Always present: an acceptance that no binding applies to is rejected. |
 
 The webhook resolves against live profiles and bindings through the API
 server, not a cache. If the namespace or the configuration cannot be read,
@@ -76,15 +75,35 @@ author or ticket belongs in `claimed-by`, which is kept as an unverified
 claim. Dry-run requests get the record they would store, and admission only
 reads the cluster.
 
-Admission records the set; it does not reject on it yet. Rejecting
-`Forbidden` or unresolved contributions and enforcing lifetime limits is task
-2.3, so a recorded `Forbidden` set grants nothing.
+### Eligibility and lifetime checks
+
+An acceptance (creation or renewal) is admitted only if every check below
+passes. The time used is the acceptance time, so a renewal is measured from
+the renewal, not from the original acceptance:
+
+| Reason | Rejected when |
+| --- | --- |
+| `UnknownPolicy` | No binding applies the policy in this namespace. |
+| `Unresolved` | A binding that targets the namespace failed to resolve, for example `ContentUnavailable` or an unknown policy. Unresolved configuration never grants permission. |
+| `Forbidden` | Any applicable contribution is `Forbidden`, even in `Audit` mode or alongside a permissive binding. The message names the restricting ComplianceBinding(s). |
+| `ExpiryElapsed` | `expiresAt` is not after the acceptance time. |
+| `LifetimeExceeded` | `expiresAt` is later than the acceptance time plus the **shortest** `maxLifetime` across every applicable contribution. |
+
+The admission message starts with the reason, for example
+`Forbidden: policy "disallow-privileged-containers" does not permit
+self-service exceptions in namespace "shop-prod"; restricted by
+ComplianceBinding "pci"`. The validating webhook re-checks these rules
+against the stored record. Metadata edits are not acceptances and are not
+re-checked. Withdrawal after central eligibility changes is the controller's
+job (task 4.3).
 
 `TestLiveExceptionAdmission` (`internal/controller`, `live` tag) runs these
 webhooks against a real API server. The manager runs in-process with a test
 CA, and requests are made as impersonated users (alice, bob, an Argo CD
-service account). It checks forged attribution, dry run, a metadata edit after
-the binding is deleted, a tampered record, renewal, and GitOps claims. Run it
+service account). It checks forged attribution, dry run, GitOps claims,
+renewal, an over-limit expiry, a `Forbidden` overlap on creation and renewal,
+a metadata edit after the binding is deleted, a tampered record, and a renewal
+once no binding applies. `task acceptance` runs it. Run it
 against a cluster created by `scripts/environment.sh`:
 
 ```sh
