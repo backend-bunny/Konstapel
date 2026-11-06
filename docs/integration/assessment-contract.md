@@ -613,6 +613,16 @@ scope and never broaden or shrink it.
 4. Full acceptance (group 6) joins both implementations with the targeting and
    exception contracts.
 
+## Acceptance evidence
+
+[assessment-acceptance.json](assessment-acceptance.json) records the final
+`task acceptance` run from clean state. It includes the prototype regressions,
+Chainsaw, offline replay, every live assessment, targeting and storage test,
+and exception admission, with versions, results, per-test evidence steps and
+package digests. `scripts/check-assessment-access.sh` was run on its own
+disposable cluster. All task-owned clusters and containers were removed
+afterwards.
+
 ## Validation
 
 - `devbox run -- task check` runs the cluster-free checks:
