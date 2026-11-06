@@ -9,17 +9,184 @@ downloads through Kubernetes RBAC, and expire evidence under binding retention.
 
 ### Requirement: Centrally configured S3 backend
 
-Konstapel SHALL support S3 as its first evidence backend, including configurable
-compatible endpoints, bucket, region, and prefix. Configuration and credentials
-SHALL be platform-controlled. Missing credentials, unsupported backend semantics,
-or an unavailable bucket SHALL prevent ready publication with an explicit error.
-Application requests SHALL NOT select arbitrary storage locations or credentials.
+Konstapel SHALL expose cluster-scoped, platform-managed EvidenceDestination
+resources in compliance.erenius.io/v1alpha1 for S3-compatible endpoint, bucket,
+region, and prefix configuration. Credential Secret references SHALL be limited
+to the controller namespace. Missing credentials, unavailable storage, or
+unsupported backend semantics SHALL prevent ready publication with an explicit
+error. Application requests SHALL NOT choose storage or credentials.
 
 #### Scenario: Publish to compatible self-hosted storage
 
 - **WHEN** the configured endpoint satisfies the documented backend contract
 - **THEN** Konstapel can publish and retrieve packages through that endpoint
 - **AND** namespace users cannot override the endpoint or inspect storage credentials
+
+#### Scenario: An application team attempts to manage a destination
+
+- **WHEN** an application identity tries to create or alter a destination, its status, or its credential references
+- **THEN** authorization denies the action
+- **AND** cross-namespace credential references are rejected by the API
+
+### Requirement: Binding selection inherits one central default
+
+Konstapel SHALL use one platform-selected default destination with an optional
+ComplianceBinding override. References SHALL identify name and UID.
+AssessmentRequests SHALL inherit the binding selection. Missing, mismatched,
+unready, or retiring selections SHALL fail visibly without fallback. Destination
+changes SHALL NOT alter policy enforcement or exception identity.
+
+#### Scenario: Resolve default and explicit destinations
+
+- **WHEN** runs start for bindings with and without a destination override
+- **THEN** the former select their explicit destination and the latter select the central default
+- **AND** a namespace request cannot bypass either choice
+
+#### Scenario: An explicitly selected destination is unavailable
+
+- **WHEN** a binding's destination is missing, unready, or has a different UID
+- **THEN** its evidence work reports the selection failure without using the default
+- **AND** policy enforcement, exceptions, and other bindings' valid destinations continue unaffected
+
+### Requirement: Destination location is immutable and access can rotate
+
+The API SHALL reject changes to a destination's endpoint, bucket, region, or
+prefix. Credentials and CA trust SHALL remain rotatable, including during
+retirement. A new location SHALL require a new destination and explicit reference
+changes. Historical evidence SHALL retain its original destination UID and
+location; name reuse SHALL NOT redirect it.
+
+#### Scenario: Change location or rotate credentials
+
+- **WHEN** an administrator edits an existing destination
+- **THEN** location changes are rejected while valid credential and CA trust rotation is accepted
+- **AND** rotation preserves historical reads and cleanup at the same location
+
+#### Scenario: Recreate a destination name
+
+- **WHEN** a destination name is reused with a new UID
+- **THEN** old references do not resolve to the new resource
+- **AND** retained or orphaned evidence is not automatically adopted even at the same bucket and prefix
+
+### Requirement: Runs pin destinations before storage work
+
+Konstapel SHALL resolve and durably pin destination UID and location in protected
+run metadata when an AssessmentRun starts, before storage writes. Publication,
+retry, download, and cleanup SHALL use that pin across restarts. Selection SHALL
+be coordinated with retirement so accepted pins remain accounted for and losing
+selections cannot write. Subsequent reference edits SHALL affect subsequent runs.
+
+#### Scenario: Switch destinations during a run
+
+- **WHEN** a binding override or central default changes after a run starts
+- **THEN** that run uploads, retries, downloads, and retires evidence at its pinned destination
+- **AND** a later run selects the new destination without moving the old package
+- **AND** retention is still selected separately at first commit preparation
+
+#### Scenario: Selection races with destination deletion
+
+- **WHEN** run startup overlaps deletion, an interrupted status update, or a stale controller cache
+- **THEN** a previously accepted pin remains protected and accounted for through restart
+- **AND** a selection that loses to retirement performs no storage writes
+
+### Requirement: Destination deletion retires outstanding obligations
+
+Destination deletion SHALL default to Retire: reject new runs, permit pinned
+runs to finish, and maintain authorized downloads and cleanup until obligations
+end. A finalizer SHALL hold the destination while runs, uploads, packages, or
+cleanup remain. Bindings SHALL report DestinationRetiring for evidence work
+without changing enforcement. Status SHALL expose outstanding counts, latest
+known retained expiry, and cleanup blockers.
+
+#### Scenario: Delete a destination with retained evidence
+
+- **WHEN** an administrator deletes a destination under the default policy
+- **THEN** new runs selecting it are refused without fallback while previously pinned runs may complete
+- **AND** existing packages remain downloadable until expiry and are cleaned up normally
+- **AND** the destination finalizer remains until outstanding obligations are verified complete
+
+#### Scenario: Retirement is blocked
+
+- **WHEN** cleanup cannot complete because of an outage, missing credentials, or an object lock
+- **THEN** status exposes the blocker and retains the destination and cleanup records for retry
+- **AND** unfinished publication with unknown expiry is not treated as an empty destination
+
+### Requirement: Explicit orphaning transfers storage responsibility
+
+Platform administrators SHALL be able to select Orphan deletion, including
+during retirement. Once deletion uses Orphan, Konstapel SHALL fence new storage
+work, downloads, and cleanup across all workers and restarts. Remaining objects,
+versions, and incomplete uploads SHALL be left to the operator even if storage
+is unreachable. Already-dispatched operations SHALL be reported truthfully;
+orphaning SHALL NOT imply remote cancellation or successful deletion.
+
+#### Scenario: Orphan a destination whose backend is unreachable
+
+- **WHEN** an authenticated administrator requests Orphan deletion with a reason
+- **THEN** handoff can complete without contacting the affected backend
+- **AND** publication, probes, downloads, retention, and abandoned-attempt cleanup stop issuing remote operations
+- **AND** surviving run records retain original references, checksums, and expiry with an Orphaned disposition
+- **AND** interrupted publication is not falsely marked successful and previously verified Deleted records remain Deleted
+- **AND** durable handoff ends interrupted publication and releases its binding's active run slot
+
+#### Scenario: Orphaning races with an in-flight operation
+
+- **WHEN** an upload, commit, or delete request was dispatched before the handoff fence
+- **THEN** Konstapel cancels and drains local work with bounded waits and records known or uncertain remote outcomes
+- **AND** late responses cannot clear Orphaned, start compensating cleanup, or reactivate the destination
+- **AND** already delivered download bytes are not claimed to be revoked
+
+### Requirement: Orphan audit and ownership survive finalization
+
+Orphan handoff SHALL record an authenticated actor, time, required reason, and
+independent durable ownership inventory before releasing destination or run
+finalizers. The inventory SHALL survive destination and run deletion and contain
+no credential material. Finalization SHALL remain blocked if it cannot be saved.
+Only explicit administrative removal SHALL discard the inventory after handoff.
+
+#### Scenario: A run is already pending deletion
+
+- **WHEN** its destination is orphaned while the run has a deletion timestamp
+- **THEN** an independent protected record preserves destination and run UIDs, location, original receipt and expiry, known attempts, and uncertain operations before either finalizer releases
+- **AND** deleting the run or destination cannot garbage-collect that record
+- **AND** backend unavailability is recorded as incomplete knowledge rather than an empty inventory
+
+#### Scenario: Audit persistence fails
+
+- **WHEN** the handoff inventory cannot be durably saved
+- **THEN** persistence failure retains finalizers and the storage fence for retry
+
+#### Scenario: A caller forges audit identity
+
+- **WHEN** a caller supplies a claimed actor in writable metadata
+- **THEN** that claim cannot replace the identity captured from the authenticated administrative request
+- **AND** unauthenticated or unauthorized requests cannot initiate orphan handoff
+
+#### Scenario: Recover ownership after handoff
+
+- **WHEN** an operator follows the documented orphaning and inventory-export commands
+- **THEN** it can inspect remaining keys, versions, incomplete uploads, and uncertain operations for external recovery or cleanup
+- **AND** documentation explains that original expiry no longer schedules Konstapel cleanup and manual finalizer removal bypasses this audited path
+
+### Requirement: Legacy destinations migrate without rewriting history
+
+Migration from file configuration and receipts lacking destination UID SHALL use
+explicit administrator-approved mappings verified against historical location
+data. It SHALL preserve committed bytes, references, checksums, and expiry.
+Ambiguous records SHALL retain ownership and finalizers with visible blockers;
+name matching or current defaults SHALL NOT infer historical ownership.
+
+#### Scenario: Upgrade with retained evidence and incomplete uploads
+
+- **WHEN** legacy writers are quiesced and verified mappings to destination UIDs are recorded
+- **THEN** reads, retries, and cleanup resume against the mapped original locations without rewriting archives or commit manifests
+- **AND** repeating migration preserves the same mapping and historical identity
+
+#### Scenario: A legacy location cannot be verified
+
+- **WHEN** preserved configuration and receipts cannot establish an unambiguous original location
+- **THEN** affected work remains blocked for explicit recovery or audited orphan handoff
+- **AND** unrelated destinations can operate without adopting the unresolved evidence
 
 ### Requirement: Complete and identifiable evidence packages
 
@@ -125,10 +292,10 @@ shorten or extend an already published package's expiry.
 ### Requirement: Konstapel manages expiry cleanup
 
 At expiry, Konstapel SHALL stop serving new downloads and reconcile deletion of
-the owned package and related publication objects. OSCAL, raw evidence, and
-packaged exception history SHALL share the package's retention. Cleanup SHALL
-cover owned object versions and abandoned uploads where applicable. Unrelated
-objects or separately retained packages SHALL NOT be deleted.
+the owned package and related publication objects unless orphan handoff has
+fenced the destination. OSCAL, raw evidence, and packaged exception history SHALL
+share package retention. Cleanup SHALL cover owned versions and abandoned uploads.
+Unrelated, separately retained, or explicitly orphaned objects SHALL NOT be deleted.
 
 #### Scenario: An assessment package expires
 
@@ -136,13 +303,20 @@ objects or separately retained packages SHALL NOT be deleted.
 - **THEN** new downloads are refused and Konstapel removes the owned package through retryable cleanup
 - **AND** another package using the same source content retains its independent expiry
 
+#### Scenario: Orphaned evidence reaches its original expiry
+
+- **WHEN** an orphaned package reaches the expiry preserved in its receipt
+- **THEN** run and destination cleanup workers leave its storage untouched
+- **AND** a restart or new destination at the same location does not resume its cleanup
+
 ### Requirement: Cleanup failures and availability remain truthful
 
 Konstapel SHALL distinguish expired-but-not-deleted, deletion-failed, unavailable,
-corrupt, and accessible evidence. Failed cleanup SHALL retain ownership and expiry
-records for retry. Delete acknowledgments alone SHALL NOT imply removal of all
-owned retained versions. Missing or corrupt objects SHALL NOT be reported as
-available or silently replaced with different evidence.
+corrupt, orphaned, and accessible evidence. Failed cleanup SHALL retain ownership
+and expiry records for retry unless explicitly orphaned. Delete acknowledgments
+SHALL NOT imply removal of all owned versions. Missing or corrupt objects SHALL
+NOT be reported available or replaced. Orphaned evidence SHALL be unavailable
+through managed downloads and SHALL NOT be reported as successfully deleted.
 
 #### Scenario: Storage refuses deletion
 
@@ -160,8 +334,8 @@ available or silently replaced with different evidence.
 Published-package retention and cleanup identities SHALL survive binding or
 request deletion, controller restart, and changes to the default storage
 destination. Historical packages SHALL retain their original destination and
-expiry. Cleanup records SHALL remain until owned storage is removed or a visible
-administrative recovery action resolves the failure.
+expiry. Cleanup records SHALL remain until owned storage is removed or an explicit
+audited orphan handoff durably transfers responsibility.
 
 #### Scenario: Delete a binding with retained evidence
 
@@ -173,7 +347,8 @@ administrative recovery action resolves the failure.
 
 The backend SHALL provide documented compatibility tests for publication,
 conditional creation, recovery, namespace authorization, integrity, and retention.
-Tests SHALL cover the supported versioning modes and a real S3-compatible service.
+Tests SHALL cover destination admission, selection, retirement, orphaning,
+migration, supported versioning modes, and a real S3-compatible service.
 Untested endpoint behavior SHALL NOT be represented as verified compatibility.
 
 #### Scenario: Validate a deployment backend
@@ -181,3 +356,10 @@ Untested endpoint behavior SHALL NOT be represented as verified compatibility.
 - **WHEN** the documented compatibility workflow runs against a supported test endpoint
 - **THEN** it demonstrates idempotent publication, authorized retrieval, and complete owned-object cleanup
 - **AND** it retains results and removes only its test-owned objects and infrastructure
+
+#### Scenario: Verify destination lifecycle through Kubernetes APIs
+
+- **WHEN** the lifecycle acceptance workflow runs against a real API server and S3-compatible service
+- **THEN** it proves immutable locations, protected credentials, UID pinning, rotation, normal retirement, and audited orphaning through the actual run APIs
+- **AND** it exercises concurrent deletion, controller restart, missing audit persistence, and legacy upgrade without losing ownership or changing enforcement
+- **AND** CI retains sanitized diagnostics and tears down its test-owned resources, including intentional orphan fixtures through explicit operator cleanup
