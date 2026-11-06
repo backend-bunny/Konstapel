@@ -3,7 +3,8 @@
 This page tracks `add-linux-workload-hardening-bundle`. Group 1 is done: the
 four upstream policies are vendored and their upstream test suites have been
 re-run. Group 2 is done: the Konstapel variants of the four checks exist and
-are tested in the CLI. None of them is part of the served bundle yet. Packaging and NIST mappings (group 3), targeting and live
+are tested in the CLI. Since task 3.1, the controller's vendored bundle serves
+them next to the first loop's privileged check (see "Serving"). Packaging and NIST mappings (group 3), targeting and live
 behavior (group 4), and exceptions (group 5) come later.
 
 ## Source layout
@@ -187,6 +188,26 @@ The only local *semantic* change is in `require-run-as-nonroot`: it removes
 the `hostUsers: false` bypass and adds the Windows guard. The other three
 variants keep the upstream expressions unchanged and add provenance
 annotations only. `variants.json` and its test pin this down.
+
+## Serving
+
+The controller's vendored bundle (`konstapel-vendored`, pinned by the sha256
+of `content/SHA256SUMS`) serves the checks in `assessment.ShippedPolicies`:
+
+| Logical policy (profile `policies[].name`) | Served source |
+| --- | --- |
+| `disallow-privileged-containers` | the first loop's upstream policy, unchanged and referenced, not copied |
+| `disallow-privilege-escalation`, `disallow-capabilities-strict`, `require-run-as-nonroot`, `restrict-seccomp-strict` | the Konstapel variant in `content/linux-hardening/variants/` |
+
+A profile selects any of them by name. Each binding renders one engine
+policy per selected check. Each rendered instance carries:
+- the logical policy name, `compliance.erenius.io/source-digest` (the
+  variant's sha256), the bundle digest and its own revision;
+- the binding's Audit or Deny mode, background evaluation, and the source's
+  unchanged workload rules, variables and validations.
+
+`internal/hardening/serve_test.go` checks this for a whole-bundle profile
+under an Audit and a Deny binding.
 
 ## NIST Moderate mappings
 

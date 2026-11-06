@@ -29,7 +29,7 @@ import (
 )
 
 var content = targeting.LocalContent{Root: "../../content", Name: "konstapel-vendored",
-	Policies: map[string]string{assessment.PolicyName: assessment.SourcePolicy}}
+	Policies: assessment.ShippedPolicies}
 
 func digest(t *testing.T) string {
 	t.Helper()
