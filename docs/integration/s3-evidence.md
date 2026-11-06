@@ -85,6 +85,11 @@ workload identities:
    The archive is uploaded in a single request, never multipart, with an
    explicit SHA-256. The stored content is verified from the server checksum,
    or by reading it back. ETags are never used as content hashes.
+   A retry uploads nothing new. If the run is already committed with the same
+   content, or an earlier attempt with the same bytes still verifies, Stage
+   returns that staging. This covers a lost upload or commit response and a
+   receipt that never reached Kubernetes. An attempt that no longer verifies
+   is replaced by a fresh upload.
 2. **Publish** creates `commit.json` with `If-None-Match: *`. It records the
    run, the package and descriptor digests, the archive key and version, and
    the retention chosen at that first commit. Its successful creation is the
@@ -133,6 +138,12 @@ with the retention recorded at closure and says so in
 `publication.retention.bindingConfiguration`. A replacement binding is never
 adopted. After the first commit, the recorded commit retention is fixed (see
 above).
+
+**Receipt recovery.** If the commit succeeds but the run's status update
+fails, the run stays `Publishing`. The next reconcile, on any leader, stages
+and publishes again. That uploads nothing and returns the original receipt,
+so the run records the original digest, `publishedAt`, `expiresAt` and
+namespace scope, and the request completes with the original publication ID.
 
 **Readiness gating.** When the controller runtime has a readiness check, the
 assessment scheduler calls it at most once per `ReadyInterval` (5 minutes by
