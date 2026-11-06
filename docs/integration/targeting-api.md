@@ -420,7 +420,7 @@ shows with the collector:
 | `Ready` | Every desired policy exists at the current revision and Kyverno reports it ready. The message says this is not a compliance result. |
 | `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. Retried every 5 seconds. |
 | `StaleRevision` | Configuration did not resolve (see `Resolved`). The last applied policies, if any, stay in force and are named in the message. |
-| `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched. |
+| `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched; the binding re-checks every minute and delivers once the name is free. |
 | `EngineUnavailable` | The ValidatingPolicy API is not served, or discovery failed. Nothing is changed. |
 | `NoContributions` | The binding resolved to no deliverable policies. |
 

@@ -39,6 +39,11 @@ const (
 // policies are not ready, are being replaced, or the engine is unavailable.
 const TransitionRequeue = 5 * time.Second
 
+// ConflictRequeue is how often a binding blocked by an ownership conflict is
+// re-checked. Unmanaged engine policies are not watched, so removing the
+// conflicting resource is noticed only by this re-check.
+const ConflictRequeue = time.Minute
+
 // maxMessage bounds condition messages so status stays small.
 const maxMessage = 1024
 
@@ -242,7 +247,7 @@ func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) []
 func engineCondition(s targeting.DeliveryResult, desired int, unresolved bool, targets int) (metav1.ConditionStatus, string, string, time.Duration) {
 	switch {
 	case len(s.Conflicts) > 0:
-		return metav1.ConditionFalse, v1alpha1.ReasonOwnershipConflict, truncate("unmanaged resources hold desired names: " + strings.Join(s.Conflicts, ", ")), 0
+		return metav1.ConditionFalse, v1alpha1.ReasonOwnershipConflict, truncate("unmanaged resources hold desired names: " + strings.Join(s.Conflicts, ", ")), ConflictRequeue
 	case unresolved && len(s.Retained) > 0:
 		return metav1.ConditionFalse, v1alpha1.ReasonStaleRevision, truncate("configuration did not resolve; last applied policies kept: " + strings.Join(s.Retained, ", ")), 0
 	case unresolved:

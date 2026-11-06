@@ -378,8 +378,19 @@ func TestOwnershipConflictIsReported(t *testing.T) {
 	if err := e.c.Create(context.Background(), squatter); err != nil {
 		t.Fatal(err)
 	}
-	e.reconcile("all")
+	// Unmanaged policies are not watched, so the conflict must be re-checked.
+	if res := e.reconcile("all"); res.RequeueAfter != ConflictRequeue {
+		t.Fatalf("conflict not re-checked: %+v", res)
+	}
 	requireNotCurrent(t, e.binding("all"), v1alpha1.ReasonOwnershipConflict)
+	// Once the unmanaged resource is gone, the next check delivers again.
+	if err := e.c.Delete(context.Background(), squatter); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile("all")
+	if len(e.policies()) != 1 || e.policies()[0].GetLabels()[targeting.LabelManagedBy] != targeting.ManagedByValue {
+		t.Fatal("delivery did not resume after the conflict was removed")
+	}
 }
 
 func TestStatusIsBounded(t *testing.T) {
