@@ -25,11 +25,75 @@ revision +1). Metadata edits do not renew, and a revision never skips or goes
 back. A selector has no namespace field, so scope cannot reach another
 namespace. Widening the scope means creating a new resource.
 
-The API does not yet check time or eligibility: future expiry, maximum
-lifetime, `Forbidden` contributions, authenticated attribution, and dry-run
-handling belong to admission (tasks 2.2 and 2.3). Status is controller-only
-(task 2.4), and revocation arrives with the withdrawal lifecycle (group 4).
-Until then the resource has no effect: Konstapel grants nothing for it.
+Authenticated attribution is recorded by admission (below). Time and
+eligibility checks (future expiry, maximum lifetime, `Forbidden`
+contributions) come with task 2.3. Status is controller-only (task 2.4), and
+revocation arrives with the withdrawal lifecycle (group 4). Until then the
+resource has no effect: Konstapel grants nothing for it.
+
+## Acceptance admission
+
+Two Konstapel webhooks (`config/webhook/exceptions.yaml`) authenticate every
+acceptance. The controller serves both on every replica when it is started with
+`--webhook-cert-dir` (a directory holding `tls.crt` and `tls.key`;
+`--webhook-port`, default 9443). The deployment provides the
+`konstapel-system/konstapel-webhook` Service and the `caBundle`: by default
+cert-manager, otherwise an operator-managed CA (add-helm-oci-distribution).
+Both webhooks use `failurePolicy: Fail` and `sideEffects: None`.
+
+On **creation** and on an **explicit renewal** (`spec.acceptanceRevision` + 1),
+the mutating webhook writes the protected annotation
+`compliance.erenius.io/acceptance`. Any value the caller supplied is
+overwritten. The annotation holds:
+
+| Field | Source |
+| --- | --- |
+| `revision` | `spec.acceptanceRevision` |
+| `acceptedAt` | the webhook's clock, in UTC seconds |
+| `actor` | the request's authenticated `userInfo`: username, UID, groups |
+| `claim` | the caller-owned `compliance.erenius.io/claimed-by` annotation, unverified |
+| `cluster`, `namespace` | the cluster identity, and the namespace name and UID |
+| `policy` | `spec.policy` |
+| `eligibility` | the targeting resolver's effective eligibility for the policy in this namespace: the complete contribution set with each `Contribution.Revision`, the shortest `maxLifetime`, and any resolution errors. `null` when no binding applies the policy here. |
+
+The webhook resolves against live profiles and bindings through the API
+server, not a cache. If the namespace or the configuration cannot be read,
+the operation is rejected.
+
+The validating webhook rejects any record that does not belong to the
+operation:
+
+- On an acceptance, the record must name the authenticated caller (username,
+  UID and groups), the requested revision, this cluster, namespace, policy and
+  claim, and a time within two minutes of the webhook's clock.
+- On any other update, such as a label edit or a GitOps re-apply, the record
+  must be unchanged. A metadata edit therefore never renews, and configuration
+  that changes after acceptance never replaces the accepted set. Only a
+  renewal records a new set.
+
+A GitOps controller's service account is the authenticated actor. A commit
+author or ticket belongs in `claimed-by`, which is kept as an unverified
+claim. Dry-run requests get the record they would store, and admission only
+reads the cluster.
+
+Admission records the set; it does not reject on it yet. Rejecting
+`Forbidden` or unresolved contributions and enforcing lifetime limits is task
+2.3, so a recorded `Forbidden` set grants nothing.
+
+`TestLiveExceptionAdmission` (`internal/controller`, `live` tag) runs these
+webhooks against a real API server. The manager runs in-process with a test
+CA, and requests are made as impersonated users (alice, bob, an Argo CD
+service account). It checks forged attribution, dry run, a metadata edit after
+the binding is deleted, a tampered record, renewal, and GitOps claims. Run it
+against a cluster created by `scripts/environment.sh`:
+
+```sh
+devbox run -- scripts/exception-admission-live.sh konstapel-assessment-<name> /tmp/konstapel-exc-adm
+```
+
+The script runs the compiled test in a container on the kind network, so the
+API server can reach the webhook even when a host firewall blocks
+container-to-host traffic.
 
 ## Lifecycle fixture matrix
 

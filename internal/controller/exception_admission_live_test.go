@@ -1,0 +1,299 @@
+//go:build live
+
+package controller
+
+// Live exception acceptance admission (add-self-service-policy-exceptions
+// task 2.2): the in-process manager serves the ComplianceException webhooks
+// from config/webhook/exceptions.yaml to a real API server, and requests are
+// made as impersonated application identities.
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/exception"
+)
+
+const exceptionWebhookPort = 19443
+
+// webhookHost is the address the kind API server reaches this test process
+// at: KONSTAPEL_LIVE_WEBHOOK_HOST, or the IPv4 gateway of the "kind" network.
+func webhookHost(t *testing.T) string {
+	if h := os.Getenv("KONSTAPEL_LIVE_WEBHOOK_HOST"); h != "" {
+		return h
+	}
+	out, err := exec.Command("docker", "network", "inspect", "kind", "-f", "{{range .IPAM.Config}}{{.Gateway}} {{end}}").Output()
+	if err != nil {
+		t.Fatalf("find the kind network gateway (or set KONSTAPEL_LIVE_WEBHOOK_HOST): %v", err)
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			return f
+		}
+	}
+	t.Fatalf("no IPv4 gateway on the kind network: %q", out)
+	return ""
+}
+
+// servingCert writes a CA-signed tls.crt/tls.key for host into dir and
+// returns the CA bundle.
+func servingCert(t *testing.T, dir, host string) []byte {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "konstapel-live-webhook-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IsCA: true,
+		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true}
+	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: host},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.ParseIP(host)}}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	write := func(name, typ string, der []byte) {
+		if err := os.WriteFile(filepath.Join(dir, name), pem.EncodeToMemory(&pem.Block{Type: typ, Bytes: der}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("tls.crt", "CERTIFICATE", leafDER)
+	write("tls.key", "EC PRIVATE KEY", keyDER)
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+}
+
+// installExceptionWebhooks applies config/webhook/exceptions.yaml pointed at
+// this process instead of the in-cluster Service.
+func (l *live) installExceptionWebhooks(host string, caBundle []byte) {
+	raw, err := os.ReadFile("../../config/webhook/exceptions.yaml")
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	dec := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
+	url := func(path string) *string {
+		u := fmt.Sprintf("https://%s:%d%s", host, exceptionWebhookPort, path)
+		return &u
+	}
+	mut, val := &admissionregistrationv1.MutatingWebhookConfiguration{}, &admissionregistrationv1.ValidatingWebhookConfiguration{}
+	if err := dec.Decode(mut); err != nil {
+		l.t.Fatal(err)
+	}
+	if err := dec.Decode(val); err != nil {
+		l.t.Fatal(err)
+	}
+	for i := range mut.Webhooks {
+		mut.Webhooks[i].ClientConfig = admissionregistrationv1.WebhookClientConfig{URL: url(*mut.Webhooks[i].ClientConfig.Service.Path), CABundle: caBundle}
+	}
+	for i := range val.Webhooks {
+		val.Webhooks[i].ClientConfig = admissionregistrationv1.WebhookClientConfig{URL: url(*val.Webhooks[i].ClientConfig.Service.Path), CABundle: caBundle}
+	}
+	for _, o := range []client.Object{mut, val} {
+		_ = l.c.Delete(l.ctx, o)
+		if err := l.c.Create(l.ctx, o); err != nil {
+			l.t.Fatal(err)
+		}
+	}
+	// Fail-closed webhooks must not outlive the process that serves them.
+	l.t.Cleanup(func() {
+		_ = l.c.Delete(l.ctx, mut)
+		_ = l.c.Delete(l.ctx, val)
+	})
+}
+
+// as returns a client that authenticates as the given identity.
+func (l *live) as(user string, groups ...string) client.Client {
+	cfg := rest.CopyConfig(l.cfg)
+	cfg.Impersonate = rest.ImpersonationConfig{UserName: user, UID: "uid-" + user, Groups: groups}
+	c, err := client.New(cfg, client.Options{Scheme: l.c.Scheme()})
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	return c
+}
+
+func acceptance(t *testing.T, ex *v1alpha1.ComplianceException) exception.Acceptance {
+	t.Helper()
+	var a exception.Acceptance
+	if err := json.Unmarshal([]byte(ex.Annotations[exception.AcceptanceAnnotation]), &a); err != nil {
+		t.Fatalf("acceptance annotation on %s: %v", ex.Name, err)
+	}
+	return a
+}
+
+func TestLiveExceptionAdmission(t *testing.T) {
+	l := newLive(t)
+	l.installCRDs()
+	host := webhookHost(t)
+	certs := t.TempDir()
+	ca := servingCert(t, certs, host)
+
+	mgr, err := NewManager(l.cfg, Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second,
+		SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: exceptionWebhookPort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(l.ctx)
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("manager exited: %v", err)
+		}
+	})
+	l.installExceptionWebhooks(host, ca)
+
+	ns := "exc-admission"
+	l.setNamespace(ns, "exc-admission")
+	p := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "exc-self-service"},
+		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)},
+			Policies: []v1alpha1.ProfilePolicy{{Name: pol, Exceptions: v1alpha1.ExceptionSettings{Eligibility: v1alpha1.ExceptionsSelfService, MaxLifetime: &metav1.Duration{Duration: 720 * time.Hour}}}}}}
+	b := bindingObj("exc-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "exc-admission"})
+	editor := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "exception-editor", Namespace: ns},
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: []string{"complianceexceptions"}, Verbs: []string{"get", "list", "create", "update", "patch"}}}}
+	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exception-editors", Namespace: ns},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: editor.Name},
+		Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "team-a-editors"}}}
+	for _, o := range []client.Object{p, b, editor, rb} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = l.c.DeleteAllOf(l.ctx, &v1alpha1.ComplianceException{}, client.InNamespace(ns))
+		for _, o := range []client.Object{rb, editor, b, p} {
+			_ = l.c.Delete(l.ctx, o)
+		}
+	})
+	l.waitReady(b.Name, 1)
+	nsObj := &corev1.Namespace{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Name: ns}, nsObj); err != nil {
+		t.Fatal(err)
+	}
+
+	alice := l.as("alice", "team-a-editors", "system:authenticated")
+	bob := l.as("bob", "team-a-editors", "system:authenticated")
+	argo := l.as("system:serviceaccount:argocd:argocd-application-controller", "team-a-editors", "system:serviceaccounts", "system:authenticated")
+	newEx := func(name string, annotations map[string]string) *v1alpha1.ComplianceException {
+		return &v1alpha1.ComplianceException{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Annotations: annotations},
+			Spec: v1alpha1.ComplianceExceptionSpec{Policy: pol, WorkloadSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "debug"}},
+				Reason: "live admission check", ExpiresAt: metav1.NewTime(time.Now().Add(24 * time.Hour).Truncate(time.Second)), AcceptanceRevision: 1}}
+	}
+
+	// The webhook server starts with the manager; wait until admission answers.
+	forged := `{"revision":1,"actor":{"username":"platform-admin"}}`
+	created := newEx("priv", map[string]string{exception.AcceptanceAnnotation: forged})
+	l.eventually("exception webhook serving", func() (bool, string) {
+		err := alice.Create(l.ctx, created.DeepCopy(), client.DryRunAll)
+		return err == nil, fmt.Sprint(err)
+	})
+
+	// 1. Creation: forged attribution is overwritten by the authenticated caller.
+	if err := alice.Create(l.ctx, created); err != nil {
+		t.Fatal(err)
+	}
+	a := acceptance(t, created)
+	l.record("create", map[string]any{"acceptance": a})
+	if a.Actor.Username != "alice" || a.Actor.UID != "uid-alice" || a.Revision != 1 || a.Namespace.UID != nsObj.UID {
+		t.Fatalf("acceptance = %+v", a)
+	}
+	if a.Eligibility == nil || a.Eligibility.Effective != v1alpha1.ExceptionsSelfService || len(a.Eligibility.Contributors) != 1 || a.Eligibility.Contributors[0].Binding.Name != b.Name {
+		t.Fatalf("resolved set = %+v", a.Eligibility)
+	}
+	accepted := created.Annotations[exception.AcceptanceAnnotation]
+
+	// 2. Dry run: the would-be record is returned and nothing is stored.
+	dry := newEx("dry", nil)
+	if err := bob.Create(l.ctx, dry, client.DryRunAll); err != nil {
+		t.Fatal(err)
+	}
+	if acceptance(t, dry).Actor.Username != "bob" {
+		t.Errorf("dry-run acceptance = %+v", acceptance(t, dry))
+	}
+	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(dry), &v1alpha1.ComplianceException{}); err == nil {
+		t.Error("dry-run exception was stored")
+	}
+	l.record("dry-run", map[string]any{"stored": false})
+
+	// 3. Later configuration does not replace the accepted set on metadata edits.
+	if err := l.c.Delete(l.ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	l.eventually("binding removed", func() (bool, string) {
+		err := l.c.Get(l.ctx, client.ObjectKeyFromObject(b), &v1alpha1.ComplianceBinding{})
+		return err != nil, "still present"
+	})
+	edited := created.DeepCopy()
+	edited.Labels = map[string]string{"edited-by": "bob"}
+	if err := bob.Update(l.ctx, edited); err != nil {
+		t.Fatalf("metadata edit: %v", err)
+	}
+	if edited.Annotations[exception.AcceptanceAnnotation] != accepted {
+		t.Error("a metadata edit changed the acceptance")
+	}
+	l.record("metadata-edit-after-binding-deleted", map[string]any{"unchanged": true})
+
+	// 4. A caller cannot rewrite the record outside a renewal.
+	tampered := edited.DeepCopy()
+	tampered.Annotations[exception.AcceptanceAnnotation] = strings.Replace(accepted, `"username":"alice"`, `"username":"platform-admin"`, 1)
+	err = bob.Update(l.ctx, tampered)
+	if err == nil || !strings.Contains(err.Error(), "protected") {
+		t.Fatalf("tampered record: %v", err)
+	}
+	l.record("tamper", map[string]any{"rejected": err.Error()})
+
+	// 5. An explicit renewal records a new acceptance by the renewing caller.
+	renewed := edited.DeepCopy()
+	renewed.Spec.AcceptanceRevision = 2
+	renewed.Spec.Reason = "renewed live"
+	renewed.Spec.ExpiresAt = metav1.NewTime(time.Now().Add(48 * time.Hour).Truncate(time.Second))
+	if err := bob.Update(l.ctx, renewed); err != nil {
+		t.Fatal(err)
+	}
+	r := acceptance(t, renewed)
+	l.record("renewal", map[string]any{"acceptance": r})
+	if r.Revision != 2 || r.Actor.Username != "bob" || r.Eligibility != nil {
+		// The binding was deleted: the renewal records that nothing applies.
+		t.Fatalf("renewal = %+v", r)
+	}
+
+	// 6. GitOps: the service account is the actor; the commit author is a claim.
+	gitops := newEx("gitops", map[string]string{exception.ClaimAnnotation: "carol (commit abc123)"})
+	if err := argo.Create(l.ctx, gitops); err != nil {
+		t.Fatal(err)
+	}
+	g := acceptance(t, gitops)
+	l.record("gitops", map[string]any{"acceptance": g})
+	if !strings.HasPrefix(g.Actor.Username, "system:serviceaccount:argocd:") || g.Claim != "carol (commit abc123)" {
+		t.Fatalf("gitops acceptance = %+v", g)
+	}
+}
