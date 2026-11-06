@@ -188,6 +188,48 @@ the `hostUsers: false` bypass and adds the Windows guard. The other three
 variants keep the upstream expressions unchanged and add provenance
 annotations only. `variants.json` and its test pin this down.
 
+## NIST Moderate mappings
+
+`content/linux-hardening/component-definition.json` (OSCAL 1.1.3, trestle
+shape) maps each check to statements in the pinned NIST SP 800-53 rev5
+catalog. It sits next to the first loop's `content/component-definition.json`
+and does not copy it: the expanded demonstration composes the two, and each
+check is mapped in exactly one document.
+
+| Check | Statements | Evidence boundary |
+| --- | --- | --- |
+| `disallow-privilege-escalation` | `ac-6_smt`, `cm-6_smt.b` | One declared privilege and configuration restriction; no observed privilege transitions |
+| `disallow-capabilities-strict` | `ac-6_smt`, `cm-7_smt.b`, `cm-6_smt.b` | Declared capability lists, not effective capability sets |
+| `require-run-as-nonroot` | `ac-6_smt`, `cm-6_smt.b` | Requested non-root execution, not the observed UID |
+| `restrict-seccomp-strict` | `cm-7_smt.b`, `cm-6_smt.b` | Selected profile type, not profile contents or observed filtering |
+
+Each check is a separate `Rule_Id` on a shared statement. So
+`ac-6_smt` collects three independent, bounded pieces of evidence for one
+control, and multiple checks or binding instances never multiply satisfied
+controls. Each rule's `Rule_Description` states its rationale and
+partial-coverage limit. No check establishes full control or Moderate-baseline
+satisfaction.
+
+`internal/assessment` validates every shipped component definition
+(`ValidateDefinition`; `Mappings` returns the per-check result):
+- it is valid OSCAL 1.1.3, and its control source resolves to the shipped
+  catalog;
+- every control is in the catalog and explicitly included by the Moderate
+  profile;
+- every statement exists and belongs to its control;
+- every statement names a rule; every rule is declared with a description,
+  mapped, has a `Check_Id` in the `konstapel-kyverno` provider, and is a
+  shipped policy;
+- no rule appears in two documents.
+
+The NIST catalog and profile are read as raw JSON at their declared OSCAL
+1.2.3 schema and are never round-tripped through the older 1.1.3 model.
+`SHA256SUMS` keeps them unchanged. `TestInvalidMappingsAreRejected` covers
+the failing references: an unknown statement, a statement from another
+control, an unknown control, a control outside Moderate, an undeclared rule,
+a missing provider check, a wrong catalog source, a rule that is not a
+shipped policy, and a check mapped twice.
+
 ## Research results versus implementation acceptance
 
 The research and this run show that the **unmodified upstream** policies

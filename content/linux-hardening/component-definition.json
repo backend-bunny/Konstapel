@@ -1,0 +1,253 @@
+{
+  "component-definition": {
+    "uuid": "e5c0d7e6-ab91-5998-9b31-9690b614bd8b",
+    "metadata": {
+      "title": "Konstapel Linux workload hardening bundle",
+      "last-modified": "2026-11-06T00:00:00Z",
+      "version": "1.0.0",
+      "oscal-version": "1.1.3",
+      "remarks": "Composes with content/component-definition.json (disallow-privileged-containers) by reference; it does not copy that check."
+    },
+    "components": [
+      {
+        "uuid": "3a6e0b44-dfd4-5520-9d68-5b8285525a96",
+        "type": "software",
+        "title": "Kubernetes workloads",
+        "description": "Linux workload configuration checks: partial, configuration-level technical evidence for AC-6, CM-6 and CM-7. No check, alone or combined, establishes full control or Moderate-baseline satisfaction.",
+        "props": [
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "disallow-privilege-escalation",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Rule_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "Partial AC-6 and CM-6 technical evidence: requires every container to declare allowPrivilegeEscalation false, a declared privilege and configuration restriction. Does not observe privilege transitions at runtime, assess authorization or organizational procedures, or establish full AC-6/CM-6/Moderate satisfaction.",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "disallow-capabilities-strict",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Rule_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "Partial AC-6, CM-7 and CM-6 technical evidence: requires every container to drop ALL Linux capabilities and add none other than NET_BIND_SERVICE in its declared capability lists. Does not observe effective process privileges or capability sets, and does not establish full AC-6/CM-7/CM-6/Moderate satisfaction.",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "require-run-as-nonroot",
+            "remarks": "rule_set_2"
+          },
+          {
+            "name": "Rule_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "Partial AC-6 and CM-6 technical evidence: requires every container to request non-root execution (runAsNonRoot true, set or inherited; user namespaces are no exemption). Does not observe the UID a process runs as, and does not establish full AC-6/CM-6/Moderate satisfaction.",
+            "remarks": "rule_set_2"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "restrict-seccomp-strict",
+            "remarks": "rule_set_3"
+          },
+          {
+            "name": "Rule_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+            "value": "Partial CM-7 and CM-6 technical evidence: requires every container to select the RuntimeDefault or Localhost seccomp profile type, set or inherited. Does not inspect Localhost profile contents or observe syscall filtering, and does not establish full CM-7/CM-6/Moderate satisfaction.",
+            "remarks": "rule_set_3"
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "6a50c50f-eeb5-5707-afe5-5ef0e1e8058f",
+            "source": "../upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+            "props": [
+              {
+                "name": "Framework_Short_Name",
+                "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal",
+                "value": "nist_800_53"
+              }
+            ],
+            "description": "NIST r5",
+            "implemented-requirements": [
+              {
+                "uuid": "b24d6ae4-6c41-5181-ae7d-640169e29296",
+                "control-id": "ac-6",
+                "description": "Partial technical evidence only; each mapped check is a separate, bounded observation.",
+                "statements": [
+                  {
+                    "statement-id": "ac-6_smt",
+                    "uuid": "5c3c0e62-067b-5263-a352-5e4356b2b343",
+                    "description": "Least-privilege configuration evidence for workload containers; partial coverage only.",
+                    "props": [
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-privilege-escalation"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-capabilities-strict"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "require-run-as-nonroot"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "uuid": "ba947148-f455-57f9-8896-7bdb440baf57",
+                "control-id": "cm-6",
+                "description": "Partial technical evidence only; each mapped check is a separate, bounded observation.",
+                "statements": [
+                  {
+                    "statement-id": "cm-6_smt.b",
+                    "uuid": "dd2a5225-e1cf-5e81-bd5f-f6f02df72a48",
+                    "description": "Implemented security configuration settings for workload containers; partial coverage only.",
+                    "props": [
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-privilege-escalation"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-capabilities-strict"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "require-run-as-nonroot"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "restrict-seccomp-strict"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "uuid": "71cb487f-6457-5ba8-a962-eda9c181cfcb",
+                "control-id": "cm-7",
+                "description": "Partial technical evidence only; each mapped check is a separate, bounded observation.",
+                "statements": [
+                  {
+                    "statement-id": "cm-7_smt.b",
+                    "uuid": "88671606-aa19-5eea-b08a-8691fcbc7f3e",
+                    "description": "Restricted kernel functions (capabilities, system calls) for workload containers; partial coverage only.",
+                    "props": [
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "disallow-capabilities-strict"
+                      },
+                      {
+                        "name": "Rule_Id",
+                        "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kubernetes",
+                        "value": "restrict-seccomp-strict"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "uuid": "03b2dfba-a091-54ba-bf05-e4694832a46e",
+        "type": "validation",
+        "title": "konstapel-kyverno",
+        "description": "Kyverno policies.kyverno.io/v1 validation provider",
+        "props": [
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privilege-escalation",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Check_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privilege-escalation",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Check_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-privilege-escalation",
+            "remarks": "rule_set_0"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-capabilities-strict",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Check_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-capabilities-strict",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Check_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "disallow-capabilities-strict",
+            "remarks": "rule_set_1"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "require-run-as-nonroot",
+            "remarks": "rule_set_2"
+          },
+          {
+            "name": "Check_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "require-run-as-nonroot",
+            "remarks": "rule_set_2"
+          },
+          {
+            "name": "Check_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "require-run-as-nonroot",
+            "remarks": "rule_set_2"
+          },
+          {
+            "name": "Rule_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "restrict-seccomp-strict",
+            "remarks": "rule_set_3"
+          },
+          {
+            "name": "Check_Id",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "restrict-seccomp-strict",
+            "remarks": "rule_set_3"
+          },
+          {
+            "name": "Check_Description",
+            "ns": "https://oscal-compass.github.io/compliance-trestle/schemas/oscal/cd/kyverno",
+            "value": "restrict-seccomp-strict",
+            "remarks": "rule_set_3"
+          }
+        ]
+      }
+    ]
+  }
+}
