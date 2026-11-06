@@ -19,8 +19,8 @@ resources:
   - resources.yaml
 variables: values.yaml
 results:
-  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-c07ae34193f1d3c1, kind: Pod, resources: [shop-prod/privileged-in-production, shop-dev/privileged-in-development], result: fail}
-  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-c07ae34193f1d3c1, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
-  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-prod/privileged-in-production], result: fail}
-  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
-  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-835a035b40c0af8f, kind: Pod, resources: [shop-dev/privileged-in-development], result: skip}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-08512d5754357b62, kind: Pod, resources: [shop-prod/privileged-in-production, shop-dev/privileged-in-development], result: fail}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-08512d5754357b62, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-1f8a532320ed7733, kind: Pod, resources: [shop-prod/privileged-in-production], result: fail}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-1f8a532320ed7733, kind: Pod, resources: [shop-prod/unprivileged-in-production], result: pass}
+  - {isValidatingPolicy: true, policy: konstapel-disallow-privileged-containers-1f8a532320ed7733, kind: Pod, resources: [shop-dev/privileged-in-development], result: skip}

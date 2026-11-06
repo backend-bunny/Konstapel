@@ -16,10 +16,10 @@ the other agents' CRDs or task lists.
 
 ## 1. Vendor and identify the four policy sources
 
-- [ ] 1.1 Vendor the four named source directories at the design's pinned revision, including relevant hidden CLI/Chainsaw fixtures and license material; verify original policy checksums against the research and require only new-group v1 policy resources in the shipped bundle.
-- [ ] 1.2 Record source URLs, licenses/notices, checksums, and stable logical check/sub-validation identities in content metadata local to the new directories; verify each policy can be traced to its immutable source without duplicating the initial privileged check.
-- [ ] 1.3 Run the retained upstream CLI suites using the pinned CLI and preserve results; verify expected outcomes match and identify the added-capabilities helper separately from the combined shipped policy.
-- [ ] 1.4 Document source layout, update procedure, runtime annotations, and the difference between research results and implementation acceptance; verify all source/license references and rerun commands resolve to the vendored content.
+- [x] 1.1 Vendor the four named source directories at the design's pinned revision, including relevant hidden CLI/Chainsaw fixtures and license material; verify original policy checksums against the research and require only new-group v1 policy resources in the shipped bundle.
+- [x] 1.2 Record source URLs, licenses/notices, checksums, and stable logical check/sub-validation identities in content metadata local to the new directories; verify each policy can be traced to its immutable source without duplicating the initial privileged check.
+- [x] 1.3 Run the retained upstream CLI suites using the pinned CLI and preserve results; verify expected outcomes match and identify the added-capabilities helper separately from the combined shipped policy.
+- [x] 1.4 Document source layout, update procedure, runtime annotations, and the difference between research results and implementation acceptance; verify all source/license references and rerun commands resolve to the vendored content.
 
 ## 2. Implement and test explicit Linux variants
 

@@ -1,0 +1,121 @@
+{
+  "bundle": "linux-workload-hardening",
+  "sourceRepository": "https://github.com/kyverno/policies",
+  "sourceRevision": "fac1ccda72ab53594921ca1c040ac90b80afadcd",
+  "research": "docs/research/next-policy-bundle.md",
+  "license": {
+    "spdx": "Apache-2.0",
+    "file": "content/upstream/kyverno/LICENSE",
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "url": "https://github.com/kyverno/policies/blob/fac1ccda72ab53594921ca1c040ac90b80afadcd/LICENSE"
+  },
+  "notices": "No NOTICE file exists in kyverno/policies at this revision.",
+  "composesByReference": [
+    {
+      "check": "disallow-privileged-containers",
+      "note": "The first loop vendored this check (content/provenance.json); the bundle refers to it and does not copy it."
+    }
+  ],
+  "checks": [
+    {
+      "check": "disallow-privilege-escalation",
+      "title": "Disallow Privilege Escalation",
+      "sourceUrl": "https://github.com/kyverno/policies/tree/fac1ccda72ab53594921ca1c040ac90b80afadcd/pod-security-vpol/restricted/disallow-privilege-escalation",
+      "sourcePath": "pod-security-vpol/restricted/disallow-privilege-escalation",
+      "vendoredPath": "content/upstream/kyverno/disallow-privilege-escalation",
+      "policyFile": "content/upstream/kyverno/disallow-privilege-escalation/disallow-privilege-escalation.yaml",
+      "policySha256": "8298294ae338afca75bd016a327d9b64343344d3f10421134ca6e2351c0589ea",
+      "researchPolicySha256": "8298294ae338afca75bd016a327d9b64343344d3f10421134ca6e2351c0589ea",
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "subValidations": [
+        {
+          "index": 0,
+          "id": "disallow-privilege-escalation.no-escalation",
+          "summary": "Every regular, init and ephemeral container sets securityContext.allowPrivilegeEscalation to false."
+        }
+      ],
+      "fixtureAids": [],
+      "modifications": "None: vendored byte-for-byte. Local variants (task 2) live separately and record their own digests."
+    },
+    {
+      "check": "disallow-capabilities-strict",
+      "title": "Disallow Capabilities (Strict)",
+      "sourceUrl": "https://github.com/kyverno/policies/tree/fac1ccda72ab53594921ca1c040ac90b80afadcd/pod-security-vpol/restricted/disallow-capabilities-strict",
+      "sourcePath": "pod-security-vpol/restricted/disallow-capabilities-strict",
+      "vendoredPath": "content/upstream/kyverno/disallow-capabilities-strict",
+      "policyFile": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "policySha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+      "researchPolicySha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "subValidations": [
+        {
+          "index": 0,
+          "id": "disallow-capabilities-strict.drop-all",
+          "summary": "Every container's capabilities.drop includes exactly ALL."
+        },
+        {
+          "index": 1,
+          "id": "disallow-capabilities-strict.add-net-bind-service-only",
+          "summary": "Containers add no capability other than NET_BIND_SERVICE."
+        }
+      ],
+      "fixtureAids": [
+        {
+          "path": ".kyverno-test/adding-capabilities-strict.yaml",
+          "role": "Upstream CLI test helper that checks only added capabilities on Pods; a test aid, not a shipped check.",
+          "sha256": "a1259c57c9b710748c698022972234d733cb6f16d9073d77a791907a2ff61bd4"
+        }
+      ],
+      "modifications": "None: vendored byte-for-byte. Local variants (task 2) live separately and record their own digests."
+    },
+    {
+      "check": "require-run-as-nonroot",
+      "title": "Require runAsNonRoot",
+      "sourceUrl": "https://github.com/kyverno/policies/tree/fac1ccda72ab53594921ca1c040ac90b80afadcd/pod-security-vpol/restricted/require-run-as-nonroot",
+      "sourcePath": "pod-security-vpol/restricted/require-run-as-nonroot",
+      "vendoredPath": "content/upstream/kyverno/require-run-as-nonroot",
+      "policyFile": "content/upstream/kyverno/require-run-as-nonroot/require-run-as-nonroot.yaml",
+      "policySha256": "5276cb3c4f3d782604334d40cb40e659ee5d9ffefb190b9d52ab880e74bbb3b8",
+      "researchPolicySha256": "5276cb3c4f3d782604334d40cb40e659ee5d9ffefb190b9d52ab880e74bbb3b8",
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "subValidations": [
+        {
+          "index": 0,
+          "id": "require-run-as-nonroot.run-as-non-root",
+          "summary": "Every container sets or inherits runAsNonRoot: true; upstream also accepts hostUsers: false (removed by the local variant, task 2.2)."
+        }
+      ],
+      "fixtureAids": [],
+      "modifications": "None: vendored byte-for-byte. Local variants (task 2) live separately and record their own digests."
+    },
+    {
+      "check": "restrict-seccomp-strict",
+      "title": "Restrict Seccomp (Strict)",
+      "sourceUrl": "https://github.com/kyverno/policies/tree/fac1ccda72ab53594921ca1c040ac90b80afadcd/pod-security-vpol/restricted/restrict-seccomp-strict",
+      "sourcePath": "pod-security-vpol/restricted/restrict-seccomp-strict",
+      "vendoredPath": "content/upstream/kyverno/restrict-seccomp-strict",
+      "policyFile": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "policySha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+      "researchPolicySha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ValidatingPolicy",
+      "subValidations": [
+        {
+          "index": 0,
+          "id": "restrict-seccomp-strict.pod-profile-type",
+          "summary": "A Pod-level seccompProfile.type, if set, is RuntimeDefault or Localhost."
+        },
+        {
+          "index": 1,
+          "id": "restrict-seccomp-strict.container-profile-type",
+          "summary": "Every container sets RuntimeDefault or Localhost, or inherits it from the Pod."
+        }
+      ],
+      "fixtureAids": [],
+      "modifications": "None: vendored byte-for-byte. Local variants (task 2) live separately and record their own digests."
+    }
+  ]
+}

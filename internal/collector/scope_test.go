@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -157,8 +156,9 @@ func TestChangesOutsideWindowAreIgnoredOrRejected(t *testing.T) {
 func TestFreezeScopeFromListedObjects(t *testing.T) {
 	subjects, stale := contractSubjects(t)
 	var rendered []assessment.Object
+	audit := renderedName(t, "audit-all.yaml")
 	for _, ch := range renderedChecks(t) {
-		raw, _ := os.ReadFile(filepath.Join(repo(t), "testdata/targeting/rendered", map[bool]string{true: "audit-all.yaml", false: "deny-production.yaml"}[strings.HasSuffix(ch.EnginePolicy, "c07ae34193f1d3c1")]))
+		raw, _ := os.ReadFile(filepath.Join(repo(t), "testdata/targeting/rendered", map[bool]string{true: "audit-all.yaml", false: "deny-production.yaml"}[ch.EnginePolicy == audit]))
 		var o assessment.Object
 		_ = yaml.Unmarshal(raw, &o)
 		rendered = append(rendered, o)
