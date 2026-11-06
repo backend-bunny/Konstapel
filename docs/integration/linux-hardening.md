@@ -328,8 +328,12 @@ attributable: 17 pass and 4 fail.
   finding is ever `satisfied`, and an all-passing capture produces no findings
   at all.
 
-C2P reports finding targets at the statement root (`cm-6_smt`), while the
-mapping and SSP name the part (`cm-6_smt.b`).
+C2P builds finding targets at the statement root (`cm-6_smt`). The export
+narrows each one to the single statement part its mapping claims
+(`cm-6_smt.b`, `cm-7_smt.b`), matching the mapping and SSP, so a finding never
+names more of a control than was assessed. `ac-6_smt` is itself the mapped
+statement and is unchanged. The results also link every component definition
+that maps an assessed check.
 
 ## Research results versus implementation acceptance
 
