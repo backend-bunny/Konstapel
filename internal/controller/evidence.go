@@ -64,9 +64,10 @@ func EvidenceRuntime(ctx context.Context, cfg *rest.Config, ec EvidenceConfig) (
 		return AssessmentRuntime{}, err
 	}
 	return AssessmentRuntime{
-		Publisher:   pub,
-		StagingDir:  ec.StagingDir,
-		ContentRoot: filepath.Dir(filepath.Clean(ec.ContentDir)),
+		Publisher:           pub,
+		StagingDir:          ec.StagingDir,
+		ControllerNamespace: ec.Namespace,
+		ContentRoot:         filepath.Dir(filepath.Clean(ec.ContentDir)),
 		Ready: func(ctx context.Context) error {
 			_, err := pub.Ready(ctx)
 			return err

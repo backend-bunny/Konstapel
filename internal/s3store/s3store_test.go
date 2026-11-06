@@ -130,10 +130,14 @@ func TestLoadDestinationIsStrict(t *testing.T) {
 	}
 }
 
-// Destination fields exist only in platform configuration: no request, run,
-// or binding spec can carry an endpoint, bucket, prefix, or credential.
+// Storage location and credentials exist only in platform-managed
+// EvidenceDestinations. Application objects (requests, runs) carry no
+// destination field at all. A ComplianceBinding is platform-managed and may
+// only reference a destination by name and UID (spec.assessment.
+// destinationRef); no spec carries an endpoint, bucket, prefix, or credential.
 func TestApplicationObjectsCannotOverrideDestination(t *testing.T) {
 	forbidden := []string{"endpoint", "bucket", "region", "prefix", "addressing", "credential", "secret", "destination", "cabundle"}
+	const allowedRef = "ComplianceBindingSpec.Assessment.DestinationRef"
 	var walk func(reflect.Type, string)
 	walk = func(ty reflect.Type, at string) {
 		for ty.Kind() == reflect.Pointer || ty.Kind() == reflect.Slice {
@@ -144,12 +148,20 @@ func TestApplicationObjectsCannotOverrideDestination(t *testing.T) {
 		}
 		for i := range ty.NumField() {
 			f := ty.Field(i)
+			path := at + "." + f.Name
+			if path == allowedRef {
+				ref := reflect.TypeOf(v1alpha1.DestinationReference{})
+				if ft := f.Type; ft.Kind() != reflect.Pointer || ft.Elem() != ref || ref.NumField() != 2 {
+					t.Errorf("%s must be a name/UID reference only", path)
+				}
+				continue
+			}
 			for _, bad := range forbidden {
 				if strings.Contains(strings.ToLower(f.Name), bad) {
-					t.Errorf("%s.%s lets an application object set %s", at, f.Name, bad)
+					t.Errorf("%s lets an object set %s", path, bad)
 				}
 			}
-			walk(f.Type, at+"."+f.Name)
+			walk(f.Type, path)
 		}
 	}
 	for _, spec := range []any{v1alpha1.AssessmentRequestSpec{}, v1alpha1.AssessmentRunSpec{}, v1alpha1.ComplianceBindingSpec{}} {

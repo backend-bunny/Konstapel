@@ -39,18 +39,20 @@ func newAssessEnv(t *testing.T, objs ...client.Object) *assessEnv {
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(targeting.ValidatingPolicyGVK, meta.RESTScopeRoot)
 	mapper.Add(PolicyReportGVK, meta.RESTScopeNamespace)
-	for _, k := range []string{"ComplianceBinding", "ComplianceProfile", "AssessmentRun"} {
+	for _, k := range []string{"ComplianceBinding", "ComplianceProfile", "AssessmentRun", "EvidenceDestination"} {
 		mapper.Add(v1alpha1.GroupVersion.WithKind(k), meta.RESTScopeRoot)
 	}
 	mapper.Add(v1alpha1.GroupVersion.WithKind("AssessmentRequest"), meta.RESTScopeNamespace)
 	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, meta.RESTScopeRoot)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, meta.RESTScopeNamespace)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, meta.RESTScopeNamespace)
 	for _, gvk := range []schema.GroupVersionKind{{Version: "v1", Kind: "Pod"}, {Version: "v1", Kind: "ReplicationController"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"}, {Group: "apps", Version: "v1", Kind: "DaemonSet"}, {Group: "apps", Version: "v1", Kind: "StatefulSet"},
 		{Group: "apps", Version: "v1", Kind: "ReplicaSet"}, {Group: "batch", Version: "v1", Kind: "Job"}, {Group: "batch", Version: "v1", Kind: "CronJob"}} {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithRESTMapper(mapper).WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.AssessmentRun{}, &v1alpha1.AssessmentRequest{}).
+		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.AssessmentRun{}, &v1alpha1.AssessmentRequest{}, &v1alpha1.EvidenceDestination{}).
 		// The API server assigns UIDs on create; the fake client does not.
 		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			if obj.GetUID() == "" {

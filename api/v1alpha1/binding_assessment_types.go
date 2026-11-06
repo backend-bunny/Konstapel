@@ -35,6 +35,11 @@ type BindingAssessment struct {
 	// +optional
 	// +kubebuilder:default="2160h"
 	Retention Duration `json:"retention,omitempty"`
+	// destinationRef overrides the central default evidence destination for
+	// this binding by name and UID. Requests inherit it. An unusable
+	// selection fails visibly and never falls back to the default.
+	// +optional
+	DestinationRef *DestinationReference `json:"destinationRef,omitempty"`
 }
 
 // BindingAssessmentStatus is written only by the assessment controller
@@ -53,6 +58,9 @@ type BindingAssessmentStatus struct {
 	// latestRun is the newest run started for this binding.
 	// +optional
 	LatestRun *RunReference `json:"latestRun,omitempty"`
+	// destination is the resolved evidence destination selection.
+	// +optional
+	Destination *DestinationSelection `json:"destination,omitempty"`
 }
 
 // AssessmentSchedule persists the schedule anchor so restarts and leader
