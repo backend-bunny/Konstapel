@@ -59,6 +59,7 @@ func startS3(t *testing.T, l *live) *s3store.Publisher {
 		t.Fatalf("start S3 service: %v %s", err, out)
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
+	l.s3Container = name
 	out, err := exec.Command("docker", "port", name, "9000/tcp").Output()
 	if err != nil {
 		t.Fatal(err)

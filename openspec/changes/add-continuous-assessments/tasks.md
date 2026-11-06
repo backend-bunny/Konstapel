@@ -61,5 +61,5 @@ change's entire task list before landing the shared contract or adapter.
 ## 6. Verify integrated continuous assessment
 
 - [x] 6.1 With the S3 adapter merged, run scheduled and team-requested assessments for two namespaces and overlapping bindings; verify current status, immutable scope, publication, authorized package contents, and validated OSCAL together.
-- [ ] 6.2 Exercise controller/engine restarts, watch discontinuity, workload mutation, missing evidence, and interrupted publication end to end; verify bounded failures, recorded gaps, honest freshness, and no duplicate or silently rewritten snapshots.
+- [x] 6.2 Exercise controller/engine restarts, watch discontinuity, workload mutation, missing evidence, and interrupted publication end to end; verify bounded failures, recorded gaps, honest freshness, and no duplicate or silently rewritten snapshots.
 - [ ] 6.3 Run the existing prototype regressions plus the documented controller workflow and retention handoff; retain versioned evidence and verify all task-owned clusters, services, objects, and processes are removed after the tests.

@@ -321,3 +321,26 @@ func TestStaleBindingCannotOverwriteSchedule(t *testing.T) {
 		t.Fatalf("stale plan overwrote the schedule: %+v", s)
 	}
 }
+
+// A plan from a stale binding (its schedule not yet visible) must not create
+// a run: the run name is derived from the anchor, so a stale anchor would
+// create a duplicate scheduled run before the status apply could conflict.
+func TestStaleBindingCreatesNoDuplicateRun(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	stale := &v1alpha1.ComplianceBinding{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: "audit-prod"}, stale); err != nil {
+		t.Fatal(err)
+	}
+	e.assess("audit-prod") // creates the initial run and persists the anchor
+	if len(e.runs()) != 1 {
+		t.Fatalf("setup: %d runs", len(e.runs()))
+	}
+	e.now = e.now.Add(time.Second)
+	if _, _, _, _, err := e.ar.plan(context.Background(), stale, e.now); !apierrors.IsConflict(err) {
+		t.Fatalf("stale plan must conflict before creating anything, got %v", err)
+	}
+	if n := len(e.runs()); n != 1 {
+		t.Fatalf("stale plan created a duplicate run: %d runs", n)
+	}
+}

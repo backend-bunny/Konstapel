@@ -39,6 +39,8 @@ type live struct {
 	c   client.Client
 	out string
 	log []map[string]any
+	// s3Container is the test-owned S3 service started by startS3.
+	s3Container string
 }
 
 func newLive(t *testing.T) *live {
