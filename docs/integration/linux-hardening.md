@@ -272,12 +272,20 @@ denied by the `require-run-as-nonroot` instance in each of these cases:
 With `runAsNonRoot: true` the Pod is admitted. User namespaces are no
 exemption.
 
-**Runtime (container evidence, separate)** is **unvalidated** in the test
+**Runtime (container evidence, separate)** was **unvalidated** in the recorded
 environment. See [hardening-userns.json](hardening-userns.json): kind on
 Kubernetes 1.37.0, containerd 2.3.4, kernel 6.18.60. A `hostUsers: false`
 Pod in an unbound namespace never starts, because runc cannot mount `sysfs`
 inside the user-namespaced sandbox of a nested kind node ("operation not
 permitted"). No isolation is claimed.
+
+Current full/admission acceptance prepares its disposable kind node with an
+additional unmasked sysfs mount, following [kind #3436](https://github.com/kubernetes-sigs/kind/issues/3436).
+It sets `KONSTAPEL_LIVE_REQUIRE_USERNS=true`: failure to start the probe or read
+its UID mapping fails acceptance instead of passing with unvalidated runtime
+evidence. CI also enables and smoke-tests host user namespaces as described in
+the [development guide](../development.md). Historical evidence above stays
+unchanged; each new run records its own result.
 
 To validate the runtime side, run the test on a node that can start
 `hostUsers: false` Pods: Kubernetes user namespaces, and a containerd 2.x

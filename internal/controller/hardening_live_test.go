@@ -317,9 +317,20 @@ func TestLiveHardeningUserNamespaces(t *testing.T) {
 
 	// Runtime (separate evidence): does this node run a user-namespaced Pod?
 	// Outside any binding, so policy is not involved.
+	unvalidated := func(fields map[string]any) {
+		fields["result"] = "unvalidated"
+		l.record("userns-runtime", fields)
+		// task acceptance prepares its own kind node for user namespaces.
+		// That environment must produce isolation evidence, not silently pass
+		// after a runtime/setup regression. Standalone probes may still record
+		// unsupported environments without claiming runtime isolation.
+		if os.Getenv("KONSTAPEL_LIVE_REQUIRE_USERNS") == "true" {
+			t.Fatalf("user-namespace runtime required but unvalidated: %v", fields)
+		}
+	}
 	probe := userns(freeNS, "hz-userns-runtime", nil, nil, &corev1.PodSecurityContext{RunAsNonRoot: &tr, RunAsUser: &uid})
 	if err := l.c.Create(l.ctx, probe); err != nil {
-		l.record("userns-runtime", map[string]any{"result": "unvalidated", "reason": "create: " + err.Error()})
+		unvalidated(map[string]any{"reason": "create: " + err.Error()})
 		return
 	}
 	created = append(created, probe)
@@ -345,13 +356,13 @@ func TestLiveHardeningUserNamespaces(t *testing.T) {
 		events, _ := exec.CommandContext(l.ctx, "kubectl", "--kubeconfig", os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"), "--context", os.Getenv("KONSTAPEL_LIVE_CONTEXT"),
 			"get", "events", "-n", freeNS, "--field-selector", "involvedObject.name="+probe.Name, "-o", "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message", "--no-headers").CombinedOutput()
 		reason = strings.TrimSpace(reason + "\n" + string(events))
-		l.record("userns-runtime", map[string]any{"result": "unvalidated", "phase": phase, "reason": reason})
+		unvalidated(map[string]any{"phase": phase, "reason": reason})
 		t.Logf("user-namespace runtime unvalidated on this node: phase %s %s", phase, reason)
 		return
 	}
 	out, err := l.podLogs(freeNS, probe.Name)
 	if err != nil {
-		l.record("userns-runtime", map[string]any{"result": "unvalidated", "reason": "logs: " + err.Error()})
+		unvalidated(map[string]any{"reason": "logs: " + err.Error()})
 		return
 	}
 	// In a user namespace, container UID 0 maps to a non-zero host UID.

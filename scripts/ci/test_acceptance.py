@@ -1,9 +1,11 @@
 """Exercise CI decisions with real Git diffs and mocked GitHub responses."""
 
 import copy
+from collections import Counter
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -14,6 +16,26 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("require_acceptance", HERE / "require-acceptance.py")
 acceptance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(acceptance)
+
+
+class GroupCoverageTests(unittest.TestCase):
+    def test_every_compiled_live_test_runs_in_exactly_one_group(self):
+        # -list compiles/discovers tests without starting a cluster. Fail when a
+        # new live test is unassigned, or a stale/duplicate selection is present.
+        output = subprocess.check_output(
+            ["go", "test", "-mod=readonly", "-tags", "live", "-list", "^TestLive",
+             "./internal/targeting/", "./internal/controller/"],
+            cwd=HERE.parents[1], text=True, timeout=180,
+        )
+        discovered = Counter(re.findall(r"^TestLive\w+$", output, re.MULTILINE))
+        assigned = Counter(test for group in acceptance.GROUPS.values() for test in group["goTests"])
+        for group in acceptance.GROUPS.values():
+            if group["exceptionAdmission"]:
+                assigned["TestLiveExceptionAdmission"] += 1
+        self.assertTrue(discovered)
+        self.assertEqual(assigned, discovered)
+        self.assertTrue(all(count == 1 for count in assigned.values()))
+        self.assertEqual(sum(group["core"] for group in acceptance.GROUPS.values()), 1)
 
 
 class ScopeTests(unittest.TestCase):
@@ -142,14 +164,21 @@ class PublicationTests(unittest.TestCase):
     def test_full_jobs_required_even_when_gate_passed(self):
         jobs = [{"name": name, "conclusion": "success"} for name in acceptance.REQUIRED_JOBS]
         acceptance.verify_jobs(jobs)
-        for conclusion in ("skipped", "failure", "cancelled", None):
-            bad = copy.deepcopy(jobs)
-            bad[1]["conclusion"] = conclusion
-            with self.assertRaises(acceptance.AcceptanceError):
-                acceptance.verify_jobs(bad)
-        for bad in (jobs[:1], jobs + [jobs[1]]):
-            with self.assertRaises(acceptance.AcceptanceError):
-                acceptance.verify_jobs(bad)
+        for index, job in enumerate(jobs):
+            with self.subTest(job=job["name"]):
+                for conclusion in ("skipped", "failure", "cancelled", None):
+                    bad = copy.deepcopy(jobs)
+                    bad[index]["conclusion"] = conclusion
+                    with self.assertRaises(acceptance.AcceptanceError):
+                        acceptance.verify_jobs(bad)
+                for bad in (jobs[:index] + jobs[index + 1:], jobs + [job]):
+                    with self.assertRaises(acceptance.AcceptanceError):
+                        acceptance.verify_jobs(bad)
+
+    def test_old_single_job_cannot_stand_in_for_missing_groups(self):
+        with self.assertRaises(acceptance.AcceptanceError):
+            acceptance.verify_jobs([{"name": name, "conclusion": "success"}
+                                    for name in ("checks", "acceptance-live", "acceptance")])
 
     def test_success_is_bound_to_attempt_and_rechecked(self):
         run = self.run_record()

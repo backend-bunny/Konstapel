@@ -53,6 +53,12 @@ task acceptance OUTPUT=/tmp/konstapel-acceptance-1
 task acceptance OUTPUT=/tmp/konstapel-acceptance-2
 ```
 
+Both commands run the full suite sequentially. CI runs four isolated groups in
+parallel; reproduce one with `task acceptance GROUP=storage OUTPUT=/tmp/konstapel-storage-1`.
+The available groups are `admission`, `assessments`, `storage`, and `recovery`;
+omitting `GROUP` selects `all`. A single group's success does not prove full
+acceptance. The selected group is recorded in `acceptance-result.json`.
+
 Both runs start from a clean disposable environment. Command stdout and stderr
 stream to the terminal and per-stage files. `progress.log` records timestamped
 stage markers; `targeting/targeting-live.log` includes verbose Go test progress

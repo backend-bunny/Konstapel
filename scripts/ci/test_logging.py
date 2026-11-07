@@ -21,6 +21,7 @@ class LoggingTests(unittest.TestCase):
         (self.repo / "scripts").mkdir()
         (self.repo / "bin").mkdir()
         shutil.copy(ROOT / "scripts/runtime.env", self.repo / "scripts/runtime.env")
+        shutil.copy(ROOT / "scripts/acceptance-groups.json", self.repo / "scripts/acceptance-groups.json")
         self.out = self.repo / "output"
         self.env = dict(os.environ, PATH=f"{self.repo / 'bin'}:{os.environ['PATH']}",
                         KONSTAPEL_CLUSTER_NAME="konstapel-assessment-log-test")
@@ -44,8 +45,9 @@ class LoggingTests(unittest.TestCase):
         self.stub("scripts/environment.sh", 'echo "environment-$1"; if [[ $1 == delete ]]; then exit "${DELETE_EXIT:-0}"; fi')
         self.stub("bin/konstapel", 'echo "$1-stdout"; echo "$1-stderr" >&2; if [[ $1 == acceptance ]]; then exit "${RUNNER_EXIT:-0}"; fi')
         self.stub("bin/chainsaw", "echo chainsaw")
-        self.stub("scripts/targeting-live.sh", "echo targeting")
+        self.stub("scripts/targeting-live.sh", 'echo "targeting-${4:-all}"; echo "require-userns=${KONSTAPEL_LIVE_REQUIRE_USERNS:-false}"')
         self.stub("scripts/exception-admission-live.sh", "echo exceptions")
+        self.stub("bin/docker", 'echo "prepared-userns $2"')
 
     def test_acceptance_streams_stages_and_keeps_logs(self):
         self.setup_acceptance()
@@ -69,7 +71,55 @@ class LoggingTests(unittest.TestCase):
         self.assertIn("acceptance-stderr", (self.out / "runner.log").read_text())
         self.assertNotIn("Acceptance passed", result.stdout)
         self.assertEqual(json.loads((self.out / "acceptance-result.json").read_text()),
-                         {"passed": False, "exitCode": 23})
+                         {"group": "all", "passed": False, "exitCode": 23})
+
+    def test_groups_run_only_their_assigned_stages(self):
+        self.setup_acceptance()
+        groups = json.loads((ROOT / "scripts/acceptance-groups.json").read_text())
+        for group, config in groups.items():
+            with self.subTest(group=group):
+                out = self.repo / group
+                result = self.run_script("acceptance.sh", out, group)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"targeting-{group}", result.stdout)
+                self.assertEqual("acceptance-stdout" in result.stdout, config["core"])
+                self.assertEqual("chainsaw" in result.stdout, config["core"])
+                self.assertEqual("exceptions" in result.stdout, config["exceptionAdmission"])
+                self.assertEqual("prepared-userns konstapel-assessment-log-test-control-plane" in result.stdout, config["core"])
+                self.assertEqual("require-userns=true" in result.stdout, config["core"])
+                self.assertEqual(json.loads((out / "acceptance-result.json").read_text()),
+                                 {"group": group, "passed": True, "exitCode": 0})
+                self.assertIn("environment-delete", result.stdout)
+
+    def test_userns_preparation_failure_fails_and_cleans_up(self):
+        self.setup_acceptance()
+        self.stub("bin/docker", "echo mount-failed >&2; exit 24")
+        result = self.run_script("acceptance.sh", self.out, "admission")
+        self.assertEqual(result.returncode, 24)
+        self.assertIn("environment-delete", result.stdout)
+        self.assertIn("mount-failed", (self.out / "userns-setup.log").read_text())
+        self.assertNotIn("Acceptance passed", result.stdout)
+
+    def test_unknown_group_stops_before_creating_output_or_cluster(self):
+        self.setup_acceptance()
+        result = self.run_script("acceptance.sh", self.out, "typo")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.out.exists())
+        self.assertNotIn("environment-create", result.stdout)
+
+    def test_group_selectors_partition_the_full_run(self):
+        self.stub("bin/go", 'while [[ $# -gt 0 ]]; do if [[ $1 == -run ]]; then printf "%s" "$2" > selected-tests; fi; shift; done')
+        groups = json.loads((ROOT / "scripts/acceptance-groups.json").read_text())
+        for group, config in groups.items():
+            result = self.run_script("targeting-live.sh", "kubeconfig", "context", self.out, group)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((self.repo / "selected-tests").read_text(),
+                             "^(" + "|".join(config["goTests"]) + ")$")
+        result = self.run_script("targeting-live.sh", "kubeconfig", "context", self.out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.repo / "selected-tests").read_text(),
+                         "^(" + "|".join(test for group in groups.values() for test in group["goTests"]) + ")$")
+        self.assertNotEqual(self.run_script("targeting-live.sh", "kubeconfig", "context", self.out, "typo").returncode, 0)
 
     def test_teardown_failure_prevents_success(self):
         self.setup_acceptance()

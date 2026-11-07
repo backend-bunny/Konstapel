@@ -16,6 +16,7 @@ jobs:
     outputs:
       required: ${{ steps.scope.outputs.required }}
       reason: ${{ steps.scope.outputs.reason }}
+      groups: ${{ steps.scope.outputs.groups }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,7 +27,9 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash scripts/ci/acceptance-scope.sh >> "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/ci/acceptance-scope.sh >> "$GITHUB_OUTPUT"
+          echo "groups=$(jq -c 'keys' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
   checks:
     runs-on: ubuntu-26.04
     steps:
@@ -48,10 +51,15 @@ jobs:
       - name: Verify checks did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
   acceptance-live:
+    name: acceptance-live (${{ matrix.group }})
     needs: acceptance-scope
     if: needs.acceptance-scope.outputs.required == 'true'
-    # Full disposable-cluster acceptance, including the S3 evidence lifecycle
-    # against the pinned S3-compatible test service (scripts/runtime.env).
+    # Each group owns a runner, cluster, and any S3 services. Tests inside a
+    # group stay sequential: recovery deliberately stops Kyverno controllers.
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.acceptance-scope.outputs.groups) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
@@ -59,8 +67,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-tools
+        with:
+          user-namespaces: ${{ matrix.group == 'admission' }}
       - name: Run acceptance
-        run: devbox run -- task acceptance OUTPUT="$RUNNER_TEMP/acceptance"
+        env:
+          ACCEPTANCE_GROUP: ${{ matrix.group }}
+        run: devbox run -- task acceptance GROUP="$ACCEPTANCE_GROUP" OUTPUT="$RUNNER_TEMP/acceptance"
       - name: Verify acceptance did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
       - name: Acceptance summary
@@ -69,7 +81,7 @@ jobs:
           out="$RUNNER_TEMP/acceptance"
           {
             echo '## Acceptance'
-            jq -r '"passed: \(.passed) (exit \(.exitCode))"' "$out/acceptance-result.json" 2>/dev/null || echo 'no result recorded'
+            jq -r '"group: \(.group), passed: \(.passed) (exit \(.exitCode))"' "$out/acceptance-result.json" 2>/dev/null || echo 'no result recorded'
             echo
             grep -hE '^(--- (PASS|FAIL)|ok|FAIL)' "$out"/targeting/targeting-live.log 2>/dev/null | sed 's/^/    /' || true
           } >> "$GITHUB_STEP_SUMMARY"
@@ -78,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: acceptance-evidence
+          name: acceptance-evidence-${{ matrix.group }}
           path: |
             ${{ runner.temp }}/acceptance
             !${{ runner.temp }}/acceptance/**/kubeconfig*
@@ -87,7 +99,8 @@ jobs:
             !${{ runner.temp }}/acceptance/kind-logs
           retention-days: 14
   acceptance:
-    # Stable required check, including explicit prose-only skips and failures.
+    # Stable required check: success requires every matrix group to succeed.
+    # No continue-on-error; fail-fast is off so all groups retain diagnostics.
     if: always()
     needs: [acceptance-scope, checks, acceptance-live]
     runs-on: ubuntu-26.04
