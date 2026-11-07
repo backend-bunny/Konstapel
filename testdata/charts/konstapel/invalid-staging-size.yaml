@@ -1,0 +1,3 @@
+# expect: stagingSizeLimit
+controller:
+  stagingSizeLimit: lots

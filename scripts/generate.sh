@@ -30,6 +30,18 @@ if [ "${1:-}" = "--check" ]; then
 		echo "CRDs in config/crd/bases are out of date; run scripts/generate.sh" >&2
 		status=1
 	fi
+	scripts/charts/runtime.sh "$tmp/runtime"
+	for f in "$tmp"/runtime/generated-*.yaml; do
+		if ! diff "$f" "charts/konstapel/templates/$(basename "$f")" >/dev/null 2>&1; then
+			echo "Runtime chart manifests in charts/konstapel/templates are out of date; run scripts/generate.sh" >&2
+			status=1
+			break
+		fi
+	done
+	if [ "$(ls "$tmp"/runtime/generated-*.yaml | wc -l)" != "$(ls charts/konstapel/templates/generated-*.yaml 2>/dev/null | wc -l)" ]; then
+		echo "Runtime chart manifests in charts/konstapel/templates are out of date; run scripts/generate.sh" >&2
+		status=1
+	fi
 	scripts/charts/crds.sh "$tmp/crd" "$tmp/chart"
 	if ! diff -r "$tmp/chart" charts/konstapel-crds/templates; then
 		echo "CRD chart templates in charts/konstapel-crds/templates are out of date; run scripts/generate.sh" >&2
@@ -45,3 +57,4 @@ fi
 mkdir -p config/rbac/controller
 generate config/crd/bases config/rbac/controller
 scripts/charts/crds.sh config/crd/bases charts/konstapel-crds/templates
+scripts/charts/runtime.sh charts/konstapel/templates

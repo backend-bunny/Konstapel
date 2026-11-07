@@ -19,11 +19,15 @@ for chart in konstapel-crds konstapel; do
   if grep -q '^dependencies:' <<<"$meta" || [[ -e $dir/Chart.lock || -e $dir/charts ]]; then
     fail "$chart: charts must not declare or vendor dependencies"
   fi
-  helm lint --strict "$dir" >/dev/null || fail "$chart: helm lint --strict"
+  # A release renders into konstapel-system with a pinned digest (packaging
+  # supplies it); testdata/charts/<chart>/base.values supplies one here.
+  base=()
+  [[ -f testdata/charts/$chart/base.values ]] && base=(-f "testdata/charts/$chart/base.values")
+  helm lint --strict "$dir" --namespace konstapel-system "${base[@]}" >/dev/null || fail "$chart: helm lint --strict"
   for values in testdata/charts/"$chart"/*.yaml; do
     expect=$(sed -n '1s/^# expect: //p' "$values")
     [[ -n $expect ]] || { fail "$values: first line must be '# expect: ...'"; continue; }
-    if out=$(helm template fixture "$dir" -f "$values" 2>&1); then
+    if out=$(helm template fixture "$dir" --namespace konstapel-system "${base[@]}" -f "$values" 2>&1); then
       [[ $expect == ok ]] || fail "$values: rendered, expected an error containing '$expect'"
     else
       [[ $expect != ok ]] || { fail "$values: $out"; continue; }

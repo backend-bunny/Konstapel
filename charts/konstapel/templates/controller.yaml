@@ -1,0 +1,183 @@
+{{- include "konstapel.validate" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: konstapel-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-controller
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-controller
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-controller-assessments
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-controller-assessments
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: konstapel-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: konstapel-controller
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konstapel-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "konstapel.controllerSelector" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "konstapel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: konstapel-controller
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "konstapel.controllerSelector" . | nindent 20 }}
+      {{- end }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - controller
+            - --leader-elect=true
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=0
+            - --evidence-staging-dir=/var/lib/konstapel/staging
+            - --shutdown-timeout={{ .Values.controller.shutdownTimeoutSeconds }}s
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: probes
+              containerPort: 8081
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with .Values.controller.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: staging
+              mountPath: /var/lib/konstapel/staging
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Per-pod bounded working storage. Durable state lives in Kubernetes
+        # and the evidence destination; a successor recovers from those.
+        - name: staging
+          emptyDir:
+            sizeLimit: {{ .Values.controller.stagingSizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: konstapel-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "konstapel.controllerSelector" . | nindent 6 }}
+{{- end }}
