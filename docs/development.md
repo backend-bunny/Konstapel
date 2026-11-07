@@ -72,6 +72,12 @@ owned cluster while preserving diagnostic evidence. See the
 manual environment create/smoke/delete commands.
 
 GitHub Actions installs the same Devbox lock and runs `devbox run -- task check`.
+The `acceptance` job in the same workflow runs `task acceptance` on a disposable
+kind cluster. That includes the live Go suite (`scripts/targeting-live.sh`) with
+the S3 evidence lifecycle against the pinned S3-compatible test service. The
+job uploads test-owned evidence as `acceptance-evidence`, without the
+kubeconfig, rendered chart manifest, or node logs. The task tears down the
+cluster and test service whether it passes or fails.
 CI checks that execution did not modify dependency locks. The setup action caches
 Nix packages and Go downloads/build outputs; it does not use a separate Go version
 or download an independently selected Kyverno CLI.
@@ -104,8 +110,9 @@ and commit the regenerated lockfile; the other tools use automated update PRs.
 Kyverno chart and CLI updates are grouped. `task deps:check` verifies the chart's
 actual `appVersion` against the CLI pin and verifies the chart archive checksum.
 Update failures must be resolved with compatible pins, not by disabling the
-check. Runtime or C2P updates also require `task acceptance` and retained evidence
-before merge; the regular CI job alone does not prove live compatibility.
+check. Runtime or C2P updates also require a passing `acceptance` job, or a local
+`task acceptance` run with retained evidence, before merge. The `checks` job
+alone does not prove live compatibility.
 
 Renovate excludes vendored content, historical evidence, and OpenSpec artifacts.
 Refresh policies, mappings, and NIST content through their reviewed content-update
