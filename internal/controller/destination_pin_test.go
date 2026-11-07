@@ -271,3 +271,43 @@ func TestDestinationPublishersFollowThePin(t *testing.T) {
 		t.Fatal("a pin with a different location was served")
 	}
 }
+
+// A team request's run pinned to a destination keeps its namespace scope:
+// the pin's label update must not discard the namespace UID this reconcile
+// resolved from the request before the scope is frozen.
+func TestPinnedTeamRunKeepsNamespaceScope(t *testing.T) {
+	e := newTeamEnv(t)
+	ed := evidenceDestination("primary", true)
+	status := ed.Status
+	ed.Status = v1alpha1.EvidenceDestinationStatus{}
+	if err := e.c.Create(context.Background(), ed); err != nil {
+		t.Fatal(err)
+	}
+	ed.Status = status
+	if err := e.c.Status().Update(context.Background(), ed); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.Create(context.Background(), defaultDestination("primary", string(ed.UID))); err != nil {
+		t.Fatal(err)
+	}
+	store := fake.New(func() time.Time { return e.now })
+	dp := &DestinationPublishers{Reader: e.c, New: func(context.Context, s3store.Destination, client.Reader, string) (publication.Publisher, error) {
+		return store, nil
+	}}
+	e.rr.Runtime.Publisher, e.ar.Runtime.Publisher = nil, nil
+	e.rr.Runtime.Destinations, e.ar.Runtime.Destinations = dp, dp
+	e.request("dev", "nightly")
+	e.assess("audit-all")
+	st := e.requestStatus("dev", "nightly")
+	if st.Run == nil {
+		t.Fatalf("request not admitted: %+v", st)
+	}
+	e.step(st.Run.Name)
+	run := e.run(st.Run.Name)
+	if run.Status.Destination == nil || run.Status.Destination.Name != "primary" {
+		t.Fatalf("run not pinned: %+v", run.Status.Destination)
+	}
+	if run.Status.Scope == nil || run.Status.Scope.NamespaceUID != "uid-dev" || run.Status.Scope.NamespaceCount != 1 {
+		t.Fatalf("pinned team run lost its namespace scope: %+v", run.Status.Scope)
+	}
+}

@@ -78,9 +78,13 @@ func (r *AssessmentRunReconciler) pinDestination(ctx context.Context, run *v1alp
 			run.Labels = map[string]string{}
 		}
 		run.Labels[LabelRunDestination] = ref.UID
+		// Update returns the stored status; keep this reconcile's unsaved
+		// status (such as a team run's resolved namespace UID).
+		status := run.Status.DeepCopy()
 		if err := r.Client.Update(ctx, run); err != nil {
 			return nil, err
 		}
+		run.Status = *status
 	}
 	ed := &v1alpha1.EvidenceDestination{}
 	if err := reader.Get(ctx, client.ObjectKey{Name: ref.Name}, ed); err != nil {

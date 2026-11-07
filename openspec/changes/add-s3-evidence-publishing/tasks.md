@@ -65,7 +65,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 
 ## 6. Verify publication, access, and retention together
 
-- [ ] 6.1 With continuous assessments integrated, run full-binding and namespace-scoped scheduled/manual cases against the real test backend using default and binding-specific destinations; verify complete/incomplete/diagnostic publications, full authorized downloads, immutable expiry, rotation, and run-start pinning through the actual run APIs.
+- [x] 6.1 With continuous assessments integrated, run full-binding and namespace-scoped scheduled/manual cases against the real test backend using default and binding-specific destinations; verify complete/incomplete/diagnostic publications, full authorized downloads, immutable expiry, rotation, and run-start pinning through the actual run APIs.
 - [ ] 6.2 Exercise lost responses, controller restart, RBAC revocation, binding/request deletion, retention edits, destination switches/retirement/orphaning, and cleanup failure end to end; verify recovery never changes historical bytes, leaks scope, changes enforcement/exception identity, or loses outstanding ownership records.
 - [ ] 6.3 Retain the final backend/version matrix and CI acceptance evidence, run the preserved local prototype validation, and tear down task-owned endpoints/objects/temporary data; explicitly clean intentional orphan fixtures through the documented operator path and preserve sanitized inventory evidence while leaving unrelated infrastructure untouched.
 

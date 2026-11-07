@@ -2,11 +2,16 @@
 
 package controller
 
-// Integrated assessments (add-continuous-assessments task 6.1): two team
-// namespaces under two overlapping bindings, with the real S3 publisher and
-// the download service. Scheduled and team-requested runs are checked
-// together for current status, frozen scope, publication, authorized
-// package contents, and validated OSCAL. Run through scripts/targeting-live.sh.
+// Integrated assessments (add-continuous-assessments task 6.1,
+// add-s3-evidence-publishing task 6.1): two team namespaces under two
+// overlapping bindings, publishing through EvidenceDestinations on the
+// test-owned S3 service — one binding via the central default, the other via
+// its own destinationRef — and served by the download service from each run's
+// pinned destination. Scheduled and team-requested runs are checked together
+// for current status, frozen scope, run-start pinning, publication,
+// authorized package contents, and validated OSCAL; an engine reporting
+// outage publishes an Incomplete package and an impossible OSCAL export a
+// Diagnostic one, both downloadable. Run through scripts/targeting-live.sh.
 
 import (
 	"context"
@@ -20,8 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -36,8 +44,32 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 	l.installCRDs()
 	root, _ := filepath.Abs("../..")
 	pub := startS3(t, l)
-	ConfigureAssessments(AssessmentRuntime{Publisher: pub, StagingDir: t.TempDir(), ContentRoot: root, Poll: 3 * time.Second, PublishTimeout: time.Minute, Workers: 2,
-		Ready: func(ctx context.Context) error { _, err := pub.Ready(ctx); return err }})
+	ns := "konstapel-system"
+	_ = l.c.Create(l.ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "it-s3"},
+		Data: map[string][]byte{"accessKeyID": []byte(l.s3Access), "secretAccessKey": []byte(l.s3Secret)}}
+	if err := l.c.Create(l.ctx, secret); err != nil {
+		t.Fatal(err)
+	}
+	dests := map[string]*v1alpha1.EvidenceDestination{}
+	for _, name := range []string{"it-default", "it-a-dest"} {
+		ed := &v1alpha1.EvidenceDestination{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.EvidenceDestinationSpec{S3: v1alpha1.S3Location{
+			Endpoint: l.s3Endpoint, Bucket: pub.Dest.Bucket, Region: "us-east-1", Prefix: "konstapel-test/" + name, DevelopmentFixture: true,
+			CredentialSecret: &v1alpha1.S3CredentialSecret{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: secret.Name}}}}}
+		if err := l.c.Create(l.ctx, ed); err != nil {
+			t.Fatal(err)
+		}
+		dests[name] = ed
+	}
+	defaultCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: DefaultDestinationConfigMap},
+		Data: map[string]string{DefaultDestinationNameKey: "it-default", DefaultDestinationUIDKey: string(dests["it-default"].UID)}}
+	if err := l.c.Create(l.ctx, defaultCM); err != nil {
+		t.Fatal(err)
+	}
+	dp := &DestinationPublishers{Reader: l.c, Namespace: ns}
+	runtime := AssessmentRuntime{StagingDir: t.TempDir(), ContentRoot: root, Poll: 3 * time.Second, PublishTimeout: time.Minute, Workers: 2,
+		ControllerNamespace: ns, Destinations: dp}
+	ConfigureAssessments(runtime)
 	t.Cleanup(func() { ConfigureAssessments(AssessmentRuntime{}) })
 	l.applyFile("../../config/rbac/assessment-requester.yaml")
 	l.applyFile("../../config/rbac/assessment-operator.yaml")
@@ -53,7 +85,8 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 	wide := bindingObj("it-wide", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "it-production"})
 	wide.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "40s"}
 	onlyA := bindingObj("it-only-a", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{"kubernetes.io/metadata.name": "it-a"})
-	onlyA.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "40s"}
+	onlyA.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "40s",
+		DestinationRef: &v1alpha1.DestinationReference{Name: "it-a-dest", UID: string(dests["it-a-dest"].UID)}}
 	yes := true
 	objs := []client.Object{p, wide, onlyA}
 	for _, ns := range teams {
@@ -77,6 +110,27 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			got := l.policiesFor(wide.Name, onlyA.Name)
 			return len(got) == 0, toJSON(got)
 		})
+		// Runs and destinations are released without waiting for package
+		// expiry; the S3 service and its data are removed with the test.
+		var runs v1alpha1.AssessmentRunList
+		_ = l.c.List(l.ctx, &runs)
+		for i := range runs.Items {
+			if r := &runs.Items[i]; strings.HasPrefix(r.Spec.BindingRef.Name, "it-") {
+				r.Finalizers = nil
+				_ = l.c.Update(l.ctx, r)
+				_ = l.c.Delete(l.ctx, r)
+			}
+		}
+		for _, ed := range dests {
+			got := &v1alpha1.EvidenceDestination{}
+			if l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got) == nil {
+				got.Finalizers = nil
+				_ = l.c.Update(l.ctx, got)
+				_ = l.c.Delete(l.ctx, got)
+			}
+		}
+		_ = l.c.Delete(l.ctx, defaultCM)
+		_ = l.c.Delete(l.ctx, secret)
 	})
 	for _, o := range objs {
 		o.SetUID("")
@@ -86,7 +140,14 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		}
 	}
 	stop := l.startManager()
-	defer stop()
+	defer func() { stop() }()
+	for name := range dests {
+		l.eventually(name+" ready", func() (bool, string) {
+			ed := &v1alpha1.EvidenceDestination{}
+			_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, ed)
+			return meta.IsStatusConditionTrue(ed.Status.Conditions, v1alpha1.ConditionDestinationReady), toJSON(ed.Status)
+		})
+	}
 	l.waitReady(wide.Name, 2)
 	l.waitReady(onlyA.Name, 1)
 	nsUID := map[string]string{}
@@ -133,7 +194,36 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			return c != nil && c.Evidence.Expected == want[b] && c.Evidence.Completeness == "Complete" && c.Outcomes.Fail == want[b], toJSON(c)
 		})
 	}
-	l.record("scheduled", map[string]any{"wide": scheduled[wide.Name].Name, "onlyA": scheduled[onlyA.Name].Name})
+	// Run-start pinning: the default for wide, the binding's own reference
+	// for onlyA, each committed under its destination's prefix only.
+	commitsUnder := func(dest, runUID string) int {
+		out, err := pub.Client.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String(pub.Dest.Bucket), Prefix: aws.String("konstapel-test/" + dest + "/")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, o := range out.Contents {
+			if k := aws.ToString(o.Key); strings.Contains(k, runUID) && strings.HasSuffix(k, "/commit.json") {
+				n++
+			}
+		}
+		return n
+	}
+	pinnedTo := func(r *v1alpha1.AssessmentRun, dest string) {
+		t.Helper()
+		other := "it-default"
+		if dest == other {
+			other = "it-a-dest"
+		}
+		if r.Status.Destination == nil || r.Status.Destination.Name != dest || r.Status.Destination.UID != string(dests[dest].UID) ||
+			commitsUnder(dest, string(r.UID)) != 1 || commitsUnder(other, string(r.UID)) != 0 {
+			t.Fatalf("%s is not published at its pinned destination %s: %s", r.Name, dest, toJSON(r.Status.Destination))
+		}
+	}
+	pinnedTo(scheduled[wide.Name], "it-default")
+	pinnedTo(scheduled[onlyA.Name], "it-a-dest")
+	l.record("scheduled", map[string]any{"wide": scheduled[wide.Name].Name, "onlyA": scheduled[onlyA.Name].Name,
+		"wideDestination": "it-default (central default)", "onlyADestination": "it-a-dest (destinationRef)"})
 
 	// 2. Team requests in both namespaces against the overlapping wide binding.
 	reqs := map[string]*v1alpha1.AssessmentRequest{}
@@ -159,6 +249,7 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			reqs[ns].Status.NamespaceUID != nsUID[ns] || r.Status.Summary.Evidence.Expected != 1 || r.Status.Publication.PublicationID != reqs[ns].Status.ArtifactRef {
 			t.Fatalf("%s team run: %s", ns, toJSON(r.Status))
 		}
+		pinnedTo(r, "it-default")
 		teamRuns[ns] = r
 	}
 	l.record("team-requests", map[string]any{"it-a": teamRuns["it-a"].Name, "it-b": teamRuns["it-b"].Name})
@@ -177,7 +268,10 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 	})
 
 	// 4. Authorized downloads: each team gets exactly its own validated package.
-	srv := &download.Server{Reader: l.c, Reviews: download.KubeReviewer{Client: l.c, Audience: downloadAudience}, Publisher: pub, TempDir: t.TempDir()}
+	srv := &download.Server{Reader: l.c, Reviews: download.KubeReviewer{Client: l.c, Audience: downloadAudience}, TempDir: t.TempDir(),
+		PublisherFor: func(ctx context.Context, r *v1alpha1.AssessmentRun) (publication.Publisher, error) {
+			return dp.For(ctx, r.Status.Destination)
+		}}
 	ts := httptest.NewTLSServer(srv.Handler())
 	defer ts.Close()
 	hc := ts.Client()
@@ -238,5 +332,71 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			t.Fatalf("%s binding package %+v %+v", b, d.Scope, d.Evidence)
 		}
 	}
-	l.record("integrated-passed", map[string]any{"bindings": 2, "teams": len(teams)})
+
+	// 5. Incomplete and Diagnostic publications through onlyA's destination.
+	manual := func(name string) *v1alpha1.AssessmentRun {
+		t.Helper()
+		r := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1alpha1.AssessmentRunSpec{BindingRef: v1alpha1.BindingReference{Name: onlyA.Name}, Scope: v1alpha1.RunScopeBinding}}
+		if err := l.c.Create(l.ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		l.eventually(name+" published", func() (bool, string) {
+			got := get(name)
+			return got != nil && got.Status.Phase == v1alpha1.RunCompleted && got.Status.Publication != nil, toJSON(got)
+		})
+		got := get(name)
+		pinnedTo(got, "it-a-dest")
+		return got
+	}
+	operatorPackage := func(r *v1alpha1.AssessmentRun) publication.Descriptor {
+		t.Helper()
+		code, body := fetch(t, hc, ts.URL+"/v1/assessmentruns/"+string(r.UID)+"/download", opTok)
+		if code != http.StatusOK {
+			t.Fatalf("operator download of %s: %d %s", r.Name, code, body)
+		}
+		d, _ := validate(r.Name, body)
+		return d
+	}
+	// An engine reporting outage while a workload is added: no evaluation
+	// arrives for it, so the snapshot is published as Incomplete, never
+	// Complete.
+	l.scaleKyverno("kyverno-reports-controller", 0)
+	l.scaleKyverno("kyverno-background-controller", 0)
+	added := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "privileged-added", Namespace: "it-a"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "registry.invalid/x:1", SecurityContext: &corev1.SecurityContext{Privileged: &yes}}}}}
+	if err := l.c.Create(l.ctx, added); err != nil {
+		t.Fatal(err)
+	}
+	objs = append(objs, added)
+	incomplete := manual("it-only-a-incomplete")
+	l.scaleKyverno("kyverno-reports-controller", 1)
+	l.scaleKyverno("kyverno-background-controller", 1)
+	if ev := incomplete.Status.Summary.Evidence; ev.Completeness != "Incomplete" || incomplete.Status.Summary.Export != "Assessment" {
+		t.Fatalf("outage run: %s", toJSON(incomplete.Status.Summary))
+	}
+	if d := operatorPackage(incomplete); d.PackageKind != publication.KindAssessment || d.Evidence.Completeness != publication.Incomplete {
+		t.Fatalf("incomplete package %+v %+v", d.PackageKind, d.Evidence)
+	}
+	// An impossible OSCAL export (no shipped content to map to) publishes a
+	// typed Diagnostic package instead of invalid OSCAL. The runtime is read
+	// when the manager starts, so it restarts with the broken content root
+	// and again with the real one.
+	broken := runtime
+	broken.ContentRoot = t.TempDir()
+	stop()
+	ConfigureAssessments(broken)
+	stop = l.startManager()
+	diagnostic := manual("it-only-a-diagnostic")
+	stop()
+	ConfigureAssessments(runtime)
+	stop = l.startManager()
+	if diagnostic.Status.Summary.Export != "Diagnostic" || diagnostic.Status.Publication.Phase != "Committed" {
+		t.Fatalf("diagnostic run: %s", toJSON(diagnostic.Status))
+	}
+	if d := operatorPackage(diagnostic); d.PackageKind != publication.KindDiagnostic || d.Diagnostic == nil || d.Diagnostic.Reason != "ExportFailed" {
+		t.Fatalf("diagnostic package %+v %+v", d.PackageKind, d.Diagnostic)
+	}
+	l.record("publication-kinds", map[string]any{"incomplete": incomplete.Name, "diagnostic": diagnostic.Name})
+	l.record("integrated-passed", map[string]any{"bindings": 2, "teams": len(teams), "destinations": 2})
 }
