@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 200" role="img" aria-labelledby="title">
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<title id="title">Konstapel — compliance controller, single-colour logo</title>
+<g transform="translate(-25 2) scale(.43)" color="#FFF9EF">
+<defs><mask id="mono" maskUnits="userSpaceOnUse" x="80" y="20" width="352" height="432"><rect x="80" y="20" width="352" height="432" fill="black"/>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- Upright ears, kept visible behind the cap. -->
+    <path d="M169 257 C146 211 115 131 119 83 C120 58 131 44 147 48 C180 57 210 154 226 237 Z" fill="black" stroke="white" stroke-width="15"/>
+    <path d="M172 222 C155 181 137 119 140 86 C141 79 144 77 147 83 C164 110 185 178 194 223 Z" fill="black"/>
+    <path d="M291 235 C296 159 323 61 349 43 C365 31 380 42 379 66 C378 121 351 204 332 254 Z" fill="black" stroke="white" stroke-width="15"/>
+    <path d="M314 220 C319 165 341 91 352 73 C357 65 359 70 357 83 C352 130 335 190 326 222 Z" fill="black"/>
+    <!-- Broad cheeks and a gently tapered jaw. -->
+    <path d="M144 278 C154 243 199 221 252 220 C307 219 352 241 364 277 C370 299 389 320 381 347 C369 386 317 418 254 426 C190 420 140 388 127 352 C117 325 137 301 144 278 Z" fill="black" stroke="white" stroke-width="15"/>
+    <!-- Custom Swedish boat-cap silhouette: tapered folded crown, no visor. -->
+    <path d="M139 287 C143 252 158 224 190 201 L250 161 Q257 157 264 163 L316 203 C340 222 354 246 361 273 C307 255 259 258 217 267 C188 273 162 282 139 292 Z" fill="white" stroke="white" stroke-width="10"/>
+    <!-- Side fold and recessed crown seam give the cap its boat-like volume. -->
+    <path d="M264 167 L316 204 C338 223 350 241 355 260 C319 236 288 228 269 219 Z" fill="white"/>
+    <path d="M151 263 C195 246 246 240 295 244 C317 246 337 251 351 257" fill="none" stroke="white" stroke-width="5"/>
+    <!-- Curved piping surrounds the badge panel rather than forming a brim. -->
+    <path d="M182 219 C175 239 207 248 253 242 C299 237 329 222 320 207" fill="none" stroke="black" stroke-width="5"/>
+    <circle cx="257" cy="209" r="19" fill="black"/>
+    <path d="M247 197 H252 V206 L261 197 H268 L257 208 L269 221 H262 L252 211 V221 H247 Z" fill="white"/>
+    <!-- Relaxed, attentive expression. -->
+    <ellipse cx="204" cy="310" rx="8" ry="12" fill="white"/>
+    <ellipse cx="303" cy="305" rx="8" ry="12" fill="white"/>
+    <circle cx="206" cy="306" r="2.5" fill="black"/>
+    <circle cx="305" cy="301" r="2.5" fill="black"/>
+    <path d="M239 338 Q253 333 267 337 Q271 340 267 345 L257 353 Q253 356 249 353 L238 345 Q234 341 239 338 Z" fill="white"/>
+    <path d="M253 353 V365 M253 364 C243 377 231 375 226 368 M253 364 C264 376 277 373 281 365" fill="none" stroke="white" stroke-width="6"/>
+    <path d="M166 340 L186 344 M322 337 L342 331" fill="none" stroke="black" stroke-width="6"/>
+  </g>
+</mask></defs><rect x="80" y="20" width="352" height="432" fill="currentColor" mask="url(#mono)"/>
+
+</g>
+<text x="165" y="112" fill="#FFF9EF" font-family="DejaVu Sans, sans-serif" font-size="70" font-weight="700" letter-spacing="-3">Konstapel</text>
+</svg>
