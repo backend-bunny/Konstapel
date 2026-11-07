@@ -229,13 +229,35 @@ Nothing here contacts storage.
 When every run is handed off, the destination's own finalizer is released and
 the destination is deleted. The inventory ConfigMaps remain.
 
+**Handed-off ownership is never adopted.** No automatic path picks up
+orphaned evidence again:
+- **Per-run cleanup only.** Publication, recovery, attempt cleanup,
+  integrity checks, and retention deletion run per run, under that run's own
+  key prefix, and only for runs that aren't handed off. No worker sweeps a
+  destination's bucket or prefix. Probes write and remove only their own
+  random `konstapel-probe/` keys.
+- **Recreated destinations.** A destination recreated under the same name, or
+  any destination at the same bucket and prefix, has a new UID. Old pins
+  never resolve to it, its obligations count only its own runs, and handed-off
+  runs keep their original pin.
+- **Expiry and restarts.** The recorded expiry stays historical, and a
+  restarted controller reads the same `orphanedAt` and `Orphaned` state from
+  status.
+- **Forced removal.** If the destination's finalizer is stripped after its
+  inventory was saved but before its runs were handed off, the saved
+  inventory still marks that storage as handed off. The runs take the
+  `Orphaned` disposition instead of recovering, and downloads answer 410.
+- **Inventory lifetime.** Nothing in Konstapel deletes the inventory
+  ConfigMaps. A platform administrator removes them after the external
+  handoff.
+
 `TestLiveOrphanFence` checks this with a real S3 test service that is paused
 (unreachable) while the handoff is requested and accepted. While the backend
 is down, the inventory is saved, the collecting run ends `DestinationOrphaned`
 and frees its binding slot, and the destination is finalized. Once the
-backend returns, nothing for the run reached storage. Exclusion from every
-recovery path and recreated destinations (8.6) and the operator walkthrough
-(8.7) follow.
+backend returns, nothing for the run reached storage. A destination recreated
+under the same name at the same location becomes ready without adopting the
+run. The operator walkthrough (8.7) follows.
 
 ## Destination configuration
 

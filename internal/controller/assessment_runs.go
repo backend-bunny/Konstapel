@@ -541,15 +541,15 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// record is held until the handoff inventory is saved, then marked
 	// Orphaned.
 	if pin := run.Status.Destination; pin != nil && r.Runtime.Destinations != nil {
-		ed, err := orphanFenced(ctx, r.reader(), pin)
+		h, held, err := orphanHandoff(ctx, r.reader(), r.Runtime.ControllerNamespace, pin)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if ed != nil {
-			if h := ed.Status.OrphanHandoff; h == nil || h.Inventory == nil {
-				return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
-			}
-			return ctrl.Result{}, r.orphan(ctx, run, ed)
+		if held {
+			return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
+		}
+		if h != nil {
+			return ctrl.Result{}, r.orphan(ctx, run, h)
 		}
 		var done func()
 		if ctx, done, err = r.Runtime.Destinations.Begin(ctx, pin.UID, "run "+run.Name+" "+string(run.Status.Phase)); errors.Is(err, publication.ErrOrphaned) {

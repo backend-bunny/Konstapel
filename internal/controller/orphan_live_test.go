@@ -2,14 +2,15 @@
 
 package controller
 
-// Live orphan handoff (add-s3-evidence-publishing 8.3–8.5): a
+// Live orphan handoff (add-s3-evidence-publishing 8.3–8.6): a
 // run pinned to an EvidenceDestination on the test-owned S3 service; the
 // backend becomes unreachable; the administrator escalates to Orphan and
 // deletes the destination. The handoff is accepted and fenced without
 // contacting the backend, the inventory is saved during the outage, the
 // interrupted run ends Orphaned (never Published) and frees its binding
 // slot, the destination is finalized, and once the backend returns
-// Konstapel still issues nothing there. Run through scripts/targeting-live.sh.
+// Konstapel still issues nothing there — even with a destination recreated
+// under the same name at the same location. Run through scripts/targeting-live.sh.
 
 import (
 	"context"
@@ -153,6 +154,15 @@ func TestLiveOrphanFence(t *testing.T) {
 	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header}, &corev1.ConfigMap{}); err != nil {
 		t.Fatalf("inventory did not survive finalization: %v", err)
 	}
+	// A destination recreated under the same name at the same location is a
+	// new owner: it becomes ready, owes nothing for the handed-off run, and
+	// never adopts it.
+	repl := &v1alpha1.EvidenceDestination{ObjectMeta: metav1.ObjectMeta{Name: ed.Name}, Spec: *ed.Spec.DeepCopy()}
+	repl.Spec.DeletionPolicy, repl.Spec.Orphan = "", nil
+	if err := l.c.Create(l.ctx, repl); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, repl) })
 	// Well past the collection timeout and after the backend returns,
 	// nothing for the run reaches storage and Orphaned is not cleared.
 	time.Sleep(50 * time.Second)
@@ -164,6 +174,15 @@ func TestLiveOrphanFence(t *testing.T) {
 	_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, r)
 	if r.Status.Phase != v1alpha1.RunFailed || r.Status.Destination == nil || r.Status.Destination.OrphanedAt == nil {
 		t.Fatalf("orphaned run changed after the backend returned: %s", toJSON(r.Status))
+	}
+	l.eventually("replacement destination ready without adopting the run", func() (bool, string) {
+		got := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(repl), got)
+		return got.UID != ed.UID && meta.IsStatusConditionTrue(got.Status.Conditions, v1alpha1.ConditionDestinationReady) &&
+			got.Status.OutstandingRuns == 0 && got.Status.OutstandingPackages == 0, toJSON(got.Status)
+	})
+	if r.Status.Destination.UID != string(ed.UID) {
+		t.Fatalf("orphaned run re-pinned: %s", toJSON(r.Status.Destination))
 	}
 	out, err := pub.Client.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String(pub.Dest.Bucket), Prefix: aws.String("konstapel-test/of-dest/")})
 	if err != nil {
