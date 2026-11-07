@@ -2,15 +2,18 @@
 
 package controller
 
-// Live orphan fence and inventory (add-s3-evidence-publishing 8.3, 8.4): a
+// Live orphan handoff (add-s3-evidence-publishing 8.3–8.5): a
 // run pinned to an EvidenceDestination on the test-owned S3 service; the
 // backend becomes unreachable; the administrator escalates to Orphan and
 // deletes the destination. The handoff is accepted and fenced without
-// contacting the backend, the inventory is saved during the outage, the run
-// is held, and once the backend returns Konstapel still issues nothing there. Run through scripts/targeting-live.sh.
+// contacting the backend, the inventory is saved during the outage, the
+// interrupted run ends Orphaned (never Published) and frees its binding
+// slot, the destination is finalized, and once the backend returns
+// Konstapel still issues nothing there. Run through scripts/targeting-live.sh.
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -20,11 +23,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
 func TestLiveOrphanFence(t *testing.T) {
@@ -103,39 +109,52 @@ func TestLiveOrphanFence(t *testing.T) {
 	if err := l.c.Delete(l.ctx, got); err != nil {
 		t.Fatal(err)
 	}
-	l.eventually("handoff accepted and fenced without the backend", func() (bool, string) {
-		got := &v1alpha1.EvidenceDestination{}
-		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
-		c := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionDestinationReady)
-		return got.Status.OrphanIntent != nil && got.Status.OrphanHandoff != nil && c != nil && c.Reason == "HandedOff", toJSON(got.Status)
-	})
-	// The inventory is saved while the backend is still unreachable.
-	var inv *v1alpha1.OrphanInventoryRef
-	l.eventually("orphan inventory saved during the outage", func() (bool, string) {
-		got := &v1alpha1.EvidenceDestination{}
-		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
-		if h := got.Status.OrphanHandoff; h != nil {
-			inv = h.Inventory
-		}
-		return inv != nil, toJSON(got.Status)
+	// The whole handoff can finish within one poll (the destination is then
+	// gone), so it is observed through its durable record: the inventory
+	// header, written last, exists only after acceptance and the fence. It
+	// is saved while the backend is still unreachable.
+	inv := &v1alpha1.OrphanInventoryRef{Header: "konstapel-orphan-" + string(ed.UID)}
+	l.eventually("handoff accepted and its inventory saved during the outage", func() (bool, string) {
+		err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header}, &corev1.ConfigMap{})
+		return err == nil, fmt.Sprint(err)
 	})
 	header := &corev1.ConfigMap{}
-	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "konstapel-system", Name: inv.Header}, header); err != nil {
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header}, header); err != nil {
 		t.Fatal(err)
 	}
-	if header.Immutable == nil || !*header.Immutable || len(header.OwnerReferences) != 0 || inv.Runs < 1 ||
-		!strings.Contains(header.Data["inventory.json"], `"actor"`) || !strings.Contains(header.Data["inventory.json"], "NotEnumerated") {
+	if h := header.Data["inventory.json"]; header.Immutable == nil || !*header.Immutable || len(header.OwnerReferences) != 0 ||
+		!strings.Contains(h, `"actor": "platform-admin"`) || !strings.Contains(h, `"reason": "backend decommissioned"`) ||
+		!strings.Contains(h, "fencedAt") || !strings.Contains(h, "NotEnumerated") {
 		t.Fatalf("inventory header %s: %s", toJSON(inv), toJSON(header))
 	}
 	chunk := &corev1.ConfigMap{}
-	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "konstapel-system", Name: inv.Header + "-0"}, chunk); err != nil || !strings.Contains(chunk.Data["inventory.json"], name) {
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header + "-0"}, chunk); err != nil || !strings.Contains(chunk.Data["inventory.json"], name) {
 		t.Fatalf("inventory chunk missing run %s: %v %s", name, err, toJSON(chunk))
 	}
-	// The run may already have closed collection (a local step) before the
-	// fence; from the fence on its phase never changes and nothing reaches
-	// storage, well past the collection timeout and after the backend returns.
-	fencedAt := &v1alpha1.AssessmentRun{}
-	_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, fencedAt)
+	// Once the inventory is saved, the interrupted run ends Failed
+	// (DestinationOrphaned), never Published, its binding slot is released,
+	// and the destination is finalized — all while the backend is down.
+	l.eventually("interrupted run ended as orphaned", func() (bool, string) {
+		r := &v1alpha1.AssessmentRun{}
+		_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, r)
+		c := meta.FindStatusCondition(r.Status.Conditions, v1alpha1.ConditionPublished)
+		committed := r.Status.Publication != nil && r.Status.Publication.Phase == v1alpha1.PublicationPhase(publication.PhaseCommitted)
+		return r.Status.Phase == v1alpha1.RunFailed && c != nil && c.Reason == v1alpha1.ReasonDestinationOrphaned && !committed &&
+			r.Status.Destination != nil && r.Status.Destination.OrphanedAt != nil && !controllerutil.ContainsFinalizer(r, RetentionFinalizer), toJSON(r)
+	})
+	l.eventually("binding slot released", func() (bool, string) {
+		s := l.binding(b.Name).Status.Assessment
+		return s != nil && s.Schedule != nil && (s.Schedule.ActiveRun == nil || s.Schedule.ActiveRun.Name != name), toJSON(s)
+	})
+	l.eventually("destination finalized", func() (bool, string) {
+		err := l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), &v1alpha1.EvidenceDestination{})
+		return apierrors.IsNotFound(err), fmt.Sprint(err)
+	})
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header}, &corev1.ConfigMap{}); err != nil {
+		t.Fatalf("inventory did not survive finalization: %v", err)
+	}
+	// Well past the collection timeout and after the backend returns,
+	// nothing for the run reaches storage and Orphaned is not cleared.
 	time.Sleep(50 * time.Second)
 	if out, err := exec.Command("docker", "unpause", l.s3Container).CombinedOutput(); err != nil {
 		t.Fatalf("unpause S3: %v %s", err, out)
@@ -143,8 +162,8 @@ func TestLiveOrphanFence(t *testing.T) {
 	time.Sleep(15 * time.Second)
 	r := &v1alpha1.AssessmentRun{}
 	_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, r)
-	if r.Status.Phase != fencedAt.Status.Phase || r.Status.Publication != nil {
-		t.Fatalf("fenced run progressed from %s: %s", fencedAt.Status.Phase, toJSON(r.Status))
+	if r.Status.Phase != v1alpha1.RunFailed || r.Status.Destination == nil || r.Status.Destination.OrphanedAt == nil {
+		t.Fatalf("orphaned run changed after the backend returned: %s", toJSON(r.Status))
 	}
 	out, err := pub.Client.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String(pub.Dest.Bucket), Prefix: aws.String("konstapel-test/of-dest/")})
 	if err != nil {

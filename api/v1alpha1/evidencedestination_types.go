@@ -389,6 +389,11 @@ type DestinationPin struct {
 	// pinnedAt is when the pin was accepted.
 	// +required
 	PinnedAt metav1.Time `json:"pinnedAt"`
+	// orphanedAt is when the run's storage responsibility passed to an
+	// operator with its destination's orphan handoff. Konstapel issues no
+	// storage operation for the run afterwards.
+	// +optional
+	OrphanedAt *metav1.Time `json:"orphanedAt,omitempty"`
 }
 
 // EvidenceDestination is a cluster-scoped, platform-managed evidence storage

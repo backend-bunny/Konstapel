@@ -279,6 +279,9 @@ func (r *DestinationReconciler) obligations(ctx context.Context, ed *v1alpha1.Ev
 	}
 	for i := range runs.Items {
 		run := &runs.Items[i]
+		if pin := run.Status.Destination; pin != nil && pin.OrphanedAt != nil {
+			continue // handed off: recorded in the inventory, owned by an operator
+		}
 		pub := run.Status.Publication
 		switch {
 		case !runDone(run):

@@ -18,6 +18,9 @@ const (
 	PhaseExpired   Phase = "Expired"
 	PhaseDeleting  Phase = "Deleting"
 	PhaseDeleted   Phase = "Deleted"
+	// PhaseOrphaned: storage responsibility was handed to an operator. Any
+	// original receipt is kept; nothing claims the package was deleted.
+	PhaseOrphaned Phase = "Orphaned"
 )
 
 // Availability reports whether new authorized downloads can be served.
@@ -39,6 +42,8 @@ const (
 	CleanupDeleted          CleanupState = "Deleted"
 	CleanupDeletionFailed   CleanupState = "DeletionFailed"
 	CleanupRetentionBlocked CleanupState = "RetentionBlocked"
+	// CleanupOrphaned: an operator owns cleanup; Konstapel never resumes it.
+	CleanupOrphaned CleanupState = "Orphaned"
 )
 
 // ObjectRole identifies an owned storage object's purpose.
@@ -222,6 +227,20 @@ func (s Status) Validate() error {
 	case PhaseFailed:
 		if s.Failure == nil || s.Commit != nil {
 			fail("failed publication requires a failure and no commit")
+		}
+	case PhaseOrphaned:
+		if s.Cleanup.State != CleanupOrphaned {
+			fail("orphaned publication requires orphaned cleanup")
+		}
+		if s.Commit != nil {
+			if s.PublishedAt == nil || s.Retention == nil || s.ExpiresAt == nil || s.Destination == nil {
+				fail("orphaned publication with a commit requires its receipt")
+				break
+			}
+			r := Receipt{PublicationID: s.PublicationID, Destination: *s.Destination, Commit: *s.Commit, DescriptorSHA256: s.DescriptorSHA256, PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, PublishedAt: *s.PublishedAt, Retention: *s.Retention, ExpiresAt: *s.ExpiresAt}
+			if err := r.Validate(); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	default:
 		fail("unknown publication phase %q", s.Phase)

@@ -208,12 +208,34 @@ kubectl -n konstapel-system get configmap \
   -l compliance.erenius.io/orphan-handoff=<destination UID> -o yaml
 ```
 
-`TestLiveOrphanFence` checks the fence and the inventory with a real S3 test
-service that is paused (unreachable) while the handoff is requested and
-accepted. The inventory is saved during the outage. Once the backend returns,
-the run is unchanged and nothing for it reached storage. The runs' `Orphaned`
-disposition and finalizer release follow (add-s3-evidence-publishing
-8.5–8.7). Until then, a fenced destination stays terminating.
+**Orphaned disposition.** Once the inventory is saved, each run pinned to the
+destination is marked handed off and its retention finalizer is released.
+Nothing here contacts storage.
+- `status.destination.orphanedAt` is set. Konstapel never issues a storage
+  operation for the run again, even after the destination is gone or another
+  destination uses the same location.
+- A publication becomes `phase: Orphaned`, `availability: Unavailable`,
+  `cleanup.state: Orphaned`. Its original receipt is kept: publication ID,
+  commit manifest and archive versions, digests, size, `publishedAt`, and
+  `expiresAt`. The expiry is now historical; Konstapel won't delete the
+  package when it passes. Managed downloads answer 410.
+- A publication already verified `Deleted` stays `Deleted`.
+- An unfinished run ends `Failed` with `Published=False`
+  (`DestinationOrphaned`). It never claims success, and its binding's active
+  run slot is released.
+- Runs already being deleted are in the inventory before their finalizer is
+  released.
+
+When every run is handed off, the destination's own finalizer is released and
+the destination is deleted. The inventory ConfigMaps remain.
+
+`TestLiveOrphanFence` checks this with a real S3 test service that is paused
+(unreachable) while the handoff is requested and accepted. While the backend
+is down, the inventory is saved, the collecting run ends `DestinationOrphaned`
+and frees its binding slot, and the destination is finalized. Once the
+backend returns, nothing for the run reached storage. Exclusion from every
+recovery path and recreated destinations (8.6) and the operator walkthrough
+(8.7) follow.
 
 ## Destination configuration
 
