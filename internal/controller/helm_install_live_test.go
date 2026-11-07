@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,6 +45,32 @@ func TestLiveHelmInstall(t *testing.T) {
 	if out, err := l.helm("install", "konstapel-crds", "../../charts/konstapel-crds", "--namespace", ns, "--create-namespace", "--wait"); err != nil {
 		t.Fatalf("install CRD chart: %v\n%s", err, out)
 	}
+	// Helm does not wait for CRDs to be established, and the test client's
+	// REST mapping predates them: wait, then use a fresh client.
+	l.eventually("chart CRDs established", func() (bool, string) {
+		var list apiextensionsv1.CustomResourceDefinitionList
+		if err := l.c.List(l.ctx, &list); err != nil {
+			return false, err.Error()
+		}
+		established := 0
+		for _, c := range list.Items {
+			if c.Spec.Group != v1alpha1.GroupVersion.Group {
+				continue
+			}
+			for _, cond := range c.Status.Conditions {
+				if cond.Type == apiextensionsv1.Established && cond.Status == apiextensionsv1.ConditionTrue {
+					established++
+				}
+			}
+		}
+		want, _ := filepath.Glob("../../charts/konstapel-crds/templates/*.yaml")
+		return established == len(want), fmt.Sprintf("%d of %d established", established, len(want))
+	})
+	fresh, err := client.New(l.cfg, client.Options{Scheme: l.c.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.c = fresh
 	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
 		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never"); err != nil {
 		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
