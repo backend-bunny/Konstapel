@@ -116,8 +116,11 @@ only proves that group's coverage; `acceptance-result.json` records its name.
 Admission CI enables unprivileged user namespaces with the same AppArmor sysctl
 and `bwrap` smoke check used by
 [container-dropshipping's setup action](https://github.com/backend-bunny/container-dropshipping/blob/2096015fe369a0cab0db589f037126a543e72666/.github/actions/setup-tools/action.yml). This
-host prerequisite does not by itself prove a nested kind Pod can run; the
-hardening test separately records the Pod's runtime isolation evidence.
+host prerequisite does not by itself prove a nested kind Pod can run. Full and
+admission runs also prepare their disposable node with the additional unmasked
+sysfs mount described in [kind #3436](https://github.com/kubernetes-sigs/kind/issues/3436).
+The hardening test must then verify Pod runtime isolation; missing runtime
+evidence fails the prepared acceptance run. The mount disappears with the node.
 
 Acceptance streams stdout and stderr to the terminal/Actions log while retaining
 per-stage log files. Timestamped stage markers also go to `progress.log`;

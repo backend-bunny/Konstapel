@@ -45,8 +45,9 @@ class LoggingTests(unittest.TestCase):
         self.stub("scripts/environment.sh", 'echo "environment-$1"; if [[ $1 == delete ]]; then exit "${DELETE_EXIT:-0}"; fi')
         self.stub("bin/konstapel", 'echo "$1-stdout"; echo "$1-stderr" >&2; if [[ $1 == acceptance ]]; then exit "${RUNNER_EXIT:-0}"; fi')
         self.stub("bin/chainsaw", "echo chainsaw")
-        self.stub("scripts/targeting-live.sh", 'echo "targeting-${4:-all}"')
+        self.stub("scripts/targeting-live.sh", 'echo "targeting-${4:-all}"; echo "require-userns=${KONSTAPEL_LIVE_REQUIRE_USERNS:-false}"')
         self.stub("scripts/exception-admission-live.sh", "echo exceptions")
+        self.stub("bin/docker", 'echo "prepared-userns $2"')
 
     def test_acceptance_streams_stages_and_keeps_logs(self):
         self.setup_acceptance()
@@ -84,9 +85,20 @@ class LoggingTests(unittest.TestCase):
                 self.assertEqual("acceptance-stdout" in result.stdout, config["core"])
                 self.assertEqual("chainsaw" in result.stdout, config["core"])
                 self.assertEqual("exceptions" in result.stdout, config["exceptionAdmission"])
+                self.assertEqual("prepared-userns konstapel-assessment-log-test-control-plane" in result.stdout, config["core"])
+                self.assertEqual("require-userns=true" in result.stdout, config["core"])
                 self.assertEqual(json.loads((out / "acceptance-result.json").read_text()),
                                  {"group": group, "passed": True, "exitCode": 0})
                 self.assertIn("environment-delete", result.stdout)
+
+    def test_userns_preparation_failure_fails_and_cleans_up(self):
+        self.setup_acceptance()
+        self.stub("bin/docker", "echo mount-failed >&2; exit 24")
+        result = self.run_script("acceptance.sh", self.out, "admission")
+        self.assertEqual(result.returncode, 24)
+        self.assertIn("environment-delete", result.stdout)
+        self.assertIn("mount-failed", (self.out / "userns-setup.log").read_text())
+        self.assertNotIn("Acceptance passed", result.stdout)
 
     def test_unknown_group_stops_before_creating_output_or_cluster(self):
         self.setup_acceptance()

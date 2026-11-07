@@ -54,6 +54,16 @@ created=true
 stage 'Creating the disposable kind cluster and installing Kyverno'
 scripts/environment.sh create "$kubeconfig" "$out/environment" 2>&1 | tee "$out/environment.log"
 if includes core; then
+  stage 'Preparing the disposable kind node for user-namespaced Pods'
+  # kind masks parts of /sys. An additional unmasked sysfs mount lets the
+  # kernel permit sysfs mounts in child user namespaces (kind issue #3436).
+  # Only the node we just created is changed; cluster teardown removes it.
+  docker exec "$KONSTAPEL_CLUSTER_NAME-control-plane" sh -ec '
+    mkdir -p /run/konstapel-userns-sys
+    mount -t sysfs sysfs /run/konstapel-userns-sys
+    echo "Prepared unmasked sysfs for user-namespaced Pods"
+  ' 2>&1 | tee "$out/userns-setup.log"
+  export KONSTAPEL_LIVE_REQUIRE_USERNS=true
   stage 'Testing admission and background findings, then validating the evidence package'
   ./bin/konstapel acceptance --kubeconfig "$kubeconfig" --context "$context" --output "$out/package" --timeout 180s 2>&1 | tee "$out/runner.log"
   ./bin/konstapel validate --output "$out/package" 2>&1 | tee "$out/validate.log"
