@@ -909,6 +909,12 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 // Deleting the run, its binding, or its request does not end retention.
 const RetentionFinalizer = "compliance.erenius.io/retention"
 
+// cleanupBackoff is the wait after the given number of failed expiry
+// deletions: one minute, doubling to at most an hour.
+func cleanupBackoff(attempts int32) time.Duration {
+	return min(time.Minute<<min(max(attempts-1, 0), 6), time.Hour)
+}
+
 // MaxRetentionRequeue caps how long a retained run waits before it is
 // re-checked, so a long expiry still sees periodic reconciliation.
 const MaxRetentionRequeue = 24 * time.Hour
@@ -950,6 +956,14 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 		wait := min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue, r.integrityInterval())
 		return ctrl.Result{RequeueAfter: wait}, r.checkIntegrity(ctx, run, now)
 	}
+	// A failed deletion is retried only after its backoff. Each attempt
+	// updates the run, which itself requeues it, so the wait is enforced
+	// here rather than left to RequeueAfter.
+	if c := pub.Cleanup; c.LastAttempt != nil && (c.State == v1alpha1.CleanupState(publication.CleanupDeletionFailed) || c.State == v1alpha1.CleanupState(publication.CleanupRetentionBlocked)) {
+		if next := c.LastAttempt.Add(cleanupBackoff(c.Attempts)); now.Before(next) {
+			return ctrl.Result{RequeueAfter: next.Sub(now)}, nil
+		}
+	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
 	cl, err := store.Delete(ctx, ref)
 	at := metav1.NewTime(now)
@@ -972,7 +986,7 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 			pub.Cleanup.Message = truncate(cl.Message)
 		}
 		// Back off from one minute to an hour; ownership metadata stays.
-		res.RequeueAfter = min(time.Minute<<min(pub.Cleanup.Attempts-1, 6), time.Hour)
+		res.RequeueAfter = cleanupBackoff(pub.Cleanup.Attempts)
 	}
 	if err := r.Client.Status().Update(ctx, run); err != nil {
 		return ctrl.Result{}, err
