@@ -9,9 +9,33 @@ image:
   digest: ""
   pullPolicy: IfNotPresent
 
-# replicaCount defaults to two serving replicas (add-controller-high-availability).
-# Development values may set 1, which omits the default PodDisruptionBudget.
+# replicaCount defaults to two replicas (add-controller-high-availability): one
+# elected leader runs the controllers, the other takes over. Development values
+# may set 1, which omits the default PodDisruptionBudget. Election stays on.
 replicaCount: 2
+
+# Rendered only when replicaCount > 1; minAvailable must stay below
+# replicaCount so voluntary evictions can proceed one at a time.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+controller:
+  # Overall shutdown budget (--shutdown-timeout); must be below the grace
+  # period so Kubernetes never kills a pod that is still draining.
+  shutdownTimeoutSeconds: 45
+  terminationGracePeriodSeconds: 60
+  # Per-pod working storage for frozen captures and packages awaiting
+  # publication; two replicas use twice this at most.
+  stagingSizeLimit: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  # Empty uses preferred hostname anti-affinity (weight 100). Setting it
+  # replaces that default entirely.
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
 
 tls:
   # mode selects who issues the service certificates, exclusively:

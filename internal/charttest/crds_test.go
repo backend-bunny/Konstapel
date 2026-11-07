@@ -113,7 +113,11 @@ func TestCRDChartMatchesGeneratedDefinitions(t *testing.T) {
 // Neither chart can run cleanup on install, upgrade, or uninstall.
 func TestChartsHaveNoHooksOrCleanupJobs(t *testing.T) {
 	for _, chart := range []string{"konstapel-crds", "konstapel"} {
-		out, err := exec.Command("helm", "template", chart, "../../charts/"+chart, "--include-crds").CombinedOutput()
+		args := []string{"template", chart, "../../charts/" + chart, "--include-crds", "--namespace", "konstapel-system"}
+		if chart == "konstapel" {
+			args = append(args, "--set", "image.digest="+digest)
+		}
+		out, err := exec.Command("helm", args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("helm template %s: %v\n%s", chart, err, out)
 		}

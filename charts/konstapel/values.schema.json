@@ -3,20 +3,39 @@
   "title": "konstapel values",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "replicaCount", "tls"],
+  "required": [
+    "image",
+    "replicaCount",
+    "tls",
+    "podDisruptionBudget",
+    "controller"
+  ],
   "properties": {
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "digest"],
+      "required": [
+        "repository",
+        "digest"
+      ],
       "properties": {
-        "repository": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*$"},
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*$"
+        },
         "digest": {
           "description": "Image digest; empty only in unpublished source charts. Mutable tags are not accepted.",
           "type": "string",
           "pattern": "^(sha256:[0-9a-f]{64})?$"
         },
-        "pullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]}
+        "pullPolicy": {
+          "enum": [
+            "IfNotPresent",
+            "Always",
+            "Never"
+          ]
+        }
       }
     },
     "replicaCount": {
@@ -27,9 +46,16 @@
     "tls": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
-        "mode": {"enum": ["certManager", "secret"]},
+        "mode": {
+          "enum": [
+            "certManager",
+            "secret"
+          ]
+        },
         "certManager": {
           "type": "object",
           "additionalProperties": false,
@@ -37,11 +63,24 @@
             "issuerRef": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "kind"],
+              "required": [
+                "name",
+                "kind"
+              ],
               "properties": {
-                "name": {"type": "string", "minLength": 1},
-                "kind": {"enum": ["Issuer", "ClusterIssuer"]},
-                "group": {"const": "cert-manager.io"}
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "Issuer",
+                    "ClusterIssuer"
+                  ]
+                },
+                "group": {
+                  "const": "cert-manager.io"
+                }
               }
             }
           }
@@ -49,23 +88,106 @@
         "secret": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "properties": {
-            "name": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+            }
           }
         }
       },
       "oneOf": [
         {
-          "properties": {"mode": {"const": "certManager"}},
-          "not": {"required": ["secret"]}
+          "properties": {
+            "mode": {
+              "const": "certManager"
+            }
+          },
+          "not": {
+            "required": [
+              "secret"
+            ]
+          }
         },
         {
-          "properties": {"mode": {"const": "secret"}},
-          "required": ["secret"],
-          "not": {"required": ["certManager"]}
+          "properties": {
+            "mode": {
+              "const": "secret"
+            }
+          },
+          "required": [
+            "secret"
+          ],
+          "not": {
+            "required": [
+              "certManager"
+            ]
+          }
         }
       ]
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "minAvailable"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shutdownTimeoutSeconds",
+        "terminationGracePeriodSeconds",
+        "stagingSizeLimit"
+      ],
+      "properties": {
+        "shutdownTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "stagingSizeLimit": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti)$"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
     }
   }
 }

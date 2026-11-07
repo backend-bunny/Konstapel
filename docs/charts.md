@@ -13,8 +13,9 @@ depend on it, and neither chart depends on or installs Kyverno or
 cert-manager.
 
 **Status.** The CRD chart packages the generated definitions and has been
-lifecycle-tested in kind (groups 1–2). The runtime chart still renders no
-resources, and nothing is published yet. Every later piece is listed with its
+lifecycle-tested in kind (groups 1–2). The runtime chart renders the
+controller (group 3, in progress). TLS modes, the download server and the
+installed-image acceptance aren't done yet, and nothing is published. Every later piece is listed with its
 owner and prerequisite under Phases.
 
 ## Chart input contract
@@ -210,6 +211,56 @@ these steps:
 
 None of these restarts the controller.
 
+## Runtime chart
+
+Install into `konstapel-system`: the shipped RBAC, admission policies and the
+controller's code all use that namespace. The `konstapel-controller`
+ServiceAccount is the one the admission policies authorize. The chart
+renders:
+
+- **Controller Deployment.** `konstapel controller` from the digest-pinned
+  image, with `--leader-elect=true` (always on, even with one replica) and
+  `--shutdown-timeout` from `controller.shutdownTimeoutSeconds` (45s).
+  - **Rollout and placement:** two replicas, rolling update with
+    `maxUnavailable: 0` and `maxSurge: 1`, and preferred (never required)
+    hostname anti-affinity at weight 100. `controller.affinity` replaces that
+    default.
+  - **Termination:** 60s grace.
+  - **Security:** non-root (65532), read-only root filesystem, no privilege
+    escalation, all capabilities dropped, `RuntimeDefault` seccomp.
+  - **Probes:** startup and liveness on `/healthz`, readiness on `/readyz`
+    (port 8081). Neither depends on Kyverno or leadership.
+  - **Storage:** a size-limited `emptyDir` for staging, so each pod has its
+    own bounded scratch space and nothing is shared.
+  - **Selector:** stable across revisions (name, instance, component). No
+    version or template hash.
+- **PodDisruptionBudget.** `minAvailable: 1` with the same selector, only when
+  `replicaCount > 1`. Development values (`replicaCount: 1`) omit it.
+- **RBAC.** The ServiceAccount; ClusterRoleBindings to `konstapel-controller`
+  and `konstapel-controller-assessments`; a RoleBinding to the Lease, Secret
+  and ConfigMap Role in `konstapel-system`.
+- **Copied manifests.** `scripts/charts/runtime.sh` copies these unchanged as
+  `templates/generated-*.yaml`, and `scripts/generate.sh --check` keeps them
+  current:
+  - the generated controller roles (`config/rbac/controller/role.yaml`);
+  - the role catalog (`config/rbac/*.yaml`: compliance admin and viewer,
+    assessment operator and requester, exception editor, evidence download);
+  - the admission policies (`config/admission/*.yaml`, with their parameter
+    ConfigMap).
+
+**Rejected at render time:**
+- a namespace other than `konstapel-system`;
+- a missing `image.digest`;
+- `controller.shutdownTimeoutSeconds` that isn't below
+  `terminationGracePeriodSeconds`;
+- `podDisruptionBudget.minAvailable` that isn't below `replicaCount`.
+
+The schema also rejects unknown values. No Service is rendered yet: the
+exception webhooks are unavailable and the download server isn't in the chart
+yet, so there is no handler to route to. `internal/charttest` checks the
+defaults, the development case, that every binding refers to a shipped role,
+and the refusals.
+
 ## Values contract
 
 `charts/konstapel/values.schema.json` rejects unknown values. There are no
@@ -302,7 +353,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults | the merged manager (available); the replica lifecycle (add-controller-high-availability) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller Deployment, RBAC and availability defaults done; TLS, download server and installed acceptance pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |

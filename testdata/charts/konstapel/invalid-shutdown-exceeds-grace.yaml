@@ -1,0 +1,4 @@
+# expect: must be less than controller.terminationGracePeriodSeconds
+controller:
+  shutdownTimeoutSeconds: 60
+  terminationGracePeriodSeconds: 60

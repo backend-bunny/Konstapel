@@ -1,0 +1,3 @@
+# expect: must be less than replicaCount
+podDisruptionBudget:
+  minAvailable: 2
