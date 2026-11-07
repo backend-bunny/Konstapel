@@ -107,3 +107,31 @@ func TestEvidenceDestinationLocationImmutableAccessRotates(t *testing.T) {
 		t.Fatalf("credential source switch rejected: %v", errs.ToAggregate())
 	}
 }
+
+func TestEvidenceDestinationOrphanRequestValidation(t *testing.T) {
+	v := crdtest.Load(t, "../../config/crd/bases")["EvidenceDestination"]
+	with := func(policy string, orphan map[string]any) map[string]any {
+		o := obj(t, destination)
+		spec := o["spec"].(map[string]any)
+		spec["deletionPolicy"] = policy
+		if orphan != nil {
+			spec["orphan"] = orphan
+		}
+		return o
+	}
+	if errs := v.Validate(with("Orphan", map[string]any{"reason": "handed to the archive team"})); len(errs) > 0 {
+		t.Fatalf("valid orphan request rejected: %v", errs.ToAggregate())
+	}
+	for name, c := range map[string]struct {
+		o    map[string]any
+		want string
+	}{
+		"orphan without reason":    {with("Orphan", nil), "requires orphan.reason"},
+		"blank reason":             {with("Orphan", map[string]any{"reason": "   "}), "must not be blank"},
+		"orphan block with Retire": {with("Retire", map[string]any{"reason": "x"}), "only with deletionPolicy Orphan"},
+	} {
+		if errs := v.Validate(c.o); len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), c.want) {
+			t.Errorf("%s: want %q, got %v", name, c.want, errs.ToAggregate())
+		}
+	}
+}

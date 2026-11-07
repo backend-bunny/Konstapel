@@ -71,6 +71,34 @@ spec:
                 - Retire
                 - Orphan
                 type: string
+              orphan:
+                description: |-
+                  orphan is required with deletionPolicy Orphan. Selecting Orphan
+                  changes nothing until the destination is deleted; once that handoff is
+                  accepted (status.orphanIntent) it cannot be changed or reversed.
+                properties:
+                  actor:
+                    description: |-
+                      actor is the authenticated user who set or changed the request,
+                      written by the konstapel-destination-orphan admission policy.
+                    maxLength: 512
+                    type: string
+                  actorUID:
+                    description: actorUID is that user's UID when the authenticator
+                      provides one.
+                    maxLength: 128
+                    type: string
+                  reason:
+                    description: reason explains the handoff. It must not be blank.
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: reason must not be blank
+                      rule: self.trim().size() > 0
+                required:
+                - reason
+                type: object
               s3:
                 description: s3 is the S3-compatible location and its access.
                 properties:
@@ -207,6 +235,11 @@ spec:
             required:
             - s3
             type: object
+            x-kubernetes-validations:
+            - message: deletionPolicy Orphan requires orphan.reason
+              rule: self.deletionPolicy != 'Orphan' || has(self.orphan)
+            - message: orphan is set only with deletionPolicy Orphan
+              rule: '!has(self.orphan) || self.deletionPolicy == ''Orphan'''
           status:
             description: EvidenceDestinationStatus is written by the controller only.
             properties:
@@ -290,6 +323,29 @@ spec:
                   describes.
                 format: int64
                 type: integer
+              orphanIntent:
+                description: orphanIntent is the accepted, irreversible orphan handoff.
+                properties:
+                  acceptedAt:
+                    description: acceptedAt is when the controller accepted the handoff.
+                    format: date-time
+                    type: string
+                  actor:
+                    maxLength: 512
+                    type: string
+                  actorUID:
+                    maxLength: 128
+                    type: string
+                  reason:
+                    description: reason, actor, and actorUID are copied from the accepted
+                      spec.orphan.
+                    maxLength: 1024
+                    type: string
+                required:
+                - acceptedAt
+                - actor
+                - reason
+                type: object
               outstandingPackages:
                 description: outstandingPackages counts retained packages not yet
                   deleted.

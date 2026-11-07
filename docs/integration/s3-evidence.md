@@ -125,8 +125,36 @@ packages stay downloadable until expiry, and expiry deletion and attempt
 cleanup carry on with the original UID and credentials (which can still
 rotate). Blockers are retried. Unfinished publication is never treated as an
 empty destination. The finalizer is removed only when nothing is outstanding.
-`deletionPolicy: Orphan` (the audited handoff) is not available yet. Such a
-destination retires normally, and its condition says so.
+**Orphan intent.** An administrator can choose to hand the remaining storage
+responsibility to an operator instead of retiring normally, either before
+deleting the destination or as an escalation of a blocked retirement:
+
+```sh
+kubectl patch evidencedestination primary --type=merge \
+  -p '{"spec":{"deletionPolicy":"Orphan","orphan":{"reason":"bucket handed to the archive team"}}}'
+```
+
+- **Reason required.** A non-blank `spec.orphan.reason` is required with
+  `deletionPolicy: Orphan`, and `orphan` is allowed only with that policy.
+- **Actor recorded by admission.** The `konstapel-destination-orphan`
+  admission policies (`config/admission/evidence-destination-orphan.yaml`)
+  write the authenticated user into `spec.orphan.actor`/`actorUID` whenever
+  the request is set or its reason changes. A forged actor is overwritten,
+  or rejected when the reason is unchanged. Nothing is inferred from
+  annotations, managedFields or the controller's account.
+- **Selecting Orphan alone does nothing.** It doesn't delete, move or stop
+  anything while the destination exists.
+- **Acceptance is irreversible.** When the destination is deleted, the
+  controller records `status.orphanIntent` (reason, actor, actorUID,
+  `acceptedAt`), which only it can write. An unattributed request, with no
+  actor because the policy isn't installed, is not accepted, and the
+  `Retiring` condition says so. From acceptance on, admission freezes
+  `deletionPolicy: Orphan` and `spec.orphan`, so the handoff can't be changed
+  or reversed. Credentials can still rotate.
+
+The handoff itself — fencing storage work, the durable orphan inventory, and
+marking runs `Orphaned` — follows (add-s3-evidence-publishing 8.3–8.7). Until
+then, an accepted orphan still retires normally, and its condition says so.
 
 ## Destination configuration
 

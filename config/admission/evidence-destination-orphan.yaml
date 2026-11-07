@@ -1,0 +1,87 @@
+# Records who requested an EvidenceDestination orphan handoff and protects an
+# accepted handoff. The mutation writes the authenticated user into
+# spec.orphan.actor/actorUID whenever the request is set or its reason changes;
+# the validation fails closed on a forged actor, and once the controller has
+# accepted the handoff (status.orphanIntent) it freezes deletionPolicy Orphan
+# and spec.orphan. The accepted time is recorded by the controller in status,
+# which only it can write. Nothing here is inferred from annotations,
+# managedFields, or the controller service account.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: konstapel-destination-orphan
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [evidencedestinations]
+  matchConditions:
+    - name: orphan-requested-or-changed
+      expression: >-
+        has(object.spec.orphan) &&
+        (oldObject == null || !has(oldObject.spec.orphan) ||
+         object.spec.orphan.reason != oldObject.spec.orphan.reason)
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{spec: Object.spec{orphan: Object.spec.orphan{
+            reason: object.spec.orphan.reason,
+            actor: request.userInfo.username,
+            ?actorUID: request.userInfo.?uid
+          }}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: konstapel-destination-orphan
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  policyName: konstapel-destination-orphan
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: konstapel-destination-orphan
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [evidencedestinations]
+  validations:
+    # A request that is set or changed names the authenticated caller.
+    - expression: >-
+        !has(object.spec.orphan) ||
+        (oldObject != null && has(oldObject.spec.orphan) && object.spec.orphan == oldObject.spec.orphan) ||
+        (object.spec.orphan.?actor.orValue('') == request.userInfo.username &&
+         object.spec.orphan.?actorUID.orValue('') == request.userInfo.?uid.orValue(''))
+      message: spec.orphan.actor must be the authenticated requester
+      reason: Forbidden
+    # An accepted handoff is irreversible.
+    - expression: >-
+        oldObject == null || !has(oldObject.status) || !has(oldObject.status.orphanIntent) ||
+        (object.spec.deletionPolicy == 'Orphan' && has(object.spec.orphan) && object.spec.orphan == oldObject.spec.orphan)
+      message: an accepted orphan handoff cannot be changed or reversed
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: konstapel-destination-orphan
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  policyName: konstapel-destination-orphan
+  validationActions: [Deny]
