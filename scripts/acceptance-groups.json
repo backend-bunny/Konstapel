@@ -10,7 +10,8 @@
       "TestLiveHardeningAdmission",
       "TestLiveHardeningUserNamespaces",
       "TestLiveCRDChartLifecycle",
-      "TestLiveLeaderElection"
+      "TestLiveLeaderElection",
+      "TestLiveBoundedShutdown"
     ]
   },
   "assessments": {

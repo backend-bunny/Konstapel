@@ -33,3 +33,10 @@ func TestElectionTimings(t *testing.T) {
 		t.Fatalf("manager accepted invalid timings: %v", err)
 	}
 }
+
+func TestShutdownTimeoutValidated(t *testing.T) {
+	_, err := NewManager(&rest.Config{Host: "https://127.0.0.1:1"}, Options{ShutdownTimeout: -time.Second})
+	if err == nil || !strings.Contains(err.Error(), "shutdown timeout") {
+		t.Fatalf("negative shutdown timeout accepted: %v", err)
+	}
+}

@@ -24,7 +24,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 - [x] 2.1 Configure the merged manager with the shared namespace-local Lease, election enabled in both replica modes, namespace-scoped RBAC and validated 15s/10s/2s defaults; verify simultaneous candidates, stable identity across upgrades and denied Lease access without an election bypass.
 - [ ] 2.2 Classify/register background workers under synchronized leadership and keep required per-replica initialization independent; verify followers start no reconciliation and unsynchronized leaders cannot expose authoritative state or mutate managed resources.
-- [ ] 2.3 Propagate leadership cancellation through worker retries and owned C2P processes, retaining normal manager error/exit behavior and no early Lease release; verify leadership loss stops new work and terminates children within the configured bound.
+- [x] 2.3 Propagate leadership cancellation through worker retries and owned C2P processes, retaining normal manager error/exit behavior and no early Lease release; verify leadership loss stops new work and terminates children within the configured bound.
 - [ ] 2.4 Exercise delayed former-leader Kubernetes writes/deletes against newer generations and ownership; verify optimistic conflicts trigger fresh resolution and stale attempts cannot overwrite protected state or withdraw a current/unmanaged contribution.
 - [ ] 2.5 Integrate lifecycle transitions with the observability owner's projections when available; verify former-leader summaries clear, successors reconstruct before publishing, and document Lease inspection, permission failures and measured recovery limits.
 
@@ -41,7 +41,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 - [ ] 4.1 Integrate recovery of durable runs and staging on leadership acquisition; verify one-active-run coordination, deterministic triggers and same-byte recovery using the real S3 backend, with uncertain backend access kept distinct from CaptureLost.
 - [ ] 4.2 Inject loss before staging and after commit but before the Kubernetes receipt; verify diagnostic CaptureLost/new-run identity in the former case and original package/expiry recovery in the latter, without duplicate publication or lost retention obligations.
 - [ ] 4.3 Reconstruct local bundle/observation state after pod loss using the owners' contracts; verify current trust revalidation, explicit cold-cache outages, retained applied policies and incomplete evidence when watch continuity cannot be established.
-- [ ] 4.4 Implement the 45s application/20s HTTP drain defaults within 60s pod grace, cancellation and owned-child cleanup with validated overrides; verify a long download or provider call cannot hold termination indefinitely and interrupted work remains recoverable or explicitly lost.
+- [x] 4.4 Implement the 45s application/20s HTTP drain defaults within 60s pod grace, cancellation and owned-child cleanup with validated overrides; verify a long download or provider call cannot hold termination indefinitely and interrupted work remains recoverable or explicitly lost.
 - [ ] 4.5 Document per-pod storage/concurrency budgets, shutdown, CaptureLost, backend-response loss and retention recovery; verify the failure walkthrough preserves committed artifacts and cleans only owned incomplete attempts.
 
 ## 5. Verify chart defaults and integrated availability

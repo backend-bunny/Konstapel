@@ -12,7 +12,14 @@ import (
 
 // Serve serves h over TLS on l until ctx ends. Plain HTTP is never served:
 // bearer tokens and evidence must not cross the network unencrypted.
-func Serve(ctx context.Context, l net.Listener, certFile, keyFile string, h http.Handler) error {
+// DefaultDrain bounds how long accepted requests may finish after shutdown
+// begins; remaining connections are then closed.
+const DefaultDrain = 20 * time.Second
+
+func Serve(ctx context.Context, l net.Listener, certFile, keyFile string, h http.Handler, drain time.Duration) error {
+	if drain <= 0 {
+		return fmt.Errorf("shutdown drain %s must be positive", drain)
+	}
 	if certFile == "" || keyFile == "" {
 		return errors.New("a TLS certificate and key are required")
 	}
@@ -32,9 +39,14 @@ func Serve(ctx context.Context, l net.Listener, certFile, keyFile string, h http
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		shutdown, cancel := context.WithTimeout(context.Background(), drain)
 		defer cancel()
-		_ = srv.Shutdown(shutdown)
+		if err := srv.Shutdown(shutdown); err != nil {
+			// The drain expired: a long download cannot hold termination
+			// open. Its client retries the full download with fresh
+			// authorization.
+			_ = srv.Close()
+		}
 		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}

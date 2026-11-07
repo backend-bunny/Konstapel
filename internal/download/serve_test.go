@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -43,7 +44,7 @@ func TestServeIsTLSOnly(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, l, cert, key, e.h) }()
+	go func() { done <- Serve(ctx, l, cert, key, e.h, DefaultDrain) }()
 	base := "://" + l.Addr().String() + teamPath
 	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // test-only self-signed cert
 	var resp *http.Response
@@ -64,7 +65,56 @@ func TestServeIsTLSOnly(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := Serve(context.Background(), l, "", "", e.h); err == nil {
+	if err := Serve(context.Background(), l, "", "", e.h, DefaultDrain); err == nil {
 		t.Fatal("served without a certificate")
+	}
+}
+
+// A request that never finishes cannot hold shutdown open past the drain:
+// the server closes it and Serve returns.
+func TestServeDrainIsBounded(t *testing.T) {
+	cert, key := selfSigned(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	hang := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		close(started)
+		<-release // a download that would never finish
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, l, cert, key, hang, 300*time.Millisecond) }()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // test-only self-signed cert
+	go func() {
+		for range 50 {
+			if resp, err := client.Get("https://" + l.Addr().String() + "/"); err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	<-started
+	begin := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hanging request held shutdown open")
+	}
+	if waited := time.Since(begin); waited < 300*time.Millisecond || waited > 2*time.Second {
+		t.Fatalf("shutdown took %s for a 300ms drain", waited)
+	}
+	if err := Serve(context.Background(), l, cert, key, hang, 0); err == nil {
+		t.Fatal("non-positive drain accepted")
 	}
 }
