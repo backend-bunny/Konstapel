@@ -119,6 +119,7 @@ rules:
   verbs:
   - create
   - get
+  - list
 - apiGroups:
   - ""
   resources:

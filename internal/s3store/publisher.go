@@ -58,9 +58,13 @@ func (p *Publisher) now() time.Time {
 
 // runPrefix is the opaque, UID-based key prefix that owns a run's objects.
 // It contains no names, reasons, or workload identities.
-func (p *Publisher) runPrefix(run publication.RunRef) string {
+func (p *Publisher) runPrefix(run publication.RunRef) string { return RunPrefix(p.Dest, run) }
+
+// RunPrefix is the key prefix that owns all of a run's objects at d: every
+// attempt, archive version, commit, and incomplete upload is below it.
+func RunPrefix(d Destination, run publication.RunRef) string {
 	cluster := strings.TrimPrefix(run.ClusterID, "kube-system:")
-	return p.Dest.KeyPrefix() + "evidence/" + safeSegment(cluster) + "/" + safeSegment(run.BindingUID) + "/" + safeSegment(run.RunUID) + "/"
+	return d.KeyPrefix() + "evidence/" + safeSegment(cluster) + "/" + safeSegment(run.BindingUID) + "/" + safeSegment(run.RunUID) + "/"
 }
 
 func safeSegment(s string) string {

@@ -2,12 +2,12 @@
 
 package controller
 
-// Live orphan fence (add-s3-evidence-publishing 8.3): a run pinned to an
-// EvidenceDestination on the test-owned S3 service; the backend becomes
-// unreachable; the administrator escalates to Orphan and deletes the
-// destination. The handoff is accepted and fenced without contacting the
-// backend, the run is held, and once the backend returns Konstapel still
-// issues nothing there. Run through scripts/targeting-live.sh.
+// Live orphan fence and inventory (add-s3-evidence-publishing 8.3, 8.4): a
+// run pinned to an EvidenceDestination on the test-owned S3 service; the
+// backend becomes unreachable; the administrator escalates to Orphan and
+// deletes the destination. The handoff is accepted and fenced without
+// contacting the backend, the inventory is saved during the outage, the run
+// is held, and once the backend returns Konstapel still issues nothing there. Run through scripts/targeting-live.sh.
 
 import (
 	"context"
@@ -109,6 +109,28 @@ func TestLiveOrphanFence(t *testing.T) {
 		c := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionDestinationReady)
 		return got.Status.OrphanIntent != nil && got.Status.OrphanHandoff != nil && c != nil && c.Reason == "HandedOff", toJSON(got.Status)
 	})
+	// The inventory is saved while the backend is still unreachable.
+	var inv *v1alpha1.OrphanInventoryRef
+	l.eventually("orphan inventory saved during the outage", func() (bool, string) {
+		got := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
+		if h := got.Status.OrphanHandoff; h != nil {
+			inv = h.Inventory
+		}
+		return inv != nil, toJSON(got.Status)
+	})
+	header := &corev1.ConfigMap{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "konstapel-system", Name: inv.Header}, header); err != nil {
+		t.Fatal(err)
+	}
+	if header.Immutable == nil || !*header.Immutable || len(header.OwnerReferences) != 0 || inv.Runs < 1 ||
+		!strings.Contains(header.Data["inventory.json"], `"actor"`) || !strings.Contains(header.Data["inventory.json"], "NotEnumerated") {
+		t.Fatalf("inventory header %s: %s", toJSON(inv), toJSON(header))
+	}
+	chunk := &corev1.ConfigMap{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "konstapel-system", Name: inv.Header + "-0"}, chunk); err != nil || !strings.Contains(chunk.Data["inventory.json"], name) {
+		t.Fatalf("inventory chunk missing run %s: %v %s", name, err, toJSON(chunk))
+	}
 	// The run may already have closed collection (a local step) before the
 	// fence; from the fence on its phase never changes and nothing reaches
 	// storage, well past the collection timeout and after the backend returns.

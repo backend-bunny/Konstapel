@@ -173,12 +173,47 @@ that destination of any kind:
   really happened, such as a commit that completed. It never restarts
   retention or cleanup.
 
-`TestLiveOrphanFence` checks this with a real S3 test service that is paused
-(unreachable) while the handoff is requested and accepted. Once the backend
-returns, the run is unchanged and nothing for it reached storage. The durable
-orphan inventory and the runs' `Orphaned` disposition follow
-(add-s3-evidence-publishing 8.4–8.7). Until then, a fenced destination stays
-terminating.
+**Orphan inventory.** After the fence, the destination reconciler saves an
+independent record of what was handed off. It is a set of immutable
+ConfigMaps in `konstapel-system` with no owner references, so it outlives the
+destination, its runs, and package expiry. Konstapel never deletes it; a
+platform administrator removes it after the external handoff.
+- **Header** `konstapel-orphan-<destination UID>` (written last, so its
+  presence means the record is complete): handoff identity, reason, actor and
+  actorUID, `acceptedAt`, `fencedAt`, whether in-flight work drained, the
+  uncertain operations, the destination UID and location (endpoint, bucket,
+  region, prefix), and the name and SHA-256 of every chunk.
+- **Chunks** `konstapel-orphan-<destination UID>-<n>` (each under 512 KiB):
+  every run pinned to the destination, including records already pending
+  deletion, with binding, cluster and namespace scope UIDs, phase, the run's
+  owned key prefix, and its original publication receipt (owned keys,
+  version and upload IDs, commit manifest and archive versions, package
+  digest and size, `publishedAt`, `expiresAt`, cleanup state).
+- **Remote state.** The inventory is built from cluster state only. Under the
+  fence the backend is not contacted, so `remoteState: NotEnumerated` says
+  the objects, versions, and incomplete uploads under each owned prefix must
+  be listed at the destination itself.
+- **No credentials.** Credential references are removed from receipts, and
+  no evidence bytes are copied.
+- **Failure.** If the ConfigMaps can't be saved, the fence and every
+  finalizer stay in place, `Retiring` reports `OrphanInventoryPending`, and
+  the save is retried. Retries are idempotent: an existing inventory is kept,
+  never rewritten.
+
+`status.orphanHandoff.inventory` names the header, chunk and run counts, and
+`savedAt`. Export it with:
+
+```sh
+kubectl -n konstapel-system get configmap \
+  -l compliance.erenius.io/orphan-handoff=<destination UID> -o yaml
+```
+
+`TestLiveOrphanFence` checks the fence and the inventory with a real S3 test
+service that is paused (unreachable) while the handoff is requested and
+accepted. The inventory is saved during the outage. Once the backend returns,
+the run is unchanged and nothing for it reached storage. The runs' `Orphaned`
+disposition and finalizer release follow (add-s3-evidence-publishing
+8.5–8.7). Until then, a fenced destination stays terminating.
 
 ## Destination configuration
 

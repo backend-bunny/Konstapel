@@ -225,6 +225,31 @@ type OrphanHandoff struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=256
 	UncertainOperations []string `json:"uncertainOperations,omitempty"`
+	// inventory is the durable ownership inventory, once fully saved.
+	// +optional
+	Inventory *OrphanInventoryRef `json:"inventory,omitempty"`
+}
+
+// OrphanInventoryRef locates a saved orphan inventory: immutable ConfigMaps
+// in the controller namespace, independent of any destination, run, binding,
+// or request, kept until a platform administrator removes them.
+type OrphanInventoryRef struct {
+	// header is the ConfigMap holding the handoff identity and chunk digests;
+	// it is written last, so its presence means the inventory is complete.
+	// +required
+	// +kubebuilder:validation:MaxLength=253
+	Header string `json:"header"`
+	// chunks is the number of run-list ConfigMaps.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Chunks int32 `json:"chunks"`
+	// runs is the number of runs recorded.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Runs int32 `json:"runs"`
+	// savedAt is when the header was saved.
+	// +required
+	SavedAt metav1.Time `json:"savedAt"`
 }
 
 // EvidenceDestinationStatus is written by the controller only.
