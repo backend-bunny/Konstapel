@@ -28,7 +28,8 @@
       "TestLiveDestinationPins",
       "TestLiveEvidenceDownload",
       "TestLiveRetentionLifecycle",
-      "TestLiveOrphanFence"
+      "TestLiveOrphanFence",
+      "TestLiveDestinationAPI"
     ]
   },
   "recovery": {
