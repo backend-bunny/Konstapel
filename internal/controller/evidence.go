@@ -8,8 +8,6 @@ import (
 
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
 // A credentialSecret destination's Secret is read, uncached, from the
@@ -20,11 +18,9 @@ import (
 // +kubebuilder:rbac:groups=compliance.erenius.io,resources=evidencedestinations,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compliance.erenius.io,resources=evidencedestinations/status,verbs=get;update;patch
 
-// EvidenceConfig selects the production evidence destination.
+// EvidenceConfig configures production evidence publication. Destinations
+// are EvidenceDestination resources; the legacy destination file is gone.
 type EvidenceConfig struct {
-	// Destination is the optional legacy S3 destination YAML file
-	// (s3store.LoadDestination) for runs without an EvidenceDestination.
-	Destination string
 	// StagingDir holds frozen captures and packages until publication.
 	StagingDir string
 	// ContentDir is the verified content directory (named "content") whose
@@ -35,11 +31,11 @@ type EvidenceConfig struct {
 	Namespace string
 }
 
-// EvidenceRuntime builds the assessment runtime for an S3 evidence
-// destination. It validates configuration but does not contact the backend:
-// readiness is probed while running, and scheduling stays disabled with the
-// reason on bindings until the probe passes.
-func EvidenceRuntime(ctx context.Context, cfg *rest.Config, ec EvidenceConfig) (AssessmentRuntime, error) {
+// EvidenceRuntime builds the assessment runtime for EvidenceDestinations.
+// It validates configuration but does not contact a backend: destinations
+// are probed while running, and scheduling stays disabled with the reason
+// on bindings until the selected destination is ready.
+func EvidenceRuntime(_ context.Context, cfg *rest.Config, ec EvidenceConfig) (AssessmentRuntime, error) {
 	if filepath.Base(filepath.Clean(ec.ContentDir)) != "content" {
 		return AssessmentRuntime{}, fmt.Errorf("content root %s must be a directory named content", ec.ContentDir)
 	}
@@ -48,43 +44,20 @@ func EvidenceRuntime(ctx context.Context, cfg *rest.Config, ec EvidenceConfig) (
 	}
 	staging := ec.StagingDir
 	if err := os.MkdirAll(staging, 0o700); err != nil {
-		if ec.Destination != "" {
-			return AssessmentRuntime{}, fmt.Errorf("evidence staging directory: %w", err)
-		}
-		// Without a legacy destination the controller still starts; evidence
-		// runs report "no staging directory is configured" until it exists.
+		// The controller still starts; evidence runs report "no staging
+		// directory is configured" until it exists.
 		staging = ""
 	}
 	reader, err := client.New(cfg, client.Options{Scheme: Scheme()})
 	if err != nil {
 		return AssessmentRuntime{}, err
 	}
-	rt := AssessmentRuntime{
+	return AssessmentRuntime{
 		StagingDir:          staging,
 		ContentRoot:         filepath.Dir(filepath.Clean(ec.ContentDir)),
 		ControllerNamespace: ec.Namespace,
-		// Runs pinned to an EvidenceDestination publish there.
+		// Runs pin an EvidenceDestination and publish there; legacy runs
+		// are migrated to one.
 		Destinations: &DestinationPublishers{Reader: reader, Namespace: ec.Namespace},
-	}
-	if ec.Destination == "" {
-		return rt, nil
-	}
-	// The legacy file destination serves unpinned runs (no selection).
-	d, err := s3store.LoadDestination(ec.Destination)
-	if err != nil {
-		return AssessmentRuntime{}, err
-	}
-	if d.CredentialSecret != nil && ec.Namespace == "" {
-		return AssessmentRuntime{}, fmt.Errorf("evidence destination %s uses a credential Secret but the controller namespace is unknown (set POD_NAMESPACE)", d.ID)
-	}
-	pub, err := s3store.NewPublisher(ctx, d, reader, ec.Namespace)
-	if err != nil {
-		return AssessmentRuntime{}, err
-	}
-	rt.Publisher = pub
-	rt.Ready = func(ctx context.Context) error {
-		_, err := pub.Ready(ctx)
-		return err
-	}
-	return rt, nil
+	}, nil
 }

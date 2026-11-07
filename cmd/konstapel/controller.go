@@ -26,7 +26,6 @@ func runController(args []string) error {
 	metrics := fs.String("metrics-bind-address", "0", "metrics address; \"0\" disables the metrics server")
 	probes := fs.String("health-probe-bind-address", ":8081", "address for /healthz and /readyz")
 	leader := fs.Bool("leader-elect", true, "use a Lease so only one replica reconciles")
-	evidence := fs.String("evidence-destination", "", "legacy S3 evidence destination YAML file for bindings without an EvidenceDestination selection")
 	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
 	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
@@ -42,7 +41,7 @@ func runController(args []string) error {
 		return fmt.Errorf("kubernetes configuration: %w", err)
 	}
 	rt, err := controller.EvidenceRuntime(context.Background(), cfg, controller.EvidenceConfig{
-		Destination: *evidence, StagingDir: *staging, ContentDir: *root, Namespace: os.Getenv("POD_NAMESPACE")})
+		StagingDir: *staging, ContentDir: *root, Namespace: os.Getenv("POD_NAMESPACE")})
 	if err != nil {
 		return fmt.Errorf("evidence destination: %w", err)
 	}

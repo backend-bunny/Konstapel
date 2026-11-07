@@ -71,6 +71,59 @@ spec:
                 - Retire
                 - Orphan
                 type: string
+              legacy:
+                description: |-
+                  legacy declares that this destination continues a legacy
+                  file-configured destination (the removed --evidence-destination file).
+                  Runs published there before destinations existed are attached to this
+                  destination only after their recorded location is verified against
+                  it and against the preserved legacy configuration. It is set only when
+                  the destination is created and never changes.
+                properties:
+                  configuration:
+                    description: |-
+                      configuration is a ConfigMap in the controller namespace holding the
+                      preserved legacy destination file under key. Fields that receipts do
+                      not record (the region) are verified against it; nothing is taken
+                      from current defaults.
+                    properties:
+                      key:
+                        default: destination.yaml
+                        description: key is the ConfigMap data key holding the destination
+                          YAML.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      name:
+                        description: name of the object in the controller namespace.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is rejected when set; it exists so that a cross-namespace
+                          reference is an explicit API error rather than a silently dropped field.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: references resolve in the controller namespace only;
+                        namespace must not be set
+                      rule: '!has(self.__namespace__)'
+                  destinationID:
+                    description: |-
+                      destinationID is the legacy destination's id, as recorded in the
+                      receipts of runs it published.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - configuration
+                - destinationID
+                type: object
               orphan:
                 description: |-
                   orphan is required with deletionPolicy Orphan. Selecting Orphan
@@ -240,6 +293,9 @@ spec:
               rule: self.deletionPolicy != 'Orphan' || has(self.orphan)
             - message: orphan is set only with deletionPolicy Orphan
               rule: '!has(self.orphan) || self.deletionPolicy == ''Orphan'''
+            - message: legacy is set only when the destination is created and is immutable
+              rule: has(self.legacy) == has(oldSelf.legacy) && (!has(self.legacy)
+                || self.legacy == oldSelf.legacy)
           status:
             description: EvidenceDestinationStatus is written by the controller only.
             properties:

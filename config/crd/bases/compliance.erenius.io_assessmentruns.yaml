@@ -240,6 +240,27 @@ spec:
                       pinned location.
                     maxLength: 2048
                     type: string
+                  legacy:
+                    description: |-
+                      legacy is the verified association of a migrated run: its legacy
+                      destination ID. With the location above it governs every later
+                      storage operation; the destination's spec only expressed intent.
+                    properties:
+                      destinationID:
+                        description: destinationID is the legacy destination ID from
+                          the run's receipt.
+                        maxLength: 63
+                        type: string
+                      verifiedAt:
+                        description: |-
+                          verifiedAt is when the receipt, the preserved legacy configuration,
+                          and the destination were found to name the same location.
+                        format: date-time
+                        type: string
+                    required:
+                    - destinationID
+                    - verifiedAt
+                    type: object
                   name:
                     description: name of the EvidenceDestination.
                     maxLength: 253
@@ -264,12 +285,14 @@ spec:
                     maxLength: 64
                     type: string
                   source:
-                    description: source is where the selection came from (Binding
-                      or Default).
+                    description: |-
+                      source is where the selection came from (Binding or Default), or
+                      Migrated for a verified legacy run.
                     enum:
                     - Binding
                     - Default
                     - None
+                    - Migrated
                     type: string
                   uid:
                     description: uid of the EvidenceDestination.
