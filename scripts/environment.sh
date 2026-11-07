@@ -19,7 +19,7 @@ create)
   kind create cluster --name "$name" --kubeconfig "$kubeconfig" --image "$KONSTAPEL_NODE_IMAGE" --wait 120s
   "${k[@]}" get namespace kube-system -o jsonpath='{.metadata.uid}' > "$out/cluster-uid"
   # This kubeconfig file belongs only to this disposable cluster; never edit the ambient config.
-  helm upgrade --install kyverno "$chart" --kubeconfig "$kubeconfig" --kube-context "$context" -n kyverno --create-namespace --set features.backgroundScan.backgroundScanInterval=15s --set features.logging.verbosity=0 --set features.policyExceptions.enabled=true --set features.policyExceptions.namespace=policy-exceptions --wait --timeout 10m > "$out/helm-install.log" 2>&1
+  helm upgrade --install kyverno "$chart" --kubeconfig "$kubeconfig" --kube-context "$context" -n kyverno --create-namespace --set features.backgroundScan.backgroundScanInterval=15s --set features.logging.verbosity=0 --set features.policyExceptions.enabled=true --set features.policyExceptions.namespace=policy-exceptions --wait --timeout 10m 2>&1 | tee "$out/helm-install.log"
   "${k[@]}" apply -f content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/ephemeral-rbac.yaml
   "$0" smoke "$kubeconfig" "$out"
   ;;

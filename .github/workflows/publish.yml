@@ -1,6 +1,8 @@
 name: publish
 on:
-  push:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -26,12 +28,20 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        (github.event.workflow_run.event == 'push' ||
+         github.event.workflow_run.event == 'workflow_dispatch')))
     runs-on: ubuntu-26.04
+    timeout-minutes: 120
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write
@@ -41,7 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.sha }}
+          # workflow_run's github.sha may be newer than the tested commit.
+          ref: ${{ github.event.workflow_run.head_sha || inputs.tag || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate release target
@@ -56,6 +67,16 @@ jobs:
       - uses: ./.github/actions/setup-tools
         with:
           image: 'true'
+      - name: Require full acceptance for this source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACCEPTANCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          args=(--commit "$(git rev-parse HEAD)")
+          if [[ -n "$ACCEPTANCE_RUN_ID" ]]; then
+            args+=(--run-id "$ACCEPTANCE_RUN_ID")
+          fi
+          devbox run -- python3 scripts/ci/require-acceptance.py "${args[@]}"
       - run: devbox run -- task check
       - run: devbox run -- task image:build
       - run: devbox run -- task image:test

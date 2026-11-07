@@ -11,8 +11,10 @@ tasks:
     cmd: scripts/build.sh
 
   test:
-    desc: Run Go tests (including provider and saved-evidence tests)
-    cmd: go test -mod=readonly ./...
+    desc: Run Go tests and CI/logging regression tests
+    cmds:
+      - go test -mod=readonly ./...
+      - python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
   lint:
     desc: Check Go formatting, vet, generated API files, and shell syntax

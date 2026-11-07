@@ -43,6 +43,7 @@ jobs:
     if: needs.release-please.outputs.release_created == 'true'
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write

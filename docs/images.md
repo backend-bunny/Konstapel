@@ -63,13 +63,17 @@ No cluster credentials are bundled in the image.
 ## Published evidence
 
 Pull requests build and test with read-only repository permissions. Pushes to
-`main` run checks, rebuild and test, then publish
+`main` run checks and full live acceptance; successful completion triggers
+publication from that exact tested commit. The publisher rebuilds and tests,
+then publishes
 `ghcr.io/backend-bunny/konstapel:sha-<full-commit>`. Merging a release-please PR
 also publishes `ghcr.io/backend-bunny/konstapel:X.Y.Z` from its `vX.Y.Z` tag and
 adds the verified digest to the GitHub Release. Both tags use the same version
 from `VERSION` in the image metadata. There is no mutable `latest` tag.
 Manual publishing is restricted to the workflow on `main`; a requested release
 tag must identify a published GitHub Release and a commit in `main`'s history.
+Every publishing path requires successful full main-branch acceptance for its
+checked-out commit, including release and manual retries.
 See the [release guide](releases.md) for the review and retry workflow.
 
 Every published digest receives:

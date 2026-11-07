@@ -29,12 +29,19 @@ changelog; documentation, CI and housekeeping changes are hidden there.
 ## Publishing
 
 After the release PR is merged, release-please creates the `vX.Y.Z` tag and
-GitHub Release. It calls the reusable publishing workflow directly, which
-builds, tests, publishes the commit and `X.Y.Z` image tags, signs and attests the
+GitHub Release. It calls the reusable publishing workflow directly, which waits
+for full main-branch acceptance of the tagged commit, then builds, tests,
+publishes the commit and `X.Y.Z` image tags, signs and attests the
 image, and verifies its evidence. A final job adds the digest to the GitHub
 Release without replacing the generated changelog or user-written notes.
 
-Ordinary pushes to `main` continue to publish commit-tagged images. A release
+Ordinary pushes to `main` publish commit-tagged images after the `test` workflow
+completes successfully. The publisher checks out that run's exact commit, even
+if `main` has moved. Automatic, release, and manual publishing all verify that
+`checks`, `acceptance-live`, and `acceptance` succeeded in the matching main-branch
+run; PR runs and skipped acceptance cannot authorize publication. Release/manual
+publishing waits up to 90 minutes for that existing run instead of starting
+another acceptance cluster. A release
 merge can therefore build the same commit in both workflows; publication is
 serialized. Consumers should pin the digest printed in the release notes or
 job summary. See the [image guide](images.md) for SBOMs, license notices and
@@ -49,7 +56,10 @@ event. The repository must allow GitHub Actions to create PRs.
 
 To retry image publication for an existing release, run the `publish` workflow
 on `main` with its `tag` input set to `vX.Y.Z`. The workflow verifies the tag's
-version, release existence and ancestry before publishing. Re-running the
+version, release existence and ancestry before publishing. If acceptance failed,
+rerun the failed main-branch `test` workflow first, then retry publication. An old
+tag without the current full-acceptance job evidence cannot be published through
+this gate. Re-running the
 failed jobs in the original release-please workflow also retries the release
 notes update. Re-running release-please from scratch after a release already
 exists may only update the next release PR.

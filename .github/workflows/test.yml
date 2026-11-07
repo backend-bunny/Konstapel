@@ -7,9 +7,26 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Superseded PRs can stop. Each main commit must finish its publication gate.
+  group: test-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  acceptance-scope:
+    runs-on: ubuntu-26.04
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the complete PR diff
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ci/acceptance-scope.sh >> "$GITHUB_OUTPUT"
   checks:
     runs-on: ubuntu-26.04
     steps:
@@ -30,7 +47,9 @@ jobs:
       - run: devbox run -- task check
       - name: Verify checks did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
-  acceptance:
+  acceptance-live:
+    needs: acceptance-scope
+    if: needs.acceptance-scope.outputs.required == 'true'
     # Full disposable-cluster acceptance, including the S3 evidence lifecycle
     # against the pinned S3-compatible test service (scripts/runtime.env).
     runs-on: ubuntu-26.04
@@ -62,7 +81,26 @@ jobs:
           name: acceptance-evidence
           path: |
             ${{ runner.temp }}/acceptance
-            !${{ runner.temp }}/acceptance/kubeconfig
+            !${{ runner.temp }}/acceptance/**/kubeconfig*
+            !${{ runner.temp }}/acceptance/**/*.test
             !${{ runner.temp }}/acceptance/environment/helm-manifest.yaml
             !${{ runner.temp }}/acceptance/kind-logs
           retention-days: 14
+  acceptance:
+    # Stable required check, including explicit prose-only skips and failures.
+    if: always()
+    needs: [acceptance-scope, checks, acceptance-live]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Enforce acceptance decision
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.acceptance-scope.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          LIVE_RESULT: ${{ needs.acceptance-live.result }}
+          ACCEPTANCE_REQUIRED: ${{ needs.acceptance-scope.outputs.required }}
+          ACCEPTANCE_REASON: ${{ needs.acceptance-scope.outputs.reason }}
+        run: bash scripts/ci/acceptance-gate.sh | tee -a "$GITHUB_STEP_SUMMARY"
