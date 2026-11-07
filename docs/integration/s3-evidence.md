@@ -761,6 +761,21 @@ finalization in the same short-duration way:
    version and delete marker of it is gone. dp-primary's is removed through
    the rotated credentials.
 
+`TestLiveIntegratedAssessments` runs continuous assessments end to end
+through destinations on the S3 test service:
+1. One binding uses the central default, and an overlapping binding has its
+   own `destinationRef`.
+2. Scheduled, manual, and team-requested (namespace-scoped) runs each pin
+   their destination at start. They are committed only under that
+   destination's prefix.
+3. The download service serves each package from its run's pinned
+   destination. A team gets only its own namespace package, and a platform
+   operator gets binding packages.
+4. An engine reporting outage, with a workload added during it, publishes an
+   `Incomplete` package.
+5. An impossible OSCAL export publishes a typed `Diagnostic` package. Both
+   are downloaded and validated.
+
 ## Recovery and handoff walkthrough
 
 Two different mechanisms deal with storage that Konstapel can't finish

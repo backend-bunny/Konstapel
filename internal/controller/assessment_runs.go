@@ -648,7 +648,7 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 		limits = nil // binding-wide limitations may name other namespaces
 	}
 	// Pin the destination before anything can reach storage. The label
-	// update inside pinDestination happens before any status change here.
+	// update inside pinDestination keeps the status prepared so far.
 	pin, err := r.pinDestination(ctx, run, b, metav1.NewTime(now))
 	switch {
 	case errors.Is(err, errDestinationLost):
