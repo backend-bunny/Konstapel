@@ -5,6 +5,10 @@ Konstapel is a compliance controller being built in Go for Kubernetes, targeting
 [compliance-to-policy-go v2](https://github.com/oscal-compass/compliance-to-policy-go)
 to connect compliance requirements, technical policies, and assessment evidence.
 
+The name **Konstapel** is Swedish for **constable**, a traditional title for a
+police officer. It reflects the project's role in coordinating policy enforcement
+and collecting traceable compliance evidence.
+
 The intended workflow is to:
 
 1. Define the applicable controls through OSCAL content and authored

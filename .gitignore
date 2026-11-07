@@ -1,5 +1,7 @@
 /bin/
 /artifacts/
+# Local acceptance output (task acceptance OUTPUT=test).
+/test/
 /tools/
 /.tools/
 __pycache__/
