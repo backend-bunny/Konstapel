@@ -257,7 +257,7 @@ is down, the inventory is saved, the collecting run ends `DestinationOrphaned`
 and frees its binding slot, and the destination is finalized. Once the
 backend returns, nothing for the run reached storage. A destination recreated
 under the same name at the same location becomes ready without adopting the
-run. The operator walkthrough (8.7) follows.
+run. The operator steps are under Recovery and handoff walkthrough.
 
 ## Destination configuration
 
@@ -752,6 +752,176 @@ finalization in the same short-duration way:
 3. Both destinations are then deleted with a 150s binding retention. Each stays
    `Retiring` with its retained package counted, and is released only after
    that package expires and is deleted from storage.
+
+## Recovery and handoff walkthrough
+
+Two different mechanisms deal with storage that Konstapel can't finish
+normally. They never overlap:
+
+| | Automatic abandoned-attempt cleanup | Explicit Orphan handoff |
+| --- | --- | --- |
+| Started by | The controller, when a run is `Completed` or `Failed` | A platform administrator: `deletionPolicy: Orphan` with a reason, then deleting the destination |
+| Scope | One run's prefix: attempt directories it owns (`intent.json`) and its incomplete multipart uploads. Never the committed attempt or unowned keys | Everything pinned to the destination: committed packages, attempts, versions, uploads |
+| Storage operations | Deletes and aborts, retried until they succeed | None. Konstapel stops all remote work, even while the backend is down |
+| After a restart | Resumes from the run records | Stays stopped. `orphanedAt`, `Orphaned` and the saved inventory are durable |
+| Who owns what remains | Konstapel, until expiry deletion | The operator, including future retention |
+| Reversible | Not needed | No. An accepted handoff is frozen |
+
+### Recovering from storage faults
+
+Each fault leaves visible diagnostics on the run, and none of them recollects
+newer evidence under an old run's identity.
+
+- **Backend outage while publishing.** The run stays `Publishing`, with
+  `Published=False` (`Retrying`) and the cause. Its frozen package
+  (`status.descriptorSha256`) doesn't change. Retries continue for 5 minutes
+  after collection closes. If the backend returns in time, the same package
+  is committed exactly once. Otherwise the run ends `Failed`
+  (`PublicationFailed`, with the cause). Its assessment summary is kept, and
+  its binding's active run slot is released. While the backend is not ready,
+  scheduled snapshots are disabled with a visible limitation (see Readiness
+  gating). Once storage is back, nothing needs restarting: the next run
+  assesses the current state. `TestLiveAssessmentFaults` (step
+  `storage-outage`) pauses the S3 test service during publication and checks
+  that the frozen package is committed once after recovery.
+- **Lost commit response or receipt update.** The next reconcile finds the
+  existing commit and records the original receipt (see Receipt recovery).
+  It never makes a second snapshot (`TestLostPublishResponseKeepsOriginalReceipt`).
+- **CaptureLost.** If the frozen bytes are lost before durable staging, the
+  run ends `Failed` with reason and export state `CaptureLost`. Nothing is
+  published under that run's identity, and a new run is needed
+  (`TestChangedStagedPackageIsCaptureLost`, `TestPublisherRecoveryAndCaptureLost`).
+- **Partial uploads.** An interrupted attempt is identified by its
+  `intent.json`. When the run is terminal, attempt cleanup removes it and
+  aborts the run's incomplete multipart uploads. Failures show as
+  `AttemptsCleaned=False` (`CleanupPending`) and are retried every minute.
+  The committed attempt and unowned keys are never touched
+  (`TestCleanupAttemptsKeepsCommittedAndUnowned`, `TestCleanupAttemptsWithoutCommit`).
+- **Destination change.** Runs keep their pinned destination, and history is
+  served and deleted there (see Changing the destination). A destination that
+  can't finish retiring is `RetirementBlocked` with named blockers (see
+  Blocked retirement). If its storage will never be reachable or cleanable
+  again, the remedy is an Orphan handoff, not deleting the prefix by hand.
+- **Orphaned evidence.** None of the automatic paths above runs for it, at
+  expiry, after restarts, or through a destination recreated at the same
+  location (`TestLiveOrphanFence`, `TestOrphanedOwnershipIsNeverAdopted`).
+
+### Deleting a destination
+
+**1. Normal deletion (retire).** Switch bindings and the default away first
+(see Changing the destination), then delete it:
+
+```sh
+kubectl delete evidencedestination primary --wait=false
+kubectl get evidencedestination primary \
+  -o jsonpath='{.status.outstandingRuns} {.status.outstandingPackages} {.status.latestRetainedExpiry}{"\n"}{.status.cleanupBlockers}{"\n"}'
+```
+
+It is released when nothing is outstanding, at the latest after
+`latestRetainedExpiry` and its expiry deletions. Fix any `cleanupBlockers`
+as described under Recovery.
+
+**2. Choosing Orphan.** Hand the storage off when Konstapel should stop
+managing it, for example:
+- the backend is decommissioned or permanently unreachable;
+- the bucket is transferred to another owner or retention regime;
+- a lock blocks deletion and won't be lifted.
+
+Request it with a reason, before deletion or as an escalation of a
+terminating destination. Admission records you as the actor.
+
+```sh
+kubectl patch evidencedestination primary --type=merge \
+  -p '{"spec":{"deletionPolicy":"Orphan","orphan":{"reason":"backend decommissioned, archive team owns the bucket"}}}'
+kubectl get evidencedestination primary -o jsonpath='{.metadata.uid}{"\n"}'   # note the UID
+kubectl delete evidencedestination primary --wait=false                       # if not already deleting
+```
+
+Acceptance on deletion is irreversible. Konstapel then:
+- fences the destination;
+- saves the inventory;
+- marks every pinned run (see Orphaned disposition);
+- releases the destination.
+
+None of this needs the backend. If `Retiring` shows `OrphanInventoryPending`,
+the inventory couldn't be saved yet. Typical causes are ConfigMap quota or
+RBAC in `konstapel-system`. The fence and finalizers hold until it succeeds.
+
+**3. Export the inventory.** The header is complete once it exists:
+
+```sh
+uid=<destination UID>
+kubectl -n konstapel-system get configmap -l compliance.erenius.io/orphan-handoff=$uid -o yaml > orphan-$uid.yaml
+kubectl -n konstapel-system get configmap konstapel-orphan-$uid -o jsonpath='{.data.inventory\.json}'
+```
+
+- **Header.** It names the actor, reason, `acceptedAt`, `fencedAt`, the
+  destination location, and `uncertainOperations`. It also lists each chunk
+  (`konstapel-orphan-$uid-<n>`) with its SHA-256 over the chunk's
+  `inventory.json`.
+- **Chunks.** Each run entry has its `ownedPrefix` and, where it published,
+  its original receipt: commit manifest and archive keys and versions,
+  `packageSha256`, `packageSize`, `publishedAt` and `expiresAt`.
+- **Lost UID.** If you didn't note the UID, list the labels:
+  `kubectl -n konstapel-system get configmap -l compliance.erenius.io/orphan-handoff -L compliance.erenius.io/orphan-handoff`.
+
+**4. What users see.**
+- **Completed runs:** `publication.phase: Orphaned`, `availability:
+  Unavailable`, `cleanup.state: Orphaned`, with the original receipt. Managed
+  downloads answer 410. Bytes already downloaded aren't revoked.
+- **Interrupted runs:** they end `Failed`, `Published=False`
+  (`DestinationOrphaned`), and never claim success.
+- **Deleted records:** they stay `Deleted`.
+- **New runs:** bindings that selected the destination need a new one.
+
+**5. External recovery and cleanup are the operator's job.**
+- **Unreachable storage.** The inventory's `remoteState` is `NotEnumerated`,
+  because Konstapel didn't contact the backend. When the storage is
+  reachable, enumerate each run's `ownedPrefix`, including every version,
+  delete marker and incomplete upload:
+
+  ```sh
+  aws s3api list-object-versions --bucket <bucket> --prefix <ownedPrefix>
+  aws s3api list-multipart-uploads --bucket <bucket> --prefix <ownedPrefix>
+  ```
+- **Retained versions and uploads.** Konstapel did not abort multipart
+  uploads or delete versions during the handoff. Everything under the
+  prefixes is still there, and object locks still apply.
+- **Uncertain operations.** These were in flight at the fence (for example a
+  publication), and their outcome is unknown. A `commit.json` under the
+  run's prefix means that commit completed, even if the run doesn't record
+  it.
+- **Moving evidence.** Copy the receipt's archive version and check it
+  against `packageSha256` and `packageSize`.
+- **Future retention.** `expiresAt` is historical. Konstapel will never
+  delete these packages. Apply your own lifecycle rules, or delete them when
+  your retention ends.
+- **Removing the inventory.** Konstapel never deletes it. Remove it after
+  the handoff is complete:
+  `kubectl -n konstapel-system delete configmap -l compliance.erenius.io/orphan-handoff=$uid`.
+
+**6. Last resort: removing finalizers by hand.** Use this only when the
+controller can't finish, for example because it is uninstalled, or the
+inventory can never be saved. Export first, because removing a finalizer
+deletes the record Konstapel would otherwise keep:
+
+```sh
+kubectl get evidencedestination primary -o yaml > destination-primary.yaml
+kubectl get assessmentrun -l compliance.erenius.io/destination-uid=$uid -o yaml > runs-$uid.yaml
+kubectl patch evidencedestination primary --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]'
+# Only for runs whose storage you now own; this releases their records:
+kubectl patch assessmentrun <run> --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]'
+```
+
+Removing finalizers never deletes storage and never moves evidence to
+another destination.
+- **Inventory saved.** Runs whose destination is gone are still recognized
+  as handed off. They take the `Orphaned` disposition, downloads answer 410,
+  and the storage is never touched again.
+- **No inventory.** Runs pinned to the removed destination only report it as
+  unavailable. They issue no storage operation, because no destination
+  resolves their pin, and they keep their records until their finalizers
+  are removed as above.
 
 ## Teardown
 

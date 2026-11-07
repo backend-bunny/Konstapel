@@ -45,7 +45,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 - [x] 3.2 Add recovery after archive upload, commit-response loss, and Kubernetes receipt-update failure; verify recovery reconciles the original digest, publication time, expiry, and namespace scope instead of creating a second snapshot.
 - [x] 3.3 Implement cancellation and orphan cleanup for owned multipart uploads and uncommitted objects; verify restart can identify its attempts and never deletes unrelated objects under a shared bucket/prefix.
 - [x] 3.4 Route publication, retries, downloads, and cleanup through protected run-start destination UID/location pins and live credential/trust references; verify default/binding switches and rotation preserve historical access, UID mismatch never redirects history, and missing old credentials remain a visible retryable problem without fallback.
-- [ ] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery, including the distinction between automatic abandoned-attempt cleanup and explicit Orphan handoff; verify the fault-injection walkthrough preserves diagnostics and never resumes cleanup for intentionally orphaned evidence.
+- [x] 3.5 Document outage, CaptureLost, partial-upload, and destination-change recovery, including the distinction between automatic abandoned-attempt cleanup and explicit Orphan handoff; verify the fault-injection walkthrough preserves diagnostics and never resumes cleanup for intentionally orphaned evidence.
 
 ## 4. Authorize and verify full-package downloads
 
@@ -84,7 +84,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 - [x] 8.4 Persist an independent protected, chunked orphan inventory with audit identity, original receipts, known attempts/versions/upload IDs, and uncertain outcomes; verify idempotence, object-size limits, backend outages, and inventory persistence failures preserve the fence and finalizers without exposing credentials.
 - [x] 8.5 Coordinate Orphaned disposition and finalizer release with the shared run/publication contract; verify records already pending deletion export ownership first, surviving records retain original references/checksums/expiry, prior Deleted records remain truthful, and interrupted publication ends and releases its binding slot without falsely claiming success.
 - [x] 8.6 Exclude orphaned ownership from every automatic recovery/cleanup path, including a replacement destination at the same bucket/prefix; verify expiry, same-name recreation, and restart cannot adopt evidence or garbage-collect the independent inventory.
-- [ ] 8.7 Document normal deletion, Orphan selection/escalation commands with a reason, inventory export, external recovery/cleanup, and last-resort finalizer stripping; verify the walkthrough explains unreachable storage, uncertain operations, retained versions/uploads, disabled managed downloads, and operator ownership of future retention.
+- [x] 8.7 Document normal deletion, Orphan selection/escalation commands with a reason, inventory export, external recovery/cleanup, and last-resort finalizer stripping; verify the walkthrough explains unreachable storage, uncertain operations, retained versions/uploads, disabled managed downloads, and operator ownership of future retention.
 
 ## 9. Migrate legacy configuration and verify the lifecycle in CI
 
