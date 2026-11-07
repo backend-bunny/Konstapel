@@ -206,6 +206,13 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 			return disabled("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error())
 		}
 	}
+	// Without policy reports a snapshot could only be incomplete: the
+	// assessment capability gates scheduling, never enforcement.
+	if r.Reports != nil {
+		if ok, err := r.Reports(ctx); !ok {
+			return disabled("scheduled snapshots are disabled: policy reports are unavailable: " + capabilityMessage(err))
+		}
+	}
 	interval, _, _, err := bindingDurations(b)
 	if err != nil {
 		return prev, latest, time.Time{}, "", err

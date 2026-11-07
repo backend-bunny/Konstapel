@@ -56,7 +56,7 @@ Keep the existing fast checks and feature-owned integration suites alongside it.
 
 ## 4. Recover from external engine prerequisites
 
-- [ ] 4.1 Implement capability discovery and service-account authorization checks on the merged manager boundary; verify missing resources, wrong group/version/scope/verbs, denied discovery/use and transport errors produce distinct results for delivery, assessment and exceptions.
+- [x] 4.1 Implement capability discovery and service-account authorization checks on the merged manager boundary; verify missing resources, wrong group/version/scope/verbs, denied discovery/use and transport errors produce distinct results for delivery, assessment and exceptions.
 - [ ] 4.2 Add bounded retries, discovery refresh and deferred/recoverable engine watches; verify starting without Kyverno and subsequently adding, removing and restoring its API resources recovers without process restart or an unbounded retry loop.
 - [ ] 4.3 Feed capability results into existing Conditions and operation gates; verify unavailable reports cannot establish compliance, missing exception prerequisites cannot activate grants, and unrelated healthy capabilities continue without deleting managed policies.
 - [ ] 4.4 Exercise live permission loss/recovery and engine rollout with existing policies and configuration admission; verify truthful readiness, retained enforcement, recovered watches, and no downgrade to legacy Kyverno policy APIs or bypass of the exception expiry/governance gate.

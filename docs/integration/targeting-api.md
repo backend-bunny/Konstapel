@@ -397,10 +397,12 @@ under `config/rbac/`.
   changes: selectors are rendered into the policy, never expanded into names.
 - **Owned ValidatingPolicies**, once discovery finds
   `policies.kyverno.io/v1 validatingpolicies`. The manager starts without
-  Kyverno; until the API is served, bindings report `EngineUnavailable` and
-  are retried every 5 seconds. Delivery reads engine policies uncached, so no
-  Kyverno informer is needed. `add-helm-oci-distribution`'s capability monitor
-  will also cover Kyverno being removed and later reinstalled.
+  Kyverno. Until the capability monitor finds the API usable, bindings report
+  the precise reason (see the table below) and are retried every 5 seconds.
+  Delivery reads engine policies uncached, so no Kyverno informer is needed.
+  Each engine watch registers once its own capability is available. After
+  that, its informer re-lists and re-watches by itself when the API is removed
+  and restored. See [Helm charts](../charts.md#external-engine-capabilities).
 
 Deleting a binding needs no finalizer: its policies, including superseded
 revisions, carry a controller owner reference, and Kubernetes garbage
@@ -437,7 +439,11 @@ shows with the collector:
 | `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. Retried every 5 seconds. |
 | `StaleRevision` | Configuration did not resolve (see `Resolved`). The last applied policies, if any, stay in force and are named in the message. |
 | `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched; the binding re-checks every minute and delivers once the name is free. |
-| `EngineUnavailable` | The ValidatingPolicy API is not served, or discovery failed. Nothing is changed. |
+| `EngineAPINotServed` | `policies.kyverno.io/v1` is not served. Nothing is changed. |
+| `EngineResourceMissing` | The group is served without `validatingpolicies`. Nothing is changed. |
+| `EngineResourceUnsupported` | `validatingpolicies` has another kind or scope, or lacks a verb Konstapel needs. Nothing is changed. |
+| `EngineAccessDenied` | Discovery, or an operation on `validatingpolicies` the controller needs, is forbidden to its service account. Nothing is changed. |
+| `EngineUnavailable` | Discovery or the access review failed (transport, timeout, server error). Nothing is changed. |
 | `NoContributions` | The binding resolved to no deliverable policies. |
 
 `status.targetCount` is absent until the first reconcile. `0` means no namespace
@@ -483,8 +489,12 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
   and the Kyverno admission controller logs.
 - `OwnershipConflict`: the named resource was not created by this binding.
   Remove or rename it deliberately; Konstapel never adopts it.
-- `EngineUnavailable`: install Kyverno 1.19 with the `policies.kyverno.io/v1`
-  API, or check the controller's discovery permissions.
+- `EngineAPINotServed`, `EngineResourceMissing`, `EngineResourceUnsupported`:
+  install Kyverno 1.19 with the `policies.kyverno.io/v1` ValidatingPolicy API.
+- `EngineAccessDenied`: grant the controller's generated RBAC
+  (`config/rbac/controller/role.yaml`).
+- `EngineUnavailable`: check API server and aggregation health. It retries by
+  itself.
 
 ## Downstream contract
 

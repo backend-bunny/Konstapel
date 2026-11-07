@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -138,9 +137,12 @@ func (t *BoundaryTracker) Lookup(uid, state string) (collector.Boundary, bool) {
 // AssessmentReconciler maintains status.assessment.current and plans the
 // binding's snapshot schedule.
 type AssessmentReconciler struct {
-	Client     client.Client
-	Content    targeting.ContentSource
-	Engine     EngineAvailable
+	Client  client.Client
+	Content targeting.ContentSource
+	Engine  EngineAvailable
+	// Reports checks the assessment capability (policy reports); nil means
+	// available.
+	Reports    EngineAvailable
 	Cluster    string
 	Boundaries *BoundaryTracker
 	Now        func() time.Time
@@ -265,7 +267,13 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 			return collector.CaptureV2{}, nil, 0, err
 		}
 	} else {
-		limits = append(limits, "policy engine API is not served; no engine policies or reports can be read")
+		msg := "policy engine API is not served"
+		if r.Engine != nil {
+			if _, err := r.Engine(ctx); err != nil {
+				msg = capabilityMessage(err)
+			}
+		}
+		limits = append(limits, msg+"; no engine policies or reports can be read")
 	}
 
 	// Subjects whose engine policy is not delivered cannot have evidence; they
@@ -357,7 +365,16 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 			}
 		}
 	}
-	if engineUp {
+	reportsUp := engineUp
+	if engineUp && r.Reports != nil {
+		if ok, err := r.Reports(ctx); !ok {
+			// Without reports nothing is attributable: evidence is missing,
+			// never compliant. Delivered policies are untouched.
+			reportsUp = false
+			limits = append(limits, "policy reports unavailable: "+capabilityMessage(err))
+		}
+	}
+	if reportsUp {
 		for _, ns := range sortedKeys(namespaces) {
 			rs, err := r.listUnstructured(ctx, PolicyReportGVK, ns)
 			if err != nil {
@@ -537,9 +554,9 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 }
 
 // setupAssessments registers the assessment reconciler with the manager.
-func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine EngineAvailable, cluster string, poll time.Duration) error {
+func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, cluster string, poll time.Duration) error {
 	rt := currentRuntime()
-	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
+	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
 		For(&v1alpha1.ComplianceBinding{}).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
@@ -571,49 +588,26 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Destinations: rt.Destinations}); err != nil {
 		return err
 	}
-	// Engine policies and reports are watched once the engine API is served.
-	return mgr.Add(&engineWatches{mgr: mgr, ctrl: c, engine: engine, poll: poll})
-}
-
-// engineWatches starts the engine-policy and PolicyReport watches once the
-// engine API is served, so the manager starts without Kyverno.
-type engineWatches struct {
-	mgr    manager.Manager
-	ctrl   controller.Controller
-	engine EngineAvailable
-	poll   time.Duration
-}
-
-func (w *engineWatches) NeedLeaderElection() bool { return true }
-
-func (w *engineWatches) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithName("assessment-engine-watches")
-	t := time.NewTicker(w.poll)
-	defer t.Stop()
-	for {
-		if ok, err := w.engine(ctx); err == nil && ok {
-			policy := &unstructured.Unstructured{}
-			policy.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
-			managed := predicate.NewPredicateFuncs(func(o client.Object) bool {
-				return o.GetLabels()[targeting.LabelManagedBy] == targeting.ManagedByValue
-			})
-			report := &unstructured.Unstructured{}
-			report.SetGroupVersionKind(PolicyReportGVK)
-			errP := w.ctrl.Watch(source.Kind(w.mgr.GetCache(), client.Object(policy), bindingForPolicy(w.mgr.GetClient()), managed))
-			errR := w.ctrl.Watch(source.Kind(w.mgr.GetCache(), client.Object(report), allBindings(w.mgr.GetClient())))
-			if errP == nil && errR == nil {
-				logger.Info("watching engine policies and policy reports")
-				<-ctx.Done()
-				return nil
-			}
-			logger.Info("could not start engine watches; retrying", "policies", errP, "reports", errR)
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-		}
+	// Engine policies and reports are watched once their capabilities are
+	// available, each independently.
+	policy := &unstructured.Unstructured{}
+	policy.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
+	managed := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		return o.GetLabels()[targeting.LabelManagedBy] == targeting.ManagedByValue
+	})
+	report := &unstructured.Unstructured{}
+	report.SetGroupVersionKind(PolicyReportGVK)
+	if err := mgr.Add(&deferredWatch{name: "assessment-engine-policies", available: engine, poll: poll, register: func() error {
+		return c.Watch(source.Kind(mgr.GetCache(), client.Object(policy), bindingForPolicy(mgr.GetClient()), managed))
+	}}); err != nil {
+		return err
 	}
+	if reports == nil {
+		reports = engine
+	}
+	return mgr.Add(&deferredWatch{name: "assessment-policy-reports", available: reports, poll: poll, register: func() error {
+		return c.Watch(source.Kind(mgr.GetCache(), client.Object(report), allBindings(mgr.GetClient())))
+	}})
 }
 
 // destinationForRun requeues the destination a run is pinned to, so
