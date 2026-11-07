@@ -47,7 +47,11 @@ class LoggingTests(unittest.TestCase):
         self.stub("bin/chainsaw", "echo chainsaw")
         self.stub("scripts/targeting-live.sh", 'echo "targeting-${4:-all}"; echo "require-userns=${KONSTAPEL_LIVE_REQUIRE_USERNS:-false}"')
         self.stub("scripts/exception-admission-live.sh", "echo exceptions")
-        self.stub("bin/docker", 'echo "prepared-userns $2"')
+        (self.repo / "scripts/image").mkdir()
+        self.stub("scripts/image/build.sh", "echo image-build")
+        # crictl reports kind's import alias; ctr names the image by digest.
+        self.stub("bin/docker", 'if [[ $* == *crictl* ]]; then echo \'{"status":{"repoDigests":["docker.io/library/import@sha256:abc"]}}\'; '
+                  'elif [[ $* == *" ctr "* ]]; then echo "tagged ${*: -1}"; else echo "prepared-userns $2"; fi')
 
     def test_acceptance_streams_stages_and_keeps_logs(self):
         self.setup_acceptance()
@@ -87,6 +91,9 @@ class LoggingTests(unittest.TestCase):
                 self.assertEqual("exceptions" in result.stdout, config["exceptionAdmission"])
                 self.assertEqual("prepared-userns konstapel-assessment-log-test-control-plane" in result.stdout, config["core"])
                 self.assertEqual("require-userns=true" in result.stdout, config["core"])
+                image = config.get("image", False)
+                self.assertEqual("image-build" in result.stdout, image)
+                self.assertEqual("tagged ghcr.io/backend-bunny/konstapel@sha256:abc" in result.stdout, image)
                 self.assertEqual(json.loads((out / "acceptance-result.json").read_text()),
                                  {"group": group, "passed": True, "exitCode": 0})
                 self.assertIn("environment-delete", result.stdout)

@@ -30,7 +30,7 @@ build_package() {
   )
   melange build melange.yaml --arch x86_64 --runner "$MELANGE_RUNNER" --package-append "go-$go_series" \
     --source-dir "$tmp/src" --cache-dir .cache/image/go --apk-cache-dir .cache/image/apk \
-    --git-repo-url https://github.com/backend-bunny/Konstapel --namespace backend-bunny \
+    --git-repo-url https://github.com/backend-bunny/Konstapel --git-commit "$KONSTAPEL_SOURCE_COMMIT" --namespace backend-bunny \
     --license Apache-2.0 --signing-key "$tmp/key/melange.rsa" --out-dir packages \
     --generate-provenance --dependency-log out/image/build-dependencies.json
   cp "$tmp/key/melange.rsa.pub" out/image/melange.rsa.pub

@@ -46,7 +46,7 @@ Keep the existing fast checks and feature-owned integration suites alongside it.
 
 ## 3. Wire the real controller, admission and TLS services
 
-- [ ] 3.1 Consume the merged manager entry point, extend the existing build/melange/apko packaging as needed, and wire its image/provider paths in the runtime chart; verify a real installed controller reconciles a profile/binding and invokes C2P with non-root, read-only-root and bounded writable-storage defaults while preserving the CLI/provider smoke tests.
+- [x] 3.1 Consume the merged manager entry point, extend the existing build/melange/apko packaging as needed, and wire its image/provider paths in the runtime chart; verify a real installed controller reconciles a profile/binding and invokes C2P with non-root, read-only-root and bounded writable-storage defaults while preserving the CLI/provider smoke tests.
 - [x] 3.2 Render generated RBAC, ServiceAccounts, Services and implemented feature settings; verify schema/default fixtures grant only the owners' required permissions, reference no missing handlers, and expose no values that bypass exception governance or download authorization.
 - [ ] 3.3 Add default cert-manager Certificates/Issuers, optional platform issuer references and CA-injection metadata; verify real issuance matches the release's service DNS identities and the chart neither installs nor manages cert-manager itself.
 - [ ] 3.4 Add operator-managed TLS Secret/CA configuration; verify installation without cert-manager, caller Secret preservation, and explicit failure for absent keys, expiry, wrong service identity or mismatched trust.
