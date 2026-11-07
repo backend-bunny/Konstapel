@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate deepcopy code, CRDs, and RBAC from the Go API types.
+# Regenerate deepcopy code, CRDs, the CRD chart's templates, and RBAC from the
+# Go API types.
 # With --check, fail if the checked-in generated files are out of date.
 set -euo pipefail
 
@@ -29,6 +30,11 @@ if [ "${1:-}" = "--check" ]; then
 		echo "CRDs in config/crd/bases are out of date; run scripts/generate.sh" >&2
 		status=1
 	fi
+	scripts/charts/crds.sh "$tmp/crd" "$tmp/chart"
+	if ! diff -r "$tmp/chart" charts/konstapel-crds/templates; then
+		echo "CRD chart templates in charts/konstapel-crds/templates are out of date; run scripts/generate.sh" >&2
+		status=1
+	fi
 	if ! diff "$tmp/rbac/role.yaml" config/rbac/controller/role.yaml; then
 		echo "Controller RBAC in config/rbac/controller is out of date; run scripts/generate.sh" >&2
 		status=1
@@ -38,3 +44,4 @@ fi
 
 mkdir -p config/rbac/controller
 generate config/crd/bases config/rbac/controller
+scripts/charts/crds.sh config/crd/bases charts/konstapel-crds/templates
