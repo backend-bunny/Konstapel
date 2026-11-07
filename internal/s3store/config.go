@@ -127,11 +127,17 @@ func (d Destination) KeyPrefix() string {
 // LoadDestination reads a destination from a YAML file, rejecting unknown
 // fields so a misspelled setting can never be silently ignored.
 func LoadDestination(file string) (Destination, error) {
-	var d Destination
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		return d, err
+		return Destination{}, err
 	}
+	return ParseDestination(raw)
+}
+
+// ParseDestination decodes a destination YAML document strictly, as
+// LoadDestination does, and validates it.
+func ParseDestination(raw []byte) (Destination, error) {
+	var d Destination
 	j, err := yaml.YAMLToJSON(raw)
 	if err != nil {
 		return d, err

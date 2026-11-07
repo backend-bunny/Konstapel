@@ -103,9 +103,10 @@ visible, retryable failure of each operation, never a fallback.
 
 Scheduling follows the selection. While a binding's selected destination is
 unusable, no runs start and `status.assessment.current` names the reason.
-Bindings with no selection use the legacy destination file below. The file is
-now optional for `konstapel controller` and `konstapel download-server`.
-Migrating the file follows (group 9).
+A binding with no selection has no destination: scheduling is disabled with
+`no evidence destination is selected`. The legacy `--evidence-destination`
+file has been removed. To move runs it published, see Upgrading from the legacy
+destination file.
 
 **Retirement.** Deleting a destination retires it (`deletionPolicy: Retire`).
 The destination reconciler counts what the destination still owes from an
@@ -261,10 +262,13 @@ backend returns, nothing for the run reached storage. A destination recreated
 under the same name at the same location becomes ready without adopting the
 run. The operator steps are under Recovery and handoff walkthrough.
 
-## Destination configuration
+## Legacy destination file
 
-The evidence destination is deployment configuration, read by
-`s3store.LoadDestination` from a YAML file. Unknown fields are rejected.
+Before EvidenceDestinations, the destination was a YAML file passed to
+`konstapel controller` and `konstapel download-server` with
+`--evidence-destination`. That flag has been removed. The format below survives
+only as the **preserved legacy configuration** that migration verifies against
+(`s3store.ParseDestination`). Unknown fields are rejected.
 `AssessmentRequest`, `AssessmentRun`, and `ComplianceBinding` have no endpoint,
 bucket, prefix, or credential fields, so application requests cannot redirect
 evidence. A test enforces this.
@@ -297,6 +301,113 @@ Rules:
   string output.
 - Konstapel never creates buckets or changes bucket configuration.
 
+## Upgrading from the legacy destination file
+
+Runs published through the legacy file recorded the file's `id`, endpoint,
+bucket, and prefix in their receipt, but no destination UID or region. After
+the upgrade, a run like that is attached to an EvidenceDestination only after
+three things are verified against each other:
+- the receipt;
+- the preserved legacy file;
+- exactly one destination that declares the legacy ID.
+
+Nothing is matched by name or location alone, and nothing is taken from the
+current default.
+
+**Order:**
+1. **Install the API first.** Apply the CRDs, RBAC, and admission policies
+   (`config/crd`, `config/rbac`, `config/admission`).
+2. **Quiesce legacy writers.** Stop the old controller, for example by scaling
+   it to zero, and wait for it to exit. Leave the old download server running
+   until step 6 if you want downloads to continue.
+3. **Preserve the legacy file.** Copy it, unchanged, into a ConfigMap in the
+   controller namespace:
+
+   ```sh
+   kubectl -n konstapel-system create configmap konstapel-legacy-destination \
+     --from-file=destination.yaml=<old destination file>
+   ```
+4. **Declare the destination.** Create an EvidenceDestination with the same
+   location and a `legacy` declaration. `spec.legacy` can be set only when the
+   destination is created, and it never changes.
+
+   | Legacy file | EvidenceDestination |
+   | --- | --- |
+   | `id` | `spec.legacy.destinationID` |
+   | `endpoint`, `bucket`, `region`, `prefix` | `spec.s3.endpoint`, `bucket`, `region`, `prefix` (identical) |
+   | `addressing`, `developmentFixture` | `spec.s3.addressing`, `developmentFixture` |
+   | `credentialSecret` (Secret in the controller namespace) | `spec.s3.credentialSecret` (same Secret and keys) |
+   | `workloadIdentity: true` | `spec.s3.workloadIdentity: true` |
+   | `caBundle` (PEM file path) | `spec.s3.caTrust` (a ConfigMap holding the PEM) |
+
+   ```yaml
+   apiVersion: compliance.erenius.io/v1alpha1
+   kind: EvidenceDestination
+   metadata: {name: primary}
+   spec:
+     s3:
+       endpoint: https://s3.example.internal
+       bucket: konstapel-evidence
+       region: eu-north-1
+       prefix: clusters/prod
+       credentialSecret: {name: konstapel-s3}
+     legacy:
+       destinationID: primary              # the legacy file's id
+       configuration:
+         name: konstapel-legacy-destination
+         key: destination.yaml             # default
+   ```
+5. **Select it for new runs.** Set it as the central default (Selection),
+   or in each binding's `destinationRef`.
+6. **Deploy the new controller and download server** without
+   `--evidence-destination`.
+
+**What the controller does with each run that has no pin.** This takes no
+storage action except as noted:
+- **Has a receipt.** The legacy ID must be declared by exactly one destination,
+  and the receipt, the preserved file, and that destination must agree on
+  endpoint, bucket, and prefix. The region comes from the preserved file and
+  must match the destination. The run is then pinned like a starting run:
+  labelled, destination finalizer added, and `status.destination` recorded
+  with `source: Migrated` and `legacy.destinationID`. That recorded
+  association governs every later download, check, and expiry deletion. The
+  receipt, archive, commit manifest, keys, versions, publication time, and
+  expiry are unchanged, because the destination resolves to the same keys.
+  Repeating the migration changes nothing.
+- **Still collecting.** It stored nothing yet, so it ends `Failed`
+  (`DestinationUnavailable`) and a new run starts against the selected
+  destination.
+- **Publishing, or terminal, without a receipt.** It may own upload attempts at
+  a location that can't be established. It stays blocked, unless its attempts
+  were already cleaned.
+
+**Blocked runs.** A run that can't be migrated keeps its record and finalizer,
+touches no storage, and reports `LegacyMigrated=False`. It is checked again
+every 10 minutes and whenever a destination declaring a legacy ID changes. The
+reasons:
+
+| Reason | Fix |
+| --- | --- |
+| `NoDestination` | Declare the legacy ID on a destination (step 4). |
+| `AmbiguousDestination` | More than one destination declares it, and none is chosen. Delete the extras. Their `legacy` can't be edited. |
+| `ConfigurationUnavailable` | Create the preserved ConfigMap or key (step 3). |
+| `LocationMismatch` | The message names the field and all three values. Recreate the destination with the historical location. Never change the receipt. |
+| `DestinationUnavailable` | The declaring destination is being deleted. Recreate it, or hand off the storage. |
+| `ReceiptMissing` | Recover or clean the run's attempts externally, then remove its finalizer by hand (Recovery). |
+
+```sh
+kubectl get assessmentruns -o custom-columns='NAME:.metadata.name,MIGRATED:.status.conditions[?(@.type=="LegacyMigrated")].reason,DEST:.status.destination.name'
+```
+
+**Afterwards.** A recreated destination has a new UID, so it never inherits a
+migrated run. Handed-off (orphaned) evidence stays handed off.
+`TestLiveLegacyMigration` covers this path on a disposable cluster:
+1. A run publishes through the legacy destination on the S3 test service.
+2. After the upgrade it is blocked (`NoDestination`) until a destination
+   declares it.
+3. It is then migrated, with its receipt and stored objects unchanged, and
+   expiry deletes it through the destination.
+
 ## Setup
 
 1. Create the bucket yourself. Konstapel never creates buckets or changes
@@ -322,10 +433,11 @@ Rules:
 4. Provide credentials in one of two ways. Either use workload identity
    (`workloadIdentity: true`), or create a Secret in the controller namespace
    and reference it as `credentialSecret`.
-5. Write the destination file (above) and start the controller with
-   `--evidence-destination=<file>` and a persistent `--evidence-staging-dir`.
-   Bindings show `scheduled snapshots are disabled: evidence backend is not
-   ready: ...` until the probe passes.
+5. Create an EvidenceDestination for the bucket (see EvidenceDestination
+   (API)), select it as the central default or in a binding's
+   `destinationRef`, and start the controller with a persistent
+   `--evidence-staging-dir`. Bindings show `scheduled snapshots are disabled:
+   evidence destination DestinationNotReady: ...` until its probe passes.
 
 **Credential rotation.** Update the Secret's data in place. The controller
 reads it again within 5 minutes (`s3store.CredentialRefresh`), with no
@@ -428,9 +540,9 @@ workload identities:
 
 ## Controller use
 
-**Configuration.** `konstapel controller --evidence-destination=<file>` loads
-the destination YAML above and enables scheduled snapshots. Without the flag
-the controller runs with scheduling disabled and says so on every binding.
+**Configuration.** `konstapel controller` publishes only through
+EvidenceDestinations. A binding without a selected, ready destination has
+scheduling disabled, and says why.
 `--evidence-staging-dir` (default `/var/lib/konstapel/staging`, created `0700`)
 must be writable and should survive restarts so staged captures can be
 recovered. `--content-root` must name the vendored `content` directory, which
@@ -475,13 +587,12 @@ terminal runs are re-listed. Cleanup needs `ListBucketVersions` (or
 `ListBucketMultipartUploads` and `AbortMultipartUpload` on the destination
 prefix.
 
-**Readiness gating.** When the controller runtime has a readiness check, the
-assessment scheduler calls it at most once per `ReadyInterval` (5 minutes by
-default). While the backend is not ready, scheduled snapshots are disabled and
-the binding's current assessment carries the limitation
-`scheduled snapshots are disabled: evidence backend is not ready: <reason>`.
-Evidence never falls back to local storage. Scheduling resumes on the first
-successful check.
+**Readiness gating.** A binding schedules only while its selected
+EvidenceDestination is `Ready` (probed every 5 minutes, and on every change).
+Otherwise its current assessment carries the limitation `scheduled snapshots
+are disabled: evidence destination <reason>: <message>`. Evidence never falls
+back to local storage or to another destination. Scheduling resumes once the
+destination is ready again.
 
 Credentials for a `credentialSecret` destination are read from that Secret in
 the controller's own namespace (keys `accessKeyID` and `secretAccessKey` by
@@ -493,8 +604,7 @@ verification cannot be disabled: an untrusted endpoint fails until its CA is in
 ## Downloads
 
 `konstapel download-server` serves committed packages over TLS. It takes
-`--tls-cert-file`, `--tls-private-key-file`, `--evidence-destination` and
-`--audience` (default `konstapel-download`). Its service account needs
+`--tls-cert-file`, `--tls-private-key-file` and `--audience` (default `konstapel-download`). Its service account needs
 `config/rbac/evidence-download.yaml`. That file holds a ClusterRole with
 TokenReview and SubjectAccessReview `create` plus read on requests, runs and
 namespaces, and for a `credentialSecret` destination a Role reading that
@@ -968,8 +1078,8 @@ another destination.
 
 - **Test service:** `scripts/s3-compat.sh` always removes its container, with
   its buckets and data. Nothing outside it is touched.
-- **Disabling publication:** remove `--evidence-destination`. Scheduling stops
-  with a visible limitation. Published packages stay in the bucket until their
+- **Disabling publication:** remove the central default and the bindings'
+  `destinationRef`. Scheduling stops with a visible limitation. Published packages stay in the bucket until their
   recorded expiry.
 - **Removing evidence:** packages are deleted only after expiry, by the
   controller, within the run's own prefix. Deleting the prefix by hand also

@@ -429,6 +429,7 @@ spec:
                         - Binding
                         - Default
                         - None
+                        - Migrated
                         type: string
                     required:
                     - ready

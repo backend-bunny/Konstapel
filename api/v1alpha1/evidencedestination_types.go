@@ -159,6 +159,7 @@ type OrphanRequest struct {
 // EvidenceDestinationSpec is platform-managed storage for evidence packages.
 // +kubebuilder:validation:XValidation:rule="self.deletionPolicy != 'Orphan' || has(self.orphan)",message="deletionPolicy Orphan requires orphan.reason"
 // +kubebuilder:validation:XValidation:rule="!has(self.orphan) || self.deletionPolicy == 'Orphan'",message="orphan is set only with deletionPolicy Orphan"
+// +kubebuilder:validation:XValidation:rule="has(self.legacy) == has(oldSelf.legacy) && (!has(self.legacy) || self.legacy == oldSelf.legacy)",message="legacy is set only when the destination is created and is immutable"
 type EvidenceDestinationSpec struct {
 	// s3 is the S3-compatible location and its access.
 	// +required
@@ -176,6 +177,44 @@ type EvidenceDestinationSpec struct {
 	// accepted (status.orphanIntent) it cannot be changed or reversed.
 	// +optional
 	Orphan *OrphanRequest `json:"orphan,omitempty"`
+
+	// legacy declares that this destination continues a legacy
+	// file-configured destination (the removed --evidence-destination file).
+	// Runs published there before destinations existed are attached to this
+	// destination only after their recorded location is verified against
+	// it and against the preserved legacy configuration. It is set only when
+	// the destination is created and never changes.
+	// +optional
+	Legacy *LegacyDestination `json:"legacy,omitempty"`
+}
+
+// LegacyDestination identifies the legacy file-configured destination a
+// destination continues, and where its preserved configuration is kept.
+type LegacyDestination struct {
+	// destinationID is the legacy destination's id, as recorded in the
+	// receipts of runs it published.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	DestinationID string `json:"destinationID"`
+	// configuration is a ConfigMap in the controller namespace holding the
+	// preserved legacy destination file under key. Fields that receipts do
+	// not record (the region) are verified against it; nothing is taken
+	// from current defaults.
+	// +required
+	Configuration LegacyConfiguration `json:"configuration"`
+}
+
+// LegacyConfiguration references the preserved legacy destination file.
+type LegacyConfiguration struct {
+	ControllerNamespaceReference `json:",inline"`
+	// key is the ConfigMap data key holding the destination YAML.
+	// +optional
+	// +kubebuilder:default=destination.yaml
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Key string `json:"key,omitempty"`
 }
 
 // OrphanIntent is the accepted orphan handoff, recorded by the controller
@@ -320,13 +359,17 @@ type DestinationReference struct {
 }
 
 // DestinationSource says where a binding's destination selection came from.
-// +kubebuilder:validation:Enum=Binding;Default;None
+// +kubebuilder:validation:Enum=Binding;Default;None;Migrated
 type DestinationSource string
 
 const (
 	DestinationFromBinding DestinationSource = "Binding"
 	DestinationFromDefault DestinationSource = "Default"
 	DestinationNone        DestinationSource = "None"
+	// DestinationMigrated marks a run published by a legacy file-configured
+	// destination and attached to an EvidenceDestination by verified
+	// migration.
+	DestinationMigrated DestinationSource = "Migrated"
 )
 
 // Destination selection reasons on a binding's status.assessment.destination.
@@ -383,17 +426,35 @@ type DestinationPin struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=512
 	Prefix string `json:"prefix,omitempty"`
-	// source is where the selection came from (Binding or Default).
+	// source is where the selection came from (Binding or Default), or
+	// Migrated for a verified legacy run.
 	// +required
 	Source DestinationSource `json:"source"`
 	// pinnedAt is when the pin was accepted.
 	// +required
 	PinnedAt metav1.Time `json:"pinnedAt"`
+	// legacy is the verified association of a migrated run: its legacy
+	// destination ID. With the location above it governs every later
+	// storage operation; the destination's spec only expressed intent.
+	// +optional
+	Legacy *LegacyPin `json:"legacy,omitempty"`
 	// orphanedAt is when the run's storage responsibility passed to an
 	// operator with its destination's orphan handoff. Konstapel issues no
 	// storage operation for the run afterwards.
 	// +optional
 	OrphanedAt *metav1.Time `json:"orphanedAt,omitempty"`
+}
+
+// LegacyPin records a verified legacy migration.
+type LegacyPin struct {
+	// destinationID is the legacy destination ID from the run's receipt.
+	// +required
+	// +kubebuilder:validation:MaxLength=63
+	DestinationID string `json:"destinationID"`
+	// verifiedAt is when the receipt, the preserved legacy configuration,
+	// and the destination were found to name the same location.
+	// +required
+	VerifiedAt metav1.Time `json:"verifiedAt"`
 }
 
 // EvidenceDestination is a cluster-scoped, platform-managed evidence storage

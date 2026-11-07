@@ -200,7 +200,7 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 	case sel.Source != v1alpha1.DestinationNone && !sel.Ready:
 		return disabled("scheduled snapshots are disabled: evidence destination " + sel.Reason + ": " + sel.Message)
 	case sel.Source == v1alpha1.DestinationNone && r.Runtime.Publisher == nil:
-		return disabled("scheduled snapshots are disabled: no evidence destination is selected and no legacy destination is configured")
+		return disabled("scheduled snapshots are disabled: no evidence destination is selected")
 	case sel.Source == v1alpha1.DestinationNone:
 		if err := r.backendReady(ctx); err != nil {
 			return disabled("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error())
@@ -358,20 +358,36 @@ func runsForBinding(c client.Client) handler.EventHandler {
 
 // runsForDestination wakes the runs pinned to a destination whose orphan
 // handoff inventory is saved, so they take the Orphaned disposition
-// promptly instead of waiting out their hold.
+// promptly instead of waiting out their hold, and unpinned legacy runs
+// when a destination declares a legacy destination.
 func runsForDestination(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		ed, ok := o.(*v1alpha1.EvidenceDestination)
-		if !ok || ed.Status.OrphanHandoff == nil || ed.Status.OrphanHandoff.Inventory == nil {
+		if !ok {
 			return nil
 		}
-		var runs v1alpha1.AssessmentRunList
-		if err := c.List(ctx, &runs, client.MatchingLabels{LabelRunDestination: string(ed.UID)}); err != nil {
-			return nil
+		var out []reconcile.Request
+		if h := ed.Status.OrphanHandoff; h != nil && h.Inventory != nil {
+			var runs v1alpha1.AssessmentRunList
+			if err := c.List(ctx, &runs, client.MatchingLabels{LabelRunDestination: string(ed.UID)}); err != nil {
+				return nil
+			}
+			for _, r := range runs.Items {
+				out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
+			}
 		}
-		out := make([]reconcile.Request, 0, len(runs.Items))
-		for _, r := range runs.Items {
-			out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
+		// A destination declaring a legacy destination may unblock
+		// unpinned legacy runs.
+		if ed.Spec.Legacy != nil {
+			var runs v1alpha1.AssessmentRunList
+			if err := c.List(ctx, &runs); err != nil {
+				return out
+			}
+			for _, r := range runs.Items {
+				if r.Status.Destination == nil && r.Status.Publication != nil {
+					out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
+				}
+			}
 		}
 		return out
 	})
@@ -535,6 +551,13 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if pin := run.Status.Destination; pin != nil && pin.OrphanedAt != nil {
 		return ctrl.Result{}, r.release(ctx, run)
 	}
+	// A run started under the removed legacy file destination is migrated
+	// to a verified EvidenceDestination, or held visibly until it can be.
+	if run.Status.Destination == nil && r.Runtime.Publisher == nil && r.Runtime.Destinations != nil {
+		if handled, res, err := r.legacy(ctx, run); handled {
+			return res, err
+		}
+	}
 	// A run pinned to a destination whose orphan handoff was accepted issues
 	// no further storage operation of any kind: publication, retries,
 	// recovery, retention, attempt cleanup, and integrity checks stop. Its
@@ -656,7 +679,7 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 	case err != nil:
 		return ctrl.Result{}, err
 	case pin == nil && r.Runtime.Publisher == nil:
-		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, ReasonDestinationUnavailable, "no evidence destination is selected and no legacy destination is configured")
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, ReasonDestinationUnavailable, "no evidence destination is selected")
 	}
 	run.Status.Destination = pin
 	if err := os.MkdirAll(r.staging(run), 0o700); err != nil {

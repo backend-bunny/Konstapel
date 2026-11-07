@@ -135,3 +135,41 @@ func TestEvidenceDestinationOrphanRequestValidation(t *testing.T) {
 		}
 	}
 }
+
+// spec.legacy declares a legacy destination only when the destination is
+// created; it cannot be added, changed, or removed later.
+func TestEvidenceDestinationLegacyIsCreationOnly(t *testing.T) {
+	v := crdtest.Load(t, "../../config/crd/bases")["EvidenceDestination"]
+	legacy := func(id string) map[string]any {
+		o := obj(t, destination)
+		o["spec"].(map[string]any)["legacy"] = map[string]any{"destinationID": id, "configuration": map[string]any{"name": "legacy-destination"}}
+		return o
+	}
+	created := legacy("prod-legacy")
+	if errs := v.Validate(created); len(errs) > 0 {
+		t.Fatalf("legacy declaration rejected: %v", errs.ToAggregate())
+	}
+	if key := created["spec"].(map[string]any)["legacy"].(map[string]any)["configuration"].(map[string]any)["key"]; key != "destination.yaml" {
+		t.Fatalf("configuration key default: %v", key)
+	}
+	for name, c := range map[string]struct{ next, prev map[string]any }{
+		"added later": {legacy("prod-legacy"), obj(t, destination)},
+		"changed":     {legacy("other-legacy"), legacy("prod-legacy")},
+		"removed":     {obj(t, destination), legacy("prod-legacy")},
+		"config moved": {func() map[string]any {
+			o := legacy("prod-legacy")
+			o["spec"].(map[string]any)["legacy"].(map[string]any)["configuration"] = map[string]any{"name": "elsewhere"}
+			return o
+		}(), legacy("prod-legacy")},
+	} {
+		if errs := v.ValidateUpdate(c.next, c.prev); len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), "immutable") {
+			t.Errorf("%s: accepted: %v", name, errs.ToAggregate())
+		}
+	}
+	if errs := v.ValidateUpdate(legacy("prod-legacy"), legacy("prod-legacy")); len(errs) > 0 {
+		t.Fatalf("unchanged legacy rejected: %v", errs.ToAggregate())
+	}
+	if errs := v.Validate(legacy("Not_A_Label")); len(errs) == 0 {
+		t.Error("invalid legacy destination ID accepted")
+	}
+}
