@@ -157,6 +157,25 @@ func runDone(r *v1alpha1.AssessmentRun) bool {
 	return r.Status.Phase == v1alpha1.RunCompleted || r.Status.Phase == v1alpha1.RunFailed
 }
 
+// releaseFinished clears a schedule's active run once that run finished or
+// no longer exists.
+func (r *AssessmentReconciler) releaseFinished(ctx context.Context, prev *v1alpha1.AssessmentSchedule) (*v1alpha1.AssessmentSchedule, error) {
+	if prev == nil || prev.ActiveRun == nil {
+		return prev, nil
+	}
+	run := &v1alpha1.AssessmentRun{}
+	switch err := r.reader().Get(ctx, client.ObjectKey{Name: prev.ActiveRun.Name}, run); {
+	case apierrors.IsNotFound(err):
+	case err != nil:
+		return prev, err
+	case !runDone(run):
+		return prev, nil
+	}
+	out := prev.DeepCopy()
+	out.ActiveRun = nil
+	return out, nil
+}
+
 // plan runs the binding's schedule. It returns the schedule and latest run to
 // persist, the next due time, and a limitation when scheduling is disabled.
 func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.AssessmentSchedule, *v1alpha1.RunReference, time.Time, string, error) {
@@ -168,17 +187,23 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 	if ok, why := r.Runtime.ready(); !ok {
 		return prev, latest, time.Time{}, "scheduled snapshots are disabled: " + why, nil
 	}
+	// While scheduling is disabled, a finished active run still frees its
+	// slot (for example a run ended by its destination's orphan handoff).
+	disabled := func(why string) (*v1alpha1.AssessmentSchedule, *v1alpha1.RunReference, time.Time, string, error) {
+		released, err := r.releaseFinished(ctx, prev)
+		return released, latest, time.Time{}, truncateMsg(why), err
+	}
 	// A binding with a destination selection schedules only when that
 	// destination is usable; it never falls back to the legacy destination.
 	// Unselected bindings use the legacy destination and its probe.
 	switch sel := selectDestination(ctx, r.reader(), r.Runtime.ControllerNamespace, b); {
 	case sel.Source != v1alpha1.DestinationNone && !sel.Ready:
-		return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence destination " + sel.Reason + ": " + sel.Message), nil
+		return disabled("scheduled snapshots are disabled: evidence destination " + sel.Reason + ": " + sel.Message)
 	case sel.Source == v1alpha1.DestinationNone && r.Runtime.Publisher == nil:
-		return prev, latest, time.Time{}, "scheduled snapshots are disabled: no evidence destination is selected and no legacy destination is configured", nil
+		return disabled("scheduled snapshots are disabled: no evidence destination is selected and no legacy destination is configured")
 	case sel.Source == v1alpha1.DestinationNone:
 		if err := r.backendReady(ctx); err != nil {
-			return prev, latest, time.Time{}, truncateMsg("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error()), nil
+			return disabled("scheduled snapshots are disabled: evidence backend is not ready: " + err.Error())
 		}
 	}
 	interval, _, _, err := bindingDurations(b)
@@ -326,6 +351,27 @@ func runsForBinding(c client.Client) handler.EventHandler {
 			if r.Spec.BindingRef.Name == o.GetName() && !runDone(&r) {
 				out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
 			}
+		}
+		return out
+	})
+}
+
+// runsForDestination wakes the runs pinned to a destination whose orphan
+// handoff inventory is saved, so they take the Orphaned disposition
+// promptly instead of waiting out their hold.
+func runsForDestination(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		ed, ok := o.(*v1alpha1.EvidenceDestination)
+		if !ok || ed.Status.OrphanHandoff == nil || ed.Status.OrphanHandoff.Inventory == nil {
+			return nil
+		}
+		var runs v1alpha1.AssessmentRunList
+		if err := c.List(ctx, &runs, client.MatchingLabels{LabelRunDestination: string(ed.UID)}); err != nil {
+			return nil
+		}
+		out := make([]reconcile.Request, 0, len(runs.Items))
+		for _, r := range runs.Items {
+			out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: r.Name}})
 		}
 		return out
 	})
@@ -484,17 +530,26 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.Get(ctx, req.NamespacedName, run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// A run whose storage was handed off is never touched again: its
+	// record only releases the retention finalizer it no longer needs.
+	if pin := run.Status.Destination; pin != nil && pin.OrphanedAt != nil {
+		return ctrl.Result{}, r.release(ctx, run)
+	}
 	// A run pinned to a destination whose orphan handoff was accepted issues
 	// no further storage operation of any kind: publication, retries,
 	// recovery, retention, attempt cleanup, and integrity checks stop. Its
-	// record is held for the handoff (inventory and Orphaned disposition).
+	// record is held until the handoff inventory is saved, then marked
+	// Orphaned.
 	if pin := run.Status.Destination; pin != nil && r.Runtime.Destinations != nil {
-		fenced, err := orphanFenced(ctx, r.reader(), pin)
+		ed, err := orphanFenced(ctx, r.reader(), pin)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if fenced {
-			return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
+		if ed != nil {
+			if h := ed.Status.OrphanHandoff; h == nil || h.Inventory == nil {
+				return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
+			}
+			return ctrl.Result{}, r.orphan(ctx, run, ed)
 		}
 		var done func()
 		if ctx, done, err = r.Runtime.Destinations.Begin(ctx, pin.UID, "run "+run.Name+" "+string(run.Status.Phase)); errors.Is(err, publication.ErrOrphaned) {

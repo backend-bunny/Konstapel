@@ -343,3 +343,20 @@ func TestOrphanedDestinationIsGone(t *testing.T) {
 		t.Fatalf("orphaned destination download: %d", w.Code)
 	}
 }
+
+// An Orphaned publication is never served, even through a publisher that
+// would still answer (for example a new destination at the same location).
+func TestOrphanedPublicationIsGone(t *testing.T) {
+	e := newEnv(t)
+	run := &v1alpha1.AssessmentRun{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: "nightly-run"}, run)
+	run.Status.Publication.Phase = v1alpha1.PublicationPhase(publication.PhaseOrphaned)
+	run.Status.Publication.Availability = v1alpha1.Availability(publication.AvailabilityUnavailable)
+	run.Status.Publication.Cleanup.State = v1alpha1.CleanupState(publication.CleanupOrphaned)
+	if err := e.c.Status().Update(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	if w := e.get(teamPath, "team-token"); w.Code != http.StatusGone {
+		t.Fatalf("orphaned publication download: %d", w.Code)
+	}
+}

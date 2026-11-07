@@ -24,6 +24,9 @@ const (
 	ReasonPublicationFailed   = "PublicationFailed"
 	ReasonCleanupPending      = "CleanupPending"
 	ReasonCleaned             = "Cleaned"
+	// ReasonDestinationOrphaned ends a run whose destination was handed off
+	// to an operator before its publication committed.
+	ReasonDestinationOrphaned = "DestinationOrphaned"
 )
 
 // BindingReference names a cluster-scoped ComplianceBinding.
@@ -110,7 +113,7 @@ type AssessmentSummary struct {
 
 // PublicationPhase is the publication lifecycle. Only Committed denotes
 // durable published output.
-// +kubebuilder:validation:Enum=Pending;Uploading;Committed;Failed;Expired;Deleting;Deleted
+// +kubebuilder:validation:Enum=Pending;Uploading;Committed;Failed;Expired;Deleting;Deleted;Orphaned
 type PublicationPhase string
 
 // Availability reports whether new authorized downloads can be served.
@@ -118,7 +121,7 @@ type PublicationPhase string
 type Availability string
 
 // CleanupState reports retention cleanup.
-// +kubebuilder:validation:Enum=NotDue;Pending;Deleted;DeletionFailed;RetentionBlocked
+// +kubebuilder:validation:Enum=NotDue;Pending;Deleted;DeletionFailed;RetentionBlocked;Orphaned
 type CleanupState string
 
 // ObjectRole identifies an owned storage object's purpose.

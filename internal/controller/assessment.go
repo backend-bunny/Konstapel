@@ -560,6 +560,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 	if err := builder.ControllerManagedBy(mgr).Named("assessmentrun").
 		For(&v1alpha1.AssessmentRun{}).
 		Watches(&v1alpha1.ComplianceBinding{}, runsForBinding(mgr.GetClient())).
+		Watches(&v1alpha1.EvidenceDestination{}, runsForDestination(mgr.GetClient())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: rt.Workers}).
 		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt, Instance: string(uuid.NewUUID())}); err != nil {
 		return err

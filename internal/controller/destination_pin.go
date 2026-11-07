@@ -209,6 +209,11 @@ type cached struct {
 
 // For returns the publisher of a run's pinned destination.
 func (p *DestinationPublishers) For(ctx context.Context, pin *v1alpha1.DestinationPin) (publication.Publisher, error) {
+	if pin.OrphanedAt != nil {
+		// Handed off: never served, even after the destination is gone or
+		// another destination exists at the same location.
+		return nil, publication.ErrOrphaned
+	}
 	ed, err := destinationByUID(ctx, p.Reader, pin.UID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", publication.ErrUnavailable, err)
@@ -268,16 +273,17 @@ func (r *AssessmentRunReconciler) reader() client.Reader {
 	return r.Client
 }
 
-// orphanFenced reports, from an uncached read, whether a pinned run's
-// destination has an accepted orphan handoff. A destination that no longer
-// exists is not fenced here (its absence is handled by the caller).
-func orphanFenced(ctx context.Context, r client.Reader, pin *v1alpha1.DestinationPin) (bool, error) {
+// orphanFenced returns, from an uncached read, a pinned run's destination
+// when its orphan handoff was accepted, and nil otherwise. A destination
+// that no longer exists is not fenced here (its absence is handled by the
+// caller).
+func orphanFenced(ctx context.Context, r client.Reader, pin *v1alpha1.DestinationPin) (*v1alpha1.EvidenceDestination, error) {
 	ed, err := destinationByUID(ctx, r, pin.UID)
 	if errors.Is(err, errDestinationLost) {
-		return false, nil
+		return nil, nil
 	}
-	if err != nil {
-		return false, err
+	if err != nil || ed.Status.OrphanIntent == nil {
+		return nil, err
 	}
-	return ed.Status.OrphanIntent != nil, nil
+	return ed, nil
 }

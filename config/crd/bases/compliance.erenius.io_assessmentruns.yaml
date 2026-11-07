@@ -246,6 +246,13 @@ spec:
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
+                  orphanedAt:
+                    description: |-
+                      orphanedAt is when the run's storage responsibility passed to an
+                      operator with its destination's orphan handoff. Konstapel issues no
+                      storage operation for the run afterwards.
+                    format: date-time
+                    type: string
                   pinnedAt:
                     description: pinnedAt is when the pin was accepted.
                     format: date-time
@@ -332,6 +339,7 @@ spec:
                         - Deleted
                         - DeletionFailed
                         - RetentionBlocked
+                        - Orphaned
                         type: string
                     required:
                     - state
@@ -467,6 +475,7 @@ spec:
                     - Expired
                     - Deleting
                     - Deleted
+                    - Orphaned
                     type: string
                   publicationID:
                     maxLength: 64
