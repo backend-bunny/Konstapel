@@ -5,6 +5,11 @@
 Authenticate Konstapel's frozen evidence packages through centrally configured
 signatures that remain independently verifiable after publication and key rotation.
 
+This delta covers Secret-backed signing only. Kubernetes service-account JWT
+authentication to Fulcio and remote OpenBao/Vault/KMS signers are deferred as
+described in the design's Deferred Follow-up section. They introduce no v1
+runtime dependency or implicit ambient-identity signing path.
+
 ## ADDED Requirements
 
 ### Requirement: Destination-controlled signing policy
@@ -23,8 +28,14 @@ Invalid combinations and unsupported signer kinds SHALL be rejected explicitly.
 
 #### Scenario: Invalid configuration
 
-- **WHEN** Required lacks a Secret reference, a reference selects another namespace, or a deferred KMS kind is requested
+- **WHEN** Required lacks a Secret reference, a reference selects another namespace, or a deferred KMS or keyless kind is requested
 - **THEN** admission rejects the configuration with a field-specific explanation
+
+#### Scenario: A workload identity token is available
+
+- **WHEN** the controller has a Kubernetes service-account token but its Required signing Secret is unavailable
+- **THEN** publication fails under the Secret-backed contract
+- **AND** token availability does not enable Fulcio signing or an unsigned fallback
 
 ### Requirement: Signing keys remain operator-managed secrets
 

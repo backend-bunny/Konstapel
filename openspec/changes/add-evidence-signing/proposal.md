@@ -27,8 +27,11 @@ its integrity and origin against an explicitly trusted public key.
   be verified using retained historical public keys.
 - Keep the signer boundary replaceable. Defer OpenBao/Vault Transit, AWS KMS,
   keyless signing, public transparency-log integration, and trusted timestamping
-  to later work. This change signs produced evidence, not release artifacts or
-  upstream scanner reports, and does not attest that a cluster is compliant.
+  to later work. Record Kubernetes service-account JWT authentication to Fulcio
+  as an optional future keyless approach, with explicit issuer trust and retained
+  historical verification proof; it is not a v1 dependency or implementation task.
+  This change signs produced evidence, not release artifacts or upstream scanner
+  reports, and does not attest that a cluster is compliant.
 
 ## Capabilities
 

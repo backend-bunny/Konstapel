@@ -9,7 +9,7 @@
 
 ## 2. Add central destination configuration and Secret access
 
-- [ ] 2.1 Coordinate shared schema ownership with S3 publishing, then add Disabled/Required signing configuration and controller-namespace Secret reference validation to EvidenceDestination; regenerate CRDs and test defaults, missing/mismatched fields, cross-namespace references, and unsupported backend requests.
+- [ ] 2.1 Coordinate shared schema ownership with S3 publishing, then add Disabled/Required signing configuration and controller-namespace Secret reference validation to EvidenceDestination; regenerate CRDs and test defaults, missing/mismatched fields, cross-namespace references, and unsupported KMS/keyless backend requests.
 - [ ] 2.2 Resolve configured Secrets through bounded namespace-scoped reads and react to relevant rotation changes; verify application roles cannot access keys or override policy, controller permissions stay scoped, and key values never enter captured errors/logs/status.
 - [ ] 2.3 Add bounded signing readiness and public-key identity status separately from assessment outcomes; test missing/malformed keys, recovery, unrelated destinations, and historical reads/cleanup with the current signer unavailable.
 - [ ] 2.4 Document operator key generation/installation and destination setup using validated examples; exercise API admission and RBAC against the examples and state that keys and trust distribution are operator-managed.
@@ -50,3 +50,9 @@
 - Propose a separate follow-up for OpenBao/Vault Transit and AWS KMS keys. Keep
   their credentials, service behavior, key versions, and compatibility tests out
   of this change's implementation checklist.
+- Explore Kubernetes service-account JWT authentication to Fulcio as a separate,
+  optional keyless-signing change, following the design's deferred flow. Resolve
+  issuer/audience trust, independent verifier identity constraints, retained
+  certificate/time/log proof for offline verification, infrastructure ownership,
+  and ephemeral-key recovery before implementation. This is future planning, not
+  a v1 task or an automatic fallback when Secret signing fails.

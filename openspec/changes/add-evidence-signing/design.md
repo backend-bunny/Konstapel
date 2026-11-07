@@ -279,8 +279,68 @@ dependencies and preserve the image's existing SBOM/license/attestation workflow
 
 ## Deferred Follow-up
 
+### Remote signing keys
+
 Add remotely owned signing keys through OpenBao/Vault Transit and AWS KMS in a
 separate change. Reuse the signer and artifact/verification contracts; design
 provider authentication, immutable remote key versions, timeouts, rotation, and
-service-outage acceptance there. No remote backend, hidden URI activation, keyless
-identity, or managed key provisioning is part of this implementation.
+service-outage acceptance there. Kubernetes workload identity may authenticate
+access to those services, but the persistent remote key still signs the evidence;
+this is distinct from Fulcio-based keyless signing.
+
+### Kubernetes identity and keyless signing
+
+Explore an optional Sigstore keyless signer in a separate change, especially for
+organisations that already operate compatible signing infrastructure. Keep
+Secret-backed signing as the portable v1 implementation; deploying Fulcio or
+trusting a public signing service is not a prerequisite for Konstapel.
+
+The prospective flow is:
+
+1. Mount a short-lived, projected Kubernetes service-account token with the
+   audience expected by the configured Fulcio service, normally `sigstore`.
+2. Generate an ephemeral signing key in memory and present the token plus proof
+   of possession of that key to Fulcio.
+3. Fulcio validates the token's issuer, audience, expiry, and signature through
+   the trusted issuer's discovery/JWKS, then issues a short-lived certificate
+   binding the public key to the workload identity.
+4. Sign the frozen archive with the ephemeral private key and durably retain the
+   signature, certificate chain, and verification proof before committing the
+   publication. Discard the ephemeral private key after use; never retain the
+   bearer token with the evidence.
+
+The JWT authenticates the certificate request; it is not the evidence-signing
+key. Neither the API server's service-account signing keys nor its token-issuance
+API become a general-purpose evidence signer. Use maintained Sigstore libraries
+through the signer boundary rather than a runtime CLI or custom JWT crypto.
+
+Fulcio must explicitly trust the cluster's issuer and be able to validate its
+tokens. Public Sigstore does not automatically trust arbitrary self-hosted
+clusters. Upstream Fulcio configuration includes EKS, AKS, and GKE issuer
+patterns; validate compatibility for the actual deployment. A self-hosted cluster
+needs a suitable Fulcio trust configuration or federation into a supported trusted
+issuer, not merely a token with the right audience. Verifiers must independently
+trust the certificate authority and constrain both the identity issuer and the
+expected namespace/service-account identity; names alone are not unique across
+clusters.
+
+Long-lived evidence needs retained certificate and trusted-time verification
+material that establishes signing within the certificate's validity period,
+such as authenticated transparency-log evidence or a trusted timestamp. Specify
+and test the chosen Sigstore bundle and offline trust inputs in that follow-up;
+certificate expiry alone must not make valid historical evidence unverifiable.
+Define service ownership, trust-root distribution/rotation, log visibility, and
+outage behaviour before selecting public or private infrastructure. Publishing
+to a public transparency log must be an explicit operator decision, accounting
+for disclosure of signing identity and artifact digest metadata.
+
+That change must adapt durable signing intent and restart recovery to ephemeral
+keys and certificate renewal; v1's pinned persistent-key contract cannot simply
+be assumed to work unchanged. Preserve exact frozen bytes, Required publication
+gating, reuse of durable signatures, and immutable committed history. No implicit
+fallback to a Secret key or unsigned publication is allowed. Token projection,
+Fulcio integration, remote signers, and their service-dependent tests remain
+outside this change's implementation checklist.
+
+References: [Fulcio OIDC and Kubernetes token requirements](https://github.com/sigstore/fulcio/blob/main/docs/oidc.md#kubernetes)
+and [upstream issuer configuration](https://github.com/sigstore/fulcio/blob/main/config/identity/config.yaml).
