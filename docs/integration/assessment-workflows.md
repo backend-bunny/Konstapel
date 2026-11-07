@@ -113,14 +113,15 @@ package means:
 
 | `summary.export` | `summary.evidence.completeness` | Meaning |
 | --- | --- | --- |
-| `Assessment` | `Complete` | Every expected check was attributable. The outcome counts are a full assessment of the frozen scope, covering only the mapped controls. |
+| `Assessment` | `Complete` | Every expected check was attributable. Outcomes cover the frozen technical-check scope; completeness does not establish a pass or whole-control compliance. |
 | `Assessment` | `Incomplete` | A valid, published assessment that records what it could not establish: missing, rejected or stale evidence, and limitations. It is never upgraded later. |
 | `Assessment` | `NoTargets` | Nothing was in scope. Not a pass. |
 | `Diagnostic` | any | Valid OSCAL could not be produced, for example because the engine policy did not match pinned content. The package holds `diagnostic.json` with the reason and evidence counts, and no OSCAL. |
 | `CaptureLost` | any | The frozen bytes were lost before durable storage. Nothing is published under that run's identity, and a new run is needed. |
 
 The engine's readiness (`EngineReady` on the binding) is never a compliance
-result, and neither status reports compliance beyond the mapped controls.
+result. Mapped checks provide bounded technical evidence, not whole-control or
+baseline compliance.
 
 ## Namespace download handoff
 
@@ -138,10 +139,10 @@ result, and neither status reports compliance beyond the mapped controls.
    issued for the `konstapel-download` audience:
 
    ```sh
-   UID=$(kubectl -n team-a get assessmentrequest nightly-check -o jsonpath='{.metadata.uid}')
-   TOKEN=$(kubectl -n team-a create token ci-reader --audience konstapel-download)
-   curl --cacert ca.crt -H "Authorization: Bearer $TOKEN" -D headers.txt -o package.tar.gz \
-     "https://<download-service>/v1/namespaces/team-a/assessmentrequests/nightly-check/download?uid=$UID"
+   REQUEST_UID=$(kubectl -n team-a get assessmentrequest nightly-check -o jsonpath='{.metadata.uid}')
+   DOWNLOAD_TOKEN=$(kubectl -n team-a create token ci-reader --audience konstapel-download)
+   curl --cacert ca.crt -H "Authorization: Bearer $DOWNLOAD_TOKEN" -D headers.txt -o package.tar.gz \
+     "https://<download-service>/v1/namespaces/team-a/assessmentrequests/nightly-check/download?uid=$REQUEST_UID"
    ```
 
    Here `ci-reader` is any service account in `team-a` whose subject the

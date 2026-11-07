@@ -10,10 +10,11 @@ cluster-scoped resources in `compliance.erenius.io/v1alpha1`:
   matches, in `Audit` or `Deny` mode.
 
 This is an alpha API. The schema, validation, RBAC, shared contract, resolver,
-engine delivery and the controller (`konstapel controller`) exist. Packaging
-the controller as a Helm chart is owned by `add-helm-oci-distribution`; feeding
-resolved scope into assessment evidence follows in this change. Applying these CRDs does not enforce anything
-yet. The capability spec is
+engine delivery and the controller (`konstapel controller`) exist. Resolved scope
+feeds the [continuous assessment collector](assessment-contract.md). Packaging
+the controller as a Helm chart is owned by `add-helm-oci-distribution`.
+Enforcement requires the running controller, selected content, and a compatible
+Kyverno installation; installing CRDs alone does not enforce policy. The capability spec is
 [compliance-targeting](../../openspec/specs/compliance-targeting/spec.md).
 
 ## Files
@@ -487,27 +488,27 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
 
 ## Downstream contract
 
-Other changes consume these files but do not edit them:
+These capabilities share the targeting contract:
 
 | Consumer | Uses |
 | --- | --- |
 | `add-self-service-policy-exceptions` | `targeting.Eligibility` (effective eligibility, shortest lifetime, contributor revisions) and `Contribution.Revision`. An acceptance is scoped to a revision and is never reused across revisions. |
-| `add-continuous-assessments` | Adds `spec.assessment` to the binding and its own kinds as new files in `api/v1alpha1`. It supplies the binding's enforcement epoch through `EnforcementInput.BindingEpoch`, and consumes `targeting.ExpectedEvidence`. |
+| Continuous assessments | Uses `spec.assessment`, AssessmentRequest/AssessmentRun, the admission-maintained enforcement epoch through `EnforcementInput.BindingEpoch`, and `targeting.ExpectedEvidence`. |
 | `add-linux-workload-hardening-bundle` | Bundle policy metadata (logical name and resource scope) that the resolver reads. |
 
 The repository has one Go module (`go.mod` at the root) and one API group
 (`compliance.erenius.io/v1alpha1`, in `api/v1alpha1`). Downstream changes add
 files there and do not create their own module or group. The exceptions change
-compares accepted contributions by `Contribution.Revision` (its task 4.3). The
-bundle change keeps the root module and existing privileged policy (its task
-preamble). Neither is implemented yet; the contracts they name are exported
-from `internal/targeting` and pinned by tests.
+compares accepted contributions by `Contribution.Revision`; its native-grant
+lifecycle remains in progress. The hardening bundle already serves its policy
+variants alongside the privileged policy. Shared contracts are exported from
+`internal/targeting` and pinned by tests; coordinate changes with their consumers.
 
 ### Expected evidence
 
 `targeting.ExpectedEvidence(result, content)` turns a resolver `Result` into the
-expected-evidence subjects that `add-continuous-assessments`' collector
-consumes. That change owns everything inside `internal/assessment`. There is
+expected-evidence subjects consumed by `internal/collector`. The original runner
+and provider remain in `internal/assessment`. There is
 one `EvidenceSubject` per namespace UID × contribution, carrying:
 
 - cluster, namespace name and UID, binding name and UID;
@@ -538,9 +539,10 @@ The output is pinned by `testdata/targeting/contract/evidence.json`; changing it
 requires bumping `targeting.ContractVersion`.
 
 `targeting.EnforcementRevision` is the only place revisions are calculated. Its
-binding-side input is the single `BindingEpoch` value. Today that is the
-binding's `metadata.generation`; `add-continuous-assessments` replaces it with
-an admission-maintained epoch, so reporting-only edits do not rotate policies.
+binding-side input is the single `BindingEpoch` value, taken from the
+admission-maintained `spec.enforcementEpoch`, so reporting-only edits do not rotate
+policies. Legacy bindings without that field fall back to `metadata.generation`
+until admission initializes the epoch on their next write.
 Namespace membership is not an input: a namespace entering or leaving scope
 does not create a new revision. The revision algorithm is pinned by a test, and
 changing it requires bumping `targeting.ContractVersion`.

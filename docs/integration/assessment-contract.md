@@ -1,14 +1,15 @@
 # Continuous assessment contract (v1alpha1)
 
-This guide documents the shared request, run, and package contract owned by
-`add-continuous-assessments`. Application teams create namespaced
+This guide documents the implemented shared request, run, and package contract.
+Application teams create namespaced
 `AssessmentRequest` resources; the controller and platform operators create
 protected, cluster-scoped `AssessmentRun` resources. Each run freezes a scope
 and produces one package, which a storage backend publishes.
 
-This is an alpha API and the contract phase only (task group 1). The scheduler,
-collector, scoped export, and binding `spec.assessment` settings arrive in later
-task groups. Applying these CRDs schedules nothing yet. The capability spec is
+This is an alpha API. The scheduler, collector, scoped export, and binding
+`spec.assessment` settings are implemented. Scheduling requires the running
+controller, admission setup, and a usable evidence destination; installing CRDs
+alone does not start assessments. The capability spec is
 [continuous-assessments](../../openspec/specs/continuous-assessments/spec.md).
 
 For operator and team workflows (schedules, on-demand runs, reading results,
@@ -130,7 +131,8 @@ together with read permission on the object. They are not CRD subresources.
   key no identity counts as the controller.
 
 Both use `admissionregistration.k8s.io/v1`. MutatingAdmissionPolicy at v1 needs
-Kubernetes 1.36 or later; the pinned acceptance node image is 1.36.1.
+Kubernetes 1.36 or later; the current acceptance node image is pinned in
+[`scripts/runtime.env`](../../scripts/runtime.env).
 
 ## Package and publication contract
 
@@ -465,8 +467,9 @@ captures stay in `internal/assessment`).
   `NextExpiry` gives the time current status must be re-evaluated, without
   waiting for an event.
 
-Engine-provided state correlation (task 4.3) may later replace the
-conservative continuity boundary where it is verified.
+Engine-provided state correlation remains unsupported for the tested Kyverno
+contract; the [engine-correlation findings](#capture-revisions-correlation-and-engine-limits)
+below explain why the conservative continuity boundary is required.
 
 **Engine policy verification.** Every capture records its subjects'
 contributions and the engine policies observed at freeze (name, labels,

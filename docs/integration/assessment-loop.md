@@ -2,9 +2,11 @@
 
 This prototype uses Go and the pinned C2P v2 library/plugin protocol to deliver
 one `policies.kyverno.io/v1` ValidatingPolicy and export partial AC-6 evidence.
-It is not a controller, a production SSP, or a full-control/baseline assessment.
-Additional policies in [the bundle research](../research/next-policy-bundle.md)
-are outside this change.
+These standalone commands are distinct from the
+[controller and targeting API](targeting-api.md). The emitted SSP is test context
+and the results do not establish full-control or baseline compliance. Additional
+shipped checks are documented in [Linux hardening](linux-hardening.md); scheduled
+and team-requested assessments are covered by [assessment workflows](assessment-workflows.md).
 
 ## Prerequisites and pinned inputs
 

@@ -8,18 +8,36 @@ to connect compliance requirements, technical policies, and assessment evidence.
 The intended workflow is to:
 
 1. Define the applicable controls through OSCAL content and authored
-   control-to-policy mappings.
-2. Generate and reconcile policies for a supported policy engine.
-3. Collect evaluation results and produce traceable OSCAL Assessment Results.
+   control-to-check mappings.
+2. Reconcile policies for supported engines and resolve reporting-only checks.
+3. Collect attributable evidence and produce traceable OSCAL Assessment Results.
 4. Report coverage, findings, and missing or stale evidence as systems change.
 
 ## Project status
 
-Konstapel includes a Go prototype for Kyverno 1.19.2 v1 policies and partial
-NIST AC-6 evidence. It exercises C2P v2, admission, background reporting and
-validated OSCAL export. A production controller is not yet implemented.
+Konstapel is under active development with an alpha Kubernetes API under
+`compliance.erenius.io/v1alpha1`. The controller supports centrally managed
+profiles/bindings, namespace targeting, Kyverno policy delivery, continuous and
+on-demand assessments, scoped OSCAL evidence, and S3-compatible publishing,
+downloads, and retention. The initial framework is NIST SP 800-53 Rev. 5 Moderate;
+technical checks provide partial control evidence.
+
+Kyverno is installed separately and performs Audit/Deny enforcement through
+`policies.kyverno.io/v1`. The Linux hardening bundle extends the original
+privileged-container check, with further assessment integration in progress.
+Native self-service exceptions remain disabled pending the documented
+[engine compatibility gates](docs/integration/policy-exceptions.md).
+
+[Trivy vulnerability assessment](openspec/changes/add-trivy-vulnerability-assessment/proposal.md)
+is planned: read-only scanner evidence through C2P, dedicated Audit bindings, and
+separate scan-coverage and vulnerability-exposure checks. Vulnerability admission
+blocking is deferred. Signed OCI policy bundles and Helm distribution are also
+tracked in [active OpenSpec changes](openspec/changes).
 
 ## Documentation
+
+Start with the [documentation index](docs/README.md) for implemented workflows,
+in-progress capabilities, and historical validation records.
 
 - [Development](docs/development.md): Devbox/direnv setup, Task commands, CI,
   and dependency updates with Renovate.
@@ -27,8 +45,14 @@ validated OSCAL export. A production controller is not yet implemented.
   and license notices.
 - [Releases](docs/releases.md): release-please version PRs, changelogs and image tags.
 - [Vision](vision.md): purpose, principles, and what success looks like.
-- [Architecture](ARCHITECTURE.md): components, reconciliation flow, C2P-Go v2
-  integration, and open design decisions.
+- [Architecture](ARCHITECTURE.md): components, reconciliation flow, provider
+  boundaries, and planned Trivy integration.
+- [Targeting API](docs/integration/targeting-api.md): profiles, bindings,
+  namespace scope, controller setup, and Kyverno delivery.
+- [Assessment workflows](docs/integration/assessment-workflows.md): schedules,
+  team requests, results, and scoped evidence downloads.
+- [S3 evidence](docs/integration/s3-evidence.md): destinations, credentials,
+  publication, retention, retirement, and orphaning.
 
 ## Assessment-loop prototype
 

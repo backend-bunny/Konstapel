@@ -1,8 +1,10 @@
 # Konstapel
 
 Konstapel is a compliance controller written in Go. It brings compliance intent
-into the reconciliation loop, connecting NIST SP 800-53 controls to technical
-policies, observed system state, and assessment evidence.
+into the reconciliation loop, connecting controls to technical policies,
+vulnerability findings, observed system state, and assessment evidence. NIST
+SP 800-53 is the first framework; the design should support other frameworks
+available as OSCAL catalogs without framework-specific evaluation logic.
 
 The project builds on OSCAL Compass's **compliance-to-policy-go v2** tooling,
 using OSCAL as the foundation for expressing compliance requirements and
@@ -26,32 +28,46 @@ operational workflow:
 
 1. Consume OSCAL content describing the applicable controls and their scope.
 2. Use compliance-to-policy tooling to connect those controls to technical
-   policies.
+   policies and assessment checks.
 3. Reconcile the intended policy configuration through supported integrations.
-4. Collect policy evaluation results and relate them to their source controls.
+4. Collect policy evaluation and scanner evidence and relate it to source controls.
 5. Expose coverage, findings, and evidence so people can assess the system and
    investigate changes.
 
-Go is the implementation language for the controller. How it integrates with
-compliance-to-policy will be established through technical validation, respecting
-the tooling's supported interfaces and runtime requirements.
+Go is the implementation language for the controller. C2P-Go v2 connects authored
+mappings and provider results to OSCAL assessments; integrations must validate
+their evidence semantics and preserve the tooling's runtime requirements.
 
 ## Initial focus
 
 The initial compliance framework is **NIST SP 800-53**, with Revision 5 as the
-starting point. The first implementation should demonstrate a complete path
-from a scoped set of controls to policies and traceable assessment evidence.
+starting point and **Moderate** as the initial baseline. Technical checks provide
+partial evidence for selected controls, with unassessed obligations left visible.
 
-The initial baseline, control subset, policy engine, and deployment assumptions
-remain to be selected. They should follow from a concrete use case and verified
-tooling capabilities.
+The first policy engine is **Kyverno**, using `policies.kyverno.io/v1` resources.
+Centrally managed profiles and bindings select namespaces and configure Audit or
+Deny behavior; the policy engine performs enforcement. Initial deployment covers
+Linux workloads in the controller's own cluster, with identities and evidence
+boundaries designed to accommodate multiple clusters later. Windows is out of scope.
+
+The planned next assessment integration is **Trivy Operator** for workload-image
+vulnerabilities. It adds separate scan-coverage and vulnerability-exposure checks
+through C2P, using dedicated Audit bindings. Trivy remains separately installed
+and owns scanning and registry access; Konstapel reads its evidence. Vulnerability
+admission blocking is deferred. See the
+[Trivy assessment proposal](openspec/changes/add-trivy-vulnerability-assessment/proposal.md)
+for the planned scope and implementation tasks.
 
 ## Principles
 
 - **Traceability:** preserve the relationship between controls, policies,
   evaluated resources, and evidence.
 - **Honest coverage:** distinguish supported, unsupported, unevaluated, and
-  failing requirements. Missing evidence must remain visible.
+  failing requirements. Missing, stale, or unattributable scan evidence must
+  remain visible and cannot establish a clean result.
+- **Governed self-service:** let application teams accept eligible risks with an
+  authenticated reason and bounded expiry, within centrally controlled limits.
+  Preserve findings and accepted risk separately; acceptance is not a pass.
 - **Continuous reconciliation:** respond to changes in compliance intent,
   policy configuration, and observed state.
 - **Standards first:** build on OSCAL and OSCAL Compass capabilities, extending
