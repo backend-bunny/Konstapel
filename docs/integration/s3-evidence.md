@@ -560,13 +560,44 @@ released immediately.
 - Removing the finalizer by hand releases the record without deleting storage.
   Do this only after cleaning up the run's prefix yourself.
 
-**Changing the destination or credentials.** Rotating the credential Secret is
-supported (see Setup). A retired destination cannot yet stay addressable for
-its packages' read and cleanup: receipts record its ID, endpoint, bucket and
-prefix, but the controller connects only to the current destination. Until
-that is resolved (add-s3-evidence-publishing 3.4), keep the destination
-unchanged while it holds unexpired packages. Otherwise their downloads and
-expiry cleanup fail as `DeletionFailed` or `Unavailable` and keep retrying.
+**Retention versus destination pinning.** These are two separate decisions
+at two moments:
+
+| | When | Chosen from | Later edits affect |
+| --- | --- | --- | --- |
+| Destination | Run start, before any storage write (Run pins) | The binding's `destinationRef`, or else the central default | Only runs that start afterwards |
+| Retention | First commit preparation | The binding's `spec.assessment.retention` (default `2160h`) | Only publications committed afterwards |
+
+A run that starts under destination A and is committed after the binding's
+retention was shortened publishes at A, with the shortened retention. A run
+committed before the edit keeps its original expiry wherever it is stored.
+
+**Changing the destination.** Locations are immutable, so moving evidence
+storage means creating a new `EvidenceDestination` and switching the
+binding's `destinationRef` or the central default. Runs already started stay
+pinned to the old destination, and their packages are downloaded, checked and
+deleted there until expiry. Later runs use the new one. Then delete the old
+destination. It retires (see Retirement): it refuses new runs, finishes its
+obligations, and is released when none remain. A name recreated for a
+different location is a new UID and never serves the old packages.
+
+**Rotating credentials or CA trust.** Update the referenced Secret's data in
+place (read again within 5 minutes), or point `credentialSecret`/`caTrust` at a
+new Secret or ConfigMap. The latter is a new generation, so the controller
+rebuilds that destination's publisher. Both apply to every package pinned to
+the destination, including historical ones, and both work while it retires.
+Deleting old credentials while packages still need them makes their
+operations fail visibly (`DeletionFailed`, `Unavailable`, retirement
+`RetirementBlocked`) and retry. There is no fallback to other credentials or
+another destination.
+
+**Blocked retirement.** A destination that cannot finish, because of an
+outage, missing credentials, or a lock on one of its packages, stays
+terminating with `Retiring=RetirementBlocked`. Its `cleanupBlockers` name the
+run and the failure. Fix the cause as described under Recovery, and the
+retries finish the work and release it. Elapsed time alone never releases a
+destination, and unfinished publication with unknown expiry is never treated
+as empty.
 
 **Short-duration verification.** `TestLiveRetentionLifecycle` (in
 `scripts/targeting-live.sh`) runs the whole lifecycle on a disposable cluster
@@ -580,6 +611,16 @@ days:
    record is released.
 4. The undeleted manual run's storage is deleted and it keeps a `Deleted`
    tombstone.
+
+`TestLiveDestinationPins` covers destination pinning, retirement and
+finalization in the same short-duration way:
+1. Two destinations on the test service are probed `Ready`.
+2. A run pins the default destination. The default switches mid-run, the run
+   still commits at its pinned prefix, and the next run commits at the new
+   one.
+3. Both destinations are then deleted with a 150s binding retention. Each stays
+   `Retiring` with its retained package counted, and is released only after
+   that package expires and is deleted from storage.
 
 ## Teardown
 

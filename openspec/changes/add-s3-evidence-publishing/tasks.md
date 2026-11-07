@@ -61,7 +61,7 @@ group 6. Do not treat earlier checks as coverage of the new API or orphan paths.
 - [x] 5.2 Add retention finalization independent of binding/request ownership and restart recovery; verify deleting a binding, request, or namespace retains its cleanup record and original expiry until storage removal is confirmed.
 - [x] 5.3 Delete owned archives, commit objects, attempt data, and applicable object versions/markers; verify enabled, suspended, and unversioned test modes remove owned retained bytes while separately retained packages and unrelated objects survive.
 - [x] 5.4 Add truthful deletion/availability states and retry behavior for partial deletion, missing permissions, locks, early object loss, and corruption; verify failed cleanup preserves ownership metadata and never reports a remaining version as deleted.
-- [ ] 5.5 Document retention selection separately from run-start destination pinning, credential/CA rotation, normal and blocked destination retirement, external lifecycle interference, and recovery; verify short-duration tests demonstrate expiry and finalization without waiting 90 days.
+- [x] 5.5 Document retention selection separately from run-start destination pinning, credential/CA rotation, normal and blocked destination retirement, external lifecycle interference, and recovery; verify short-duration tests demonstrate expiry and finalization without waiting 90 days.
 
 ## 6. Verify publication, access, and retention together
 
