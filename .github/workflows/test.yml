@@ -30,3 +30,39 @@ jobs:
       - run: devbox run -- task check
       - name: Verify checks did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
+  acceptance:
+    # Full disposable-cluster acceptance, including the S3 evidence lifecycle
+    # against the pinned S3-compatible test service (scripts/runtime.env).
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - name: Run acceptance
+        run: devbox run -- task acceptance OUTPUT="$RUNNER_TEMP/acceptance"
+      - name: Verify acceptance did not modify dependency locks
+        run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
+      - name: Acceptance summary
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/acceptance"
+          {
+            echo '## Acceptance'
+            jq -r '"passed: \(.passed) (exit \(.exitCode))"' "$out/acceptance-result.json" 2>/dev/null || echo 'no result recorded'
+            echo
+            grep -hE '^(--- (PASS|FAIL)|ok|FAIL)' "$out"/targeting/targeting-live.log 2>/dev/null | sed 's/^/    /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Test-owned evidence only: no kubeconfig, rendered chart manifest, or
+      # node logs. The cluster and S3 test service are torn down by the task.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: acceptance-evidence
+          path: |
+            ${{ runner.temp }}/acceptance
+            !${{ runner.temp }}/acceptance/kubeconfig
+            !${{ runner.temp }}/acceptance/environment/helm-manifest.yaml
+            !${{ runner.temp }}/acceptance/kind-logs
+          retention-days: 14
