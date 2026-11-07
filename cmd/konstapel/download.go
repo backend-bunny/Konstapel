@@ -30,6 +30,7 @@ func runDownload(args []string) error {
 	tmp := fs.String("temp-dir", os.TempDir(), "directory for archives while they are verified")
 	maxConcurrent := fs.Int("max-concurrent", 4, "concurrent downloads")
 	maxDisk := fs.Int64("max-temp-bytes", 2<<30, "temporary disk bytes across concurrent downloads")
+	drain := fs.Duration("shutdown-drain", download.DefaultDrain, "how long accepted downloads may finish after a termination signal before connections are closed")
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -61,5 +62,5 @@ func runDownload(args []string) error {
 	if err != nil {
 		return err
 	}
-	return download.Serve(ctx, l, *cert, *key, srv.Handler())
+	return download.Serve(ctx, l, *cert, *key, srv.Handler(), *drain)
 }

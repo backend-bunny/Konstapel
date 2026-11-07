@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -57,6 +59,11 @@ const (
 	DefaultRetryPeriod   = 2 * time.Second
 )
 
+// DefaultShutdownTimeout is the controller's overall shutdown budget: after
+// a termination signal or leadership loss, runnables have this long to stop
+// before the process exits, within the pod's 60s termination grace.
+const DefaultShutdownTimeout = 45 * time.Second
+
 // electionJitter is client-go's leader election jitter factor: the renew
 // deadline must exceed it times the retry period.
 const electionJitter = 1.2
@@ -102,6 +109,11 @@ type Options struct {
 	LeaderElectionNamespace string
 	// Election overrides the default timings; zero fields keep defaults.
 	Election Election
+	// ShutdownTimeout bounds shutdown; zero means DefaultShutdownTimeout.
+	ShutdownTimeout time.Duration
+	// Stopping reports that termination has begun; readiness then fails so
+	// the replica leaves service endpoints while it drains. Nil never stops.
+	Stopping func() bool
 	// SkipControllerNameValidation allows a second manager in the same
 	// process. Only tests that restart the manager in-process set it.
 	SkipControllerNameValidation bool
@@ -137,6 +149,13 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := election.Validate(); err != nil {
 		return nil, err
 	}
+	shutdown := opts.ShutdownTimeout
+	if shutdown == 0 {
+		shutdown = DefaultShutdownTimeout
+	}
+	if shutdown < 0 {
+		return nil, fmt.Errorf("shutdown timeout %s must be positive", shutdown)
+	}
 	mopts := ctrl.Options{
 		Scheme:                  Scheme(),
 		Metrics:                 metricsserver.Options{BindAddress: opts.MetricsAddr},
@@ -150,6 +169,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		// The Lease is not released early: expiry bounds the wait while
 		// shutdown may still be draining mutating work.
 		LeaderElectionReleaseOnCancel: false,
+		GracefulShutdownTimeout:       &shutdown,
 		Controller:                    config.Controller{SkipNameValidation: &opts.SkipControllerNameValidation},
 	}
 	if opts.WebhookCertDir != "" {
@@ -164,6 +184,16 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}
 	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		return nil, err
+	}
+	if opts.Stopping != nil {
+		if err := mgr.AddReadyzCheck("shutdown", func(*http.Request) error {
+			if opts.Stopping() {
+				return errors.New("shutting down")
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.ComplianceBinding{}, ProfileRefIndex, func(o client.Object) []string {
 		return []string{o.(*v1alpha1.ComplianceBinding).Spec.ProfileRef.Name}

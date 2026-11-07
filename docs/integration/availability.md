@@ -37,6 +37,40 @@ marked unavailable.
   graceful leader stop took about 20s in `TestLiveLeaderElection`, because the
   Lease expires rather than being released.
 
+## Shutdown and leadership loss
+
+| Setting | Default | Flag |
+| --- | --- | --- |
+| Controller shutdown budget | `45s`: runnables must stop by then, and the process exits even if one doesn't | `konstapel controller --shutdown-timeout` |
+| Download drain | `20s`: accepted downloads may finish, then remaining connections are closed | `konstapel download-server --shutdown-drain` |
+| Pod termination grace | `60s` (Helm), leaving headroom above both | — |
+
+- **Readiness.** From the termination signal on, `/readyz` fails (the
+  `shutdown` check) while the controller drains, so the replica leaves service
+  endpoints first. `/healthz` is unaffected.
+- **Interrupted downloads.** A long download can't hold termination open. Its
+  client retries the whole download with fresh authorization, because there
+  are no resumable ranges. There are no shell `preStop` hooks: the image has no
+  shell.
+- **Leadership loss.** When the Lease is lost, controller-runtime cancels
+  every leader-only runnable (reconcilers, the capability trigger, deferred
+  engine watches) and the manager exits with `leader election lost`. It doesn't
+  linger as an unelected process; the pod restarts and becomes a candidate
+  again.
+- **No child processes.** The controller runs no C2P child processes. Only the
+  `konstapel` CLI starts the provider plugin, so there are no children to
+  terminate.
+- **Interrupted work.** Durable recovery handles interrupted work: frozen
+  captures and staged packages are recovered on the next leader, and loss
+  before durable staging is `CaptureLost` (see the assessment contract).
+
+`TestLiveBoundedShutdown` checks three things:
+1. readiness fails once termination begins;
+2. a runnable that ignores cancellation can't hold the process past a 3s
+   budget;
+3. when another holder takes the Lease, the leader's work is cancelled within
+   5s and the manager exits with `leader election lost`.
+
 ## Lifecycle matrix
 
 `testdata/availability/lifecycle-matrix.json` maps every requirement in the
@@ -69,7 +103,4 @@ disposable cluster and checks four things:
 ## Not yet available
 
 - Serving readiness, which needs TLS and synchronized state (task 3.1).
-- Bounded shutdown: 45s application budget, 20s HTTP drain, 60s grace (task
-  4.4).
-- Child-process cancellation on leadership loss (task 2.3).
 - Multi-replica recovery and node-loss acceptance (group 5).

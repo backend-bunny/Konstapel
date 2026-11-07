@@ -29,6 +29,7 @@ func runController(args []string) error {
 	leaseDuration := fs.Duration("leader-election-lease-duration", controller.DefaultLeaseDuration, "how long a non-leader waits before taking over an unrenewed Lease")
 	renewDeadline := fs.Duration("leader-election-renew-deadline", controller.DefaultRenewDeadline, "how long the leader retries renewing before giving up leadership")
 	retryPeriod := fs.Duration("leader-election-retry-period", controller.DefaultRetryPeriod, "how often candidates try to acquire or renew the Lease")
+	shutdown := fs.Duration("shutdown-timeout", controller.DefaultShutdownTimeout, "overall shutdown budget after a termination signal or leadership loss; keep it below the pod's termination grace")
 	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
 	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
@@ -49,6 +50,8 @@ func runController(args []string) error {
 		return fmt.Errorf("evidence destination: %w", err)
 	}
 	controller.ConfigureAssessments(rt)
+	// Readiness fails from the termination signal on, while shutdown drains.
+	ctx := ctrl.SetupSignalHandler()
 	mgr, err := controller.NewManager(cfg, controller.Options{
 		Content: targeting.LocalContent{Root: *root, Name: VendoredBundle,
 			Policies: assessment.ShippedPolicies},
@@ -57,6 +60,8 @@ func runController(args []string) error {
 		LeaderElection:          *leader,
 		LeaderElectionNamespace: *leaderNS,
 		Election:                controller.Election{LeaseDuration: *leaseDuration, RenewDeadline: *renewDeadline, RetryPeriod: *retryPeriod},
+		ShutdownTimeout:         *shutdown,
+		Stopping:                func() bool { return ctx.Err() != nil },
 		WebhookCertDir:          *webhookCerts,
 		WebhookPort:             *webhookPort,
 		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),
@@ -64,5 +69,5 @@ func runController(args []string) error {
 	if err != nil {
 		return err
 	}
-	return mgr.Start(ctrl.SetupSignalHandler())
+	return mgr.Start(ctx)
 }
