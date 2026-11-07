@@ -26,6 +26,9 @@ func runController(args []string) error {
 	metrics := fs.String("metrics-bind-address", "0", "metrics address; \"0\" disables the metrics server")
 	probes := fs.String("health-probe-bind-address", ":8081", "address for /healthz and /readyz")
 	leader := fs.Bool("leader-elect", true, "use a Lease so only one replica reconciles")
+	leaseDuration := fs.Duration("leader-election-lease-duration", controller.DefaultLeaseDuration, "how long a non-leader waits before taking over an unrenewed Lease")
+	renewDeadline := fs.Duration("leader-election-renew-deadline", controller.DefaultRenewDeadline, "how long the leader retries renewing before giving up leadership")
+	retryPeriod := fs.Duration("leader-election-retry-period", controller.DefaultRetryPeriod, "how often candidates try to acquire or renew the Lease")
 	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
 	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
@@ -53,6 +56,7 @@ func runController(args []string) error {
 		ProbeAddr:               *probes,
 		LeaderElection:          *leader,
 		LeaderElectionNamespace: *leaderNS,
+		Election:                controller.Election{LeaseDuration: *leaseDuration, RenewDeadline: *renewDeadline, RetryPeriod: *retryPeriod},
 		WebhookCertDir:          *webhookCerts,
 		WebhookPort:             *webhookPort,
 		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),

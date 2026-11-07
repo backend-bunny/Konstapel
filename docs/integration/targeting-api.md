@@ -361,7 +361,8 @@ Remove it through the prototype's own workflow.
 | `--content-root` | `/usr/share/konstapel/content` | Vendored content, served as bundle `konstapel-vendored`. |
 | `--health-probe-bind-address` | `:8081` | `/healthz` and `/readyz`. They report process health only, never engine readiness or compliance. |
 | `--metrics-bind-address` | `0` (off) | controller-runtime metrics. |
-| `--leader-elect` | `true` | Lease `konstapel-targeting.compliance.erenius.io` in the pod namespace. |
+| `--leader-elect` | `true` | Lease `konstapel-controller-leader-election` in the pod namespace, shared by every replica and supported revision. |
+| `--leader-election-lease-duration`, `--leader-election-renew-deadline`, `--leader-election-retry-period` | `15s`, `10s`, `2s` | Election timings. Startup fails unless lease > renew > 1.2 × retry, all positive. |
 | `--leader-election-namespace` | `$POD_NAMESPACE` | Namespace of the Lease. |
 
 Profiles pin the vendored content as bundle `konstapel-vendored` at
