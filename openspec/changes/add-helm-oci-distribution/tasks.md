@@ -38,11 +38,11 @@ Keep the existing fast checks and feature-owned integration suites alongside it.
 
 ## 2. Package authoritative CRDs and prove their lifecycle
 
-- [ ] 2.1 After API implementations land, generate the CRD chart from their canonical outputs with only reviewed packaging metadata; verify normalized schemas, defaults, validation, scopes and subresources match and placeholder or obsolete definitions cannot ship.
-- [ ] 2.2 Add retention metadata to every CRD and prohibit destructive chart cleanup paths; verify rendered output has no deletion/recreation hooks, unsafe owner references, purge option or finalizer-removal behavior.
-- [ ] 2.3 Exercise explicit CRD upgrades with the pinned Helm in kind; verify existing object UIDs/spec/status/finalizers survive unchanged-schema version bumps and supported additive changes, and document the tested previous-controller transition when a prior runtime exists.
-- [ ] 2.4 Exercise CRD-chart uninstall and same-identity reinstall with populated objects; verify definitions/data survive, retained ownership supports the documented reinstall, and conflicting release ownership is reported without adoption or deletion.
-- [ ] 2.5 Document CRDs-first installation, supported upgrade/rollback boundaries and retained-resource ownership; verify the commands reproduce the lifecycle fixtures and explain that explicit CRD deletion is outside Helm uninstall.
+- [x] 2.1 After API implementations land, generate the CRD chart from their canonical outputs with only reviewed packaging metadata; verify normalized schemas, defaults, validation, scopes and subresources match and placeholder or obsolete definitions cannot ship.
+- [x] 2.2 Add retention metadata to every CRD and prohibit destructive chart cleanup paths; verify rendered output has no deletion/recreation hooks, unsafe owner references, purge option or finalizer-removal behavior.
+- [x] 2.3 Exercise explicit CRD upgrades with the pinned Helm in kind; verify existing object UIDs/spec/status/finalizers survive unchanged-schema version bumps and supported additive changes, and document the tested previous-controller transition when a prior runtime exists.
+- [x] 2.4 Exercise CRD-chart uninstall and same-identity reinstall with populated objects; verify definitions/data survive, retained ownership supports the documented reinstall, and conflicting release ownership is reported without adoption or deletion.
+- [x] 2.5 Document CRDs-first installation, supported upgrade/rollback boundaries and retained-resource ownership; verify the commands reproduce the lifecycle fixtures and explain that explicit CRD deletion is outside Helm uninstall.
 
 ## 3. Wire the real controller, admission and TLS services
 
