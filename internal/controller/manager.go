@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -131,6 +132,16 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}
 	capabilities := &capability.Monitor{Discovery: dc, Review: capability.SelfReview(reviewer), Timeout: capabilityTimeout, TTL: opts.EnginePoll}
 	engine := capabilities.Engine(capability.Delivery)
+	reports := capabilities.Engine(capability.Assessment)
+	// A capability change (an engine installed, removed, or its permissions
+	// changed) re-reconciles every binding, so Conditions stay truthful
+	// although a Ready binding is otherwise not requeued.
+	deliveryEvents := make(chan event.GenericEvent)
+	assessmentEvents := make(chan event.GenericEvent)
+	if err := mgr.Add(&capabilityTrigger{name: "capability-trigger", client: mgr.GetClient(), poll: opts.EnginePoll,
+		checks: []EngineAvailable{engine, reports}, out: []chan<- event.GenericEvent{deliveryEvents, assessmentEvents}}); err != nil {
+		return nil, err
+	}
 
 	br := &BindingReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: opts.Content, Engine: engine, Cluster: "kube-system:" + string(ks.UID)}
 	bc, err := builder.ControllerManagedBy(mgr).
@@ -138,6 +149,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		For(&v1alpha1.ComplianceBinding{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient())).
+		WatchesRawSource(source.Channel(deliveryEvents, &handler.EnqueueRequestForObject{})).
 		Build(br)
 	if err != nil {
 		return nil, err
@@ -159,7 +171,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}}); err != nil {
 		return nil, err
 	}
-	if err := setupAssessments(mgr, opts.Content, engine, capabilities.Engine(capability.Assessment), br.Cluster, opts.EnginePoll); err != nil {
+	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
@@ -214,6 +226,61 @@ func (w *deferredWatch) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+		}
+	}
+}
+
+// capabilityTrigger polls capabilities and, whenever any result changes,
+// sends every ComplianceBinding to each output, so the dependent
+// controllers re-evaluate.
+type capabilityTrigger struct {
+	name   string
+	client client.Client
+	checks []EngineAvailable
+	out    []chan<- event.GenericEvent
+	poll   time.Duration
+}
+
+func (t *capabilityTrigger) NeedLeaderElection() bool { return true }
+
+func (t *capabilityTrigger) Start(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName(t.name)
+	ticker := time.NewTicker(t.poll)
+	defer ticker.Stop()
+	var last string
+	for {
+		var state []string
+		for _, check := range t.checks {
+			if _, err := check(ctx); err != nil {
+				state = append(state, string(capability.ReasonOf(err))+":"+err.Error())
+			} else {
+				state = append(state, string(capability.Available))
+			}
+		}
+		if s := strings.Join(state, "|"); s != last {
+			if last != "" {
+				logger.Info("capabilities changed; re-reconciling bindings", "capabilities", s)
+			}
+			last = s
+			var list v1alpha1.ComplianceBindingList
+			if err := t.client.List(ctx, &list); err != nil {
+				last = "" // retry the notification next time
+			} else {
+				for i := range list.Items {
+					for _, ch := range t.out {
+						select {
+						case ch <- event.GenericEvent{Object: &list.Items[i]}:
+						case <-ctx.Done():
+							return nil
+						}
+					}
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
 		}
 	}
 }

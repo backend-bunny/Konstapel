@@ -69,3 +69,17 @@ func TestAssessmentCapabilityGate(t *testing.T) {
 		t.Fatal("scheduling did not resume with reports available")
 	}
 }
+
+// An unavailable delivery capability is an assessment limitation with its
+// reason, not a reconcile failure.
+func TestAssessmentWithUnavailableEngine(t *testing.T) {
+	e := newRunEnv(t, epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}))
+	e.deliver("audit-prod")
+	e.ar.Engine = unavailable(capability.AccessDenied, "PolicyDelivery: the service account may not list validatingpolicies.policies.kyverno.io")
+	e.assess("audit-prod")
+	cur := e.current("audit-prod")
+	if !strings.Contains(strings.Join(cur.Limitations, ";"), "PolicyDelivery: the service account may not list validatingpolicies.policies.kyverno.io; no engine policies or reports can be read") ||
+		cur.Evidence.Completeness == "Complete" {
+		t.Fatalf("limitations %v completeness %s", cur.Limitations, cur.Evidence.Completeness)
+	}
+}
