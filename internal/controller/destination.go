@@ -35,6 +35,8 @@ const (
 	// DestinationProbeInterval is how often a destination's backend is
 	// re-probed while nothing changes.
 	DestinationProbeInterval = 5 * time.Minute
+	// DestinationProbeTimeout bounds one compatibility probe.
+	DestinationProbeTimeout = 30 * time.Second
 )
 
 // controllerNamespace is where credentials, trust, and the default live.
@@ -83,6 +85,13 @@ type DestinationReconciler struct {
 	Reader    client.Reader // uncached: Secrets and ConfigMaps in the controller namespace
 	Namespace string
 	Now       func() time.Time
+	// Destinations is the process's publisher registry; an accepted orphan
+	// handoff fences and drains its in-flight work.
+	Destinations *DestinationPublishers
+	// ProbeTimeout bounds one compatibility probe (default 30s).
+	ProbeTimeout time.Duration
+	// DrainTimeout bounds the wait for fenced in-flight work (default 30s).
+	DrainTimeout time.Duration
 	// Probe checks a destination; tests replace it.
 	Probe func(ctx context.Context, d s3store.Destination, r client.Reader, namespace string) error
 }
@@ -104,26 +113,59 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	cond := metav1.Condition{Type: v1alpha1.ConditionDestinationReady, Status: metav1.ConditionTrue, Reason: "Ready", Message: "backend passed the compatibility probe", ObservedGeneration: ed.Generation}
+	status := ed.Status.DeepCopy()
+	acceptOrphan(ed, status, r.now())
+	handedOff := status.OrphanIntent != nil
+	var err error
+	if handedOff {
+		// No remote operation of any kind after an accepted handoff, not
+		// even a probe.
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, "HandedOff", "storage responsibility was handed off to an operator; the backend is no longer contacted"
+		uncertain := []string(nil)
+		if r.Destinations != nil {
+			wait := r.DrainTimeout
+			if wait <= 0 {
+				wait = 30 * time.Second
+			}
+			if status.OrphanHandoff != nil {
+				wait = 0 // a restarted process re-fences; nothing of ours is in flight
+			}
+			uncertain = r.Destinations.Fence(string(ed.UID), wait)
+		}
+		if status.OrphanHandoff == nil {
+			if len(uncertain) > 64 {
+				uncertain = uncertain[:64]
+			}
+			status.OrphanHandoff = &v1alpha1.OrphanHandoff{FencedAt: metav1.NewTime(r.now()), Drained: len(uncertain) == 0, UncertainOperations: uncertain}
+		}
+	}
 	d, err := DestinationFromAPI(ctx, r.Reader, r.Namespace, ed)
-	if err == nil {
+	if err == nil && !handedOff {
 		probe := r.Probe
 		if probe == nil {
 			probe = ProbeDestination
 		}
-		err = probe(ctx, d, r.Reader, r.Namespace)
+		// An unreachable backend must not stall the reconciler (every S3
+		// request would otherwise wait out its own timeout and retries), or
+		// retirement and orphan handoff could not proceed.
+		timeout := r.ProbeTimeout
+		if timeout <= 0 {
+			timeout = DestinationProbeTimeout
+		}
+		pctx, cancel := context.WithTimeout(ctx, timeout)
+		err = probe(pctx, d, r.Reader, r.Namespace)
+		cancel()
 	}
-	if err != nil {
+	if err != nil && !handedOff {
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, "NotReady", truncate(err.Error())
 	}
 	ob, err := r.obligations(ctx, ed)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	status := ed.Status.DeepCopy()
 	status.ObservedGeneration = ed.Generation
 	meta.SetStatusCondition(&status.Conditions, cond)
 	ob.apply(status)
-	acceptOrphan(ed, status, r.now())
 	if !ed.DeletionTimestamp.IsZero() {
 		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed, status))
 	}

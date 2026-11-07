@@ -484,6 +484,24 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.Get(ctx, req.NamespacedName, run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// A run pinned to a destination whose orphan handoff was accepted issues
+	// no further storage operation of any kind: publication, retries,
+	// recovery, retention, attempt cleanup, and integrity checks stop. Its
+	// record is held for the handoff (inventory and Orphaned disposition).
+	if pin := run.Status.Destination; pin != nil && r.Runtime.Destinations != nil {
+		fenced, err := orphanFenced(ctx, r.reader(), pin)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if fenced {
+			return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
+		}
+		var done func()
+		if ctx, done, err = r.Runtime.Destinations.Begin(ctx, pin.UID, "run "+run.Name+" "+string(run.Status.Phase)); errors.Is(err, publication.ErrOrphaned) {
+			return ctrl.Result{RequeueAfter: OrphanHoldRequeue}, nil
+		}
+		defer done()
+	}
 	if runDone(run) {
 		return r.retain(ctx, run)
 	}
@@ -953,6 +971,10 @@ func (r *AssessmentRunReconciler) checkIntegrity(ctx context.Context, run *v1alp
 	pub.Availability, pub.Failure = availability, failure
 	return r.Client.Status().Update(ctx, run)
 }
+
+// OrphanHoldRequeue is how often a run fenced by an orphan handoff is looked
+// at again; it never issues storage operations while fenced.
+const OrphanHoldRequeue = 10 * time.Minute
 
 // ReasonDestinationUnavailable fails a run whose destination selection lost
 // to deletion, replacement, or readiness; it made no storage writes.

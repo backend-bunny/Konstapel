@@ -323,6 +323,34 @@ spec:
                   describes.
                 format: int64
                 type: integer
+              orphanHandoff:
+                description: orphanHandoff reports the work fence after an accepted
+                  handoff.
+                properties:
+                  drained:
+                    description: |-
+                      drained is true when no local operation was still in flight after the
+                      bounded wait.
+                    type: boolean
+                  fencedAt:
+                    description: fencedAt is when the controller stopped issuing storage
+                      operations.
+                    format: date-time
+                    type: string
+                  uncertainOperations:
+                    description: |-
+                      uncertainOperations are local operations still in flight when the
+                      wait ended; their remote outcome is unknown.
+                    items:
+                      maxLength: 256
+                      type: string
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - drained
+                - fencedAt
+                type: object
               orphanIntent:
                 description: orphanIntent is the accepted, irreversible orphan handoff.
                 properties:

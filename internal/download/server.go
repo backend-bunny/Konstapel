@@ -256,6 +256,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.Ass
 		if s.PublisherFor != nil {
 			if p, err := s.PublisherFor(ctx, run); err == nil {
 				pub = p
+			} else if errors.Is(err, publication.ErrOrphaned) {
+				fail(w, problem{http.StatusGone, "the package's storage was handed off to an operator and is no longer served"})
+				return
 			} else {
 				log.FromContext(ctx).Info("pinned destination unavailable", "run", run.Name, "error", err.Error())
 			}
