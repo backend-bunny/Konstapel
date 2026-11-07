@@ -258,17 +258,15 @@ func TestLiveEvidenceRecovery(t *testing.T) {
 	l.record("cleanup-recovered", map[string]any{"run": first})
 
 	// 5. The binding is deleted while a run publishes against an outage.
-	manual("er-audit-orphaned-binding")
-	l.eventually("run collecting", func() (bool, string) {
-		r := get("er-audit-orphaned-binding")
-		return r != nil && r.Status.Phase == v1alpha1.RunCollecting, toJSON(r)
-	})
+	// Storage goes away first: with complete evidence, collection can close
+	// at once, and pinning needs no storage call.
 	if out, err := exec.Command("docker", "pause", l.s3Container).CombinedOutput(); err != nil {
 		t.Fatalf("pause S3: %v %s", err, out)
 	}
+	manual("er-audit-orphaned-binding")
 	l.eventually("run publishing during the outage", func() (bool, string) {
 		r := get("er-audit-orphaned-binding")
-		return r.Status.Phase == v1alpha1.RunPublishing, toJSON(r.Status)
+		return r != nil && r.Status.Phase == v1alpha1.RunPublishing && r.Status.Destination != nil, toJSON(r)
 	})
 	oldBinding := get("er-audit-orphaned-binding").Status.Binding.UID
 	if err := l.c.Delete(l.ctx, l.binding("er-audit")); err != nil {
