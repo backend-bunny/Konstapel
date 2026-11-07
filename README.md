@@ -1,5 +1,12 @@
 # Konstapel
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/konstapel-logo-dark.png">
+    <img src="docs/assets/branding/konstapel-logo-light.png" alt="Konstapel: a bunny wearing a Swedish-inspired law officer cap with a K badge" width="480">
+  </picture>
+</p>
+
 Konstapel is a compliance controller being built in Go for Kubernetes, targeting
 **NIST SP 800-53 Revision 5**. It builds on OSCAL Compass's
 [compliance-to-policy-go v2](https://github.com/oscal-compass/compliance-to-policy-go)
