@@ -116,7 +116,7 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	status := ed.Status.DeepCopy()
 	acceptOrphan(ed, status, r.now())
 	handedOff := status.OrphanIntent != nil
-	var err error
+	var err, inventoryErr error
 	if handedOff {
 		// No remote operation of any kind after an accepted handoff, not
 		// even a probe.
@@ -137,6 +137,15 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				uncertain = uncertain[:64]
 			}
 			status.OrphanHandoff = &v1alpha1.OrphanHandoff{FencedAt: metav1.NewTime(r.now()), Drained: len(uncertain) == 0, UncertainOperations: uncertain}
+		}
+		// Persist the ownership inventory before anything may be released.
+		// A failure keeps the fence and every finalizer and is retried.
+		if status.OrphanHandoff.Inventory == nil {
+			if inv, err := r.saveOrphanInventory(ctx, ed, status); err != nil {
+				inventoryErr = err
+			} else {
+				status.OrphanHandoff.Inventory = inv
+			}
 		}
 	}
 	d, err := DestinationFromAPI(ctx, r.Reader, r.Namespace, ed)
@@ -169,11 +178,18 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if !ed.DeletionTimestamp.IsZero() {
 		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed, status))
 	}
+	if inventoryErr != nil {
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionDestinationRetiring, Status: metav1.ConditionTrue,
+			Reason: "OrphanInventoryPending", Message: truncate("the orphan inventory could not be saved; the fence and finalizers remain: " + inventoryErr.Error()), ObservedGeneration: ed.Generation})
+	}
 	if !equality.Semantic.DeepEqual(&ed.Status, status) {
 		ed.Status = *status
 		if err := r.Client.Status().Update(ctx, ed); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+	if inventoryErr != nil {
+		return ctrl.Result{RequeueAfter: AttemptCleanupRetry}, nil
 	}
 	// Retirement finishes only when no accepted run, upload, retained
 	// package, or cleanup still needs this destination. The count comes

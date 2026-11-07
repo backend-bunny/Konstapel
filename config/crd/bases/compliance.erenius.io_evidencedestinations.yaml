@@ -337,6 +337,36 @@ spec:
                       operations.
                     format: date-time
                     type: string
+                  inventory:
+                    description: inventory is the durable ownership inventory, once
+                      fully saved.
+                    properties:
+                      chunks:
+                        description: chunks is the number of run-list ConfigMaps.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      header:
+                        description: |-
+                          header is the ConfigMap holding the handoff identity and chunk digests;
+                          it is written last, so its presence means the inventory is complete.
+                        maxLength: 253
+                        type: string
+                      runs:
+                        description: runs is the number of runs recorded.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      savedAt:
+                        description: savedAt is when the header was saved.
+                        format: date-time
+                        type: string
+                    required:
+                    - chunks
+                    - header
+                    - runs
+                    - savedAt
+                    type: object
                   uncertainOperations:
                     description: |-
                       uncertainOperations are local operations still in flight when the
