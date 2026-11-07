@@ -29,6 +29,10 @@ var (
 	// an object lock or a missing delete permission. Konstapel never bypasses
 	// it; an administrator must resolve it.
 	ErrRetentionBlocked = errors.New("storage refused deletion")
+	// ErrOrphaned reports that the destination's storage responsibility was
+	// handed to an operator: Konstapel issues no further remote operations
+	// there and serves no downloads.
+	ErrOrphaned = errors.New("evidence destination handed off to an operator")
 )
 
 // StageRequest hands a frozen, validated package directory to the publisher.

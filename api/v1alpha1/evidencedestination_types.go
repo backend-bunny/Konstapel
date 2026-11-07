@@ -207,6 +207,26 @@ const (
 	ConditionDestinationRetiring = "Retiring"
 )
 
+// OrphanHandoff reports how storage work was fenced for an accepted orphan
+// handoff. Cancelling local work never reverses a remote write or deletion;
+// operations that were already dispatched have unknown remote outcomes.
+type OrphanHandoff struct {
+	// fencedAt is when the controller stopped issuing storage operations.
+	// +required
+	FencedAt metav1.Time `json:"fencedAt"`
+	// drained is true when no local operation was still in flight after the
+	// bounded wait.
+	// +required
+	Drained bool `json:"drained"`
+	// uncertainOperations are local operations still in flight when the
+	// wait ended; their remote outcome is unknown.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=256
+	UncertainOperations []string `json:"uncertainOperations,omitempty"`
+}
+
 // EvidenceDestinationStatus is written by the controller only.
 type EvidenceDestinationStatus struct {
 	// observedGeneration is the spec generation the status describes.
@@ -244,6 +264,10 @@ type EvidenceDestinationStatus struct {
 	// orphanIntent is the accepted, irreversible orphan handoff.
 	// +optional
 	OrphanIntent *OrphanIntent `json:"orphanIntent,omitempty"`
+
+	// orphanHandoff reports the work fence after an accepted handoff.
+	// +optional
+	OrphanHandoff *OrphanHandoff `json:"orphanHandoff,omitempty"`
 
 	// conditions report readiness and retirement.
 	// +optional

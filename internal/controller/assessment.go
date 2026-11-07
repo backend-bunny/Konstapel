@@ -567,7 +567,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 	if err := builder.ControllerManagedBy(mgr).Named("evidencedestination").
 		For(&v1alpha1.EvidenceDestination{}).
 		Watches(&v1alpha1.AssessmentRun{}, destinationForRun(mgr.GetClient())).
-		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace}); err != nil {
+		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Destinations: rt.Destinations}); err != nil {
 		return err
 	}
 	// Engine policies and reports are watched once the engine API is served.

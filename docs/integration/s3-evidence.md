@@ -152,9 +152,33 @@ kubectl patch evidencedestination primary --type=merge \
   `deletionPolicy: Orphan` and `spec.orphan`, so the handoff can't be changed
   or reversed. Credentials can still rotate.
 
-The handoff itself — fencing storage work, the durable orphan inventory, and
-marking runs `Orphaned` — follows (add-s3-evidence-publishing 8.3–8.7). Until
-then, an accepted orphan still retires normally, and its condition says so.
+**Orphan fence.** From acceptance on, Konstapel issues no remote operation for
+that destination of any kind:
+- **Run reconciler.** A run pinned to the destination re-reads it uncached on
+  every reconcile. When the handoff is accepted, the run starts no
+  publication, retry, recovery, retention deletion, attempt cleanup
+  (multipart uploads are never aborted) or integrity check. Its record is held
+  unchanged, and a restarted controller sees the same fence from the durable
+  status.
+- **Destination reconciler.** It stops probing (`Ready=HandedOff`), cancels
+  this process's in-flight operations for the destination and waits up to 30s
+  for them to drain. It records `status.orphanHandoff` with `fencedAt`,
+  `drained`, and the operations still in flight at the deadline
+  (`uncertainOperations`). Their remote outcome is unknown, and nothing claims
+  they were reversed or that stored bytes were removed. Probes are bounded at
+  30s, so an unreachable backend never stalls handoff.
+- **Download service.** It answers 410 for the destination's packages.
+  Already delivered bytes are not revoked.
+- **Late responses.** A response that arrives after the fence may record what
+  really happened, such as a commit that completed. It never restarts
+  retention or cleanup.
+
+`TestLiveOrphanFence` checks this with a real S3 test service that is paused
+(unreachable) while the handoff is requested and accepted. Once the backend
+returns, the run is unchanged and nothing for it reached storage. The durable
+orphan inventory and the runs' `Orphaned` disposition follow
+(add-s3-evidence-publishing 8.4–8.7). Until then, a fenced destination stays
+terminating.
 
 ## Destination configuration
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -132,6 +134,72 @@ type DestinationPublishers struct {
 
 	mu    sync.Mutex
 	cache map[string]cached
+
+	// In-process operations per destination UID, cancelled by Fence.
+	inflightMu sync.Mutex
+	inflight   map[string]map[*inflightOp]struct{}
+	fenced     map[string]bool
+}
+
+type inflightOp struct {
+	desc   string
+	cancel context.CancelFunc
+}
+
+// Begin registers a unit of storage work against a destination. The
+// returned context is cancelled when the destination is fenced; done must
+// be called when the work ends. Work cannot begin on a fenced destination.
+func (p *DestinationPublishers) Begin(ctx context.Context, uid, desc string) (context.Context, func(), error) {
+	p.inflightMu.Lock()
+	defer p.inflightMu.Unlock()
+	if p.fenced[uid] {
+		return ctx, func() {}, publication.ErrOrphaned
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	op := &inflightOp{desc: desc, cancel: cancel}
+	if p.inflight == nil {
+		p.inflight = map[string]map[*inflightOp]struct{}{}
+	}
+	if p.inflight[uid] == nil {
+		p.inflight[uid] = map[*inflightOp]struct{}{}
+	}
+	p.inflight[uid][op] = struct{}{}
+	return ctx, func() {
+		cancel()
+		p.inflightMu.Lock()
+		delete(p.inflight[uid], op)
+		p.inflightMu.Unlock()
+	}, nil
+}
+
+// Fence stops all new work for a destination in this process, cancels work
+// in flight, and waits up to wait for it to end. It returns the work that
+// was still in flight: its remote outcome is unknown. Cancellation never
+// reverses a request the storage service already received.
+func (p *DestinationPublishers) Fence(uid string, wait time.Duration) []string {
+	p.inflightMu.Lock()
+	if p.fenced == nil {
+		p.fenced = map[string]bool{}
+	}
+	p.fenced[uid] = true
+	for op := range p.inflight[uid] {
+		op.cancel()
+	}
+	p.inflightMu.Unlock()
+	deadline := time.Now().Add(wait)
+	for {
+		p.inflightMu.Lock()
+		var left []string
+		for op := range p.inflight[uid] {
+			left = append(left, op.desc)
+		}
+		p.inflightMu.Unlock()
+		if len(left) == 0 || !time.Now().Before(deadline) {
+			slices.Sort(left)
+			return left
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 type cached struct {
@@ -144,6 +212,9 @@ func (p *DestinationPublishers) For(ctx context.Context, pin *v1alpha1.Destinati
 	ed, err := destinationByUID(ctx, p.Reader, pin.UID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", publication.ErrUnavailable, err)
+	}
+	if ed.Status.OrphanIntent != nil {
+		return nil, publication.ErrOrphaned
 	}
 	s := ed.Spec.S3
 	if s.Endpoint != pin.Endpoint || s.Bucket != pin.Bucket || s.Region != pin.Region || s.Prefix != pin.Prefix {
@@ -195,4 +266,18 @@ func (r *AssessmentRunReconciler) reader() client.Reader {
 		return r.Assess.Reader
 	}
 	return r.Client
+}
+
+// orphanFenced reports, from an uncached read, whether a pinned run's
+// destination has an accepted orphan handoff. A destination that no longer
+// exists is not fenced here (its absence is handled by the caller).
+func orphanFenced(ctx context.Context, r client.Reader, pin *v1alpha1.DestinationPin) (bool, error) {
+	ed, err := destinationByUID(ctx, r, pin.UID)
+	if errors.Is(err, errDestinationLost) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ed.Status.OrphanIntent != nil, nil
 }

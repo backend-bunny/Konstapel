@@ -329,3 +329,17 @@ func TestPinnedRunIsServedFromItsDestination(t *testing.T) {
 		t.Fatalf("unreachable pin: %d", w.Code)
 	}
 }
+
+func TestOrphanedDestinationIsGone(t *testing.T) {
+	e := newEnv(t)
+	run := &v1alpha1.AssessmentRun{}
+	_ = e.c.Get(context.Background(), client.ObjectKey{Name: "nightly-run"}, run)
+	run.Status.Destination = &v1alpha1.DestinationPin{DestinationReference: v1alpha1.DestinationReference{Name: "primary", UID: "uid-primary"}}
+	_ = e.c.Status().Update(context.Background(), run)
+	e.srv.PublisherFor = func(context.Context, *v1alpha1.AssessmentRun) (publication.Publisher, error) {
+		return nil, publication.ErrOrphaned
+	}
+	if w := e.get(teamPath, "team-token"); w.Code != http.StatusGone {
+		t.Fatalf("orphaned destination download: %d", w.Code)
+	}
+}
