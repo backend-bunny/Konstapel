@@ -252,7 +252,9 @@ orphaned evidence again:
   handoff.
 
 `TestLiveOrphanFence` checks this with a real S3 test service that is paused
-(unreachable) while the handoff is requested and accepted. While the backend
+(unreachable) while the run's publication is pending and the handoff is
+requested and accepted. The pending publication is drained at the fence, or
+listed in `uncertainOperations`. While the backend
 is down, the inventory is saved, the collecting run ends `DestinationOrphaned`
 and frees its binding slot, and the destination is finalized. Once the
 backend returns, nothing for the run reached storage. A destination recreated
@@ -749,9 +751,15 @@ finalization in the same short-duration way:
 2. A run pins the default destination. The default switches mid-run, the run
    still commits at its pinned prefix, and the next run commits at the new
    one.
-3. Both destinations are then deleted with a 150s binding retention. Each stays
-   `Retiring` with its retained package counted, and is released only after
-   that package expires and is deleted from storage.
+3. dp-primary's credential Secret reference is pointed at a missing Secret. It
+   reports `Ready=False`, naming the Secret but no credential material, and
+   doesn't fall back to dp-secondary's Secret. It is then pointed at a rotated
+   Secret and its original Secret is deleted.
+4. Both destinations are then deleted with a 150s binding retention, on a
+   bucket with versioning enabled. Each stays `Retiring` with its retained
+   package counted. It is released only after that package expires and every
+   version and delete marker of it is gone. dp-primary's is removed through
+   the rotated credentials.
 
 ## Recovery and handoff walkthrough
 

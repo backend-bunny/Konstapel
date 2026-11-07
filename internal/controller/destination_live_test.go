@@ -7,8 +7,11 @@ package controller
 // the controller namespace, and the central default ConfigMap. The real
 // destination reconciler probes them; a run pins the default and publishes
 // there through the real publisher even after the default switches, and the
-// next run publishes at the new destination. Run through
-// scripts/targeting-live.sh.
+// next run publishes at the new destination. Credential rotation (3.4):
+// a missing Secret is a visible, retryable problem with no fallback, and
+// switching to a rotated Secret serves history again; retirement (8.1) on a
+// versioned bucket deletes every version of the expired packages using the
+// rotated credentials. Run through scripts/targeting-live.sh.
 
 import (
 	"context"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,15 +39,25 @@ func TestLiveDestinationPins(t *testing.T) {
 	l.installCRDs()
 	root, _ := filepath.Abs("../..")
 	pub := startS3(t, l) // creates the bucket; its client lists objects below
+	// A versioned bucket: retirement must remove every version it owns.
+	if _, err := pub.Client.PutBucketVersioning(l.ctx, &s3.PutBucketVersioningInput{Bucket: aws.String(pub.Dest.Bucket),
+		VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatal(err)
+	}
 	ns := "konstapel-system"
 	_ = l.c.Create(l.ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dp-s3"},
-		Data: map[string][]byte{"accessKeyID": []byte(l.s3Access), "secretAccessKey": []byte(l.s3Secret)}}
+	creds := func(name string) *corev1.Secret {
+		return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+			Data: map[string][]byte{"accessKeyID": []byte(l.s3Access), "secretAccessKey": []byte(l.s3Secret)}}
+	}
+	// Each destination has its own Secret so dp-primary's can be rotated
+	// away and deleted while dp-secondary keeps working.
+	secret, primarySecret := creds("dp-s3"), creds("dp-s3-primary")
 	dests := map[string]*v1alpha1.EvidenceDestination{}
-	for _, name := range []string{"dp-primary", "dp-secondary"} {
+	for name, ref := range map[string]string{"dp-primary": primarySecret.Name, "dp-secondary": secret.Name} {
 		dests[name] = &v1alpha1.EvidenceDestination{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.EvidenceDestinationSpec{S3: v1alpha1.S3Location{
 			Endpoint: l.s3Endpoint, Bucket: pub.Dest.Bucket, Region: "us-east-1", Prefix: "konstapel-test/" + name, DevelopmentFixture: true,
-			CredentialSecret: &v1alpha1.S3CredentialSecret{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: secret.Name}}}}}
+			CredentialSecret: &v1alpha1.S3CredentialSecret{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: ref}}}}}
 	}
 	l.setNamespace("dp-prod", "dp-production")
 	p := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "dp-baseline"},
@@ -53,7 +67,7 @@ func TestLiveDestinationPins(t *testing.T) {
 	yes := true
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "privileged", Namespace: "dp-prod"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "registry.invalid/x:1", SecurityContext: &corev1.SecurityContext{Privileged: &yes}}}}}
-	objs := []client.Object{secret, dests["dp-primary"], dests["dp-secondary"], p, b, pod}
+	objs := []client.Object{secret, primarySecret, dests["dp-primary"], dests["dp-secondary"], p, b, pod}
 	for _, o := range objs {
 		o.SetUID("")
 		if err := l.c.Create(l.ctx, o); err != nil {
@@ -163,6 +177,46 @@ func TestLiveDestinationPins(t *testing.T) {
 	}
 	l.record("pins", map[string]any{"first": r1.Status.Destination.Name, "second": r2.Status.Destination.Name})
 
+	// Rotation: dp-primary's credentials go missing — a visible problem with
+	// no fallback to dp-secondary's Secret — then it is pointed at a rotated
+	// Secret and its old Secret is deleted. The retained package (r1) is
+	// later deleted through the rotated reference.
+	rotate := func(ref string) {
+		ed := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKey{Name: "dp-primary"}, ed)
+		ed.Spec.S3.CredentialSecret.Name = ref
+		if err := l.c.Update(l.ctx, ed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readyReason := func() (bool, string) {
+		ed := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKey{Name: "dp-primary"}, ed)
+		c := meta.FindStatusCondition(ed.Status.Conditions, v1alpha1.ConditionDestinationReady)
+		if c == nil || c.ObservedGeneration != ed.Generation && ed.Status.ObservedGeneration != ed.Generation {
+			return false, toJSON(ed.Status)
+		}
+		return c.Status == metav1.ConditionTrue, c.Reason + ": " + c.Message
+	}
+	rotate("dp-s3-missing")
+	l.eventually("missing credentials reported", func() (bool, string) {
+		ok, msg := readyReason()
+		return !ok && msg != "" && strings.Contains(msg, "dp-s3-missing"), msg
+	})
+	if strings.Contains(fmt.Sprint(readyReason()), l.s3Secret) {
+		t.Fatal("status exposes credential material")
+	}
+	rotated := creds("dp-s3-rotated")
+	if err := l.c.Create(l.ctx, rotated); err != nil {
+		t.Fatal(err)
+	}
+	rotate(rotated.Name)
+	l.eventually("rotated credentials ready", func() (bool, string) { return readyReason() })
+	if err := l.c.Delete(l.ctx, primarySecret); err != nil {
+		t.Fatal(err)
+	}
+	l.record("rotation", map[string]any{"missing": "NotReady", "rotated": rotated.Name})
+
 	// Retirement (8.1): deleting both destinations keeps each until its
 	// retained package expires and is deleted, then releases it.
 	for name := range dests {
@@ -183,11 +237,33 @@ func TestLiveDestinationPins(t *testing.T) {
 	if commitsUnder("konstapel-test/dp-primary", string(r1.UID)) != 1 {
 		t.Fatal("retirement removed a package before its expiry")
 	}
+	versionsOf := func(prefix, runUID string) int {
+		out, err := pub.Client.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String(pub.Dest.Bucket), Prefix: aws.String(prefix + "/")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, v := range out.Versions {
+			if strings.Contains(aws.ToString(v.Key), runUID) {
+				n++
+			}
+		}
+		for _, m := range out.DeleteMarkers {
+			if strings.Contains(aws.ToString(m.Key), runUID) {
+				n++
+			}
+		}
+		return n
+	}
+	if versionsOf("konstapel-test/dp-primary", string(r1.UID)) == 0 {
+		t.Fatal("setup: no versions recorded for the retained package")
+	}
 	for name, uid := range map[string]string{"dp-primary": string(r1.UID), "dp-secondary": string(r2.UID)} {
-		l.eventually(name+" released after its package expired and was deleted", func() (bool, string) {
+		l.eventually(name+" released after every version of its package was deleted", func() (bool, string) {
 			err := l.c.Get(l.ctx, client.ObjectKey{Name: name}, &v1alpha1.EvidenceDestination{})
-			return apierrors.IsNotFound(err) && commitsUnder("konstapel-test/"+name, uid) == 0, fmt.Sprint(err)
+			return apierrors.IsNotFound(err) && versionsOf("konstapel-test/"+name, uid) == 0, fmt.Sprint(err)
 		})
 	}
-	l.record("retired", map[string]any{"destinations": 2})
+	_ = l.c.Delete(l.ctx, rotated)
+	l.record("retired", map[string]any{"destinations": 2, "bucket": "versioned", "credentials": "rotated"})
 }

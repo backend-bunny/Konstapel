@@ -14,6 +14,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -95,11 +96,18 @@ func TestLiveOrphanFence(t *testing.T) {
 		}
 		return r.Status.Destination != nil && r.Status.Phase == v1alpha1.RunCollecting, toJSON(r.Status)
 	})
-	// The backend becomes unreachable; the administrator escalates to Orphan.
-	// (Admission records the actor in a cluster; this harness sets it.)
+	// The backend becomes unreachable and the run's publication is left
+	// pending: collection closes and publishing retries against the outage.
+	// Then the administrator escalates to Orphan. (Admission records the
+	// actor in a cluster; this harness sets it.)
 	if out, err := exec.Command("docker", "pause", l.s3Container).CombinedOutput(); err != nil {
 		t.Fatalf("pause S3: %v %s", err, out)
 	}
+	l.eventually("publication pending during the outage", func() (bool, string) {
+		r := &v1alpha1.AssessmentRun{}
+		_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, r)
+		return r.Status.Phase == v1alpha1.RunPublishing && r.Status.DescriptorSHA256 != "", toJSON(r.Status)
+	})
 	got := &v1alpha1.EvidenceDestination{}
 	_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
 	got.Spec.DeletionPolicy = v1alpha1.DeletionOrphan
@@ -123,6 +131,15 @@ func TestLiveOrphanFence(t *testing.T) {
 	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: inv.Header}, header); err != nil {
 		t.Fatal(err)
 	}
+	var hdr OrphanInventoryHeader
+	if err := json.Unmarshal([]byte(header.Data["inventory.json"]), &hdr); err != nil {
+		t.Fatal(err)
+	}
+	// The pending publication was cancelled and drained at the fence, or is
+	// listed as an uncertain operation — never silently dropped.
+	if !hdr.Drained && len(hdr.Uncertain) == 0 {
+		t.Fatalf("undrained fence without uncertain operations: %s", toJSON(hdr))
+	}
 	if h := header.Data["inventory.json"]; header.Immutable == nil || !*header.Immutable || len(header.OwnerReferences) != 0 ||
 		!strings.Contains(h, `"actor": "platform-admin"`) || !strings.Contains(h, `"reason": "backend decommissioned"`) ||
 		!strings.Contains(h, "fencedAt") || !strings.Contains(h, "NotEnumerated") {
@@ -139,7 +156,8 @@ func TestLiveOrphanFence(t *testing.T) {
 		r := &v1alpha1.AssessmentRun{}
 		_ = l.c.Get(l.ctx, client.ObjectKey{Name: name}, r)
 		c := meta.FindStatusCondition(r.Status.Conditions, v1alpha1.ConditionPublished)
-		committed := r.Status.Publication != nil && r.Status.Publication.Phase == v1alpha1.PublicationPhase(publication.PhaseCommitted)
+		// A pending publication record becomes Orphaned; nothing claims a commit.
+		committed := r.Status.Publication != nil && r.Status.Publication.Phase != v1alpha1.PublicationPhase(publication.PhaseOrphaned)
 		return r.Status.Phase == v1alpha1.RunFailed && c != nil && c.Reason == v1alpha1.ReasonDestinationOrphaned && !committed &&
 			r.Status.Destination != nil && r.Status.Destination.OrphanedAt != nil && !controllerutil.ContainsFinalizer(r, RetentionFinalizer), toJSON(r)
 	})
@@ -193,5 +211,5 @@ func TestLiveOrphanFence(t *testing.T) {
 			t.Fatalf("storage written for a fenced run: %s", k)
 		}
 	}
-	l.record("orphan-fence", map[string]any{"run": name, "phase": r.Status.Phase})
+	l.record("orphan-fence", map[string]any{"run": name, "phase": r.Status.Phase, "drained": hdr.Drained, "uncertainOperations": hdr.Uncertain})
 }
