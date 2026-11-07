@@ -1,0 +1,42 @@
+{
+  "admission": {
+    "core": true,
+    "exceptionAdmission": false,
+    "goTests": [
+      "TestLiveDelivery",
+      "TestLiveManager",
+      "TestLiveEnforcementEpoch",
+      "TestLiveTargetingWorkflow",
+      "TestLiveHardeningAdmission",
+      "TestLiveHardeningUserNamespaces"
+    ]
+  },
+  "assessments": {
+    "core": false,
+    "exceptionAdmission": true,
+    "goTests": [
+      "TestLiveAssessmentStatus",
+      "TestLiveAssessmentRuns",
+      "TestLiveEngineCorrelation",
+      "TestLiveIntegratedAssessments"
+    ]
+  },
+  "storage": {
+    "core": false,
+    "exceptionAdmission": false,
+    "goTests": [
+      "TestLiveDestinationPins",
+      "TestLiveEvidenceDownload",
+      "TestLiveRetentionLifecycle",
+      "TestLiveOrphanFence"
+    ]
+  },
+  "recovery": {
+    "core": false,
+    "exceptionAdmission": false,
+    "goTests": [
+      "TestLiveTargetingFailures",
+      "TestLiveAssessmentFaults"
+    ]
+  }
+}

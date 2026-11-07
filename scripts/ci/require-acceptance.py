@@ -9,6 +9,7 @@ GitHub API errors, skipped jobs, and missing evidence never authorize publishing
 import argparse
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -16,7 +17,8 @@ import time
 
 
 WORKFLOW = ".github/workflows/test.yml"
-REQUIRED_JOBS = ("checks", "acceptance-live", "acceptance")
+GROUPS = json.loads((Path(__file__).resolve().parents[1] / "acceptance-groups.json").read_text())
+REQUIRED_JOBS = ("checks", "acceptance", *(f"acceptance-live ({group})" for group in GROUPS))
 
 
 class AcceptanceError(Exception):

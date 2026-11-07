@@ -48,7 +48,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
-| `task acceptance OUTPUT=/absolute/fresh/path` | Run full acceptance, including targeting delivery, in a disposable kind cluster and retain evidence. |
+| `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
 
@@ -87,22 +87,47 @@ the complete Git diff, including deletions and both sides of renames. Integratio
 documentation stays covered because live tests execute documented commands.
 Only superseded PR runs are cancelled; main runs remain available for publication.
 
-The `acceptance-live` job runs `task acceptance` on a disposable kind cluster.
-That includes the live Go suite (`scripts/targeting-live.sh`) with the S3 evidence
-lifecycle against the pinned S3-compatible test service. The stable `acceptance`
-gate passes only when `checks` succeeds and either full acceptance succeeds or
-an allowlisted prose-only PR explicitly skips it. Configure `checks` and
-`acceptance` as required status checks on `main`; do not require the conditional
-`acceptance-live` job.
+The `acceptance-live` matrix runs four groups concurrently, each on its own
+runner with its own disposable kind cluster and test-owned S3 services:
+
+| Group | Coverage |
+| --- | --- |
+| `admission` | Runner admission/background evidence, Chainsaw, offline replay, targeting/delivery, and Linux hardening |
+| `assessments` | Assessment status/runs, engine correlation, integrated assessments, and authenticated exception admission |
+| `storage` | Destination/credential changes, downloads, retention, and orphaning |
+| `recovery` | Kyverno outages and assessment/publication faults |
+
+`scripts/acceptance-groups.json` defines the matrix and Go test selection. The
+normal `task test` checks that every compiled `TestLive*` test is assigned exactly
+once. Tests stay sequential inside each cluster: failure probes stop shared
+Kyverno deployments, managers watch cluster-wide resources, and tests configure
+process-global assessment settings. Matrix fail-fast is disabled so every group
+can finish and upload diagnostics even if another fails.
+
+The stable `acceptance` gate requires successful `checks` and every matrix group,
+or an explicit allowlisted prose-only PR skip. `checks` and `acceptance` are the
+required status checks on `main`; individual matrix jobs remain conditional.
+
+Local `task acceptance OUTPUT=/absolute/fresh/path` still runs the entire suite
+sequentially in one cluster. Reproduce one CI group with, for example,
+`task acceptance GROUP=storage OUTPUT=/tmp/konstapel-storage-1`. A group result
+only proves that group's coverage; `acceptance-result.json` records its name.
+
+Admission CI enables unprivileged user namespaces with the same AppArmor sysctl
+and `bwrap` smoke check used by
+[container-dropshipping's setup action](https://github.com/backend-bunny/container-dropshipping/blob/2096015fe369a0cab0db589f037126a543e72666/.github/actions/setup-tools/action.yml). This
+host prerequisite does not by itself prove a nested kind Pod can run; the
+hardening test separately records the Pod's runtime isolation evidence.
 
 Acceptance streams stdout and stderr to the terminal/Actions log while retaining
 per-stage log files. Timestamped stage markers also go to `progress.log`;
 `targeting/targeting-live.log` includes verbose Go test progress. Expiry/recovery
-tests can take several minutes, and a full run currently takes roughly 25 minutes.
+tests can take several minutes. Before partitioning, full CI took about 26 minutes;
+parallel jobs reduce elapsed time while repeating setup on each runner.
 Piping logs through `tee` preserves failures. `acceptance-result.json` and
 `result.txt` record the final outcome after teardown.
 
-CI uploads test-owned evidence as `acceptance-evidence`, excluding kubeconfigs,
+CI uploads test-owned evidence as `acceptance-evidence-<group>`, excluding kubeconfigs,
 compiled test binaries, rendered chart manifests, and node logs. The task tears
 down its cluster and test service on success or failure; teardown errors fail
 the task and remain in its logs.
@@ -138,7 +163,7 @@ and commit the regenerated lockfile; the other tools use automated update PRs.
 Kyverno chart and CLI updates are grouped. `task deps:check` verifies the chart's
 actual `appVersion` against the CLI pin and verifies the chart archive checksum.
 Update failures must be resolved with compatible pins, not by disabling the
-check. Runtime or C2P updates also require passing `acceptance-live` and
+check. Runtime or C2P updates also require all `acceptance-live (<group>)` and
 `acceptance` jobs before merge. A local `task acceptance` run provides useful
 evidence but does not replace the required CI gate. The `checks` job
 alone does not prove live compatibility.

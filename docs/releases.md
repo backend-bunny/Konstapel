@@ -38,8 +38,10 @@ Release without replacing the generated changelog or user-written notes.
 Ordinary pushes to `main` publish commit-tagged images after the `test` workflow
 completes successfully. The publisher checks out that run's exact commit, even
 if `main` has moved. Automatic, release, and manual publishing all verify that
-`checks`, `acceptance-live`, and `acceptance` succeeded in the matching main-branch
-run; PR runs and skipped acceptance cannot authorize publication. Release/manual
+`checks`, `acceptance`, and every `acceptance-live (<group>)` job declared in
+`scripts/acceptance-groups.json` succeeded in the matching main-branch run. Missing,
+duplicate, failed, cancelled, or skipped group jobs block publication, even if
+the aggregate gate passed. PR runs cannot authorize publication. Release/manual
 publishing waits up to 90 minutes for that existing run instead of starting
 another acceptance cluster. A release
 merge can therefore build the same commit in both workflows; publication is

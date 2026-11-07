@@ -62,13 +62,16 @@ tasks:
       - task: policies:test
 
   acceptance:
-    desc: Run full disposable-cluster acceptance (requires Docker and a fresh OUTPUT)
+    desc: Run disposable-cluster acceptance (GROUP defaults to all; requires Docker and fresh OUTPUT)
+    vars:
+      GROUP: '{{default "all" .GROUP}}'
     requires:
       vars: [OUTPUT]
     env:
       KONSTAPEL_TASK_OUTPUT: '{{.OUTPUT}}'
+      KONSTAPEL_TASK_GROUP: '{{.GROUP}}'
     cmds:
-      - scripts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT"
+      - scripts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT" "$KONSTAPEL_TASK_GROUP"
 
   test:failures:
     desc: Run disposable-cluster failure probes (requires Docker and a fresh OUTPUT)
