@@ -37,7 +37,8 @@
     "exceptionAdmission": false,
     "goTests": [
       "TestLiveTargetingFailures",
-      "TestLiveAssessmentFaults"
+      "TestLiveAssessmentFaults",
+      "TestLiveEvidenceRecovery"
     ]
   }
 }

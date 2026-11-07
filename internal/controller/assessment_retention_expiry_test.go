@@ -91,11 +91,24 @@ func TestExpiryDeletesStorageIndependentOfOwners(t *testing.T) {
 		!controllerutil.ContainsFinalizer(r, RetentionFinalizer) {
 		t.Fatalf("blocked deletion reported as %+v", r.Status.Publication)
 	}
+	// The run's own status update requeues it at once: no new attempt is
+	// made until the backoff has passed.
+	calls := e.pub.Calls(fake.OpDelete)
+	e.now = e.now.Add(20 * time.Second)
+	if res := e.step(name); res.RequeueAfter != 40*time.Second || e.pub.Calls(fake.OpDelete) != calls {
+		t.Fatalf("retried before the backoff: %+v, %d delete calls", res, e.pub.Calls(fake.OpDelete)-calls)
+	}
 	e.pub.Fail(fake.OpDelete, publication.ErrUnavailable)
+	e.now = e.now.Add(40 * time.Second)
 	e.step(name)
 	if r = e.run(name); r.Status.Publication.Cleanup.State != "DeletionFailed" || r.Status.Publication.Cleanup.Attempts != 2 {
 		t.Fatalf("failed deletion reported as %+v", r.Status.Publication.Cleanup)
 	}
+	e.now = e.now.Add(time.Minute) // the second backoff is two minutes
+	if e.step(name); e.pub.Calls(fake.OpDelete) != calls+1 {
+		t.Fatal("retried before the doubled backoff")
+	}
+	e.now = e.now.Add(time.Minute)
 	e.step(name)
 	if err := e.c.Get(ctx, client.ObjectKey{Name: name}, &v1alpha1.AssessmentRun{}); err == nil {
 		t.Fatal("cleaned-up run record not released")

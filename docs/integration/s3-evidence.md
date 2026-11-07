@@ -776,6 +776,24 @@ through destinations on the S3 test service:
 5. An impossible OSCAL export publishes a typed `Diagnostic` package. Both
    are downloaded and validated.
 
+`TestLiveEvidenceRecovery` exercises recovery on an object-lock bucket
+through a pinned destination:
+1. **Retention edit.** Editing a binding's retention changes only later
+   publications. The earlier receipt and the engine policies keep their
+   identity, because the shipped epoch policy is installed.
+2. **Legal hold.** A legal hold on a package makes expiry cleanup
+   `RetentionBlocked`, with the storage message and a destination cleanup
+   blocker. Retries wait for their backoff, one minute and doubling, and the
+   stored bytes are unchanged.
+3. **Hold lifted.** Once the hold is lifted, the next retry deletes every
+   version and leaves a `Deleted` tombstone.
+4. **Binding deleted during an outage.** A binding is deleted while its run
+   publishes against a storage outage. The run publishes with its recorded
+   retention when storage returns, and a binding recreated under the same
+   name never adopts it.
+5. **RBAC revoked.** Revoking a platform operator's binding makes downloads
+   answer 403.
+
 ## Recovery and handoff walkthrough
 
 Two different mechanisms deal with storage that Konstapel can't finish
