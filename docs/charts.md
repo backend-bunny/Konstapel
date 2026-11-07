@@ -149,6 +149,39 @@ deliberate mismatches. Chart-only changes that need a new distribution use a
 release-producing Conventional Commit type (`feat`, `fix`, `perf`, `deps`,
 `build`). A published version's bytes are never replaced.
 
+## Publication manifest
+
+Before anything is pushed, release packaging freezes both chart archives
+and a manifest. Every publication attempt and retry verifies that manifest,
+and stops before any registry write on a mismatch.
+`scripts/charts/manifest.py` does both:
+
+```sh
+python3 scripts/charts/manifest.py freeze --archives out/charts --source <commit SHA> --tag v<version> \
+  --image-digest sha256:<verified image digest> --tool helm=<version> --out out/charts/publication.json
+python3 scripts/charts/manifest.py verify --archives out/charts --manifest out/charts/publication.json \
+  --source <commit SHA> --image-digest sha256:<digest>
+```
+
+**What it records:**
+- the source commit and tag;
+- each chart's name, version, `appVersion`, archive file name and SHA-256;
+- a content identity of the CRD chart's templates;
+- the runtime chart's default image digest;
+- the packaging tool versions.
+
+**What it rejects:**
+- a non-SHA source, a malformed tag, or an image reference that isn't a
+  digest;
+- a missing, extra or duplicate chart archive;
+- changed archive bytes or CRD content;
+- a source or image digest other than the frozen one;
+- a runtime chart that doesn't default to that digest;
+- chart versions that aren't the aligned pair for the tag.
+
+An existing manifest is never overwritten. `scripts/ci/test_chart_manifest.py`
+packages real archives with the pinned Helm and exercises each rejection.
+
 ## Checks you can run
 
 `task check` runs `scripts/charts/check.sh` through `task lint`. It needs no
@@ -175,7 +208,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 
 | Group | Work | Prerequisite |
 | --- | --- | --- |
-| 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures | none |
+| 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
 | 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults | the merged manager (available); the replica lifecycle (add-controller-high-availability) |
 | 4 | Capability discovery and recovery without restart | the merged manager |

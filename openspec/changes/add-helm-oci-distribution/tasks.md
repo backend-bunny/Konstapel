@@ -33,7 +33,7 @@ Keep the existing fast checks and feature-owned integration suites alongside it.
 - [x] 1.1 Define the chart input contract for generated CRDs/RBAC, available capabilities, manager entry point, ports/probes, TLS, writable storage, image inputs and the availability owner's Lease/shutdown/replica lifecycle; verify every field is traced to a named implementation owner and unresolved inputs cannot be substituted with a fixture in a release.
 - [x] 1.2 Add metadata and values-schema scaffolding for the two independent charts with fixture render cases; verify chart names, the `compliance.erenius.io` API contract, mutually exclusive TLS settings, and absence of CRD/Kyverno/cert-manager chart dependencies.
 - [x] 1.3 Extend release-please and the existing version helper to update/check both charts' version and appVersion; verify an unchanged-schema release advances both charts and a deliberate version mismatch fails the check.
-- [ ] 1.4 Add packaging-input/publication-manifest fixtures recording source revision, chart versions, archive checksums and image digest; verify source/digest mismatches, missing artifacts and incompatible version pairs fail before registry writes.
+- [x] 1.4 Add packaging-input/publication-manifest fixtures recording source revision, chart versions, archive checksums and image digest; verify source/digest mismatches, missing artifacts and incompatible version pairs fail before registry writes.
 - [x] 1.5 Document ownership, phase dependencies, fixture entry points and chart release/version rules; verify another agent can run the independent checks through Devbox without a controller, cluster, or production registry credentials.
 
 ## 2. Package authoritative CRDs and prove their lifecycle
