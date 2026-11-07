@@ -1,0 +1,23 @@
+# Runtime templates are added once their inputs are resolved from merged code
+# (docs/charts.md, "Chart input contract"). Only settings with a named owner
+# appear here.
+
+image:
+  repository: ghcr.io/backend-bunny/konstapel
+  # digest pins the controller image. Release packaging injects the verified
+  # published digest into an isolated chart copy; source never carries one.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# replicaCount defaults to two serving replicas (add-controller-high-availability).
+# Development values may set 1, which omits the default PodDisruptionBudget.
+replicaCount: 2
+
+tls:
+  # mode selects who issues the service certificates, exclusively:
+  #   certManager (default): a separately installed cert-manager. Optionally
+  #     set certManager.issuerRef {name, kind: Issuer|ClusterIssuer} to use a
+  #     platform issuer instead of a chart-managed self-signed CA.
+  #   secret: operator-managed; set secret.name to a kubernetes.io/tls Secret
+  #     with tls.crt, tls.key and ca.crt in the release namespace.
+  mode: certManager

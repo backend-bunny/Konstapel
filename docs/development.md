@@ -43,7 +43,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | --- | --- |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
 | `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, plus CI decision and shell logging regression tests. |
-| `task lint` | Check Go formatting, `go vet`, generated API files, and shell syntax. |
+| `task lint` | Check Go formatting, `go vet`, generated API files, Helm chart metadata, versions and values-schema fixtures (`scripts/charts/check.sh`), and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |

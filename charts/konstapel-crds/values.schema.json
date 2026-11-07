@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "konstapel-crds values",
+  "description": "The CRD chart accepts no values: schemas are generated, and retention cannot be switched off.",
+  "type": "object",
+  "additionalProperties": false
+}

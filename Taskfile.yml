@@ -17,7 +17,7 @@ tasks:
       - python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
   lint:
-    desc: Check Go formatting, vet, generated API files, and shell syntax
+    desc: Check Go formatting, vet, generated API files, Helm charts, and shell syntax
     cmds:
       - |
         unformatted=$(gofmt -l api cmd internal)
@@ -28,6 +28,7 @@ tasks:
       - go vet -mod=readonly ./...
       - go vet -mod=readonly -tags live ./internal/targeting/ ./internal/controller/
       - scripts/generate.sh --check
+      - scripts/charts/check.sh
       - |
         set -eu
         bash -n .envrc

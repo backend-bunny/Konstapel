@@ -1,0 +1,6 @@
+# expect: oneOf
+tls:
+  mode: secret
+  secret: {name: konstapel-tls}
+  certManager:
+    issuerRef: {name: platform-ca, kind: ClusterIssuer}

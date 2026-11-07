@@ -1,0 +1,3 @@
+# The CRD chart has no settings: definitions come unchanged from the API
+# generator (config/crd/bases) and are always retained on uninstall.
+{}
