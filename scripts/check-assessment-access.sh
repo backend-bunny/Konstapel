@@ -139,6 +139,21 @@ expect deny "destination: prefix is immutable" -- patch evidencedestination prim
 expect ok "destination: credentials rotate" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"credentialSecret":{"name":"konstapel-s3-rotated"}}}}'
 expect ok "destination: CA trust rotates" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"caTrust":{"name":"s3-ca"}}}}'
 expect deny "destination: cross-namespace credentials are rejected" -- create --as="$admin" --dry-run=server -f <(destination https://s3.example.internal evidence x konstapel-s3 team-a | sed 's/name: primary/name: crossns/')
+# Orphan intent: the actor is the authenticated requester, never forged, and an
+# accepted handoff (status.orphanIntent, written by the controller) is frozen.
+expect ok "orphan: admin requests Orphan with a reason" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"deletionPolicy":"Orphan","orphan":{"reason":"bucket handed to archive team"}}}'
+actor=$(k get evidencedestination primary -o jsonpath='{.spec.orphan.actor}')
+if [ "$actor" = "$admin" ]; then echo "PASS orphan: actor recorded from the authenticated requester" | tee -a "$log"; else echo "FAIL orphan: actor is '$actor'" | tee -a "$log"; failures=$((failures + 1)); fi
+expect deny "orphan: a forged actor is rejected" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"orphan":{"actor":"someone-else"}}}'
+expect ok "orphan: a forged actor with a new reason is overwritten" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"orphan":{"reason":"updated reason","actor":"someone-else"}}}'
+actor=$(k get evidencedestination primary -o jsonpath='{.spec.orphan.actor}')
+if [ "$actor" = "$admin" ]; then echo "PASS orphan: forged actor replaced by the requester" | tee -a "$log"; else echo "FAIL orphan: forged actor stored as '$actor'" | tee -a "$log"; failures=$((failures + 1)); fi
+expect deny "orphan: Orphan without a reason is rejected" -- create --as="$admin" --dry-run=server -f <(destination https://s3.example.internal evidence noreason konstapel-s3 | sed 's/name: primary/name: noreason/; s/^spec:/spec:\n  deletionPolicy: Orphan/')
+# Simulate the controller accepting the handoff (status is controller-only).
+k patch evidencedestination primary --subresource=status --type=merge -p "{\"status\":{\"orphanIntent\":{\"reason\":\"updated reason\",\"actor\":\"$admin\",\"acceptedAt\":\"2026-11-07T00:00:00Z\"}}}" >>"$log"
+expect deny "orphan: an accepted handoff cannot revert to Retire" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"deletionPolicy":"Retire","orphan":null}}'
+expect deny "orphan: an accepted handoff's reason is frozen" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"orphan":{"reason":"rewritten"}}}'
+expect ok "orphan: credentials still rotate after acceptance" -- patch evidencedestination primary --as="$admin" --type=merge -p '{"spec":{"s3":{"credentialSecret":{"name":"konstapel-s3-later"}}}}'
 k get evidencedestination primary -o yaml >"$out/evidencedestination.yaml"
 
 # The controller identity is configuration, not policy text.

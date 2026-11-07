@@ -133,7 +133,32 @@ type S3Location struct {
 	DevelopmentFixture bool `json:"developmentFixture,omitempty"`
 }
 
+// OrphanRequest is an administrator's explicit request to hand the
+// destination's remaining storage responsibility to an operator instead of
+// retiring it. The reason is supplied by the administrator; actor and
+// actorUID are recorded by admission from the authenticated request and
+// cannot be forged.
+type OrphanRequest struct {
+	// reason explains the handoff. It must not be blank.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
+	// +kubebuilder:validation:XValidation:rule="self.trim().size() > 0",message="reason must not be blank"
+	Reason string `json:"reason"`
+	// actor is the authenticated user who set or changed the request,
+	// written by the konstapel-destination-orphan admission policy.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Actor string `json:"actor,omitempty"`
+	// actorUID is that user's UID when the authenticator provides one.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ActorUID string `json:"actorUID,omitempty"`
+}
+
 // EvidenceDestinationSpec is platform-managed storage for evidence packages.
+// +kubebuilder:validation:XValidation:rule="self.deletionPolicy != 'Orphan' || has(self.orphan)",message="deletionPolicy Orphan requires orphan.reason"
+// +kubebuilder:validation:XValidation:rule="!has(self.orphan) || self.deletionPolicy == 'Orphan'",message="orphan is set only with deletionPolicy Orphan"
 type EvidenceDestinationSpec struct {
 	// s3 is the S3-compatible location and its access.
 	// +required
@@ -145,6 +170,31 @@ type EvidenceDestinationSpec struct {
 	// +optional
 	// +kubebuilder:default=Retire
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
+
+	// orphan is required with deletionPolicy Orphan. Selecting Orphan
+	// changes nothing until the destination is deleted; once that handoff is
+	// accepted (status.orphanIntent) it cannot be changed or reversed.
+	// +optional
+	Orphan *OrphanRequest `json:"orphan,omitempty"`
+}
+
+// OrphanIntent is the accepted orphan handoff, recorded by the controller
+// when a destination with deletionPolicy Orphan is deleted. It is protected:
+// only the controller writes status, and admission then freezes the spec.
+type OrphanIntent struct {
+	// reason, actor, and actorUID are copied from the accepted spec.orphan.
+	// +required
+	// +kubebuilder:validation:MaxLength=1024
+	Reason string `json:"reason"`
+	// +required
+	// +kubebuilder:validation:MaxLength=512
+	Actor string `json:"actor"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ActorUID string `json:"actorUID,omitempty"`
+	// acceptedAt is when the controller accepted the handoff.
+	// +required
+	AcceptedAt metav1.Time `json:"acceptedAt"`
 }
 
 // Condition types and reasons reported on EvidenceDestination status.
@@ -190,6 +240,10 @@ type EvidenceDestinationStatus struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=512
 	CleanupBlockers []string `json:"cleanupBlockers,omitempty"`
+
+	// orphanIntent is the accepted, irreversible orphan handoff.
+	// +optional
+	OrphanIntent *OrphanIntent `json:"orphanIntent,omitempty"`
 
 	// conditions report readiness and retirement.
 	// +optional

@@ -6,6 +6,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -122,8 +123,9 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	status.ObservedGeneration = ed.Generation
 	meta.SetStatusCondition(&status.Conditions, cond)
 	ob.apply(status)
+	acceptOrphan(ed, status, r.now())
 	if !ed.DeletionTimestamp.IsZero() {
-		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed))
+		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed, status))
 	}
 	if !equality.Semantic.DeepEqual(&ed.Status, status) {
 		ed.Status = *status
@@ -145,6 +147,25 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{RequeueAfter: DestinationProbeInterval}, nil
 }
 
+// acceptOrphan records the orphan handoff once, when a destination with
+// deletionPolicy Orphan is deleted. The request's actor must have been
+// recorded by admission; without it nothing is accepted. An accepted intent
+// is never changed or cleared.
+func acceptOrphan(ed *v1alpha1.EvidenceDestination, status *v1alpha1.EvidenceDestinationStatus, now time.Time) {
+	o := ed.Spec.Orphan
+	if status.OrphanIntent != nil || ed.DeletionTimestamp.IsZero() || ed.Spec.DeletionPolicy != v1alpha1.DeletionOrphan || o == nil || o.Actor == "" || strings.TrimSpace(o.Reason) == "" {
+		return
+	}
+	status.OrphanIntent = &v1alpha1.OrphanIntent{Reason: o.Reason, Actor: o.Actor, ActorUID: o.ActorUID, AcceptedAt: metav1.NewTime(now)}
+}
+
+func (r *DestinationReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
 // obligations are what a destination still owes its pinned runs.
 type obligations struct {
 	runs, packages, unknownExpiry, cleanup int32
@@ -161,11 +182,14 @@ func (o obligations) apply(s *v1alpha1.EvidenceDestinationStatus) {
 	s.LatestRetainedExpiry, s.CleanupBlockers = o.latest, o.blockers
 }
 
-func (o obligations) retiring(ed *v1alpha1.EvidenceDestination) metav1.Condition {
+func (o obligations) retiring(ed *v1alpha1.EvidenceDestination, status *v1alpha1.EvidenceDestinationStatus) metav1.Condition {
 	c := metav1.Condition{Type: v1alpha1.ConditionDestinationRetiring, Status: metav1.ConditionTrue, ObservedGeneration: ed.Generation}
 	note := ""
-	if ed.Spec.DeletionPolicy == v1alpha1.DeletionOrphan {
-		note = " (Orphan handoff is not available yet; retiring normally)"
+	switch {
+	case status.OrphanIntent != nil:
+		note = " (orphan handoff accepted for " + status.OrphanIntent.Actor + "; fencing and inventory are not available yet, so it retires normally)"
+	case ed.Spec.DeletionPolicy == v1alpha1.DeletionOrphan:
+		note = " (orphan request has no admission-recorded actor and is not accepted; install the konstapel-destination-orphan admission policy)"
 	}
 	switch {
 	case o.empty():
