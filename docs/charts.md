@@ -255,6 +255,25 @@ renders:
   `terminationGracePeriodSeconds`;
 - `podDisruptionBudget.minAvailable` that isn't below `replicaCount`.
 
+**Installed-image acceptance.** The `charts` acceptance group builds the
+controller image from the checkout (`scripts/image/build.sh`). It loads the
+image into the disposable kind node and names it by its manifest digest, then
+runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
+1. It installs both charts with the pinned Helm, the runtime chart pinned to
+   that digest with `pullPolicy: Never`.
+2. Both replicas become ready with the hardened pod spec, and one of them
+   holds the Lease.
+3. The installed controller delivers a Deny binding, and a privileged Pod is
+   denied.
+4. A scheduled run is collected, exported to OSCAL with C2P, and published
+   from inside the pod to a test-owned S3 service on the kind network. This
+   proves the read-only root and the chart's bounded writable volumes are
+   enough.
+
+```sh
+devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
+```
+
 The schema also rejects unknown values. No Service is rendered yet: the
 exception webhooks are unavailable and the download server isn't in the chart
 yet, so there is no handler to route to. `internal/charttest` checks the
@@ -353,7 +372,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller Deployment, RBAC and availability defaults done; TLS, download server and installed acceptance pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller Deployment, RBAC, availability defaults and installed-image acceptance done; TLS and the download server pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |

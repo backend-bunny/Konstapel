@@ -43,6 +43,14 @@
       "TestLiveEngineCapabilityRecovery"
     ]
   },
+  "charts": {
+    "core": false,
+    "exceptionAdmission": false,
+    "image": true,
+    "goTests": [
+      "TestLiveHelmInstall"
+    ]
+  },
   "recovery": {
     "core": false,
     "exceptionAdmission": false,

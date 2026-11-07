@@ -78,6 +78,22 @@ if includes core; then
   ./bin/konstapel convert --capture "$out/package/capture.json" --output "$out/reconverted" 2>&1 | tee "$out/reconvert.log"
   ./bin/konstapel validate --output "$out/reconverted" 2>&1 | tee "$out/revalidate.log"
 fi
+if includes image; then
+  # The Helm-installed controller runs the image built from this checkout,
+  # loaded into the disposable node and referenced by its digest.
+  stage 'Building the controller image and loading it into the disposable cluster'
+  scripts/image/build.sh 2>&1 | tee "$out/image-build.log"
+  kind load image-archive out/image/image.tar --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee "$out/image-load.log"
+  # The node records a digest only for kind's import alias; name the image by
+  # that manifest digest under its real repository so the chart's
+  # repository@digest reference resolves locally (pullPolicy Never).
+  node="$KONSTAPEL_CLUSTER_NAME-control-plane"
+  imported=$(docker exec "$node" crictl inspecti -o json ghcr.io/backend-bunny/konstapel:build-amd64 | jq -er '.status.repoDigests[0]')
+  KONSTAPEL_LIVE_IMAGE=ghcr.io/backend-bunny/konstapel@${imported##*@}
+  docker exec "$node" ctr -n k8s.io images tag ghcr.io/backend-bunny/konstapel:build-amd64 "$KONSTAPEL_LIVE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
+  export KONSTAPEL_LIVE_IMAGE
+  echo "$KONSTAPEL_LIVE_IMAGE" | tee "$out/image-ref.txt"
+fi
 # Targeting delivery: Audit/Deny bindings, relabelling, ready-gated replacement,
 # withdrawal, and non-adoption of a prototype-style unmanaged policy.
 stage 'Running live targeting, controller, storage and hardening tests (expiry/recovery cases take several minutes)'
