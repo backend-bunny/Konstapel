@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -215,6 +216,12 @@ func (p *DestinationPublishers) For(ctx context.Context, pin *v1alpha1.Destinati
 		return nil, publication.ErrOrphaned
 	}
 	ed, err := destinationByUID(ctx, p.Reader, pin.UID)
+	if errors.Is(err, errDestinationLost) {
+		// Ownership recorded in a saved inventory is never served again.
+		if h, herr := savedHandoff(ctx, p.Reader, p.Namespace, pin); herr == nil && h != nil {
+			return nil, publication.ErrOrphaned
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", publication.ErrUnavailable, err)
 	}
@@ -273,17 +280,46 @@ func (r *AssessmentRunReconciler) reader() client.Reader {
 	return r.Client
 }
 
-// orphanFenced returns, from an uncached read, a pinned run's destination
-// when its orphan handoff was accepted, and nil otherwise. A destination
-// that no longer exists is not fenced here (its absence is handled by the
-// caller).
-func orphanFenced(ctx context.Context, r client.Reader, pin *v1alpha1.DestinationPin) (*v1alpha1.EvidenceDestination, error) {
-	ed, err := destinationByUID(ctx, r, pin.UID)
-	if errors.Is(err, errDestinationLost) {
+// savedHandoff finds the saved inventory of a destination that no longer
+// exists, or nil when there is none.
+func savedHandoff(ctx context.Context, r client.Reader, namespace string, pin *v1alpha1.DestinationPin) (*handoff, error) {
+	cm := &corev1.ConfigMap{}
+	name := inventoryName(pin.UID, -1)
+	switch err := r.Get(ctx, client.ObjectKey{Namespace: controllerNamespace(namespace), Name: name}, cm); {
+	case apierrors.IsNotFound(err):
 		return nil, nil
-	}
-	if err != nil || ed.Status.OrphanIntent == nil {
+	case err != nil:
 		return nil, err
+	case cm.Labels[LabelOrphanHandoff] != pin.UID:
+		return nil, fmt.Errorf("ConfigMap %s does not belong to destination %s", name, pin.UID)
 	}
-	return ed, nil
+	return &handoff{Destination: pin.Name, Inventory: name}, nil
+}
+
+// handoff identifies an orphan handoff that owns a pinned run's storage.
+type handoff struct {
+	Destination string // destination name
+	Inventory   string // inventory header ConfigMap
+}
+
+// orphanHandoff reports, from uncached reads, whether a pinned run's
+// storage was handed off. held is true while the handoff is accepted but
+// its inventory is not yet saved. A destination that no longer exists is
+// handed off when its inventory exists (for example after a last-resort
+// finalizer removal), so ownership recorded there is never adopted by
+// recovery; otherwise its absence is handled by the caller.
+func orphanHandoff(ctx context.Context, r client.Reader, namespace string, pin *v1alpha1.DestinationPin) (h *handoff, held bool, err error) {
+	ed, err := destinationByUID(ctx, r, pin.UID)
+	switch {
+	case errors.Is(err, errDestinationLost):
+		h, err := savedHandoff(ctx, r, namespace, pin)
+		return h, false, err
+	case err != nil:
+		return nil, false, err
+	case ed.Status.OrphanIntent == nil:
+		return nil, false, nil
+	case ed.Status.OrphanHandoff == nil || ed.Status.OrphanHandoff.Inventory == nil:
+		return nil, true, nil
+	}
+	return &handoff{Destination: ed.Name, Inventory: ed.Status.OrphanHandoff.Inventory.Header}, false, nil
 }

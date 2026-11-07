@@ -24,13 +24,13 @@ import (
 //
 // Runs already pending deletion take the same path: their ownership is in
 // the saved inventory before their finalizer is released.
-func (r *AssessmentRunReconciler) orphan(ctx context.Context, run *v1alpha1.AssessmentRun, ed *v1alpha1.EvidenceDestination) error {
+func (r *AssessmentRunReconciler) orphan(ctx context.Context, run *v1alpha1.AssessmentRun, h *handoff) error {
 	now := metav1.NewTime(r.now())
 	run.Status.Destination.OrphanedAt = &now
 	if pub := run.Status.Publication; pub != nil {
 		orphanPublication(pub)
 	}
-	msg := fmt.Sprintf("storage handed to an operator by the orphan handoff of destination %s (inventory %s)", ed.Name, ed.Status.OrphanHandoff.Inventory.Header)
+	msg := fmt.Sprintf("storage handed to an operator by the orphan handoff of destination %s (inventory %s)", h.Destination, h.Inventory)
 	if !runDone(run) {
 		if err := r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonDestinationOrphaned, msg); err != nil {
 			return err
