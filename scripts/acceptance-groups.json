@@ -9,7 +9,8 @@
       "TestLiveTargetingWorkflow",
       "TestLiveHardeningAdmission",
       "TestLiveHardeningUserNamespaces",
-      "TestLiveCRDChartLifecycle"
+      "TestLiveCRDChartLifecycle",
+      "TestLiveLeaderElection"
     ]
   },
   "assessments": {

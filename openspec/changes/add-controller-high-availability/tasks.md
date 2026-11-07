@@ -16,13 +16,13 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 ## 1. Establish lifecycle contracts and independent failure fixtures
 
-- [ ] 1.1 Add a lifecycle fixture matrix for startup, leadership, serving, termination and recovery boundaries; verify every availability requirement maps to an expected state or observable result and name the implementing feature owner.
+- [x] 1.1 Add a lifecycle fixture matrix for startup, leadership, serving, termination and recovery boundaries; verify every availability requirement maps to an expected state or observable result and name the implementing feature owner.
 - [ ] 1.2 Add fault fixtures around the existing publication contract for lost responses, same-run conflicting bytes and recovery from a separate client; verify matching operations retain identity/expiry and fixtures distinguish a shared fake store from real durable-backend acceptance.
-- [ ] 1.3 Document the manager/Helm integration contract, defaults, dependencies and fixture commands; verify it names existing entry points/interfaces after their owners merge and marks unimplemented services unavailable.
+- [x] 1.3 Document the manager/Helm integration contract, defaults, dependencies and fixture commands; verify it names existing entry points/interfaces after their owners merge and marks unimplemented services unavailable.
 
 ## 2. Integrate election and background worker lifecycle
 
-- [ ] 2.1 Configure the merged manager with the shared namespace-local Lease, election enabled in both replica modes, namespace-scoped RBAC and validated 15s/10s/2s defaults; verify simultaneous candidates, stable identity across upgrades and denied Lease access without an election bypass.
+- [x] 2.1 Configure the merged manager with the shared namespace-local Lease, election enabled in both replica modes, namespace-scoped RBAC and validated 15s/10s/2s defaults; verify simultaneous candidates, stable identity across upgrades and denied Lease access without an election bypass.
 - [ ] 2.2 Classify/register background workers under synchronized leadership and keep required per-replica initialization independent; verify followers start no reconciliation and unsynchronized leaders cannot expose authoritative state or mutate managed resources.
 - [ ] 2.3 Propagate leadership cancellation through worker retries and owned C2P processes, retaining normal manager error/exit behavior and no early Lease release; verify leadership loss stops new work and terminates children within the configured bound.
 - [ ] 2.4 Exercise delayed former-leader Kubernetes writes/deletes against newer generations and ownership; verify optimistic conflicts trigger fresh resolution and stale attempts cannot overwrite protected state or withdraw a current/unmanaged contribution.

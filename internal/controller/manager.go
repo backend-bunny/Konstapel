@@ -44,8 +44,54 @@ import (
 // ProfileRefIndex indexes ComplianceBindings by spec.profileRef.name.
 const ProfileRefIndex = "spec.profileRef.name"
 
-// LeaderElectionID is the Lease name the controller uses.
-const LeaderElectionID = "konstapel-targeting.compliance.erenius.io"
+// LeaderElectionID is the Lease every controller pod of the installation
+// shares in the controller namespace, across replicas and supported
+// runtime revisions. It never includes a pod name, image, or chart version;
+// each candidate process has its own holder identity.
+const LeaderElectionID = "konstapel-controller-leader-election"
+
+// Default election timings (controller-runtime's conventional values).
+const (
+	DefaultLeaseDuration = 15 * time.Second
+	DefaultRenewDeadline = 10 * time.Second
+	DefaultRetryPeriod   = 2 * time.Second
+)
+
+// electionJitter is client-go's leader election jitter factor: the renew
+// deadline must exceed it times the retry period.
+const electionJitter = 1.2
+
+// Election holds the leader-election timings.
+type Election struct {
+	LeaseDuration, RenewDeadline, RetryPeriod time.Duration
+}
+
+// Validate checks the timings before startup, with client-go's ordering:
+// positive, lease duration > renew deadline > 1.2 x retry period.
+func (e Election) Validate() error {
+	switch {
+	case e.LeaseDuration <= 0 || e.RenewDeadline <= 0 || e.RetryPeriod <= 0:
+		return fmt.Errorf("leader election timings must be positive (lease %s, renew %s, retry %s)", e.LeaseDuration, e.RenewDeadline, e.RetryPeriod)
+	case e.LeaseDuration <= e.RenewDeadline:
+		return fmt.Errorf("leader election lease duration %s must exceed the renew deadline %s", e.LeaseDuration, e.RenewDeadline)
+	case float64(e.RenewDeadline) <= electionJitter*float64(e.RetryPeriod):
+		return fmt.Errorf("leader election renew deadline %s must exceed %.1f x the retry period %s", e.RenewDeadline, electionJitter, e.RetryPeriod)
+	}
+	return nil
+}
+
+func (e Election) withDefaults() Election {
+	if e.LeaseDuration == 0 {
+		e.LeaseDuration = DefaultLeaseDuration
+	}
+	if e.RenewDeadline == 0 {
+		e.RenewDeadline = DefaultRenewDeadline
+	}
+	if e.RetryPeriod == 0 {
+		e.RetryPeriod = DefaultRetryPeriod
+	}
+	return e
+}
 
 // Options configure the targeting manager.
 type Options struct {
@@ -54,6 +100,8 @@ type Options struct {
 	ProbeAddr               string
 	LeaderElection          bool
 	LeaderElectionNamespace string
+	// Election overrides the default timings; zero fields keep defaults.
+	Election Election
 	// SkipControllerNameValidation allows a second manager in the same
 	// process. Only tests that restart the manager in-process set it.
 	SkipControllerNameValidation bool
@@ -85,6 +133,10 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if opts.EnginePoll == 0 {
 		opts.EnginePoll = 15 * time.Second
 	}
+	election := opts.Election.withDefaults()
+	if err := election.Validate(); err != nil {
+		return nil, err
+	}
 	mopts := ctrl.Options{
 		Scheme:                  Scheme(),
 		Metrics:                 metricsserver.Options{BindAddress: opts.MetricsAddr},
@@ -92,7 +144,13 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		LeaderElection:          opts.LeaderElection,
 		LeaderElectionID:        LeaderElectionID,
 		LeaderElectionNamespace: opts.LeaderElectionNamespace,
-		Controller:              config.Controller{SkipNameValidation: &opts.SkipControllerNameValidation},
+		LeaseDuration:           &election.LeaseDuration,
+		RenewDeadline:           &election.RenewDeadline,
+		RetryPeriod:             &election.RetryPeriod,
+		// The Lease is not released early: expiry bounds the wait while
+		// shutdown may still be draining mutating work.
+		LeaderElectionReleaseOnCancel: false,
+		Controller:                    config.Controller{SkipNameValidation: &opts.SkipControllerNameValidation},
 	}
 	if opts.WebhookCertDir != "" {
 		mopts.WebhookServer = webhook.NewServer(webhook.Options{Port: opts.WebhookPort, CertDir: opts.WebhookCertDir, CertName: "tls.crt", KeyName: "tls.key"})
