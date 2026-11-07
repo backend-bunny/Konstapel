@@ -27,7 +27,9 @@
       "version-file": "VERSION",
       "initial-version": "0.1.0",
       "extra-files": [
-        { "type": "generic", "path": "melange.yaml" }
+        { "type": "generic", "path": "melange.yaml" },
+        { "type": "generic", "path": "charts/konstapel-crds/Chart.yaml" },
+        { "type": "generic", "path": "charts/konstapel/Chart.yaml" }
       ]
     }
   }

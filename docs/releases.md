@@ -2,13 +2,14 @@
 
 Release-please maintains one `chore: release X.Y.Z` pull request from Conventional
 Commits on `main`, following talos-nyckelpiga's workflow. The release PR updates
-`VERSION`, `CHANGELOG.md`, the melange package version, and release-please's
-manifest. Review and merge that PR when a version is ready to ship. Creating or
+`VERSION`, `CHANGELOG.md`, the melange package version, both Helm charts'
+`version` and `appVersion`, and release-please's manifest. Review and merge that PR when a version is ready to ship. Creating or
 updating the release PR does not publish a version tag.
 
 The `simple` release strategy keeps Konstapel's application version in `VERSION`;
 the Go version in `go.mod` remains the compiler requirement. Local builds and
-image builds check that `VERSION` matches `melange.yaml`. The generated C2P
+image builds check that `VERSION` matches `melange.yaml` and both charts
+(`charts/konstapel-crds`, `charts/konstapel`; see [Helm charts](charts.md)). The generated C2P
 provider manifest and OCI version annotation read `VERSION` as well.
 
 The initial application version is `0.1.0`. The release-please manifest starts at

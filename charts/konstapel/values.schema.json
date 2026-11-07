@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "konstapel values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "replicaCount", "tls"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*$"},
+        "digest": {
+          "description": "Image digest; empty only in unpublished source charts. Mutable tags are not accepted.",
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64})?$"
+        },
+        "pullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]}
+      }
+    },
+    "replicaCount": {
+      "description": "Serving replicas; 2 by default, 1 only for development.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["certManager", "secret"]},
+        "certManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind"],
+              "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "kind": {"enum": ["Issuer", "ClusterIssuer"]},
+                "group": {"const": "cert-manager.io"}
+              }
+            }
+          }
+        },
+        "secret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {"mode": {"const": "certManager"}},
+          "not": {"required": ["secret"]}
+        },
+        {
+          "properties": {"mode": {"const": "secret"}},
+          "required": ["secret"],
+          "not": {"required": ["certManager"]}
+        }
+      ]
+    }
+  }
+}

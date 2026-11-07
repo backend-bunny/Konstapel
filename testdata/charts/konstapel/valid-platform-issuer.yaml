@@ -1,0 +1,5 @@
+# expect: ok
+tls:
+  mode: certManager
+  certManager:
+    issuerRef: {name: platform-ca, kind: ClusterIssuer}
