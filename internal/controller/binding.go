@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -32,7 +33,15 @@ import (
 const (
 	ReasonEngineUnavailable = "EngineUnavailable"
 	ReasonEngineReady       = "Ready"
-	ReasonNoContributions   = "NoContributions"
+	// EngineReady reasons for a delivery capability that is not available:
+	// the policy API is not served, served without or with an unsupported
+	// ValidatingPolicy resource, or forbidden to the controller.
+	// EngineUnavailable covers transport failures.
+	ReasonEngineAPINotServed    = "EngineAPINotServed"
+	ReasonEngineResourceMissing = "EngineResourceMissing"
+	ReasonEngineUnsupported     = "EngineResourceUnsupported"
+	ReasonEngineAccessDenied    = "EngineAccessDenied"
+	ReasonNoContributions       = "NoContributions"
 )
 
 // TransitionRequeue is how often a binding is re-checked while engine
@@ -118,7 +127,7 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err != nil {
 			msg = err.Error()
 		}
-		engine.Status, engine.Reason, engine.Message = metav1.ConditionFalse, ReasonEngineUnavailable, msg
+		engine.Status, engine.Reason, engine.Message = metav1.ConditionFalse, engineReason(err), msg
 		requeue = TransitionRequeue
 	default:
 		desired, hold, renderErrs := r.desired(ctx, b, br)
@@ -313,4 +322,19 @@ func (r readThrough) Get(ctx context.Context, key client.ObjectKey, obj client.O
 
 func (r readThrough) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	return r.reader.List(ctx, list, opts...)
+}
+
+// engineReason maps a delivery capability result to an EngineReady reason.
+func engineReason(err error) string {
+	switch capability.ReasonOf(err) {
+	case capability.APINotServed:
+		return ReasonEngineAPINotServed
+	case capability.ResourceMissing:
+		return ReasonEngineResourceMissing
+	case capability.UnsupportedResource:
+		return ReasonEngineUnsupported
+	case capability.AccessDenied:
+		return ReasonEngineAccessDenied
+	}
+	return ReasonEngineUnavailable
 }

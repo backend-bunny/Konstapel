@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -20,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -33,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
@@ -118,11 +117,20 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := mgr.GetAPIReader().Get(context.Background(), client.ObjectKey{Name: "kube-system"}, ks); err != nil {
 		return nil, fmt.Errorf("read cluster identity: %w", err)
 	}
-	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	// Discovery calls are bounded; capability results are reused for one
+	// poll interval, so a returning engine is noticed within it.
+	dcfg := rest.CopyConfig(cfg)
+	dcfg.Timeout = capabilityTimeout
+	dc, err := discovery.NewDiscoveryClientForConfig(dcfg)
 	if err != nil {
 		return nil, err
 	}
-	engine := cachedEngine(DiscoverEngine(dc), opts.EnginePoll)
+	reviewer, err := client.New(dcfg, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		return nil, err
+	}
+	capabilities := &capability.Monitor{Discovery: dc, Review: capability.SelfReview(reviewer), Timeout: capabilityTimeout, TTL: opts.EnginePoll}
+	engine := capabilities.Engine(capability.Delivery)
 
 	br := &BindingReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: opts.Content, Engine: engine, Cluster: "kube-system:" + string(ks.UID)}
 	bc, err := builder.ControllerManagedBy(mgr).
@@ -139,10 +147,19 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		Complete(&ProfileReconciler{Client: mgr.GetClient(), Content: opts.Content}); err != nil {
 		return nil, err
 	}
-	if err := mgr.Add(&ownedPolicyWatch{mgr: mgr, ctrl: bc, engine: engine, poll: opts.EnginePoll}); err != nil {
+	owned := &unstructured.Unstructured{}
+	owned.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
+	if err := mgr.Add(&deferredWatch{name: "owned-policy-watch", available: engine, poll: opts.EnginePoll, register: func() error {
+		// Only engine policies Konstapel manages are cached.
+		managed := predicate.NewPredicateFuncs(func(o client.Object) bool {
+			return o.GetLabels()[targeting.LabelManagedBy] == targeting.ManagedByValue
+		})
+		return bc.Watch(source.Kind(mgr.GetCache(), client.Object(owned),
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ComplianceBinding{}, handler.OnlyControllerOwner()), managed))
+	}}); err != nil {
 		return nil, err
 	}
-	if err := setupAssessments(mgr, opts.Content, engine, br.Cluster, opts.EnginePoll); err != nil {
+	if err := setupAssessments(mgr, opts.Content, engine, capabilities.Engine(capability.Assessment), br.Cluster, opts.EnginePoll); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
@@ -157,80 +174,41 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	return mgr, nil
 }
 
-// DiscoverEngine checks that the cluster serves policies.kyverno.io/v1
-// validatingpolicies. A missing group/version is "not available", not an error.
-func DiscoverEngine(dc discovery.DiscoveryInterface) EngineAvailable {
-	return func(context.Context) (bool, error) {
-		gv := targeting.ValidatingPolicyGVK.GroupVersion().String()
-		list, err := dc.ServerResourcesForGroupVersion(gv)
-		if err != nil {
-			if isNotFound(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("discover %s: %w", gv, err)
-		}
-		for _, r := range list.APIResources {
-			if r.Name == "validatingpolicies" && !r.Namespaced {
-				return true, nil
-			}
-		}
-		return false, nil
-	}
+// capabilityTimeout bounds each discovery and authorization request.
+const capabilityTimeout = 10 * time.Second
+
+// SelfSubjectAccessReviews check the controller's own permissions for each
+// capability.
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=selfsubjectaccessreviews,verbs=create
+
+// deferredWatch registers one watch once its capability is available, so the
+// manager starts without the engine and reports why. It registers its source
+// exactly once; afterwards the informer itself re-lists and re-watches when
+// the API is removed and restored.
+type deferredWatch struct {
+	name      string
+	available EngineAvailable
+	register  func() error
+	poll      time.Duration
 }
 
-func cachedEngine(f EngineAvailable, ttl time.Duration) EngineAvailable {
-	var mu sync.Mutex
-	var at time.Time
-	var ok bool
-	return func(ctx context.Context) (bool, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if ok && time.Since(at) < ttl {
-			return true, nil
-		}
-		avail, err := f(ctx)
-		ok, at = avail && err == nil, time.Now()
-		return avail, err
-	}
-}
+func (w *deferredWatch) NeedLeaderElection() bool { return true }
 
-// ownedPolicyWatch starts the watch on owned engine policies once the engine
-// API is served, so the manager starts and reports EngineUnavailable when
-// Kyverno is absent. add-helm-oci-distribution's capability monitor
-// generalises this (re-registration after API removal, authorization checks).
-type ownedPolicyWatch struct {
-	mgr    manager.Manager
-	ctrl   controller.Controller
-	engine EngineAvailable
-	poll   time.Duration
-}
-
-func (w *ownedPolicyWatch) NeedLeaderElection() bool { return true }
-
-func (w *ownedPolicyWatch) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithName("owned-policy-watch")
+func (w *deferredWatch) Start(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName(w.name)
 	t := time.NewTicker(w.poll)
 	defer t.Stop()
 	for {
-		if ok, err := w.engine(ctx); err != nil {
-			logger.Info("engine discovery failed; retrying", "error", err.Error())
-		} else if ok {
-			obj := &unstructured.Unstructured{}
-			obj.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
-			// Only engine policies Konstapel manages are cached.
-			managed := predicate.NewPredicateFuncs(func(o client.Object) bool {
-				return o.GetLabels()[targeting.LabelManagedBy] == targeting.ManagedByValue
-			})
-			src := source.Kind(w.mgr.GetCache(), client.Object(obj),
-				handler.EnqueueRequestForOwner(w.mgr.GetScheme(), w.mgr.GetRESTMapper(), &v1alpha1.ComplianceBinding{}, handler.OnlyControllerOwner()),
-				managed)
-			if err := w.ctrl.Watch(src); err != nil {
-				logger.Info("could not start owned-policy watch; retrying", "error", err.Error())
-			} else {
-				logger.Info("watching owned engine policies")
+		if ok, err := w.available(ctx); ok {
+			if err := w.register(); err == nil {
+				logger.Info("watch started")
 				<-ctx.Done()
 				return nil
+			} else {
+				logger.Info("could not start watch; retrying", "error", err.Error())
 			}
+		} else if err != nil {
+			logger.Info("waiting for capability", "reason", capability.ReasonOf(err), "message", err.Error())
 		}
 		select {
 		case <-ctx.Done():
@@ -238,6 +216,14 @@ func (w *ownedPolicyWatch) Start(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+// capabilityMessage is the message of a capability check result.
+func capabilityMessage(err error) string {
+	if err == nil {
+		return "unavailable"
+	}
+	return err.Error()
 }
 
 func bindingsForProfile(c client.Client) handler.MapFunc {

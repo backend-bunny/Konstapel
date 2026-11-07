@@ -118,6 +118,42 @@ object's UID, spec, status and finalizers stay unchanged:
 4. a refused install under another release name;
 5. a same-identity reinstall, which restores the chart's schema.
 
+## External engine capabilities
+
+Kyverno is installed and managed separately. The controller's capability
+monitor (`internal/capability`) checks, for each capability:
+- that the required API resources are served with the right group, version,
+  resource, kind, scope and discovery verbs;
+- that the controller's service account may perform the operations the
+  implementation uses (SelfSubjectAccessReviews).
+
+Each request is bounded at 10 seconds, and results are reused for one poll
+interval.
+
+| Capability | Required API resources | Access reviewed |
+| --- | --- | --- |
+| Policy delivery | `policies.kyverno.io/v1` `validatingpolicies` (ValidatingPolicy, cluster-scoped) | get, list, watch, create, update, patch, delete |
+| Assessment | `wgpolicyk8s.io/v1alpha2` `policyreports` (namespaced) and `clusterpolicyreports` (cluster-scoped) | get, list, watch on `policyreports` (the collector reads namespaced reports) |
+| Exceptions | `policies.kyverno.io/v1` `policyexceptions` (namespaced) | none yet: native exceptions are add-self-service-policy-exceptions's, which has its own expiry and governance gates |
+
+The results are distinct. `APINotServed`, `ResourceMissing`,
+`UnsupportedResource` (kind, scope or verbs), `AccessDenied` (forbidden
+discovery or operation) and `DependencyUnavailable` (transport, timeout) are
+never conflated. Results go into existing status, not a new resource:
+- **Policy delivery** sets the binding's `EngineReady` reason
+  (`EngineAPINotServed`, `EngineResourceMissing`,
+  `EngineResourceUnsupported`, `EngineAccessDenied`, `EngineUnavailable`).
+  Applied policies stay in place.
+- **Assessment** adds `policy reports unavailable: <reason>` to
+  `status.assessment.current.limitations`. Evidence is then incomplete, never
+  compliant, and scheduled snapshots are disabled until reports return.
+  Delivery is unaffected.
+
+Each engine watch registers once its own capability is available. After that,
+its informer re-lists and re-watches by itself when the API is removed and
+restored, so the controller never restarts for a late or returning engine.
+`/healthz` and `/readyz` don't depend on Kyverno.
+
 ## Values contract
 
 `charts/konstapel/values.schema.json` rejects unknown values. There are no
