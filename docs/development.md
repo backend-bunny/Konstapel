@@ -8,7 +8,7 @@ The initial supported development and acceptance platform is Linux amd64.
 
 Install [Devbox](https://www.jetify.com/docs/devbox/installing_devbox/) and,
 optionally, [direnv](https://direnv.net/docs/installation.html) with its shell hook.
-CI currently uses Devbox 0.18.4. The repository's `devbox.json` and generated
+CI currently uses Devbox 0.19.0. The repository's `devbox.json` and generated
 `devbox.lock` select the tools, including Go, Task, Kyverno CLI, Chainsaw, kind,
 kubectl, Helm, shell utilities, and the Renovate configuration validator.
 Image tools include melange, apko, cosign, Syft, go-licenses and bubblewrap;
@@ -42,7 +42,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | Task | Behavior |
 | --- | --- |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
-| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks. |
+| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, plus CI decision and shell logging regression tests. |
 | `task lint` | Check Go formatting, `go vet`, generated API files, and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
@@ -71,13 +71,41 @@ owned cluster while preserving diagnostic evidence. See the
 [assessment guide](integration/assessment-loop.md) for package inspection and
 manual environment create/smoke/delete commands.
 
-GitHub Actions installs the same Devbox lock and runs `devbox run -- task check`.
-The `acceptance` job in the same workflow runs `task acceptance` on a disposable
-kind cluster. That includes the live Go suite (`scripts/targeting-live.sh`) with
-the S3 evidence lifecycle against the pinned S3-compatible test service. The
-job uploads test-owned evidence as `acceptance-evidence`, without the
-kubeconfig, rendered chart manifest, or node logs. The task tears down the
-cluster and test service whether it passes or fails.
+GitHub Actions installs the same Devbox lock and runs `devbox run -- task check`
+in the `checks` job on every PR, main push, and manual test run. Live acceptance
+is scoped as follows:
+
+| Change or event | Full acceptance |
+| --- | --- |
+| PR containing only root README, vision, architecture, agent guidelines, changelog, license/notice files, OpenSpec Markdown/config, or research Markdown | Skipped with an explicit reason |
+| Any other PR path, including Go, dependencies, workflows, scripts, policies, charts, and integration documentation | Required |
+| Unknown paths, incomplete history, or an empty diff | Required |
+| Main push or manual test run | Required |
+
+The exact prose allowlist lives in `scripts/ci/acceptance-scope.sh`. It inspects
+the complete Git diff, including deletions and both sides of renames. Integration
+documentation stays covered because live tests execute documented commands.
+Only superseded PR runs are cancelled; main runs remain available for publication.
+
+The `acceptance-live` job runs `task acceptance` on a disposable kind cluster.
+That includes the live Go suite (`scripts/targeting-live.sh`) with the S3 evidence
+lifecycle against the pinned S3-compatible test service. The stable `acceptance`
+gate passes only when `checks` succeeds and either full acceptance succeeds or
+an allowlisted prose-only PR explicitly skips it. Configure `checks` and
+`acceptance` as required status checks on `main`; do not require the conditional
+`acceptance-live` job.
+
+Acceptance streams stdout and stderr to the terminal/Actions log while retaining
+per-stage log files. Timestamped stage markers also go to `progress.log`;
+`targeting/targeting-live.log` includes verbose Go test progress. Expiry/recovery
+tests can take several minutes, and a full run currently takes roughly 25 minutes.
+Piping logs through `tee` preserves failures. `acceptance-result.json` and
+`result.txt` record the final outcome after teardown.
+
+CI uploads test-owned evidence as `acceptance-evidence`, excluding kubeconfigs,
+compiled test binaries, rendered chart manifests, and node logs. The task tears
+down its cluster and test service on success or failure; teardown errors fail
+the task and remain in its logs.
 CI checks that execution did not modify dependency locks. The setup action caches
 Nix packages and Go downloads/build outputs; it does not use a separate Go version
 or download an independently selected Kyverno CLI.
@@ -110,8 +138,9 @@ and commit the regenerated lockfile; the other tools use automated update PRs.
 Kyverno chart and CLI updates are grouped. `task deps:check` verifies the chart's
 actual `appVersion` against the CLI pin and verifies the chart archive checksum.
 Update failures must be resolved with compatible pins, not by disabling the
-check. Runtime or C2P updates also require a passing `acceptance` job, or a local
-`task acceptance` run with retained evidence, before merge. The `checks` job
+check. Runtime or C2P updates also require passing `acceptance-live` and
+`acceptance` jobs before merge. A local `task acceptance` run provides useful
+evidence but does not replace the required CI gate. The `checks` job
 alone does not prove live compatibility.
 
 Renovate excludes vendored content, historical evidence, and OpenSpec artifacts.

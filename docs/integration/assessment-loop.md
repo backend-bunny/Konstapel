@@ -53,8 +53,12 @@ task acceptance OUTPUT=/tmp/konstapel-acceptance-1
 task acceptance OUTPUT=/tmp/konstapel-acceptance-2
 ```
 
-Both runs start from a clean disposable environment. Read `result.txt`,
-`runner.log`, `chainsaw.log`, `environment/`, `package/`, and `kind-logs/`.
+Both runs start from a clean disposable environment. Command stdout and stderr
+stream to the terminal and per-stage files. `progress.log` records timestamped
+stage markers; `targeting/targeting-live.log` includes verbose Go test progress
+during the longer expiry/recovery cases. Read `result.txt`, `runner.log`,
+`chainsaw.log`, `environment/`, `package/`, and `kind-logs/`. The final result is
+recorded after teardown; teardown failure also fails the run.
 The exit status is authoritative: a missing observation or unexpected admission
 outcome fails acceptance. Failure artifacts remain available. Kubeconfig is an
 operational input in the run directory, not evidence that should be published.
