@@ -152,7 +152,63 @@ never conflated. Results go into existing status, not a new resource:
 Each engine watch registers once its own capability is available. After that,
 its informer re-lists and re-watches by itself when the API is removed and
 restored, so the controller never restarts for a late or returning engine.
+
+A Ready binding is otherwise not requeued, so a capability trigger rechecks
+every capability each poll interval. When any result changes, it
+re-reconciles every binding for delivery and assessment. This covers an
+engine that is installed, removed, or loses or regains permissions.
 `/healthz` and `/readyz` don't depend on Kyverno.
+
+**Tested versions.** The matrix above is tested against Kyverno chart
+`3.9.2` (`scripts/runtime.env`), which serves `policies.kyverno.io/v1` and
+`wgpolicyk8s.io/v1alpha2`. Compatibility comes from these API shapes, not from
+the Kyverno version string. Konstapel never installs engine CRDs and never
+falls back to legacy Kyverno policy APIs.
+
+**Troubleshooting.** These are four different questions. Answer them in this
+order:
+1. **Is the API present and usable?** Check the binding's `EngineReady`
+   reason:
+   - `EngineAPINotServed` or `EngineResourceMissing`: install, or reinstall,
+     Kyverno with the APIs above.
+   - `EngineResourceUnsupported`: run a Kyverno release from the tested matrix.
+   - `EngineAccessDenied`: restore the controller's generated RBAC
+     (`config/rbac/controller/role.yaml`).
+   - `EngineUnavailable`: check API server and aggregation health.
+
+   Each of these clears by itself once fixed. There's no restart.
+2. **Is Konstapel serving?** `/healthz` and `/readyz` (probe port 8081) report
+   the process. They stay healthy without Kyverno, so the endpoints for
+   configuration admission and evidence downloads stay available.
+3. **Are the policies ready?** `EngineReady=True` (`Ready`) means every
+   desired policy is applied at the current revision and Kyverno reports it
+   ready. `ReplacementPending` means the engine has not accepted the policies
+   yet. During an engine outage, already applied policies stay in place and
+   keep enforcing.
+4. **Is the evidence complete?** That's `status.assessment.current`.
+   `policy reports unavailable: <reason>` means no evidence can be attributed:
+   completeness is never `Complete`, and scheduled snapshots stop until
+   reports are readable again.
+
+```sh
+kubectl get compliancebinding <name> -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
+kubectl get compliancebinding <name> -o jsonpath='{.status.assessment.current.evidence.completeness}{"\n"}{range .status.assessment.current.limitations[*]}{@}{"\n"}{end}'
+```
+
+`TestLiveEngineCapabilityRecovery` (the `capabilities` acceptance group, on
+its own cluster) runs the controller under the generated RBAC and checks
+these steps:
+1. It starts while the ValidatingPolicy API is not served
+   (`EngineResourceMissing`), and recovers to delivery and enforcement when the
+   API returns.
+2. It loses its engine and report permissions (`EngineAccessDenied`, with
+   reports unavailable) while the applied policy keeps enforcing, and recovers
+   when they're restored.
+3. A Kyverno rollout keeps the policy.
+4. The API is removed and restored while the controller runs, and the policy
+   is re-delivered.
+
+None of these restarts the controller.
 
 ## Values contract
 
@@ -247,7 +303,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
 | 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults | the merged manager (available); the replica lifecycle (add-controller-high-availability) |
-| 4 | Capability discovery and recovery without restart | the merged manager |
+| 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |
 

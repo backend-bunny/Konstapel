@@ -49,6 +49,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
@@ -253,10 +254,12 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 	}
 
 	engineUp := false
+	var engineErr error
 	if r.Engine != nil {
-		engineUp, err = r.Engine(ctx)
-		if err != nil {
-			return collector.CaptureV2{}, nil, 0, err
+		engineUp, engineErr = r.Engine(ctx)
+		// An unavailable capability is a limitation, not a failure.
+		if engineErr != nil && capability.ReasonOf(engineErr) == "" {
+			return collector.CaptureV2{}, nil, 0, engineErr
 		}
 	}
 	var rendered []assessment.Object
@@ -268,10 +271,8 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 		}
 	} else {
 		msg := "policy engine API is not served"
-		if r.Engine != nil {
-			if _, err := r.Engine(ctx); err != nil {
-				msg = capabilityMessage(err)
-			}
+		if engineErr != nil {
+			msg = capabilityMessage(engineErr)
 		}
 		limits = append(limits, msg+"; no engine policies or reports can be read")
 	}
@@ -554,7 +555,7 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 }
 
 // setupAssessments registers the assessment reconciler with the manager.
-func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, cluster string, poll time.Duration) error {
+func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration) error {
 	rt := currentRuntime()
 	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
@@ -564,6 +565,9 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Watches(&v1alpha1.AssessmentRun{}, bindingForRun()).
 		Watches(&v1alpha1.AssessmentRequest{}, bindingForRequest()).
 		Watches(&v1alpha1.EvidenceDestination{}, allBindings(mgr.GetClient()))
+	if capabilityEvents != nil {
+		b = b.WatchesRawSource(source.Channel(capabilityEvents, &handler.EnqueueRequestForObject{}))
+	}
 	for _, res := range sortedKeys(workloadKinds) {
 		obj, _ := workloadKinds[res]()
 		b = b.Watches(obj, allBindings(mgr.GetClient()), builder.WithPredicates(workloadStateChanged()))
