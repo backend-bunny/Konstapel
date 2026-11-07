@@ -1,11 +1,12 @@
 # Linux workload hardening bundle
 
-This page tracks `add-linux-workload-hardening-bundle`. Group 1 is done: the
-four upstream policies are vendored and their upstream test suites have been
-re-run. Group 2 is done: the Konstapel variants of the four checks exist and
-are tested in the CLI. Since task 3.1, the controller's vendored bundle serves
-them next to the first loop's privileged check (see "Serving"). Packaging and NIST mappings (group 3), targeting and live
-behavior (group 4), and exceptions (group 5) come later.
+This page tracks `add-linux-workload-hardening-bundle`. The four upstream
+policies and Konstapel variants are vendored and tested. The controller serves
+them alongside the original privileged-container check, with bounded NIST
+mappings, saved-evidence conversion, rendered targeting tests, and live admission
+coverage including the user-namespace case. Background/applicability integration,
+exception lifecycle, and final combined acceptance remain in progress; see the
+[implementation tasks](../../openspec/changes/add-linux-workload-hardening-bundle/tasks.md).
 
 ## Source layout
 
@@ -54,9 +55,9 @@ Every source policy carries these upstream annotations:
 They also set `validationActions: [Audit]` and enable background evaluation.
 
 These annotations are upstream descriptions, not Konstapel's tested matrix.
-Konstapel's runtime pins are in `scripts/runtime.env` and
-`docs/integration/versions.json`. Rendering will set the enforcement mode
-(Audit or Deny) per binding.
+Konstapel's current runtime pins are in `scripts/runtime.env`;
+`docs/integration/versions.json` records the original validation environment.
+Rendering sets the enforcement mode (Audit or Deny) per binding.
 
 ## Upstream CLI suites (task 1.3)
 

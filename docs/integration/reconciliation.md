@@ -1,5 +1,9 @@
 # Reconciled assessment implementation
 
+Historical integration and validation record for the standalone assessment-loop
+prototype. See the [documentation index](../README.md) for current controller
+workflows and implementation status.
+
 Two independent implementations of `prove-kyverno-v1-assessment-loop` completed
 in parallel. PR #29 supplied the implementation already on main. This merge
 keeps its `internal/assessment` package, Go runner/provider, version-1 capture
@@ -18,8 +22,9 @@ resource UIDs, and refusal to delete a replacement cluster.
 
 The completed OpenSpec change is archived and the nine requirements and fifteen
 scenarios are synced into `openspec/specs/kyverno-assessment-loop/spec.md`.
-The original independent implementation is preserved locally on branch
-`backup/prove-kyverno-independent` for recovery and comparison. Its capture format
+At reconciliation time, the original independent implementation was preserved
+locally on branch `backup/prove-kyverno-independent` for recovery and comparison;
+that local branch is not a distributed repository artifact. Its capture format
 is different; its original artifacts remain separate from version-1 captures.
 
 ## Validation
@@ -38,7 +43,6 @@ Original violating resource identities remained present until owned cleanup.
 
 | Run | Cluster identity | Evaluation boundary | Collected |
 | --- | --- | --- | --- |
-
 | `acceptance-reconciled-1` | `kube-system:7da4246f-0506-4222-8734-80686c84b706` | 2026-11-05T09:42:37.203740104Z | 2026-11-05T09:43:03.49183857Z |
 | `acceptance-reconciled-2` | `kube-system:e9597aef-83b2-4f9c-b456-6a19c8a85de1` | 2026-11-05T09:46:42.072977188Z | 2026-11-05T09:47:08.213895409Z |
 

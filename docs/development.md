@@ -77,7 +77,7 @@ is scoped as follows:
 
 | Change or event | Full acceptance |
 | --- | --- |
-| PR containing only root README, vision, architecture, agent guidelines, changelog, license/notice files, OpenSpec Markdown/config, or research Markdown | Skipped with an explicit reason |
+| PR containing only root README, vision, architecture, agent guidelines, changelog, license/notice files, OpenSpec Markdown, root `openspec/config.yaml`, or research Markdown | Skipped with an explicit reason |
 | Any other PR path, including Go, dependencies, workflows, scripts, policies, charts, and integration documentation | Required |
 | Unknown paths, incomplete history, or an empty diff | Required |
 | Main push or manual test run | Required |
@@ -85,6 +85,8 @@ is scoped as follows:
 The exact prose allowlist lives in `scripts/ci/acceptance-scope.sh`. It inspects
 the complete Git diff, including deletions and both sides of renames. Integration
 documentation stays covered because live tests execute documented commands.
+Per-change OpenSpec `.openspec.yaml` metadata and documentation outside the
+allowlisted paths currently require acceptance too.
 Only superseded PR runs are cancelled; main runs remain available for publication.
 
 The `acceptance-live` matrix runs four groups concurrently, each on its own

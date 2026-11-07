@@ -1,5 +1,10 @@
 # Assessment-loop validation record
 
+Historical validation of the original standalone prototype. For current
+controller capabilities and implementation status, see the
+[documentation index](../README.md); current pins live in
+[`scripts/runtime.env`](../../scripts/runtime.env).
+
 Date: 2026-11-05. Environment versions and observed controller image digests are
 recorded in [versions.json](versions.json) and
 [runtime-images.json](runtime-images.json). Supporting bundle research remains

@@ -42,7 +42,7 @@ The editor role is not aggregated into the built-in `admin`/`edit` roles:
 namespace edit rights alone do not grant authority to accept risk. It grants
 nothing outside `complianceexceptions`. In particular it gives no access to
 profiles, bindings, the protected `konstapel-system` namespace where
-acceptance snapshots will live (task 3.1), or native Kyverno
+acceptance snapshots are stored, or native Kyverno
 `PolicyException`s. The protected acceptance record is enforced by admission,
 not RBAC (see below).
 
