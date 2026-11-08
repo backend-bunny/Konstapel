@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,12 @@ var prodViolations = map[string]map[int]bool{
 	"disallow-capabilities-strict":  {1: true},
 }
 
-func bundleCapture(t *testing.T) exportFixture {
+func bundleCapture(t *testing.T) exportFixture { return bundleCaptureWith(t, nil) }
+
+// extraPod is an additional Pod in the fixture, with a declared OS.
+type extraPod struct{ ns, name, uid, os string }
+
+func bundleCaptureWith(t *testing.T, extra []extraPod) exportFixture {
 	t.Helper()
 	c, ref := served(t)
 	var policies []v1alpha1.ProfilePolicy
@@ -83,8 +89,15 @@ func bundleCapture(t *testing.T) exportFixture {
 		return collector.ListedObject{Resource: "/v1/pods", NamespaceUID: string(nsUID[ns]), Object: assessment.Object{"apiVersion": "v1", "kind": "Pod",
 			"metadata": assessment.Object{"namespace": ns, "name": name, "uid": uid}, "spec": assessment.Object{"containers": []any{}}, "status": assessment.Object{"phase": "Running"}}}
 	}
-	capture, err := collector.FreezeScope(cluster, exportT0, "sha256:mapping-fixture", subjects, stale, rendered,
-		[]collector.ListedObject{pod("shop-dev", "web", "pod-dev"), pod("shop-prod", "web", "pod-prod")})
+	listed := []collector.ListedObject{pod("shop-dev", "web", "pod-dev"), pod("shop-prod", "web", "pod-prod")}
+	for _, x := range extra {
+		lo := pod(x.ns, x.name, x.uid)
+		if x.os != "" {
+			assessment.Map(lo.Object["spec"])["os"] = assessment.Object{"name": x.os}
+		}
+		listed = append(listed, lo)
+	}
+	capture, err := collector.FreezeScope(cluster, exportT0, "sha256:mapping-fixture", subjects, stale, rendered, listed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,5 +408,77 @@ func TestSavedBundlePackageResolvesAllReferences(t *testing.T) {
 	}
 	if ran < 5 {
 		t.Errorf("only %d documented commands ran", ran)
+	}
+}
+
+// Task 4.5: an explicit Windows Pod short-circuits every Linux check to a
+// raw pass. It is recorded as outside those checks' scope: never counted as
+// passing coverage, absent from the OSCAL results of those checks, and named
+// as out of scope, while its raw outcome stays in evaluation.json. Pods that
+// omit spec.os.name remain assessed by the Linux rules.
+func TestWindowsWorkloadIsOutOfScopeNotPassing(t *testing.T) {
+	base := bundleCapture(t)
+	f := bundleCaptureWith(t, []extraPod{{"shop-dev", "win", "pod-win", "windows"}})
+	var linux, other, windowsAll int
+	for _, e := range f.capture.Expected {
+		if e.Workload.UID != "pod-win" {
+			continue
+		}
+		windowsAll++
+		if e.Workload.OS != "windows" {
+			t.Fatalf("captured OS %q", e.Workload.OS)
+		}
+		policy := f.capture.EnginePolicies[slices.IndexFunc(f.capture.EnginePolicies, func(p assessment.Object) bool {
+			return assessment.Str(assessment.At(p, "metadata", "name")) == e.Check.EnginePolicy
+		})]
+		v := assessment.Map(assessment.At(policy, "spec", "validations").([]any)[e.Check.Index])
+		if strings.Contains(assessment.Str(v["expression"]), "variables.isWindowsPod") {
+			linux++
+		} else {
+			other++
+		}
+	}
+	if linux == 0 {
+		t.Fatal("no Linux-only check targets the Windows Pod")
+	}
+	if f.ev.Outcomes.NotApplicable != linux || f.ev.Outcomes.Pass != base.ev.Outcomes.Pass+other {
+		t.Fatalf("Windows Pod counted as coverage: base %+v, with Windows %+v (%d Linux-only, %d other checks)", base.ev.Outcomes, f.ev.Outcomes, linux, other)
+	}
+	if f.ev.Evidence.Completeness != publication.Complete || f.ev.Evidence.Attributable != f.ev.Evidence.Expected {
+		t.Fatalf("evidence %+v", f.ev.Evidence)
+	}
+	for _, o := range f.ev.Observations {
+		if o.Applicability == collector.NotApplicable && (o.Outcome != "pass" || len(o.Reasons) == 0) {
+			t.Fatalf("out-of-scope observation lost its raw outcome or reason: %+v", o)
+		}
+	}
+	out, d := exportBundle(t, f)
+	if d.Outcomes.NotApplicable != linux || d.Outcomes.AcceptedRisk != 0 {
+		t.Fatalf("descriptor outcomes %+v", d.Outcomes)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "assessment-results.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if got := strings.Count(text, "out of scope (declares Windows): "); got != linux {
+		t.Fatalf("%d out-of-scope properties, want %d", got, linux)
+	}
+	if strings.Count(text, "pod-win") < other {
+		t.Fatalf("the Windows Pod's other checks are missing from the results")
+	}
+}
+
+// An omitted OS is evaluated with the Linux rules (the documented
+// convention): nothing about it is out of scope.
+func TestOmittedOSIsAssessedAsLinux(t *testing.T) {
+	f := bundleCaptureWith(t, []extraPod{{"shop-dev", "plain", "pod-plain", ""}})
+	if f.ev.Outcomes.NotApplicable != 0 {
+		t.Fatalf("omitted OS treated as out of scope: %+v", f.ev.Outcomes)
+	}
+	for _, w := range f.capture.Workloads {
+		if w.UID == "pod-plain" && w.OS != "" {
+			t.Fatalf("captured OS %q for a Pod without spec.os", w.OS)
+		}
 	}
 }

@@ -41,6 +41,10 @@ type Workload struct {
 	Name         string `json:"name"`
 	UID          string `json:"uid"`
 	StateSHA256  string `json:"stateSha256"`
+	// OS is the operating system the workload's Pod spec or template
+	// declares (spec.os.name), empty when omitted. It is configuration, not
+	// the observed node OS; Linux-only checks treat an omitted OS as Linux.
+	OS string `json:"os,omitempty"`
 }
 
 // Contribution identifies the binding contribution an observation belongs to.
@@ -130,6 +134,21 @@ func PolicyChecks(rendered assessment.Object, named []string) ([]Check, error) {
 		}
 	}
 	return out, nil
+}
+
+// DeclaredOS returns spec.os.name of a Pod, or of the Pod template of a
+// controller or CronJob, as the policies' variables.podSpec reads it.
+func DeclaredOS(obj assessment.Object) string {
+	for _, path := range [][]string{
+		{"spec", "os", "name"},
+		{"spec", "template", "spec", "os", "name"},
+		{"spec", "jobTemplate", "spec", "template", "spec", "os", "name"},
+	} {
+		if v := assessment.Str(assessment.At(obj, path...)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // WorkloadState digests the inputs a supported policy or exception selector
@@ -262,7 +281,8 @@ func FreezeScope(cluster string, started time.Time, mappingSHA256 string, subjec
 	}
 	for _, l := range listed {
 		meta := assessment.Map(l.Object["metadata"])
-		w := Workload{Resource: l.Resource, Namespace: assessment.Str(meta["namespace"]), NamespaceUID: l.NamespaceUID, Name: assessment.Str(meta["name"]), UID: assessment.Str(meta["uid"]), StateSHA256: WorkloadState(l.Object)}
+		w := Workload{Resource: l.Resource, Namespace: assessment.Str(meta["namespace"]), NamespaceUID: l.NamespaceUID, Name: assessment.Str(meta["name"]), UID: assessment.Str(meta["uid"]),
+			StateSHA256: WorkloadState(l.Object), OS: DeclaredOS(l.Object)}
 		if w.UID == "" || w.Name == "" || w.NamespaceUID == "" || w.Resource == "" {
 			return c, fmt.Errorf("listed %s object %s/%s lacks identity", l.Resource, w.Namespace, w.Name)
 		}

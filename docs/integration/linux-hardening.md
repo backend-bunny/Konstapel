@@ -3,9 +3,11 @@
 This page tracks `add-linux-workload-hardening-bundle`. The four upstream
 policies and Konstapel variants are vendored and tested. The controller serves
 them alongside the original privileged-container check, with bounded NIST
-mappings, saved-evidence conversion, rendered targeting tests, and live admission
-coverage including the user-namespace case. Background/applicability integration,
-exception lifecycle, and final combined acceptance remain in progress; see the
+mappings, saved-evidence conversion, rendered targeting tests, live admission
+coverage including the user-namespace case, and background assessment with
+Windows applicability. Exception integration (group 5) stays disabled behind
+the [policy-exception compatibility gates](policy-exceptions.md), and the
+final combined acceptance (group 6) depends on it; see the
 [implementation tasks](../../openspec/changes/add-linux-workload-hardening-bundle/tasks.md).
 
 ## Source layout
@@ -168,14 +170,16 @@ configuration. It does not show:
 
 - **Rendered behavior.** Binding instances (Audit or Deny mode, namespace
   selector, provenance), live admission, `UPDATE` and ephemeral-container
-  requests, and background reports are group 4.
+  requests, and background reports are covered under
+  [Background assessment and rollout](#background-assessment-and-rollout-tasks-4446).
 - **Runtime behavior.** No check observes the effective UID, the effective
   capability set, privilege transitions, or the contents of a `Localhost`
   seccomp profile and the filtering it applies. A pass means the workload
   *requested* the setting.
 - **Node OS.** An omitted `spec.os.name` gets the Linux rules by convention;
   this does not attest the OS of the node that runs the Pod. Explicit Windows
-  workloads produce a raw `pass` but are outside the bundle's scope (task 4.5).
+  workloads produce a raw `pass`, which assessment records as not applicable,
+  never as passing coverage (see below).
 - **Fine-grained waivers.** Exceptions are whole-policy: an exception for
   `disallow-capabilities-strict` waives both its `drop-all` and
   `add-net-bind-service-only` validations for the selected workloads. The
@@ -293,6 +297,105 @@ To validate the runtime side, run the test on a node that can start
 runtime with idmapped-mount support on a non-nested node. There the test
 reads `/proc/self/uid_map` and fails if container UID 0 maps to host UID 0.
 Even then, this is runtime evidence about one Pod, not about policy coverage.
+
+## Background assessment and rollout (tasks 4.4–4.6)
+
+**Supported workload forms.** Each check reads one Pod spec
+(`variables.podSpec`). It finds that spec in:
+- a Pod (including its ephemeral containers);
+- the template of a Deployment, DaemonSet, StatefulSet, ReplicaSet,
+  ReplicationController or Job;
+- the job template of a CronJob.
+
+Admission covers `CREATE` and `UPDATE` of these forms, and ephemeral
+containers added to a running Pod. Background evaluation covers every
+existing object of these forms in the bound namespaces.
+
+**Background evidence.** Kyverno re-evaluates existing workloads in the
+background and writes PolicyReports, and the controller's assessment
+collects them.
+- Workloads that existed before a Deny binding (and so were never admitted
+  under it) are reported with their raw outcome, source time, workload UID,
+  and the cluster and engine-policy identities.
+- A create denied under Deny mode never becomes a report subject: there is
+  no object to assess.
+
+`TestLiveHardeningBackground` (`admission` group) runs this end to end. It
+seeds the following before the binding exists:
+- a compliant Pod;
+- one Pod violating each check;
+- a zero-replica Deployment whose template declares Windows and violates
+  every setting.
+
+The test then binds the four checks in Deny mode and requires all of these:
+- a violating create is denied;
+- the first scheduled run publishes a package that validates;
+- the inventory is exactly the seeded workloads;
+- each violating Pod fails only its own check;
+- the Windows Deployment's validations, and those of the ReplicaSet it owns,
+  are not applicable;
+- the counts are exact: 42 expected, 24 pass, 4 fail, 12 not applicable and
+  2 missing, so the evidence is `Incomplete`.
+
+The two missing results are expected, and they are why the run isn't
+`Complete`. Kyverno stops evaluating a ValidatingPolicy at its first failing
+validation and reports only that failure. A workload that fails one
+validation of a two-validation check (`disallow-capabilities-strict`,
+`restrict-seccomp-strict`) therefore has no result for the other one. That
+check is recorded as missing evidence, never as a pass, and makes the run
+`Incomplete`. Fixing the failure brings back evidence for both validations
+at the next background scan.
+
+**Applicability: explicit Windows and an omitted OS.**
+
+| Workload declares | The four Linux checks | Counted as |
+| --- | --- | --- |
+| `spec.os.name: windows` (Pod or template) | short-circuit to a raw `pass` through `variables.isWindowsPod`, so a Windows workload is never denied | **not applicable**: `outcomes.notApplicable`, never `pass` or accepted risk. The OSCAL results for those checks leave the subject out and name it in the observation description ("out of scope (declares Windows)"). The raw outcome stays in `evaluation.json` with `applicability: NotApplicable`. |
+| no `spec.os` | evaluated with the Linux rules | ordinary pass or fail |
+| `spec.os.name: linux` | evaluated with the Linux rules | ordinary pass or fail |
+
+The capture records each workload's declared OS (`os` in `capture.json`). A
+check is Linux-only when its validation short-circuits through
+`variables.isWindowsPod`; the collector reads this from the captured engine
+policy, so it can't be asserted separately. The original privileged-container
+check has no Windows guard, and it still assesses Windows workloads.
+`TestWindowsWorkloadIsOutOfScopeNotPassing` and `TestOmittedOSIsAssessedAsLinux`
+(`internal/hardening`) cover the export.
+
+**What the evidence is, and isn't.** Admission decisions and background
+reports both evaluate **configuration**: the settings a workload requests in
+its spec. Neither observes a running container. Runtime evidence, such as
+the effective UID mapping in [User namespaces](#user-namespaces-task-43), is
+a separate, explicitly executed check, recorded apart from policy outcomes.
+Neither kind substitutes for the other.
+
+**Live environment.** The acceptance groups run on:
+- kind with the node image pinned in `scripts/runtime.env` (Kubernetes 1.37);
+- Kyverno chart 3.9.2 (Kyverno 1.19.2), with a 15-second background-scan
+  interval to keep tests short. Kyverno's default interval is one hour:
+  evidence is only as fresh as the last background scan, and a run records
+  each result's source time.
+
+**Rolling out from Audit to Deny.**
+1. **Bind in Audit.** Create the `ComplianceBinding` for the target
+   namespaces with `mode: Audit` and an `assessment` schedule. Nothing is
+   denied; violations appear in PolicyReports and assessment runs.
+2. **Read the first assessment.** Wait for a run with `Complete` evidence
+   (`kubectl get assessmentrun`). An `Incomplete` run lists missing or stale
+   checks; don't treat it as clean.
+3. **Remediate.** Fix the workloads that fail. Windows workloads appear as
+   not applicable and need no change. Workloads that genuinely can't comply
+   need an exception once exception support is enabled; until then they block
+   Deny for their namespaces.
+4. **Switch to Deny.** Set `mode: Deny` on the binding. This changes the
+   enforcement epoch, so new engine policies are rendered. The previous ones
+   stay until the replacement is ready, so there is no window without
+   enforcement.
+5. **Watch admissions and keep assessing.** Denied creates and updates
+   surface to the workload owners. Existing workloads aren't evicted: they
+   keep appearing in background evidence until they are fixed or replaced.
+
+To roll back, set `mode: Audit` again. Assessment history stays unchanged.
 
 ## NIST Moderate mappings
 
