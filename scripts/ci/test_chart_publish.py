@@ -1,6 +1,7 @@
 """Write-once chart publication against a fake OCI registry
-(add-helm-oci-distribution 5.2): frozen inputs and a matching acceptance
-record are required before any write; existing versions are never
+(add-helm-oci-distribution 5.2, 6.6): frozen inputs and a matching acceptance
+record, with every release-required group and test of the frozen source
+passed, are required before any write; existing versions are never
 replaced; a retry after partial publication pushes only what is missing."""
 
 import contextlib
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/charts"))
@@ -28,6 +30,7 @@ def load(name, path):
 
 
 manifest = load("manifest", ROOT / "scripts/charts/manifest.py")
+evidence = load("evidence", ROOT / "scripts/charts/evidence.py")
 attest = load("attest", ROOT / "scripts/charts/attest.py")
 notes = load("release_notes", ROOT / "scripts/charts/release-notes.py")
 publish = load("publish", ROOT / "scripts/charts/publish.py")
@@ -38,16 +41,36 @@ HEAD = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=Tru
 DIGEST = fixtures.DIGEST
 
 
+# The release-required groups and tests as committed at HEAD, the frozen
+# source of these fixtures.
+REQUIRED = evidence.frozen_groups(HEAD)
+FILES = {f: "sha256:" + "12" * 32 for f in evidence.EVIDENCE_FILES}
+
+
+def groups_for(required=None) -> dict:
+    return {g: {"required": True, "passed": True, "exitCode": 0, "files": dict(FILES),
+                "tests": [{"name": t, "result": "pass"} for t in tests]}
+            for g, tests in (required or REQUIRED).items()}
+
+
 def acceptance_for(m: dict, **override) -> dict:
     record = {
-        "apiVersion": "konstapel.dev/chart-acceptance/v1",
+        "apiVersion": "konstapel.dev/chart-acceptance/v2",
         "passed": True,
         "source": dict(m["source"]),
         "image": "ghcr.io/backend-bunny/konstapel@" + m["image"]["digest"],
         "crdContent": m["crdContent"],
         "charts": {n: {"version": c["version"], "sha256": c["sha256"]} for n, c in m["charts"].items()},
+        "groups": groups_for(),
+        "runtime": {"kind": "v0.0.0"},
     }
     record.update(override)
+    return record
+
+
+def mutated(m: dict, change) -> dict:
+    record = acceptance_for(m)
+    change(record)
     return record
 
 
@@ -116,10 +139,108 @@ class PublishTests(unittest.TestCase):
     def test_requires_passing_acceptance(self):
         self.write_acceptance(acceptance_for(self.frozen, passed=False))
         self.assertRefusedBeforeWrites("did not pass")
+        record = acceptance_for(self.frozen)
+        del record["passed"]
+        self.write_acceptance(record)
+        self.assertRefusedBeforeWrites("did not pass")
+
+    def test_missing_or_partial_record_is_refused(self):
+        # A cancelled or crashed acceptance leaves no record, or a cut one.
         self.acceptance.unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.publish()
-        self.assertEqual(self.registry.writes, [])
+        self.assertRefusedBeforeWrites("no chart acceptance record")
+        self.acceptance.write_text(json.dumps(acceptance_for(self.frozen))[:200])
+        self.assertRefusedBeforeWrites("unreadable chart acceptance record")
+        for value in ([], "passed", None):
+            with self.subTest(record=value):
+                self.write_acceptance(value)
+                self.assertRefusedBeforeWrites("not an object")
+
+    def test_stale_record_version_is_refused(self):
+        # A v1 record carried no per-group evidence: charts group only.
+        v1 = acceptance_for(self.frozen, apiVersion="konstapel.dev/chart-acceptance/v1", tests=REQUIRED["charts"])
+        del v1["groups"]
+        for record in (v1, acceptance_for(self.frozen, apiVersion="konstapel.dev/chart-acceptance/v1"),
+                       acceptance_for(self.frozen, apiVersion="konstapel.dev/chart-acceptance/v3")):
+            with self.subTest(apiVersion=record["apiVersion"]):
+                self.write_acceptance(record)
+                self.assertRefusedBeforeWrites("stale or unknown")
+
+    def test_release_groups_are_charts_and_availability_at_least(self):
+        self.assertLessEqual({"charts", "availability"}, set(REQUIRED))
+
+    def test_missing_failed_cancelled_or_skipped_group_evidence_is_refused(self):
+        first = next(iter(REQUIRED))
+        tests = REQUIRED[first]
+
+        def set_group(**fields):
+            return lambda r: r["groups"][first].update(fields)
+
+        def set_test(index, **fields):
+            return lambda r: r["groups"][first]["tests"][index].update(fields)
+
+        def drop_test_key(r):
+            del r["groups"][first]["tests"][0]["result"]
+
+        def drop_file(r):
+            del r["groups"][first]["files"][evidence.LOG]
+
+        cases = {
+            "no group results": (lambda r: r.pop("groups"), "no group results"),
+            "groups not an object": (lambda r: r.update(groups=list(r["groups"])), "no group results"),
+            "empty groups": (lambda r: r.update(groups={}), "is missing"),
+            "group malformed": (lambda r: r["groups"].update({first: "passed"}), "malformed result"),
+            "group failed": (set_group(passed=False), "did not pass"),
+            "group passed absent": (lambda r: r["groups"][first].pop("passed"), "did not pass"),
+            "group passed as string": (set_group(passed="true"), "did not pass"),
+            "group exit nonzero": (set_group(exitCode=1), "exited 1"),
+            "group cancelled": (set_group(exitCode=130), "exited 130"),
+            "group exit as bool": (set_group(exitCode=False), "exited False"),
+            "group exit as string": (set_group(exitCode="0"), "exited '0'"),
+            "group exit absent": (lambda r: r["groups"][first].pop("exitCode"), "exited None"),
+            "group not required": (set_group(required=False), "not recorded as required"),
+            "test failed": (set_test(0, result="fail"), "result 'fail'"),
+            "test skipped": (set_test(-1, result="skip"), "result 'skip'"),
+            "test missing from log": (set_test(0, result="missing"), "result 'missing'"),
+            "test ambiguous in log": (set_test(0, result="ambiguous"), "result 'ambiguous'"),
+            "test result absent": (drop_test_key, "result None"),
+            "test results malformed": (set_group(tests=["x"]), "malformed test results"),
+            "no test results": (set_group(tests=[]), "frozen source requires"),
+            "test dropped": (set_group(tests=[{"name": t, "result": "pass"} for t in tests[:-1]]), "frozen source requires"),
+            "test added": (set_group(tests=[{"name": t, "result": "pass"} for t in tests + ["TestLiveOther"]]), "frozen source requires"),
+            "test renamed": (set_test(0, name=tests[0] + "X"), "frozen source requires"),
+            "test duplicated": (set_group(tests=[{"name": t, "result": "pass"} for t in tests + tests[:1]]), "frozen source requires"),
+            "log digest missing": (drop_file, "evidence file digests incomplete"),
+            "log digest malformed": (lambda r: r["groups"][first]["files"].update({evidence.LOG: "abc"}), "evidence file digests incomplete"),
+            "files absent": (lambda r: r["groups"][first].pop("files"), "evidence file digests incomplete"),
+        }
+        for group in REQUIRED:
+            cases[f"group {group} absent"] = ((lambda g: lambda r: r["groups"].pop(g))(group), f"required acceptance group {group} is missing")
+        cases["unrequired group recorded"] = (lambda r: r["groups"].update(admission=r["groups"][first]), "not release-required")
+        # The record cannot name its own requirements: only the frozen source does.
+        cases["self-declared requirements"] = (
+            lambda r: r.update(groups={first: r["groups"][first]}, requiredGroups=[first]), "is missing")
+        for what, (change, text) in cases.items():
+            with self.subTest(what):
+                self.write_acceptance(mutated(self.frozen, change))
+                self.assertRefusedBeforeWrites(text)
+
+    def test_requirements_come_from_the_frozen_source_commit(self):
+        calls = []
+        real = evidence.frozen_groups
+
+        def stricter(commit, *args):
+            calls.append(commit)
+            required = real(commit, *args)
+            first = next(iter(required))
+            required[first] = required[first] + ["TestLiveAddedAtFrozenSource"]
+            return required
+
+        with patch.object(publish.evidence, "frozen_groups", stricter):
+            self.assertRefusedBeforeWrites("frozen source requires")
+        self.assertEqual(calls, [self.frozen["source"]["commit"]])
+        # An unreadable or malformed group file at the source fails closed.
+        with patch.object(publish.evidence, "frozen_groups", side_effect=publish.evidence.Rejected("cannot read")):
+            self.assertRefusedBeforeWrites("cannot read")
 
     def test_acceptance_of_other_inputs_is_refused(self):
         other = "sha256:" + "ee" * 32
@@ -127,14 +248,16 @@ class PublishTests(unittest.TestCase):
             "image": acceptance_for(self.frozen, image="ghcr.io/backend-bunny/konstapel@" + other),
             "source commit": acceptance_for(self.frozen, source={"commit": "f" * 40, "tag": fixtures.TAG}),
             "CRD content": acceptance_for(self.frozen, crdContent=other),
+            "tag": acceptance_for(self.frozen, source={"commit": HEAD, "tag": "v9.9.9"}),
+            "konstapel-crds archive": mutated(self.frozen, lambda r: r["charts"]["konstapel-crds"].update(sha256=other)),
+            "konstapel archive": mutated(self.frozen, lambda r: r["charts"]["konstapel"].update(sha256=other)),
+            "konstapel version": mutated(self.frozen, lambda r: r["charts"]["konstapel"].update(version="9.9.9")),
+            "konstapel-crds archive None": mutated(self.frozen, lambda r: r["charts"].pop("konstapel-crds")),
         }
-        charts = acceptance_for(self.frozen)
-        charts["charts"]["konstapel"]["sha256"] = other
-        cases["konstapel archive"] = charts
         for what, record in cases.items():
             with self.subTest(what):
                 self.write_acceptance(record)
-                self.assertRefusedBeforeWrites(f"tested {what}")
+                self.assertRefusedBeforeWrites(f"tested {what.removesuffix(' None')}")
 
     def test_changed_archive_is_refused(self):
         for old in self.archives.glob("konstapel-crds-*.tgz"):
@@ -234,13 +357,62 @@ class AttestTests(PublishTests):
         code, err = self.attest("verify")
         self.assertNotEqual(code, 0, "a signature by another key verified")
 
-    def test_attestation_for_other_inputs_does_not_verify(self):
+    def forge(self, record):
+        """Sign and attest with an acceptance record that sign itself would
+        refuse, as a compromised or buggy signer could: verify must still
+        reject it."""
         forged = self.dir / "forged-acceptance.json"
-        forged.write_text(json.dumps(acceptance_for(self.frozen, source={"commit": "f" * 40, "tag": fixtures.TAG})))
-        self.assertEqual(self.attest("sign", acceptance=forged)[0], 0)
+        forged.write_text(json.dumps(record))
+        with patch.object(attest.evidence, "check"), patch.object(attest, "verified_attestation", return_value=False):
+            self.assertEqual(self.attest("sign", acceptance=forged)[0], 0)
+
+    def test_sign_refuses_acceptance_the_publisher_would_refuse(self):
+        first = next(iter(REQUIRED))
+        for what, record in {
+            "skipped test": mutated(self.frozen, lambda r: r["groups"][first]["tests"][0].update(result="skip")),
+            "missing group": mutated(self.frozen, lambda r: r["groups"].pop(first)),
+            "stale record": acceptance_for(self.frozen, apiVersion="konstapel.dev/chart-acceptance/v1"),
+        }.items():
+            with self.subTest(what):
+                forged = self.dir / "refused-acceptance.json"
+                forged.write_text(json.dumps(record))
+                writes = len(self.registry.manifest_writes())
+                code, err = self.attest("sign", acceptance=forged)
+                self.assertNotEqual(code, 0)
+                self.assertIn("acceptance:", err)
+                self.assertEqual(len(self.registry.manifest_writes()), writes, "a refused acceptance was signed or attested")
+
+    def test_attestation_for_other_inputs_does_not_verify(self):
+        self.forge(acceptance_for(self.frozen, source={"commit": "f" * 40, "tag": fixtures.TAG}))
         code, err = self.attest("verify")
         self.assertNotEqual(code, 0)
         self.assertIn("no chart-inputs attestation", err)
+
+    def test_attestation_with_incomplete_group_evidence_does_not_verify(self):
+        # Each forged predicate names the released inputs exactly; only the
+        # group evidence is wrong.
+        groups = list(REQUIRED)
+        for what, record in {
+            "skipped test": mutated(self.frozen, lambda r: r["groups"][groups[-1]]["tests"][-1].update(result="skip")),
+            "missing group": mutated(self.frozen, lambda r: r["groups"].pop(groups[-1])),
+        }.items():
+            with self.subTest(what):
+                self.forge(record)
+                code, err = self.attest("verify")
+                self.assertNotEqual(code, 0)
+                self.assertIn("no chart-inputs attestation", err)
+        # The genuine record still attests and verifies alongside the forgeries.
+        self.assertEqual(self.attest("sign")[0], 0)
+        code, err = self.attest("verify")
+        self.assertEqual(code, 0, err)
+
+    def test_predicate_check_uses_the_released_source_groups(self):
+        statement = {"predicateType": attest.CHART_INPUTS, "subject": [{"digest": {"sha256": self.result()["charts"]["konstapel"]["digest"].removeprefix("sha256:")}}],
+                     "predicate": {"publication": self.frozen, "acceptance": acceptance_for(self.frozen)}}
+        attest.check_predicate(self.result(), "konstapel", statement)
+        statement["predicate"]["acceptance"]["groups"][next(iter(REQUIRED))]["exitCode"] = 1
+        with self.assertRaisesRegex(attest.Failed, "attested acceptance: .* exited 1"):
+            attest.check_predicate(self.result(), "konstapel", statement)
 
     def test_release_record_naming_other_bytes_does_not_verify(self):
         self.assertEqual(self.attest("sign")[0], 0)
@@ -262,6 +434,11 @@ class AttestTests(PublishTests):
     test_publishes_both_subjects_with_the_frozen_layers = None
     test_republishing_is_a_no_op = None
     test_requires_passing_acceptance = None
+    test_missing_or_partial_record_is_refused = None
+    test_stale_record_version_is_refused = None
+    test_release_groups_are_charts_and_availability_at_least = None
+    test_missing_failed_cancelled_or_skipped_group_evidence_is_refused = None
+    test_requirements_come_from_the_frozen_source_commit = None
     test_acceptance_of_other_inputs_is_refused = None
     test_changed_archive_is_refused = None
     test_partial_publication_resumes = None

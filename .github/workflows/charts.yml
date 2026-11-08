@@ -106,10 +106,29 @@ jobs:
         with:
           name: frozen-charts
           path: out/charts
+      # Runs every release-required group (acceptance-groups.json at this
+      # tag, "release": true) on its own disposable cluster with these exact
+      # archives and image; chart-acceptance.json exists only if all passed.
       - name: Accept the frozen charts with the released image
         env:
           DIGEST: ${{ needs.freeze.outputs.image-digest }}
         run: devbox run -- task charts:acceptance OUTPUT="$RUNNER_TEMP/chart-acceptance" ARCHIVES=out/charts IMAGE="$IMAGE@$DIGEST"
+      - name: Release acceptance summary
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/chart-acceptance"
+          {
+            echo '### Release acceptance of the frozen charts'
+            for result in "$out"/groups/*/acceptance-result.json; do
+              [ -e "$result" ] || continue
+              jq -r '"- group `\(.group)`: passed \(.passed) (exit \(.exitCode))"' "$result"
+            done
+            if [ -f "$out/chart-acceptance.json" ]; then
+              jq -r '"Bound to \(.source.commit) (\(.source.tag)), \(.image)", (.groups | to_entries[] | "- `\(.key)`: " + ([.value.tests[] | "\(.name) \(.result)"] | join(", ")))' "$out/chart-acceptance.json"
+            else
+              echo 'No chart-acceptance.json: a required group did not fully pass, so publication cannot run.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -118,13 +137,14 @@ jobs:
             ${{ runner.temp }}/chart-acceptance
             !${{ runner.temp }}/chart-acceptance/**/kubeconfig*
             !${{ runner.temp }}/chart-acceptance/**/*.test
-            !${{ runner.temp }}/chart-acceptance/environment/helm-manifest.yaml
-            !${{ runner.temp }}/chart-acceptance/kind-logs
+            !${{ runner.temp }}/chart-acceptance/**/environment/helm-manifest.yaml
+            !${{ runner.temp }}/chart-acceptance/**/kind-logs
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chart-acceptance
           path: ${{ runner.temp }}/chart-acceptance/chart-acceptance.json
+          if-no-files-found: error
           retention-days: 14
 
   publish:

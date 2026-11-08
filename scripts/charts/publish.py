@@ -6,8 +6,9 @@
 
 Before any registry write it verifies DIR/publication.json (the frozen
 manifest) against the archives and this checkout, and requires a passing
-chart-acceptance record bound to exactly that source, those archive
-checksums, the CRD content and the image digest.
+chart-acceptance record (scripts/charts/evidence.py) bound to exactly that
+source, those archive checksums, the CRD content and the image digest, with
+every release-required group and test of the frozen source commit passed.
 
 Each chart version is write-once. For each chart, the CRD chart first:
   - if the version already exists, its chart layer must be byte-identical to
@@ -35,12 +36,12 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import evidence  # noqa: E402
 import manifest as frozen  # noqa: E402
 
 CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 CHART_CONFIG = "application/vnd.cncf.helm.config.v1+json"
 MANIFEST_TYPES = "application/vnd.oci.image.manifest.v1+json"
-ACCEPTANCE = "konstapel.dev/chart-acceptance/v1"
 
 
 class Refused(Exception):
@@ -58,24 +59,24 @@ def git_head() -> str:
     return run("git", "rev-parse", "HEAD").stdout.strip()
 
 
-def check_acceptance(manifest: dict, record: dict) -> None:
-    """The acceptance record must be a pass for exactly the frozen inputs."""
-    if record.get("apiVersion") != ACCEPTANCE or record.get("passed") is not True:
-        raise Refused("chart acceptance did not pass")
-    want_image = "ghcr.io/backend-bunny/konstapel@" + manifest["image"]["digest"]
-    checks = [
-        ("source commit", record.get("source", {}).get("commit"), manifest["source"]["commit"]),
-        ("tag", record.get("source", {}).get("tag"), manifest["source"]["tag"]),
-        ("image", record.get("image"), want_image),
-        ("CRD content", record.get("crdContent"), manifest["crdContent"]),
-    ]
-    for name in frozen.CHARTS:
-        got = record.get("charts", {}).get(name, {})
-        checks.append((f"{name} archive", got.get("sha256"), manifest["charts"][name]["sha256"]))
-        checks.append((f"{name} version", got.get("version"), manifest["charts"][name]["version"]))
-    for what, got, want in checks:
-        if got != want:
-            raise Refused(f"chart acceptance tested {what} {got!r}, frozen {want!r}")
+def check_acceptance(manifest: dict, record) -> None:
+    """The acceptance record must be a full pass, for exactly the frozen
+    inputs, of every release-required group and test listed in
+    scripts/acceptance-groups.json at the frozen source commit. The record
+    never names its own requirements."""
+    try:
+        evidence.check(manifest, record, evidence.frozen_groups(manifest["source"]["commit"]))
+    except evidence.Rejected as e:
+        raise Refused(str(e))
+
+
+def read_acceptance(path: str):
+    try:
+        return json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        raise Refused(f"no chart acceptance record at {path}")
+    except (OSError, ValueError) as e:
+        raise Refused(f"unreadable chart acceptance record {path}: {e}")
 
 
 class Registry:
@@ -136,7 +137,7 @@ def publish(args) -> dict:
         frozen.verify(argparse.Namespace(archives=str(archives), manifest=str(manifest_path), source=git_head(), image_digest=None))
     except frozen.Mismatch as e:
         raise Refused(f"frozen inputs: {e}")
-    check_acceptance(manifest, json.loads(Path(args.acceptance).read_text()))
+    check_acceptance(manifest, read_acceptance(args.acceptance))
     reg = Registry(args.registry, args.plain_http)
     plain = ["--plain-http"] if args.plain_http else []
     result = {"apiVersion": "konstapel.dev/chart-release/v1", "source": manifest["source"], "image": manifest["image"], "charts": {}}

@@ -80,10 +80,15 @@ digest. Its three jobs run in order, and any failure stops the publication:
    to the GitHub Release. A retry downloads those assets and verifies them
    instead of packaging again.
 2. **acceptance** requires the full main-branch acceptance for the tagged
-   commit (`scripts/ci/require-acceptance.py`), as image publishing does. It
-   then runs `charts:acceptance` on the frozen archives with the released
-   image pulled by digest. Only a passing `chart-acceptance.json` for
-   exactly those inputs lets the next job run.
+   commit (`scripts/ci/require-acceptance.py`), as image publishing does;
+   that covers the groups that install no chart. It then runs
+   `charts:acceptance` on the downloaded frozen archives with the released
+   image pulled by digest: every release-required group (`charts` and
+   `availability`, as listed at the tag) on its own disposable cluster. The
+   job summary lists each group's result, and sanitized evidence (no
+   kubeconfigs, test binaries, rendered chart manifests or node logs) is
+   uploaded even on failure. Only a `chart-acceptance.json` in which every
+   required test passed for exactly those inputs lets the next job run.
 3. **publish**:
    1. pushes the archives write-once (`scripts/charts/publish.py`);
    2. signs each OCI subject and attaches a chart-inputs attestation, which
@@ -91,9 +96,11 @@ digest. Its three jobs run in order, and any failure stops the publication:
       (`scripts/charts/attest.py sign`);
    3. adds GitHub build provenance for each subject;
    4. verifies everything remotely: the signatures, the attestation
-      predicate (source commit, tag, image digest, archive checksum,
-      acceptance passed), the provenance, the image signature, and that
-      pulling each subject by digest yields the frozen archive bytes;
+      predicate (source commit, tag, image digest, archive checksum, and an
+      acceptance record that passes the publisher's checks against the
+      release-required groups and tests at the source commit), the
+      provenance, the image signature, and that pulling each subject by
+      digest yields the frozen archive bytes;
    5. attaches `charts-release.json` to the release.
 
 The release-notes job then adds a chart block next to the image block. It
@@ -103,7 +110,8 @@ archive checksum and install that file. Rerunning it replaces only that
 block.
 
 Ordinary pushes to `main` publish no charts. Pull requests run the same
-`charts` acceptance group, but never sign or write to the chart registry.
+`charts` and `availability` acceptance groups (with an image built from the
+pull request), but never sign or write to the chart registry.
 
 **Trust identities.**
 
@@ -114,7 +122,10 @@ Ordinary pushes to `main` publish no charts. Pull requests run the same
 
 A valid signature by any other identity doesn't satisfy verification. The
 chart-inputs attestation (`https://github.com/backend-bunny/Konstapel/chart-inputs/v1`)
-must name the released source commit, image digest and archive checksum.
+must name the released source commit, image digest and archive checksum, and
+carry the release acceptance record with a `pass` for every test of every
+release-required group at that commit. `attest.py sign` refuses a record the
+publisher would refuse, and `attest.py verify` checks it again.
 Provenance for the archive file alone isn't accepted: the subject is the OCI
 manifest digest.
 
