@@ -295,6 +295,14 @@ func pvpResults(c CaptureV2, ev Evaluation) ([]policy.PVPResult, bool) {
 				{Name: "source-sha256", Value: e.SourceSHA256},
 			},
 		}
+		if o.Applicability == NotApplicable {
+			// Outside the check's scope: not a result for this check. The
+			// observation description names the subject so reports show it
+			// was excluded, and its raw outcome stays in evaluation.json.
+			// C2P keeps the observation description (not its properties).
+			obs.Description += "; out of scope (declares Windows): " + s.Title
+			continue
+		}
 		if o.State == Attributable && o.Evaluated != nil {
 			s.Result, s.EvaluatedOn, s.Reason = assessment.Normalize(o.Outcome), *o.Evaluated, "source outcome "+o.Outcome
 			s.Props = append(s.Props, policy.Property{Name: "source-outcome", Value: o.Outcome},

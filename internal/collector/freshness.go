@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
@@ -50,6 +51,34 @@ type Observation struct {
 	Index     int              `json:"resultIndex"`
 	// Reasons explain every rejected or unresolved candidate.
 	Reasons []string `json:"reasons,omitempty"`
+	// Applicability is NotApplicable when the check is outside the
+	// workload's scope: a Linux-only check on a workload that explicitly
+	// declares Windows. Its raw outcome is kept but never counted as a pass.
+	Applicability string `json:"applicability,omitempty"`
+}
+
+// NotApplicable marks an observation outside the check's scope.
+const NotApplicable = "NotApplicable"
+
+// linuxOnly reports, per engine policy and validation index, the checks
+// that exclude explicit Windows workloads: the bundle convention is that
+// such a validation short-circuits through variables.isWindowsPod, so a
+// Windows workload's raw pass means "not evaluated", not compliance.
+func linuxOnly(policies []assessment.Object) map[string]map[int]bool {
+	out := map[string]map[int]bool{}
+	for _, p := range policies {
+		name := assessment.Str(assessment.At(p, "metadata", "name"))
+		validations, _ := assessment.At(p, "spec", "validations").([]any)
+		for i, v := range validations {
+			if strings.Contains(assessment.Str(assessment.Map(v)["expression"]), "variables.isWindowsPod") {
+				if out[name] == nil {
+					out[name] = map[int]bool{}
+				}
+				out[name][i] = true
+			}
+		}
+	}
+	return out
 }
 
 // Evaluation is the outcome of applying freshness rules at closure.
@@ -144,9 +173,14 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 		validations[e.Check.EnginePolicy][e.Check.Index] = true
 	}
 
+	scoped := linuxOnly(c.EnginePolicies)
 	ev := Evaluation{Observations: []Observation{}, Evidence: publication.EvidenceSummary{Expected: len(c.Expected), StaleScopes: len(c.Stale)}}
 	for _, e := range c.Expected {
 		o := Observation{Key: e.Key()}
+		if e.Workload.OS == "windows" && scoped[e.Check.EnginePolicy][e.Check.Index] {
+			o.Applicability = NotApplicable
+			o.Reasons = append(o.Reasons, "the workload declares Windows (spec.os.name); this Linux check does not assess it")
+		}
 		key := resultKey(e.Workload.UID, e.Check.EnginePolicy, strconv.Itoa(e.Check.Index))
 		policyKey := resultKey(e.Workload.UID, e.Check.EnginePolicy, "")
 		candidates := slices.Clone(found[key])
@@ -224,6 +258,10 @@ func (ev *Evaluation) add(o Observation) {
 	switch o.State {
 	case Attributable:
 		ev.Evidence.Attributable++
+		if o.Applicability == NotApplicable {
+			ev.Outcomes.NotApplicable++
+			return
+		}
 		switch o.Outcome {
 		case "pass":
 			ev.Outcomes.Pass++

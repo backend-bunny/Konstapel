@@ -10,7 +10,8 @@
       "TestLiveHardeningAdmission",
       "TestLiveHardeningUserNamespaces",
       "TestLiveLeaderElection",
-      "TestLiveBoundedShutdown"
+      "TestLiveBoundedShutdown",
+      "TestLiveHardeningBackground"
     ]
   },
   "assessments": {

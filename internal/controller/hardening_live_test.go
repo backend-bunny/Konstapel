@@ -11,9 +11,12 @@ package controller
 // containers; compliant workloads and the Audit namespace are admitted.
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/s3store"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -387,4 +394,229 @@ func (l *live) podLogs(ns, name string) (string, error) {
 		time.Sleep(2 * time.Second)
 	}
 	return out, err
+}
+
+// TestLiveHardeningBackground covers background evidence (task 4.4): workloads
+// that exist before the Deny policies are installed are evaluated in the
+// background and collected through the controller's assessment pipeline; a
+// violating create after installation is denied and is not a report subject.
+func TestLiveHardeningBackground(t *testing.T) {
+	l := newLive(t)
+	l.installCRDs()
+	root, _ := filepath.Abs("../..")
+	pub := startS3(t, l)
+	ConfigureAssessments(AssessmentRuntime{Publisher: pub, StagingDir: t.TempDir(), ContentRoot: root, Poll: 3 * time.Second, PublishTimeout: time.Minute, Workers: 2,
+		Ready: func(ctx context.Context) error { _, err := pub.Ready(ctx); return err }})
+	t.Cleanup(func() { ConfigureAssessments(AssessmentRuntime{}) })
+
+	const ns = "hz-bg"
+	l.setNamespace(ns, "hz-bg")
+	// Seed pre-existing subjects before any policy exists.
+	seeded := map[string]string{"compliant": ""}
+	for _, c := range hzChecks {
+		seeded["violates-"+strings.Split(c, "-")[1]] = c
+	}
+	var created []client.Object
+	for name, check := range seeded {
+		sc := hzSecurityContext()
+		if check != "" {
+			hzViolate(sc, check)
+		}
+		pod := hzWorkload("Pod", ns, "hz-bg-"+name, hzPodSpec(sc, nil))
+		if err := l.c.Create(l.ctx, pod); err != nil {
+			t.Fatal(err)
+		}
+		created = append(created, pod)
+	}
+	// An explicit Windows workload (task 4.5) that sets none of the Linux
+	// settings (the API rejects them for Windows), so the Linux rules would
+	// fail it: the checks short-circuit instead, which must not read as
+	// compliance. Zero replicas: the template is assessed, no Windows node
+	// is needed.
+	winSpec := hzPodSpec(nil, nil)
+	winSpec.SecurityContext = nil
+	winSpec.OS = &corev1.PodOS{Name: corev1.Windows}
+	win := hzWorkload("Deployment", ns, "hz-bg-windows", winSpec).(*appsv1.Deployment)
+	zero := int32(0)
+	win.Spec.Replicas = &zero
+	if err := l.c.Create(l.ctx, win); err != nil {
+		t.Fatal(err)
+	}
+	created = append(created, win)
+	p := profileObj(t, "hz-bg-hardening", hzChecks...)
+	b := bindingObj("hz-bg-deny", p.Name, v1alpha1.ModeDeny, map[string]v1alpha1.LabelValue{envLabel: "hz-bg"})
+	b.Spec.Assessment = &v1alpha1.BindingAssessment{Interval: "24h", CollectionTimeout: "90s"}
+	for _, o := range []client.Object{p, b} {
+		o.SetUID("")
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, o := range created {
+			_ = l.c.Delete(l.ctx, o)
+		}
+		_ = l.c.Delete(l.ctx, b)
+		_ = l.c.Delete(l.ctx, p)
+		l.eventually("background test policies withdrawn", func() (bool, string) {
+			left := l.policiesFor(b.Name)
+			return len(left) == 0, fmt.Sprint(left)
+		})
+	})
+	stop := l.startManager()
+	defer stop()
+	l.waitReady(b.Name, 1)
+	policies := l.hzPolicyNames(b.Name)
+
+	// A violating create after installation is denied and never becomes a
+	// report subject.
+	late := hzSecurityContext()
+	hzViolate(late, "*")
+	lateErr := l.c.Create(l.ctx, hzWorkload("Pod", ns, "hz-bg-late", hzPodSpec(late, nil)))
+	if lateErr == nil {
+		t.Fatal("a violating Pod was created under Deny")
+	}
+
+	// The scheduled run collects background evidence for the seeded subjects.
+	var run *v1alpha1.AssessmentRun
+	l.eventually("scheduled background run published", func() (bool, string) {
+		var runs v1alpha1.AssessmentRunList
+		_ = l.c.List(l.ctx, &runs)
+		for i := range runs.Items {
+			r := &runs.Items[i]
+			if r.Spec.BindingRef.Name == b.Name && r.Status.Phase == v1alpha1.RunCompleted && r.Status.Publication != nil && r.Status.Publication.Phase == "Committed" {
+				run = r
+				return true, ""
+			}
+		}
+		return false, toJSON(l.binding(b.Name).Status.Assessment)
+	})
+	// The published package keeps raw outcomes, source times, workload UIDs,
+	// cluster and policy identities, and exactly the seeded inventory.
+	rc, _, err := pub.Open(l.ctx, publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	untar(t, archive, dir)
+	if _, err := s3store.ValidatePackage(dir); err != nil {
+		t.Fatalf("package does not validate: %v", err)
+	}
+	var capture collector.CaptureV2
+	if err := assessment.Read(filepath.Join(dir, "capture.json"), &capture); err != nil {
+		t.Fatal(err)
+	}
+	var evaluation collector.Evaluation
+	if err := assessment.Read(filepath.Join(dir, "evaluation.json"), &evaluation); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"capture.json", "evaluation.json"} {
+		if b, err := os.ReadFile(filepath.Join(dir, f)); err == nil {
+			_ = os.WriteFile(filepath.Join(l.out, "TestLiveHardeningBackground-"+f), b, 0o644)
+		}
+	}
+	// 6 validations x 7 workloads: 5 seeded Pods, the Windows Deployment and
+	// the ReplicaSet it owns (zero replicas, same Windows template).
+	//   - one failing validation per violating Pod (4 fail);
+	//   - Kyverno stops evaluating a policy at its first failing validation,
+	//     so the other validation of a failed two-validation policy
+	//     (capabilities, seccomp) has no result: Missing, and the evidence is
+	//     Incomplete rather than an invented pass (2 missing);
+	//   - the Windows Deployment and ReplicaSet are not applicable (12),
+	//     never passes;
+	//   - every other check passes (24).
+	sum := run.Status.Summary
+	if sum == nil || sum.Export != "Assessment" || sum.Evidence.Completeness != "Incomplete" || sum.Evidence.Expected != 42 ||
+		sum.Evidence.Missing != 2 || sum.Outcomes.Fail != 4 || sum.Outcomes.Pass != 24 || sum.Outcomes.NotApplicable != 12 {
+		t.Fatalf("background run summary: %s", toJSON(run.Status))
+	}
+
+	ks := &corev1.Namespace{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Name: "kube-system"}, ks); err != nil {
+		t.Fatal(err)
+	}
+	if capture.Cluster != "kube-system:"+string(ks.UID) {
+		t.Errorf("capture cluster %s", capture.Cluster)
+	}
+	uids := map[string]string{}
+	for _, o := range created {
+		cur := o.DeepCopyObject().(client.Object)
+		if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(o), cur); err != nil {
+			t.Fatalf("seeded %s no longer exists: %v", o.GetName(), err)
+		}
+		uids[string(cur.GetUID())] = cur.GetName()
+	}
+	// The Windows Deployment's ReplicaSet carries the same template.
+	var sets appsv1.ReplicaSetList
+	_ = l.c.List(l.ctx, &sets, client.InNamespace(ns))
+	for _, rs := range sets.Items {
+		if owner := metav1.GetControllerOf(&rs); owner != nil && owner.Name == "hz-bg-windows" {
+			uids[string(rs.UID)] = rs.Name
+		}
+	}
+	inventory := map[string]bool{}
+	for _, w := range capture.Workloads {
+		if w.Namespace != ns {
+			continue
+		}
+		if _, ok := uids[w.UID]; !ok {
+			t.Errorf("unexpected subject %s/%s in the inventory", w.Namespace, w.Name)
+		}
+		inventory[w.UID] = true
+	}
+	if len(inventory) != len(uids) {
+		t.Errorf("inventory has %d seeded workloads, want %d", len(inventory), len(uids))
+	}
+	engine := map[string]bool{}
+	for _, n := range policies {
+		engine[n] = true
+	}
+	expected := map[string]collector.Expected{}
+	for _, e := range capture.Expected {
+		expected[e.Key()] = e
+	}
+	failed := map[string]string{}
+	for _, o := range evaluation.Observations {
+		e, ok := expected[o.Key]
+		if !ok {
+			t.Errorf("observation %s has no expected entry", o.Key)
+			continue
+		}
+		if o.State == collector.Missing {
+			// Only the unevaluated sibling of a failed two-validation policy.
+			if v := seeded[strings.TrimPrefix(uids[e.Workload.UID], "hz-bg-")]; v != e.Contribution.LogicalPolicy ||
+				(v != "disallow-capabilities-strict" && v != "restrict-seccomp-strict") {
+				t.Errorf("unexpected missing evidence for %s %s/%d", uids[e.Workload.UID], e.Contribution.LogicalPolicy, e.Check.Index)
+			}
+			continue
+		}
+		if o.State != collector.Attributable || o.Evaluated == nil || o.Report == "" {
+			t.Errorf("observation of %s/%d: state %s evaluated %v report %q", e.Workload.Name, e.Check.Index, o.State, o.Evaluated, o.Report)
+		}
+		if !engine[e.Check.EnginePolicy] || e.Cluster != capture.Cluster {
+			t.Errorf("observation of foreign identity: %+v", e)
+		}
+		windows := e.Workload.OS == "windows"
+		if windows != (o.Applicability == collector.NotApplicable) || (windows && !strings.HasPrefix(uids[e.Workload.UID]+e.Workload.Name, "hz-bg-windows")) {
+			t.Errorf("%s check %d: applicability %q, declared OS %q", uids[e.Workload.UID], e.Check.Index, o.Applicability, e.Workload.OS)
+		}
+		if o.Outcome == "fail" {
+			failed[uids[e.Workload.UID]] = e.Contribution.LogicalPolicy
+		}
+	}
+	for name, check := range seeded {
+		if check != "" && failed["hz-bg-"+name] != check {
+			t.Errorf("%s: failed check %q, want %q", name, failed["hz-bg-"+name], check)
+		}
+	}
+	if _, bad := failed["hz-bg-compliant"]; bad {
+		t.Error("the compliant Pod failed")
+	}
+	l.record("background", map[string]any{"run": run.Name, "expected": sum.Evidence.Expected, "fail": sum.Outcomes.Fail, "pass": sum.Outcomes.Pass, "notApplicable": sum.Outcomes.NotApplicable,
+		"lateCreate": lateErr.Error(), "failedByWorkload": failed})
 }
