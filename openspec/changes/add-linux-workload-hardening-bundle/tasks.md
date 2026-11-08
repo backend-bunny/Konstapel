@@ -56,7 +56,7 @@ the other agents' CRDs or task lists.
 - [ ] 5.3 Export combined raw outcomes, applicability, and accepted-risk context through C2P to OSCAL; verify skip/pass influenced by exceptions is distinct from ordinary passing evidence and unresolved/missing/stale evidence cannot establish compliance.
   <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 5.4 Document the bundle exception walkthrough, whole-policy waiver consequences, and final report interpretation; verify a retained output package remains understandable after live exception cleanup.
-  <!-- agent: tier=standard risk=low reason="Document the implemented exception walkthrough" -->
+  <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 6. Verify the complete expanded assessment
 
@@ -65,4 +65,4 @@ the other agents' CRDs or task lists.
 - [ ] 6.2 Run failure/cleanup paths for unsupported prerequisites, missing evidence, unexpected admission, and failed exception attribution; verify failures retain diagnostics and cleanup affects only owned resources without fabricating pass results.
   <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 6.3 Repeat the documented clean-state workflow on the final engine pin and retain the tested matrix, rendered digests, and acceptance artifacts; verify any engine update needed for expiry also passes the original loop and all rendered-policy regressions.
-  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
+  <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

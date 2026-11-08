@@ -41,9 +41,13 @@ use exact supported IDs in the map when version pinning is needed.
 Missing metadata defaults to `standard`, with `risk: null` and `defaulted: true`
 in the output. This is backward compatibility, not evidence that the task is
 low risk. Triage an unannotated task before execution and add a deep assignment
-when it crosses one of the boundaries above. Remaining release-critical Helm,
-availability, and hardening tasks have initial assignments; other active tasks
-can be annotated as they are selected. Add metadata to new tasks.
+when it crosses one of the boundaries above. Every unfinished task in the active
+changes has an initial assignment; completed and archived tasks are left alone.
+Add metadata to new tasks. CI checks unfinished-task coverage so new repository
+tasks do not accidentally rely on the compatibility default. Reassess the tier
+when a task's scope changes; these are starting assignments, not permanent model
+rankings. None of the current unfinished tasks is purely mechanical enough for
+the light tier.
 
 ## Calling the selector
 

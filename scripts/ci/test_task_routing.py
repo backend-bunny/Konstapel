@@ -96,7 +96,9 @@ class TaskRoutingTests(unittest.TestCase):
         routing.config(ROOT)
         for path in (ROOT / "openspec/changes").glob("*/tasks.md"):
             with self.subTest(path=path):
-                routing.tasks(path)
+                for task in routing.tasks(path).values():
+                    if not task["done"]:
+                        self.assertTrue(task["metadata"], f"{path}: unfinished task {task['task']} needs routing metadata")
 
 
 if __name__ == "__main__":
