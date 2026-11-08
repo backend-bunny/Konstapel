@@ -56,8 +56,9 @@ attestation and GitHub provenance on each OCI subject.
 | --- | --- |
 | Leader pod loss and node loss: another replica leads within about 20 s and reconciles | `TestLiveHelmAvailability` |
 | Kyverno keeps enforcing, and downloads keep serving, while no controller runs | `TestLiveHelmAvailability`, `TestLiveHelmInstall` |
-| A run staged in S3 is committed by the next leader with the same bytes and identity; a lost receipt is recovered with the original expiry and retention | `TestLiveLeaderHandoverRecovery`, `TestLiveLeaderHandoverLoss` (in-process managers, real S3) |
-| A capture lost before durable staging is reported as `CaptureLost`, never published, and an S3 outage alone never causes it | `TestLiveHelmAvailability` (installed image), `TestLiveLeaderHandoverLoss` |
+| A run staged in S3 before its commit is committed by the other replica after the Lease holder's pod is removed, with the same run and publication identity and the exact staged bytes; a run committed before its Kubernetes receipt is recorded with its original commit, `publishedAt`, `expiresAt` and retention even if the binding's retention changed since; nothing is committed twice | `TestLiveHelmDurableRecovery` (`availability` group: installed image, two replicas, real S3 behind a test-owned fault proxy that holds, or forwards and withholds, the commit); also `TestLiveLeaderHandoverRecovery`, `TestLiveLeaderHandoverLoss` (in-process managers) |
+| A capture lost before durable staging is reported as `CaptureLost`, never published, and an S3 outage alone never causes it: while S3 is held or unreachable, before and after the leader pod is removed, the run stays `Publishing` | `TestLiveHelmAvailability`, `TestLiveHelmDurableRecovery` (installed image), `TestLiveLeaderHandoverLoss` |
+| The first scheduled run of a binding is neither duplicated nor orphaned when its status write loses to another writer, even with a lagging run cache or a replan more than one interval later (a defect the deployed recovery test found and this release fixes) | `TestLostFirstScheduleWriteAdoptsTheCreatedRun`, `TestLostFirstScheduleWriteAdoptedAfterAnInterval`, `TestLostFirstScheduleWriteAdoptedDespiteRunCacheLag`, `TestFirstScheduleAdoptsOnlyOwnUnfinishedScheduledRuns` |
 | A delayed former leader can't withdraw the current policy revision | `TestDelayedFormerLeaderResolvesAgain` and delivery tests |
 | Kyverno API or permission loss is reported, not crashed on, and recovers without a restart | `TestLiveEngineCapabilityRecovery` (`capabilities` group) |
 
@@ -77,6 +78,7 @@ attestation and GitHub provenance on each OCI subject.
 | The image is signed and attested, and is verified before release | the image publish workflow ([Images](images.md#verify)) |
 | Chart archives are frozen (source commit, checksums, CRD content, image digest) before acceptance, and only accepted bytes are published, write-once | `test_chart_manifest.py`, `test_chart_publish.py`, `test_chart_release_inputs.py`; release: the `charts` workflow |
 | Each chart subject is signed, with a chart-inputs attestation binding source, image, archive and acceptance; verification pulls the subject by digest and compares bytes | `test_chart_publish.py` (key pairs); release: keyless verification in the `charts` workflow |
+| Release acceptance covers every release-required group on the frozen artifacts: `charts` and `availability` each run on their own disposable cluster, install the frozen archives and pull the released image by digest on every node. Per-test results come from the real test logs, and a missing, failed, cancelled, skipped, stale or mismatched record is refused before any registry write | `test_chart_evidence.py`, `test_chart_publish.py`, `test_acceptance.py`; release: `task charts:acceptance` in the `charts` workflow |
 | The release notes' install commands install exactly the verified bytes | `test_documented_install_commands_pull_the_frozen_archives` |
 
 ## Known limitations
@@ -100,9 +102,10 @@ attestation and GitHub provenance on each OCI subject.
   and conditional create (`If-None-Match: *`) is required.
 - **Staging is per pod.** Captures not yet staged in S3 are lost with their
   pod and reported as `CaptureLost`.
-- **Deployed staged-byte recovery.** Recovery of an already staged run is
-  proven with in-process managers against real S3. On the installed image,
-  only the uncertain-access and `CaptureLost` paths are exercised.
+- **Failover under traffic.** The recovery tests check state and bytes after
+  a leader pod or node is lost (a new leader takes the Lease in about 20 s).
+  They don't measure client request success during that gap or under
+  sustained load.
 - **Not in v0.1.0:** Trivy vulnerability assessment, evidence signing,
   policy-change previews, supporting attachments, independent policy-bundle
   distribution, and control-coverage reporting.
