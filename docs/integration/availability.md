@@ -253,6 +253,35 @@ through its own port-forward. It checks:
 The certificate rotations in the same test (operator Secret and cert-manager)
 also check every pod.
 
+## Deployed availability (multi-node acceptance)
+
+The `availability` acceptance group runs on a kind cluster with one control
+plane and two workers (`KONSTAPEL_CLUSTER_WORKERS=2`). The workers are
+labelled `konstapel.dev/pool=workload`, and Kyverno is pinned to the control
+plane, so losing a worker removes Konstapel replicas but not the engine.
+`TestLiveHelmAvailability` installs both charts with the packaged image
+(operator TLS) and checks, in order:
+
+| Case | What must hold |
+| --- | --- |
+| Placement | both controller and both download replicas ready, on different workers (preferred anti-affinity); one Lease holder |
+| Disruption budget | one voluntary eviction proceeds; a second, before its replacement is ready, is refused (`429`) |
+| Rolling upgrade | a pod-template change replaces both controllers while at least two stay ready |
+| Constrained surge | with every worker cordoned, the surge pod stays `Pending`; both old replicas keep serving and the rollout is visibly incomplete until capacity returns |
+| Preferred separation | with one worker cordoned, a replaced replica co-locates with the other and becomes ready (separation is never required) |
+| Development values | `docs/examples/charts/development.yaml`: one replica, no controller PodDisruptionBudget, and a drain of the single replica proceeds |
+| Controller outage | with the controller scaled to zero, Kyverno keeps enforcing the delivered policies and downloads keep serving |
+| Leader pod loss | a force-deleted leader is replaced: the other replica takes the Lease (about 16–20 s in tests) and reconciles a new binding generation |
+| Leader loss during an S3 outage | after capture, with S3 paused, the leader pod is force-deleted. The run stays `Publishing` (uncertain access, never `CaptureLost`) while S3 is down. The capture lived only in that pod's staging volume, so once S3 returns the run ends as a truthful `CaptureLost`, and the next run publishes under a new identity |
+| Node loss | the leader's worker container is stopped. The replica on the other worker takes the Lease (about 19–21 s) and reconciles, and the download replica there serves the package |
+
+Not exercised on the deployed image: byte-identical recovery of a run that
+the former leader had already staged in S3. No reliable way exists to stop
+the installed controller between staging and commit, so this is covered with
+real S3 by the in-process `TestLiveLeaderHandoverRecovery` and
+`TestLiveLeaderHandoverLoss`, which run the same code
+([Recovery on leadership acquisition](#recovery-on-leadership-acquisition)).
+
 ## Lifecycle matrix
 
 `testdata/availability/lifecycle-matrix.json` maps every requirement in the

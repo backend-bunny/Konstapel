@@ -69,8 +69,8 @@ jobs:
       - uses: ./.github/actions/setup-tools
         with:
           user-namespaces: ${{ matrix.group == 'admission' }}
-          # The charts group builds the controller image it installs.
-          image: ${{ matrix.group == 'charts' }}
+          # The charts and availability groups build the controller image they install.
+          image: ${{ matrix.group == 'charts' || matrix.group == 'availability' }}
       - name: Run acceptance
         env:
           ACCEPTANCE_GROUP: ${{ matrix.group }}

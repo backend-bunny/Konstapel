@@ -62,5 +62,14 @@
       "TestLiveLeaderHandoverRecovery",
       "TestLiveLeaderHandoverLoss"
     ]
+  },
+  "availability": {
+    "core": false,
+    "exceptionAdmission": false,
+    "image": true,
+    "workers": 2,
+    "goTests": [
+      "TestLiveHelmAvailability"
+    ]
   }
 }
