@@ -63,3 +63,18 @@ merge workflow above. Report the PR URL and merge result.
 - When changing the public task interface, update the development command table
   and remove redundant aliases. Explain the recurring workflow that warrants any
   new public task in the PR description.
+
+# Agent model routing
+
+- Follow [task routing](docs/agent-task-routing.md) for OpenSpec task metadata
+  and the shared Claude Code/Codex model map in `.claude/task-routing.json`.
+- Add an adjacent `<!-- agent: tier=standard risk=low -->` comment to new tasks,
+  choosing the actual tier/risk rather than copying the example indiscriminately.
+  Use `deep` for authorization, cryptographic trust, distributed recovery,
+  concurrency, and release integrity; reserve `light` for mechanical edits.
+- Triage unannotated tasks before execution. Their standard default is a
+  compatibility fallback, not a low-risk classification.
+- The external harness calls `scripts/agents/select-task.py` before starting a
+  fresh model invocation. Do not claim that metadata switches a running agent.
+- Escalation and model choice never weaken validation or change task scope,
+  completion criteria, repository workflow, or release approval boundaries.

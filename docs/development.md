@@ -4,6 +4,9 @@ Konstapel uses Devbox for the pinned development environment, direnv for optiona
 automatic activation, Task for commands, and Renovate for dependency update PRs.
 The initial supported development and acceptance platform is Linux amd64.
 
+For Claude Code and Codex loops, see [agent task routing](agent-task-routing.md)
+for per-task model selection, escalation, and the external harness contract.
+
 ## Enter the environment
 
 Install [Devbox](https://www.jetify.com/docs/devbox/installing_devbox/) and,

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "defaultTier": "standard",
+  "providers": {
+    "claude": {
+      "defaults": {"light": "sonnet", "standard": "sonnet", "deep": "opus"},
+      "models": {"sonnet": "standard", "opus": "deep"}
+    },
+    "codex": {
+      "defaults": {"light": "gpt-6-luna", "standard": "gpt-6.1-sol", "deep": "gpt-6-astra"},
+      "models": {
+        "gpt-6-luna": "light",
+        "gpt-6.1-sol": "standard",
+        "gpt-6-sol": "standard",
+        "gpt-5.6-terra": "standard",
+        "gpt-6-astra": "deep"
+      }
+    }
+  }
+}
