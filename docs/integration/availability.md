@@ -190,6 +190,23 @@ For 30 seconds the single run stays `Publishing` and is never `CaptureLost`.
 After S3 returns, B commits the same run with A's publication ID and package
 SHA-256.
 
+### Where a lost leader's work ends up
+
+| The leader was lost | The successor finds | Outcome |
+| --- | --- | --- |
+| before the capture was durably staged (it existed only in that pod's staging directory) | no attempt in S3: `Recover` returns `ErrCaptureLost` | the run fails with `export: CaptureLost` and nothing is committed; the next run is a new identity and publishes normally |
+| after staging, before the commit | the staged attempt | the same run commits the staged bytes (above) |
+| after the commit, before the Kubernetes receipt | the existing commit | the run records the original commit: same publication ID, archive, `publishedAt` and `expiresAt`. The retention is the one the commit was made with, even if the binding's retention changed since. Nothing is committed twice. |
+| while S3 is unreachable | nothing certain | the run stays `Publishing` and retries; this is never `CaptureLost` |
+
+`TestLiveLeaderHandoverLoss` (`recovery` group) checks the first and third
+rows across leaders:
+- In the lost-receipt case, the binding's retention changes from 600s to
+  120s before the successor takes over. The recorded expiry is still the
+  committed 600s.
+- In the lost-capture case, the test also checks that S3 holds no staging for
+  the lost run, and that a following run publishes.
+
 ## Downloads without the leader
 
 The download server is its own Deployment (`konstapel-download`, two

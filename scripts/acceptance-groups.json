@@ -59,7 +59,8 @@
       "TestLiveTargetingFailures",
       "TestLiveAssessmentFaults",
       "TestLiveEvidenceRecovery",
-      "TestLiveLeaderHandoverRecovery"
+      "TestLiveLeaderHandoverRecovery",
+      "TestLiveLeaderHandoverLoss"
     ]
   }
 }
