@@ -309,6 +309,11 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
    Service, TLS trusted only through that CA), and its SHA-256 matches the
    receipt.
 6. After uninstall, the operator's Secret still exists.
+7. The test reinstalls in the default `certManager` mode. The `charts` group
+   installs cert-manager first, separately and pinned in
+   `scripts/runtime.env`. cert-manager issues `konstapel-download-tls` from the
+   chart's `konstapel-ca` for the Service's three DNS names, and a download that
+   trusts only that Secret's `ca.crt` matches the receipt.
 
 ```sh
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
@@ -412,7 +417,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, operator-Secret TLS and installed-image acceptance done; cert-manager TLS rendered and awaiting a live run; certificate reload pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes and installed-image acceptance done; certificate reload pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |

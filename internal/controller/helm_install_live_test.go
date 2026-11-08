@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -254,6 +255,39 @@ func TestLiveHelmInstall(t *testing.T) {
 	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(tlsSecret), &corev1.Secret{}); err != nil {
 		t.Fatalf("operator TLS Secret removed by uninstall: %v", err)
 	}
+
+	// 6. Default TLS mode: cert-manager (installed separately) issues the
+	// download certificate from the chart's CA for the Service's names.
+	if os.Getenv("KONSTAPEL_LIVE_CERT_MANAGER") != "true" {
+		t.Log("cert-manager is not installed in this environment; the default TLS mode is covered by the charts acceptance group")
+		return
+	}
+	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
+		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never"); err != nil {
+		t.Fatalf("install in cert-manager mode: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
+	}
+	issued := &corev1.Secret{}
+	l.eventually("download certificate issued", func() (bool, string) {
+		err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: "konstapel-download-tls"}, issued)
+		return err == nil && len(issued.Data["ca.crt"]) > 0 && len(issued.Data["tls.crt"]) > 0, fmt.Sprint(err)
+	})
+	block, _ := pem.Decode(issued.Data["tls.crt"])
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(leaf.DNSNames, "konstapel-download.konstapel-system.svc") {
+		t.Fatalf("issued certificate names %v, not the Service", leaf.DNSNames)
+	}
+	issuedRoots := x509.NewCertPool()
+	issuedRoots.AppendCertsFromPEM(issued.Data["ca.crt"])
+	local = l.portForward(ns, "svc/konstapel-download", 443)
+	hc = &http.Client{Timeout: time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: issuedRoots, ServerName: "konstapel-download.konstapel-system.svc"}}}
+	l.eventually("download through the cert-manager certificate", func() (bool, string) {
+		code, body = fetch(t, hc, "https://"+local+"/v1/assessmentruns/"+string(run.UID)+"/download", l.token(ns, operator.Name, downloadAudience))
+		return code == http.StatusOK && fmt.Sprintf("%x", sha256.Sum256(body)) == run.Status.Publication.PackageSHA256, fmt.Sprint(code)
+	})
+	l.record("cert-manager", map[string]any{"issuer": leaf.Issuer.CommonName, "dnsNames": leaf.DNSNames, "downloadSha256": run.Status.Publication.PackageSHA256})
 }
 
 // downloadTLSSecret issues a test CA and a serving certificate for the

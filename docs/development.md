@@ -165,6 +165,12 @@ The Bash pin currently needs manual updates: Renovate's Devbox manager rejects
 versions such as `5.3p20` during extraction. Update that pin with `devbox update`
 and commit the regenerated lockfile; the other tools use automated update PRs.
 
+The cert-manager chart used by the `charts` acceptance group for the runtime
+chart's default TLS mode is pinned the same way, by version and archive
+checksum in `scripts/runtime.env`, and fetched by `scripts/fetch-chart.sh
+cert-manager`; `task deps:check` verifies the pin. Renovate updates the
+version and checksum together.
+
 Kyverno chart and CLI updates are grouped. `task deps:check` verifies the chart's
 actual `appVersion` against the CLI pin and verifies the chart archive checksum.
 Update failures must be resolved with compatible pins, not by disabling the

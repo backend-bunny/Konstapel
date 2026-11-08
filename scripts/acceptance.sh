@@ -78,6 +78,14 @@ if includes core; then
   ./bin/konstapel convert --capture "$out/package/capture.json" --output "$out/reconverted" 2>&1 | tee "$out/reconvert.log"
   ./bin/konstapel validate --output "$out/reconverted" 2>&1 | tee "$out/revalidate.log"
 fi
+if includes certManager; then
+  # The runtime chart's default TLS mode needs cert-manager, installed
+  # separately as an operator would; the chart never installs it.
+  stage 'Installing the pinned cert-manager'
+  helm upgrade --install cert-manager "$(scripts/fetch-chart.sh cert-manager)" --kubeconfig "$kubeconfig" --kube-context "$context" \
+    -n cert-manager --create-namespace --set crds.enabled=true --wait --timeout 10m 2>&1 | tee "$out/cert-manager-install.log"
+  export KONSTAPEL_LIVE_CERT_MANAGER=true
+fi
 if includes image; then
   # The Helm-installed controller runs the image built from this checkout,
   # loaded into the disposable node and referenced by its digest.
