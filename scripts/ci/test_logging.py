@@ -25,7 +25,7 @@ class LoggingTests(unittest.TestCase):
         self.out = self.repo / "output"
         self.env = dict(os.environ, PATH=f"{self.repo / 'bin'}:{os.environ['PATH']}",
                         KONSTAPEL_CLUSTER_NAME="konstapel-assessment-log-test")
-        self.stub("bin/kind", 'if [[ $1 == export ]]; then echo diagnostics; fi')
+        self.stub("bin/kind", 'if [[ $1 == export ]]; then echo diagnostics; fi; if [[ $1 == get && $2 == nodes ]]; then echo stub-control-plane; fi')
 
     def stub(self, name, body):
         path = self.repo / name

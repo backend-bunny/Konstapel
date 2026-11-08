@@ -17,6 +17,10 @@ if [[ -e $out ]]; then echo 'Acceptance output must be a fresh directory' >&2; e
 mkdir -p "$out"
 kubeconfig=$out/kubeconfig
 export KONSTAPEL_CLUSTER_NAME=${KONSTAPEL_CLUSTER_NAME:-konstapel-assessment-${RANDOM}-${RANDOM}}
+# A group may ask for worker nodes (multi-node availability cases).
+if [[ $group != all ]]; then
+  export KONSTAPEL_CLUSTER_WORKERS=$(jq -r --arg group "$group" '.[$group].workers // 0' scripts/acceptance-groups.json)
+fi
 context=kind-$KONSTAPEL_CLUSTER_NAME
 jq -n --arg name "$KONSTAPEL_CLUSTER_NAME" --arg context "$context" '{name:$name,context:$context}' > "$out/target.json"
 created=false
@@ -92,7 +96,9 @@ if includes image && [[ -n ${KONSTAPEL_ACCEPTANCE_IMAGE:-} ]]; then
   [[ $KONSTAPEL_ACCEPTANCE_IMAGE =~ ^ghcr\.io/backend-bunny/konstapel@sha256:[0-9a-f]{64}$ ]] || {
     echo "KONSTAPEL_ACCEPTANCE_IMAGE must be ghcr.io/backend-bunny/konstapel@sha256:<digest>" >&2; exit 1; }
   stage 'Pulling the published controller image by digest into the disposable cluster'
-  docker exec "$KONSTAPEL_CLUSTER_NAME-control-plane" crictl pull "$KONSTAPEL_ACCEPTANCE_IMAGE" 2>&1 | tee "$out/image-load.log"
+  for node in $(kind get nodes --name "$KONSTAPEL_CLUSTER_NAME"); do
+    docker exec "$node" crictl pull "$KONSTAPEL_ACCEPTANCE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
+  done
   export KONSTAPEL_LIVE_IMAGE=$KONSTAPEL_ACCEPTANCE_IMAGE
   echo "$KONSTAPEL_LIVE_IMAGE" | tee "$out/image-ref.txt"
 elif includes image; then
@@ -107,7 +113,9 @@ elif includes image; then
   node="$KONSTAPEL_CLUSTER_NAME-control-plane"
   imported=$(docker exec "$node" crictl inspecti -o json ghcr.io/backend-bunny/konstapel:build-amd64 | jq -er '.status.repoDigests[0]')
   KONSTAPEL_LIVE_IMAGE=ghcr.io/backend-bunny/konstapel@${imported##*@}
-  docker exec "$node" ctr -n k8s.io images tag ghcr.io/backend-bunny/konstapel:build-amd64 "$KONSTAPEL_LIVE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
+  for each in $(kind get nodes --name "$KONSTAPEL_CLUSTER_NAME"); do
+    docker exec "$each" ctr -n k8s.io images tag ghcr.io/backend-bunny/konstapel:build-amd64 "$KONSTAPEL_LIVE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
+  done
   export KONSTAPEL_LIVE_IMAGE
   echo "$KONSTAPEL_LIVE_IMAGE" | tee "$out/image-ref.txt"
 fi
