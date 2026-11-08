@@ -94,6 +94,35 @@ Event: the follower's agent appears on none of them, and the leader's does.
 3. when another holder takes the Lease, the leader's work is cancelled within
    5s and the manager exits with `leader election lost`.
 
+## Delayed former leaders
+
+Leader election isn't fencing. A paused process, or a request already in
+flight, can outlive its leadership. Each write therefore carries its own guard:
+
+| Write | Guard against a stale attempt |
+| --- | --- |
+| Binding and profile status | `Update` with the read `resourceVersion`; a newer object is a conflict, and the next reconcile reads it |
+| Engine policy create, repair | names are derived from the enforcement revision and never reused; repair is an `Update` with the read `resourceVersion` on a policy the binding owns at the same revision |
+| Engine policy delete (superseded revisions) | before the first write, and again after listing owned policies, the binding and profile are re-read from the API server and must still have the snapshot's UID and generation. A changed snapshot aborts the Sync, and the binding resolves again. Each delete carries the listed object's UID and `resourceVersion` as preconditions. |
+| Assessment run publication | deterministic run identities and conditional immutable S3 commits: matching bytes recover the original commit, and different bytes under the same identity are a conflict (`internal/s3store` `TestStagePublishAndRecover`, `TestConflictingContentNeverOverwrites`) |
+
+The order is what makes this safe. A policy delivered for a newer snapshot
+can only exist after that snapshot was committed. If it appears in the owned
+list, the check that follows sees the newer generation, and no delete is sent.
+A stale attempt can at most recreate a superseded revision. The current
+leader's owned-policy watch then retires it again once the replacement is
+ready. The current revision is never withdrawn.
+
+Tests:
+- `TestDelayedFormerLeaderResolvesAgain` runs a reconciler whose cache still
+  holds the old binding and profile after another reconciler delivered a
+  newer profile generation. The current policy and the newer status stay
+  untouched.
+- `TestDelayedFormerLeaderCannotWithdrawTheNewRevision` covers a stale
+  snapshot, and one that turns stale during the attempt.
+- `TestDeleteRequiresTheListedObject` changes a policy between listing and
+  delete; the result is a conflict, not a deletion.
+
 ## Downloads without the leader
 
 The download server is its own Deployment (`konstapel-download`, two

@@ -3,11 +3,13 @@ package targeting
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -313,5 +315,104 @@ func TestPrototypePolicyIsNeverAdopted(t *testing.T) {
 	}
 	if got := policyNames(t, c); !slices.Equal(got, []string{proto.GetName()}) {
 		t.Fatalf("prototype policy touched: %v", got)
+	}
+}
+
+// A former leader resuming a delayed attempt from an old snapshot (v1)
+// after a newer leader has delivered v2: the snapshot check refuses before
+// any write, so v1 is not resurrected and v2 is not withdrawn
+// (add-controller-high-availability 2.4).
+func TestDelayedFormerLeaderCannotWithdrawTheNewRevision(t *testing.T) {
+	c := fakeClient()
+	ctx := context.Background()
+	v1 := desiredFor(t, "b1", pol, "sha256:r1", v1alpha1.ModeAudit)
+	v2 := desiredFor(t, "b1", pol, "sha256:r2", v1alpha1.ModeDeny)
+	both := readyNames(v1.GetName(), v2.GetName())
+	if _, err := (&Delivery{Client: c, Ready: both}).Sync(ctx, "b1", []*unstructured.Unstructured{v1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&Delivery{Client: c, Ready: both}).Sync(ctx, "b1", []*unstructured.Unstructured{v2}, nil); err != nil {
+		t.Fatal(err)
+	}
+	stale := func(context.Context) error { return ErrStaleSnapshot }
+	_, err := (&Delivery{Client: c, Ready: both, Current: stale}).Sync(ctx, "b1", []*unstructured.Unstructured{v1}, nil)
+	if !errors.Is(err, ErrStaleSnapshot) {
+		t.Fatalf("stale attempt: %v", err)
+	}
+	if got := policyNames(t, c); !slices.Equal(got, []string{v2.GetName()}) {
+		t.Fatalf("stale attempt changed policies: %v", got)
+	}
+
+	// The newer snapshot lands while the attempt runs: its replacement
+	// exists by the time owned policies are listed, so the check before
+	// deletes refuses and v2 stays.
+	calls := 0
+	racing := func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return nil
+		}
+		return ErrStaleSnapshot
+	}
+	if _, err := (&Delivery{Client: c, Ready: both, Current: racing}).Sync(ctx, "b1", []*unstructured.Unstructured{v1}, nil); !errors.Is(err, ErrStaleSnapshot) {
+		t.Fatalf("racing attempt: %v", err)
+	}
+	if got := policyNames(t, c); !slices.Contains(got, v2.GetName()) {
+		t.Fatalf("racing attempt withdrew the current revision: %v", got)
+	}
+	// The current leader converges again: v1 (recreated by the racing
+	// attempt) is retired, v2 remains.
+	if _, err := (&Delivery{Client: c, Ready: both}).Sync(ctx, "b1", []*unstructured.Unstructured{v2}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := policyNames(t, c); !slices.Equal(got, []string{v2.GetName()}) {
+		t.Fatalf("after convergence: %v", got)
+	}
+}
+
+// replacingClient replaces the object a Delete targets just before the
+// delete is sent, as another writer would between list and delete.
+type replacingClient struct {
+	client.Client
+	replace func(ctx context.Context, o client.Object)
+}
+
+func (c replacingClient) Delete(ctx context.Context, o client.Object, opts ...client.DeleteOption) error {
+	if c.replace != nil {
+		c.replace(ctx, o)
+	}
+	return c.Client.Delete(ctx, o, opts...)
+}
+
+// A delete removes exactly the listed object: one changed since it was
+// listed is a conflict, never removed.
+func TestDeleteRequiresTheListedObject(t *testing.T) {
+	inner := fakeClient()
+	ctx := context.Background()
+	v1 := desiredFor(t, "b1", pol, "sha256:r1", v1alpha1.ModeAudit)
+	v2 := desiredFor(t, "b1", pol, "sha256:r2", v1alpha1.ModeDeny)
+	both := readyNames(v1.GetName(), v2.GetName())
+	if _, err := (&Delivery{Client: inner, Ready: both}).Sync(ctx, "b1", []*unstructured.Unstructured{v1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	touched := ""
+	c := replacingClient{Client: inner, replace: func(ctx context.Context, o client.Object) {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(ValidatingPolicyGVK)
+		if err := inner.Get(ctx, client.ObjectKeyFromObject(o), live); err != nil {
+			t.Fatal(err)
+		}
+		live.SetAnnotations(merge(live.GetAnnotations(), map[string]string{"example.com/touched": "true"}))
+		if err := inner.Update(ctx, live); err != nil {
+			t.Fatal(err)
+		}
+		touched = live.GetName()
+	}}
+	_, err := (&Delivery{Client: c, Ready: both}).Sync(ctx, "b1", []*unstructured.Unstructured{v2}, nil)
+	if !apierrors.IsConflict(err) || touched != v1.GetName() {
+		t.Fatalf("delete of a changed object: %v (touched %q)", err, touched)
+	}
+	if got := policyNames(t, inner); !slices.Contains(got, v1.GetName()) {
+		t.Fatalf("changed object deleted: %v", got)
 	}
 }

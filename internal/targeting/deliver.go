@@ -2,6 +2,7 @@ package targeting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -37,7 +38,18 @@ func KyvernoReady(o *unstructured.Unstructured) bool {
 type Delivery struct {
 	Client client.Client
 	Ready  ReadyFunc
+	// Current, when set, confirms against the API server that the snapshot
+	// desired was resolved from is still current. Sync calls it before its
+	// first write and again after listing owned policies, immediately
+	// before any delete; an error aborts the Sync. Leader election is not
+	// fencing: a former leader resuming a delayed attempt must not create
+	// superseded revisions or withdraw what a newer snapshot desires.
+	Current func(context.Context) error
 }
+
+// ErrStaleSnapshot reports that the binding or profile changed after the
+// snapshot a Sync was resolved from. The caller resolves again.
+var ErrStaleSnapshot = errors.New("the binding or its profile changed; resolve again")
 
 // DeliveryResult is the observable outcome of one Sync. Names are sorted.
 type DeliveryResult struct {
@@ -74,6 +86,9 @@ func (d *Delivery) Sync(ctx context.Context, bindingUID types.UID, desired []*un
 		ready = KyvernoReady
 	}
 	var res DeliveryResult
+	if err := d.current(ctx); err != nil {
+		return res, err
+	}
 	desiredNames := map[string]bool{}
 	// Per policy hash: whether every desired instance is current and ready.
 	replacementReady := map[string]bool{}
@@ -110,6 +125,12 @@ func (d *Delivery) Sync(ctx context.Context, bindingUID types.UID, desired []*un
 	if err != nil {
 		return res, err
 	}
+	// Listed first, checked second: an owned policy created for a newer
+	// snapshot implies that snapshot was committed before the list, so the
+	// check below sees it and no delete is sent.
+	if err := d.current(ctx); err != nil {
+		return res, err
+	}
 	for _, o := range owned {
 		if desiredNames[o.GetName()] {
 			continue
@@ -120,7 +141,7 @@ func (d *Delivery) Sync(ctx context.Context, bindingUID types.UID, desired []*un
 		case held[hash], stillDesired && !replaced:
 			res.Retained = append(res.Retained, o.GetName())
 		default:
-			if err := d.Client.Delete(ctx, &o); err != nil && !apierrors.IsNotFound(err) {
+			if err := d.delete(ctx, &o); err != nil {
 				return res, err
 			}
 			res.Removed = append(res.Removed, o.GetName())
@@ -141,7 +162,7 @@ func (d *Delivery) Withdraw(ctx context.Context, bindingUID types.UID) ([]string
 	}
 	var removed []string
 	for _, o := range owned {
-		if err := d.Client.Delete(ctx, &o); err != nil && !apierrors.IsNotFound(err) {
+		if err := d.delete(ctx, &o); err != nil {
 			return removed, err
 		}
 		removed = append(removed, o.GetName())
@@ -151,6 +172,25 @@ func (d *Delivery) Withdraw(ctx context.Context, bindingUID types.UID) ([]string
 }
 
 var errConflict = fmt.Errorf("ownership conflict")
+
+func (d *Delivery) current(ctx context.Context) error {
+	if d.Current == nil {
+		return nil
+	}
+	return d.Current(ctx)
+}
+
+// delete removes exactly the listed object: a policy recreated or changed
+// since it was listed (another UID or resourceVersion) is a conflict, not
+// a deletion, and the caller resolves again.
+func (d *Delivery) delete(ctx context.Context, o *unstructured.Unstructured) error {
+	uid, rv := o.GetUID(), o.GetResourceVersion()
+	err := d.Client.Delete(ctx, o, client.Preconditions{UID: &uid, ResourceVersion: &rv})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
 
 // apply creates want, or repairs drift on an existing policy the binding owns.
 func (d *Delivery) apply(ctx context.Context, bindingUID types.UID, want *unstructured.Unstructured) (*unstructured.Unstructured, error) {
