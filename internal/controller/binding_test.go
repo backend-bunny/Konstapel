@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -651,5 +652,65 @@ func TestDelayedFormerLeaderResolvesAgain(t *testing.T) {
 	}
 	if got := e.binding("all").Status; !equality.Semantic.DeepEqual(got, statusBefore) {
 		t.Fatalf("former leader overwrote status:\n%s\n%s", statusJSON(got), statusJSON(statusBefore))
+	}
+}
+
+// A successor whose local content fails verification (a cold or corrupted
+// cache after failover) does not resolve: it reports the content
+// unavailable, keeps the policies the former leader applied, never claims a
+// current revision from remembered status, and selects no other digest
+// (add-controller-high-availability 4.3).
+func TestSuccessorWithUnverifiableContentKeepsPolicies(t *testing.T) {
+	p := profileObj(t, "baseline", pol)
+	e := newEnv(t, nsObj("prod"), p, bindingObj("all", "baseline", v1alpha1.ModeAudit, nil))
+	e.reconcile("all")
+	e.markAllReady()
+	e.reconcile("all")
+	applied := e.policies()
+	if len(applied) != 1 {
+		t.Fatalf("former leader applied %d policies", len(applied))
+	}
+	before := e.binding("all")
+	requireObserved(t, before)
+
+	// The successor's copy of the pinned content has one tampered file.
+	dir := t.TempDir()
+	if err := os.CopyFS(filepath.Join(dir, "content"), os.DirFS("../../content")); err != nil {
+		t.Fatal(err)
+	}
+	policy := filepath.Join(dir, assessment.ShippedPolicies[pol])
+	raw, err := os.ReadFile(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policy, append(raw, []byte("\n# tampered\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	successor := *e.r
+	successor.Content = targeting.LocalContent{Root: filepath.Join(dir, "content"), Name: content.Name, Policies: content.Policies}
+	// A new generation forces the successor to resolve rather than rely on
+	// the status the former leader wrote.
+	b := e.binding("all")
+	b.Spec.Mode = v1alpha1.ModeDeny
+	b.Generation++
+	if err := e.c.Update(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := successor.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "all"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.binding("all")
+	if c := cond(got, v1alpha1.ConditionResolved); c.Status != metav1.ConditionFalse || c.Reason != v1alpha1.ReasonContentUnavailable {
+		t.Fatalf("Resolved %+v", c)
+	}
+	if c := cond(got, v1alpha1.ConditionEngineReady); c.Status == metav1.ConditionTrue {
+		t.Fatalf("successor claims current enforcement from remembered status: %+v", c)
+	}
+	after := e.policies()
+	if len(after) != 1 || after[0].GetName() != applied[0].GetName() {
+		t.Fatalf("unverifiable content changed applied policies: %v -> %v", applied[0].GetName(), after)
+	}
+	if got.Status.Profile == nil || got.Status.Profile.BundleDigest != before.Status.Profile.BundleDigest {
+		t.Fatalf("successor selected another digest: %+v", got.Status.Profile)
 	}
 }

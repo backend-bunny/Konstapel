@@ -207,6 +207,87 @@ rows across leaders:
 - In the lost-capture case, the test also checks that S3 holds no staging for
   the lost run, and that a following run publishes.
 
+## Per-pod budgets
+
+Each replica has its own bounded storage and concurrency. Nothing is shared
+between pods, and nothing is needed from a lost pod.
+
+| Process | Budget | Default (chart value) | When exceeded |
+| --- | --- | --- | --- |
+| Controller (leader) | concurrently executing runs across all bindings | 4 | further runs wait their turn; one active run per binding |
+| Controller | staging volume (`emptyDir`) for frozen captures and packages awaiting publication | 2Gi (`controller.stagingSizeLimit`) | the kubelet evicts the pod; captures not yet staged in S3 become `CaptureLost` on the next leader |
+| Controller | one package archive | 512 MiB (`s3store.MaxArchiveBytes`) | publication is refused for that run |
+| Controller | publication retries after collection closes | 5 min | the run fails with the publication error, and nothing partial is committed |
+| Download server | concurrent downloads | 4 (`download.maxConcurrent`) | `429` with `Retry-After: 30` |
+| Download server | bytes buffered for verification across downloads | 2 GiB (`download.maxTempBytes`) inside a 3Gi volume (`download.tempSizeLimit`) | `503` with `Retry-After: 30` |
+| Both | shutdown | 45 s controller budget and 20 s download drain within a 60 s grace ([Shutdown and leadership loss](#shutdown-and-leadership-loss)) | the process exits; interrupted work is recovered or reported |
+
+Two replicas of each Deployment use at most twice these budgets.
+
+## Replica-local state after pod loss
+
+A new pod, or a new leader, starts with nothing remembered locally. It
+rebuilds what it can from durable state, and states what it can't:
+
+| Local state | After loss | Never assumed from memory |
+| --- | --- | --- |
+| Policy content | read from the image and **re-verified on every resolution** against `SHA256SUMS`, whose own digest is the pinned bundle digest | a file that fails verification makes the binding `Resolved=False` (`ContentUnavailable`): applied policies stay, no other digest is chosen, and the binding isn't reported current |
+| Informer caches | re-listed from the API server and synced before the leader acts ([What runs where](#what-runs-where)) | — |
+| Engine capability | rediscovered on the first reconcile and every poll | an absent engine is reported, not inferred from earlier status |
+| An in-progress capture | resumed from the run's frozen scope | results evaluated before the restart don't count, because watch continuity isn't proven; missing evidence leaves the run `Incomplete` |
+| Staged packages | recovered from S3 attempts | a capture that existed only in the lost pod's staging volume becomes `CaptureLost` |
+| Grants, publications, cleanup obligations | live in the API (runs, finalizers, receipts) and in S3, never only in the pod | — |
+
+Tests:
+- `TestSuccessorWithUnverifiableContentKeepsPolicies` gives a successor a
+  tampered content copy: it reports `ContentUnavailable`, keeps the former
+  leader's policy, and keeps the recorded bundle digest.
+- `TestUnavailableContentKeepsAppliedPolicies` covers a digest this replica
+  doesn't serve.
+- `TestLocalContentRejectsTamperedFiles` covers tampered content files.
+- `TestRestartResumesSameCaptureWithoutContinuity` covers continuity lost
+  during collection.
+- `TestLiveEngineCapabilityRecovery` covers capability rediscovery.
+
+## Failure walkthrough
+
+What survives each failure, and what is cleaned up. Committed artifacts are
+never rewritten or deleted before their recorded expiry. Cleanup removes only
+attempt data that the run itself owns.
+
+| Failure | Committed package | Incomplete attempt data | Retention obligation |
+| --- | --- | --- | --- |
+| Leader pod deleted mid-collection | none yet | the capture is lost with the pod; the run ends `CaptureLost`, nothing is uploaded | none for that run |
+| Leader lost after staging, before commit | committed later by the next leader with the original bytes and identity | staged attempts other than the committed one are removed once the run is terminal (`AttemptsCleaned`) | from the commit, with the retention selected at commit |
+| Leader lost after commit, before the receipt | unchanged; the next leader records the original receipt | as above | the original `expiresAt`, even if the binding's retention changed since |
+| S3 unreachable | unchanged | kept until S3 answers; the run stays `Publishing` and isn't `CaptureLost` | unchanged; expiry deletion retries |
+| A response lost on publish or delete | unchanged; a retry returns the matching commit instead of committing twice | as above | a lost delete response is retried until no owned version remains |
+| Controller outage (no replica) | unchanged and still downloadable | untouched until a controller runs | expiry deletion is delayed, never skipped; the run's retention finalizer keeps it until its package is deleted |
+
+**How attempt cleanup stays safe.** `CleanupAttempts` runs only for terminal
+runs, and only below that run's own prefix (cluster, binding UID, run UID). It
+removes uncommitted staged attempts and incomplete multipart uploads, but it
+never touches the commit or the committed archive, and it leaves anything
+whose ownership it can't establish. A failure is recorded on the run
+(`AttemptsCleaned=False`, `CleanupPending`) and retried, and a new leader
+re-lists terminal runs and resumes.
+
+Tests:
+- `TestPublisherRoundTrip` (`internal/s3store`, real S3, all versioning
+  modes) removes an interrupted attempt and a real incomplete multipart
+  upload. It checks that an unrelated object in the same bucket survives,
+  and that the committed package is undamaged.
+- `TestLiveLeaderHandoverRecovery` and `TestLiveLeaderHandoverLoss` cover
+  the staged, receipt-lost and capture-lost rows across leaders.
+- `TestLiveHelmAvailability` covers capture loss with the installed image.
+- `TestLiveEvidenceRecovery` and `TestLiveRetentionLifecycle` cover expiry
+  deletion blocked by a legal hold and resumed, and a binding deleted during
+  an S3 outage.
+- `TestLostDeleteResponseIsRetriedToDeleted` (unit) loses a delete response.
+  The finalizer stays, and the retry after backoff records the `Deleted`
+  tombstone. `TestLostPublishResponseKeepsOriginalReceipt` covers a lost
+  publish response, which keeps the original receipt and commits only once.
+
 ## Downloads without the leader
 
 The download server is its own Deployment (`konstapel-download`, two
