@@ -46,7 +46,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 ## 5. Verify chart defaults and integrated availability
 
-- [ ] 5.1 Consume the Helm owner's merged availability values and render tests; verify default two replicas, explicit development one, preferred hostname separation, default multi-replica minAvailable 1 PDB, development PDB omission and zero-unavailable/one-surge rolling updates without duplicating chart ownership.
+- [x] 5.1 Consume the Helm owner's merged availability values and render tests; verify default two replicas, explicit development one, preferred hostname separation, default multi-replica minAvailable 1 PDB, development PDB omission and zero-unavailable/one-surge rolling updates without duplicating chart ownership.
 - [ ] 5.2 Extend the shared chart acceptance harness with a pinned multi-node cluster, real packaged image and test-owned S3 backend; verify both pods become ready, record their placement/Lease holder, and prove admission/download requests reach the follower when those features are enabled.
 - [ ] 5.3 Exercise abrupt leader failure, graceful leader/follower replacement and node loss under traffic; verify bounded cancellation/recovery, retained policy/acceptance identities, same-run publication recovery and truthful metrics/evidence rather than inferring correctness from Lease ownership.
 - [ ] 5.4 Exercise a supported rolling image upgrade and sequential voluntary evictions; verify replacement readiness before normal rollout retirement, PDB rejection of an availability-breaking eviction and explicit pending rollout when surge capacity is constrained.
