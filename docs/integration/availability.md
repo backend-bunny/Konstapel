@@ -60,6 +60,51 @@ user agent and edits a binding while both run. The test then checks the field
 managers of the binding, its profile, its engine policies, the Lease and every
 Event: the follower's agent appears on none of them, and the leader's does.
 
+## Serving readiness versus leadership
+
+Readiness answers "can this pod serve requests now?", never "is this pod the
+leader?". Both controller replicas, leader and follower, become ready.
+Services and probes therefore select every ready replica, and none of them
+needs to know which one holds the Lease.
+
+| Process | Ready when | Not ready when | Independent of |
+| --- | --- | --- | --- |
+| Controller (`:8081/readyz`) | the manager is running | it is shutting down (termination signal or leadership loss) | leadership, Kyverno health (reported in binding Conditions), S3 |
+| Download server (`:8443/readyz`, HTTPS) | its mounted certificate is valid and verified | the mounted TLS is invalid, the served certificate has expired, or it is shutting down | the controller, leadership, S3 (a backend outage fails only the affected downloads with `503`) |
+
+To see who leads, read the Lease, not readiness:
+
+```sh
+kubectl -n konstapel-system get lease konstapel-controller-leader-election \
+  -o jsonpath='{.spec.holderIdentity}{"\n"}'
+```
+
+`TestLiveHelmInstall` checks this on the installed chart. Both controller pods
+become ready while exactly one holds the Lease. Both download pods serve
+through the `konstapel-download` Service, which has no session affinity. Each
+download pod also serves directly with no controller running at all (see
+[Downloads without the leader](#downloads-without-the-leader)).
+
+### Client retry
+
+- **Downloads.** Retry the same URL with a fresh token. Any ready replica
+  answers, and there is no session state to resume. Answers:
+  - `503` and `429` are temporary: retry after the `Retry-After` header (30s).
+  - `401` and `403` mean authenticate or authorize again; retrying doesn't
+    help.
+  - `409` means not published yet.
+  - `410` means expired or handed off.
+
+  An interrupted transfer restarts from the beginning, because there are no
+  range requests.
+- **Kubernetes API writes** (bindings, profiles, requests). Clients talk to
+  the API server, not to Konstapel, so leadership changes don't affect them.
+  A new leader reconciles everything from the current state after the Lease
+  changes hands, which took about 20s in tests.
+- **Exception admission webhooks.** They aren't served yet (see below). Once
+  they are, every ready replica will serve them, and the API server retries
+  them according to the webhook's failure policy.
+
 ## Shutdown and leadership loss
 
 | Setting | Default | Flag |

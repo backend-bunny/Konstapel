@@ -34,7 +34,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 - [ ] 3.2 Exercise protected admission against each replica during central edits, renewal and leadership changes; verify authoritative scope/revision checks, authenticated attribution and dry-run behavior remain intact and no grant is broadened or renewed by failover.
 - [x] 3.3 Integrate follower downloads with durable request/run lookup and the S3 owner; verify identical package digests after the producing pod is removed, current authorization on retry, namespace-UID isolation and explicit expiry/backend errors without leader-local files.
 - [x] 3.4 Exercise certificate/credential rotation and authorization revocation on both serving pods; verify each uses current trust/access rules, records no secret values and does not depend on session affinity or a leader proxy.
-- [ ] 3.5 Document serving versus leadership readiness and client retry behavior; verify the Helm owner can select/probe all ready replicas and the documented service requests work through a known follower.
+- [x] 3.5 Document serving versus leadership readiness and client retry behavior; verify the Helm owner can select/probe all ready replicas and the documented service requests work through a known follower.
 
 ## 4. Recover state and drain bounded work
 
