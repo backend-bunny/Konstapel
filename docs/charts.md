@@ -401,6 +401,32 @@ unavailable, so no webhook Service or configuration is rendered.
 server and all three TLS shapes, that every binding refers to a shipped role,
 and the refusals.
 
+## Uninstalling the runtime chart
+
+`helm uninstall konstapel -n konstapel-system` removes the controller, the
+download server and their RBAC, Services, admission policies and
+certificates. The CRD chart, every custom resource and anything outside the
+cluster stay. In detail:
+
+| Stops | Stays |
+| --- | --- |
+| reconciling profiles and bindings: new or changed bindings deliver nothing | the delivered Kyverno policies: they are owned by their bindings, so **Kyverno keeps enforcing the last delivered revisions** |
+| scheduled and requested assessment runs | completed runs and their status, and the packages already published to S3 |
+| downloads (the download Service goes away) | the S3 objects; operators can still read them with storage credentials |
+| retention cleanup: expired packages are **not** deleted until a controller runs again | the runs' retention finalizer, which keeps a run until its package is deleted |
+| the admission policies that protect run and destination status | `ComplianceException` objects (exception admission isn't served in v0.1.0) |
+
+To remove Konstapel completely, keep the controller running while you remove
+its work:
+1. delete the bindings, so their Kyverno policies are garbage-collected;
+2. let retention delete what has expired, or hand storage off as described
+   in [S3 evidence](integration/s3-evidence.md);
+3. uninstall the runtime chart, then the CRD chart;
+4. delete the CRDs explicitly if their data should go too.
+
+Reinstalling the runtime chart resumes all of the above from the retained
+objects.
+
 ## Values contract
 
 `charts/konstapel/values.schema.json` rejects unknown values. There are no

@@ -33,6 +33,8 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
   acceptance groups, log locations, and dependency ownership.
 - [Images](images.md): melange/apko, SBOMs, license notices, signing, and verification.
 - [Releases](releases.md): release-please, required acceptance, and publication.
+- [v0.1.0 readiness](release-readiness.md): what the first release ships, the
+  test behind each claim, and known limitations.
 - [Contributor instructions](../AGENTS.md): branch/PR workflow and tooling rules.
 
 Current tool pins live in [devbox.json](../devbox.json) and

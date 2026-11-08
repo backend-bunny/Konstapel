@@ -538,6 +538,48 @@ workload identities:
 6. **Ready** runs the compatibility probe. An incompatible or unreachable
    backend is `ErrUnavailable`.
 
+### Installing with Helm
+
+The [Helm charts](../charts.md) ship everything this guide relies on, so
+nothing here needs to be applied by hand:
+
+| Resource | Chart | Source |
+| --- | --- | --- |
+| `EvidenceDestination` CRD (including the create-only `spec.legacy` declaration) | `konstapel-crds` | generated `config/crd/bases`, kept on uninstall |
+| Controller access to destinations, their finalizers, and Secrets/ConfigMaps in `konstapel-system` | `konstapel` | the generated controller roles (`config/rbac/controller`) |
+| Download server access (destinations, credential Secret, CA ConfigMap) | `konstapel` | `config/rbac/evidence-download.yaml` |
+| Admission policies protecting destination and run status | `konstapel` | `config/admission/*.yaml` |
+
+The chart has no values for locations or credentials. After installing both
+charts, create the bucket, the credential Secret in `konstapel-system` and the
+`EvidenceDestination` as in [Setup](#setup), then select it.
+
+The runtime chart gives each controller pod a size-limited `emptyDir` for
+`--evidence-staging-dir` (`controller.stagingSizeLimit`, 2Gi). It survives
+container restarts but not pod deletion. A run staged durably in S3 is
+recovered by the next leader. A capture lost with its pod before durable
+staging is reported as `CaptureLost`, never published
+([Controller availability](availability.md#where-a-lost-leaders-work-ends-up)).
+
+`TestLiveHelmInstall` and `TestLiveHelmAvailability` publish through such a
+destination from the installed image to a test-owned S3 service. The
+`TestLiveCRDChartLifecycle` test upgrades, uninstalls and reinstalls the CRD
+chart with a populated `EvidenceDestination` carrying a finalizer. The
+`charts` and `availability` groups belong to the required `acceptance`
+check.
+
+**Upgrading from the legacy file with Helm.** `--evidence-destination` was
+removed, so the chart can't run the legacy file mode. Follow
+[Upgrading from the legacy destination file](#upgrading-from-the-legacy-destination-file)
+with two substitutions:
+- in step 1, install the `konstapel-crds` chart (and keep the old controller
+  stopped) instead of applying `config/crd`;
+- where that procedure starts the new controller, install the `konstapel`
+  chart.
+
+Declare the `EvidenceDestination` with `spec.legacy` before the runtime chart
+starts the controller, so the old runs are attached on its first reconcile.
+
 ## Controller use
 
 **Configuration.** `konstapel controller` publishes only through
