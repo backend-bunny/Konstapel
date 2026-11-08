@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -337,10 +338,179 @@ func TestStaleBindingCreatesNoDuplicateRun(t *testing.T) {
 		t.Fatalf("setup: %d runs", len(e.runs()))
 	}
 	e.now = e.now.Add(time.Second)
+	first := e.runs()[0].Name
+	// The first-schedule lookup adopts a run it can see; hide it so the
+	// stale plan reaches the run creation and its resourceVersion guard.
+	e.ar.Reader = hideRuns{Client: e.c, hide: first}
 	if _, _, _, _, err := e.ar.plan(context.Background(), stale, e.now); !apierrors.IsConflict(err) {
 		t.Fatalf("stale plan must conflict before creating anything, got %v", err)
 	}
 	if n := len(e.runs()); n != 1 {
 		t.Fatalf("stale plan created a duplicate run: %d runs", n)
 	}
+	// Seeing the run, the stale plan adopts it instead of creating another.
+	e.ar.Reader = e.c
+	sched, _, _, _, err := e.ar.plan(context.Background(), stale, e.now)
+	if err != nil || sched == nil || sched.ActiveRun == nil || sched.ActiveRun.Name != first {
+		t.Fatalf("stale plan with the run visible: %v %+v", err, sched)
+	}
+	if n := len(e.runs()); n != 1 {
+		t.Fatalf("stale plan created a duplicate run: %d runs", n)
+	}
+}
+
+// A plan that created the first scheduled run but whose status write then
+// lost to another writer must not leave that run behind: the replan, a second
+// later, adopts it instead of deriving a new anchor and a duplicate run.
+func TestLostFirstScheduleWriteAdoptsTheCreatedRun(t *testing.T) {
+	e, created := lostFirstSchedule(t)
+	e.now = e.now.Add(time.Second)
+	e.assess("audit-prod")
+	e.wantAdopted(created, 1)
+}
+
+// The adoption survives a replan more than one interval later (scheduling
+// was disabled meanwhile): the created run is admitted, not replaced by a
+// run for the latest due time.
+func TestLostFirstScheduleWriteAdoptedAfterAnInterval(t *testing.T) {
+	e, created := lostFirstSchedule(t)
+	e.now = e.now.Add(25 * time.Hour)
+	e.assess("audit-prod")
+	e.wantAdopted(created, 1)
+}
+
+// The run informer can lag behind the binding's: a replan whose cached run
+// list does not yet contain the created run still adopts it, because the
+// first-schedule lookup reads uncached.
+func TestLostFirstScheduleWriteAdoptedDespiteRunCacheLag(t *testing.T) {
+	e, created := lostFirstSchedule(t)
+	e.ar.Reader = e.c
+	e.ar.Client = hideRuns{Client: e.c, hide: created.Name}
+	e.now = e.now.Add(time.Second)
+	e.assess("audit-prod")
+	e.wantAdopted(created, 1)
+}
+
+// Only an unfinished scheduled run of the same binding (by UID) is adopted,
+// the earliest when there are several; other bindings' runs, a same-named
+// binding's runs, finished runs and manual runs never anchor the schedule.
+func TestFirstScheduleAdoptsOnlyOwnUnfinishedScheduledRuns(t *testing.T) {
+	ignored := []struct {
+		name, binding, uid string
+		trigger            v1alpha1.TriggerType
+		phase              v1alpha1.RunPhase
+	}{
+		{"other-binding", "other", "", v1alpha1.TriggerScheduled, ""},
+		{"replaced-binding", "audit-prod", "uid-old", v1alpha1.TriggerScheduled, v1alpha1.RunPending},
+		{"completed", "audit-prod", "", v1alpha1.TriggerScheduled, v1alpha1.RunCompleted},
+		{"failed", "audit-prod", "", v1alpha1.TriggerScheduled, v1alpha1.RunFailed},
+		{"manual", "audit-prod", "", v1alpha1.TriggerManual, v1alpha1.RunPending},
+		{"request", "audit-prod", "", v1alpha1.TriggerRequest, v1alpha1.RunPending},
+	}
+	for _, c := range ignored {
+		t.Run(c.name, func(t *testing.T) {
+			e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+			e.deliver("audit-prod")
+			uid := c.uid
+			if uid == "" {
+				uid = string(e.bindingUID("audit-prod"))
+			}
+			e.scheduledRun(c.name, c.binding, uid, c.trigger, e.now.Add(-time.Hour), c.phase)
+			e.assess("audit-prod")
+			if s := e.schedule("audit-prod"); !s.Anchor.Time.Equal(e.now) || s.ActiveRun == nil || s.ActiveRun.Name == c.name {
+				t.Fatalf("schedule %+v adopted %s", s, c.name)
+			}
+		})
+	}
+	t.Run("earliest", func(t *testing.T) {
+		e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+		e.deliver("audit-prod")
+		uid := string(e.bindingUID("audit-prod"))
+		later := e.scheduledRun("later", "audit-prod", uid, v1alpha1.TriggerScheduled, e.now.Add(-time.Minute), "")
+		earlier := e.scheduledRun("earlier", "audit-prod", uid, v1alpha1.TriggerScheduled, e.now.Add(-time.Hour), v1alpha1.RunPending)
+		e.assess("audit-prod")
+		e.wantAdopted(earlier, 2)
+		if r := e.run(later.Name); r.Status.Phase != "" {
+			t.Fatalf("the later run changed: %s", r.Status.Phase)
+		}
+	})
+}
+
+// lostFirstSchedule plans the binding's first run without persisting the
+// schedule, as when the status write loses to another writer.
+func lostFirstSchedule(t *testing.T) (*runEnv, *v1alpha1.AssessmentRun) {
+	t.Helper()
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	b := &v1alpha1.ComplianceBinding{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: "audit-prod"}, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := e.ar.plan(context.Background(), b, e.now); err != nil {
+		t.Fatal(err)
+	}
+	created := e.runs()
+	if len(created) != 1 {
+		t.Fatalf("setup: %d runs", len(created))
+	}
+	return e, &created[0]
+}
+
+// wantAdopted checks that the binding has n runs and that its schedule
+// admits run, anchored at its scheduled time.
+func (e *runEnv) wantAdopted(run *v1alpha1.AssessmentRun, n int) {
+	e.t.Helper()
+	if got := e.runs(); len(got) != n {
+		e.t.Fatalf("replan created a duplicate scheduled run: %d runs", len(got))
+	}
+	s := e.schedule("audit-prod")
+	if s.ActiveRun == nil || s.ActiveRun.Name != run.Name || !s.Anchor.Time.Equal(run.Spec.Trigger.ScheduledTime.Time) {
+		e.t.Fatalf("schedule %+v does not adopt %s", s, run.Name)
+	}
+}
+
+func (e *runEnv) bindingUID(name string) types.UID {
+	e.t.Helper()
+	b := &v1alpha1.ComplianceBinding{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: name}, b); err != nil {
+		e.t.Fatal(err)
+	}
+	return b.UID
+}
+
+func (e *runEnv) scheduledRun(name, binding, uid string, trigger v1alpha1.TriggerType, at time.Time, phase v1alpha1.RunPhase) *v1alpha1.AssessmentRun {
+	e.t.Helper()
+	when := metav1.NewTime(at)
+	r := &v1alpha1.AssessmentRun{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{LabelRunBinding: uid}},
+		Spec: v1alpha1.AssessmentRunSpec{BindingRef: v1alpha1.BindingReference{Name: binding}, Scope: v1alpha1.RunScopeBinding,
+			Trigger: &v1alpha1.RunTrigger{Type: trigger}}}
+	if trigger == v1alpha1.TriggerScheduled {
+		r.Spec.Trigger.ScheduledTime = &when
+	}
+	if err := e.c.Create(context.Background(), r); err != nil {
+		e.t.Fatal(err)
+	}
+	if phase != "" {
+		r.Status.Phase = phase
+		if err := e.c.Status().Update(context.Background(), r); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	return r
+}
+
+// hideRuns is a client whose run lists lag behind: they omit one run.
+type hideRuns struct {
+	client.Client
+	hide string
+}
+
+func (h hideRuns) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if err := h.Client.List(ctx, list, opts...); err != nil {
+		return err
+	}
+	if runs, ok := list.(*v1alpha1.AssessmentRunList); ok {
+		runs.Items = slices.DeleteFunc(runs.Items, func(r v1alpha1.AssessmentRun) bool { return r.Name == h.hide })
+	}
+	return nil
 }

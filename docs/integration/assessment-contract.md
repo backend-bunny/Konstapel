@@ -328,6 +328,16 @@ runs are created. Current evidence status (above) works without a publisher.
 - Scheduled runs are named `<binding>-s-<hash(binding UID, scheduled time)>`.
   A retry or a new leader finds the existing run instead of creating a
   duplicate snapshot.
+- The first anchor is the planning clock. If the status write of the first
+  plan is lost after its run was created (another writer changed the
+  binding), the next plan reads the binding's runs without the cache and
+  adopts the earliest unfinished scheduled run of the same binding UID as the
+  anchor and active run, however much later it replans. It never creates a
+  second first run. Bindings hit by the earlier behavior already have a
+  persisted anchor, so adoption does not apply to them: a `Pending` scheduled
+  run that is not `status.assessment.schedule.activeRun` is that orphan. It
+  is safe to delete, because the run controller releases the finalizer of a
+  run deleted before `Publishing`.
 
 **Execution.** The run controller (bounded concurrency, default 4) executes
 only the run its binding's schedule admitted:

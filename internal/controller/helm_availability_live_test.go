@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,14 +44,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
 func TestLiveHelmAvailability(t *testing.T) {
-	image := os.Getenv("KONSTAPEL_LIVE_IMAGE")
-	repo, digest, ok := strings.Cut(image, "@")
-	if !ok {
-		t.Fatalf("KONSTAPEL_LIVE_IMAGE=%q is not repository@digest", image)
-	}
+	image, repo, digest := liveImage(t)
 	l := newLive(t)
 	const ns = "konstapel-system"
 	cluster := os.Getenv("KONSTAPEL_CLUSTER_NAME")
@@ -61,23 +59,7 @@ func TestLiveHelmAvailability(t *testing.T) {
 	}
 
 	// Install both charts with operator TLS.
-	if out, err := l.helm("install", "konstapel-crds", chartArchive(t, "konstapel-crds"), "--namespace", ns, "--create-namespace", "--wait"); err != nil {
-		t.Fatalf("install CRD chart: %v\n%s", err, out)
-	}
-	l.waitChartCRDs()
-	tlsSecret, caPEM := downloadTLSSecret(t, ns)
-	if err := l.c.Create(l.ctx, tlsSecret); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m",
-		"-f", "../../docs/examples/charts/operator-tls.yaml"}, imageValues(repo, digest)...)...); err != nil {
-		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
-	}
-	t.Cleanup(func() {
-		_, _ = l.helm("uninstall", "konstapel", "--namespace", ns, "--wait")
-		_, _ = l.helm("uninstall", "konstapel-crds", "--namespace", ns)
-		_ = l.c.Delete(l.ctx, tlsSecret)
-	})
+	caPEM := l.installCharts(ns, repo, digest)
 
 	// 1. Placement: two ready replicas of each Deployment, on both workers
 	// (preferred anti-affinity), and one Lease holder.
@@ -116,13 +98,7 @@ func TestLiveHelmAvailability(t *testing.T) {
 	run := l.publishedRun(b.Name, "")
 	operator, crb := l.downloadOperator(ns, "ha-operator")
 	_ = crb
-	roots := x509.NewCertPool()
-	roots.AppendCertsFromPEM(caPEM)
-	download := func(addr string) (int, string) {
-		hc := &http.Client{Timeout: 3 * time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "konstapel-download.konstapel-system.svc"}}}
-		code, body := fetch(t, hc, "https://"+addr+"/v1/assessmentruns/"+string(run.UID)+"/download", l.token(ns, operator, downloadAudience))
-		return code, fmt.Sprintf("%x", sha256.Sum256(body))
-	}
+	download := func(addr string) (int, string) { return l.downloadPackage(addr, ns, operator, caPEM, string(run.UID)) }
 	if code, sum := download(l.portForward(ns, "svc/konstapel-download", 443)); code != http.StatusOK || sum != run.Status.Publication.PackageSHA256 {
 		t.Fatalf("download: %d %s", code, sum)
 	}
@@ -480,14 +456,49 @@ func (l *live) createWhenServed(o client.Object) {
 // EvidenceDestination with its credentials in the controller namespace.
 func (l *live) chartDestination(t *testing.T, ns, prefix string) (any, *v1alpha1.EvidenceDestination, *corev1.Secret) {
 	t.Helper()
+	pub := l.chartS3(t)
+	ed, secret := l.chartDestinationAt(t, ns, prefix, pub.Dest.Bucket, "http://"+l.s3Container+":9000")
+	return pub, ed, secret
+}
+
+// chartS3 starts the test S3 service, reachable from the pods on the kind
+// network, and returns a publisher whose client reaches it directly.
+func (l *live) chartS3(t *testing.T) *s3store.Publisher {
+	t.Helper()
 	pub := startS3(t, l)
 	if out, err := exec.Command("docker", "network", "connect", "kind", l.s3Container).CombinedOutput(); err != nil {
 		t.Fatalf("attach the S3 service to the kind network: %v %s", err, out)
 	}
+	// Docker can republish the loopback port when a network is attached:
+	// point the direct client at the current one.
+	out, err := exec.Command("docker", "port", l.s3Container, "9000/tcp").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strings.TrimSpace(strings.Split(strings.Split(string(out), "\n")[0], ":")[1])
+	l.s3Endpoint = "http://127.0.0.1:" + port
+	pub.Dest.Endpoint = l.s3Endpoint
+	c, err := s3store.NewClient(l.ctx, pub.Dest, &s3store.StaticCredentials{AccessKeyID: l.s3Access, SecretAccessKey: l.s3Secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub.Client = c
+	if _, err := pub.Ready(l.ctx); err != nil {
+		t.Fatalf("direct S3 access after attaching the kind network: %v", err)
+	}
+	return pub
+}
+
+// chartDestinationAt creates an EvidenceDestination for the test S3 service
+// at endpoint (the service itself, or a proxy in front of it) under the key
+// prefix konstapel-test/<prefix>, with its credentials in the controller
+// namespace, and waits until the controller reports it ready.
+func (l *live) chartDestinationAt(t *testing.T, ns, prefix, bucket, endpoint string) (*v1alpha1.EvidenceDestination, *corev1.Secret) {
+	t.Helper()
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: prefix + "-s3"},
 		Data: map[string][]byte{"accessKeyID": []byte(l.s3Access), "secretAccessKey": []byte(l.s3Secret)}}
 	ed := &v1alpha1.EvidenceDestination{ObjectMeta: metav1.ObjectMeta{Name: prefix + "-dest"}, Spec: v1alpha1.EvidenceDestinationSpec{S3: v1alpha1.S3Location{
-		Endpoint: "http://" + l.s3Container + ":9000", Bucket: pub.Dest.Bucket, Region: "us-east-1", Prefix: "konstapel-test/" + prefix, DevelopmentFixture: true,
+		Endpoint: endpoint, Bucket: bucket, Region: "us-east-1", Prefix: "konstapel-test/" + prefix, DevelopmentFixture: true,
 		CredentialSecret: &v1alpha1.S3CredentialSecret{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: secret.Name}}}}}
 	for _, o := range []client.Object{secret, ed} {
 		if err := l.c.Create(l.ctx, o); err != nil {
@@ -508,7 +519,7 @@ func (l *live) chartDestination(t *testing.T, ns, prefix string) (any, *v1alpha1
 		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
 		return meta.IsStatusConditionTrue(got.Status.Conditions, v1alpha1.ConditionDestinationReady), toJSON(got.Status)
 	})
-	return pub, ed, secret
+	return ed, secret
 }
 
 func (l *live) dropRuns(binding string) {
@@ -548,7 +559,9 @@ func (l *live) publishedRun(binding, name string) *v1alpha1.AssessmentRun {
 	var out *v1alpha1.AssessmentRun
 	l.eventually("run published", func() (bool, string) {
 		var runs v1alpha1.AssessmentRunList
-		_ = l.c.List(l.ctx, &runs)
+		if err := l.c.List(l.ctx, &runs); err != nil {
+			return false, err.Error()
+		}
 		for i := range runs.Items {
 			r := &runs.Items[i]
 			if r.Spec.BindingRef.Name == binding && (name == "" || r.Name == name) &&
@@ -577,4 +590,71 @@ func (l *live) downloadOperator(ns, name string) (string, *rbacv1.ClusterRoleBin
 	}
 	l.t.Cleanup(func() { _ = l.c.Delete(l.ctx, crb); _ = l.c.Delete(l.ctx, sa) })
 	return name, crb
+}
+
+// liveImage is the packaged controller image (KONSTAPEL_LIVE_IMAGE) as
+// repository and digest.
+func liveImage(t *testing.T) (image, repo, digest string) {
+	t.Helper()
+	image = os.Getenv("KONSTAPEL_LIVE_IMAGE")
+	repo, digest, ok := strings.Cut(image, "@")
+	if !ok {
+		t.Fatalf("KONSTAPEL_LIVE_IMAGE=%q is not repository@digest", image)
+	}
+	return image, repo, digest
+}
+
+// installCharts installs both charts into ns with operator TLS and the
+// packaged image, uninstalls them when the test ends, and returns the CA
+// that issued the download server's certificate.
+func (l *live) installCharts(ns, repo, digest string) []byte {
+	t := l.t
+	t.Helper()
+	if out, err := l.helm("install", "konstapel-crds", chartArchive(t, "konstapel-crds"), "--namespace", ns, "--create-namespace", "--wait"); err != nil {
+		t.Fatalf("install CRD chart: %v\n%s", err, out)
+	}
+	l.waitChartCRDs()
+	tlsSecret, caPEM := downloadTLSSecret(t, ns)
+	if err := l.c.Create(l.ctx, tlsSecret); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m",
+		"-f", "../../docs/examples/charts/operator-tls.yaml"}, imageValues(repo, digest)...)...); err != nil {
+		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			// The pods' logs are gone once the release is uninstalled.
+			kubectl := func(args ...string) []byte {
+				out, _ := exec.Command("kubectl", append([]string{"--kubeconfig", os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"), "--context", os.Getenv("KONSTAPEL_LIVE_CONTEXT")}, args...)...).CombinedOutput()
+				return out
+			}
+			var b strings.Builder
+			var pods corev1.PodList
+			_ = l.c.List(l.ctx, &pods, client.InNamespace(ns))
+			for _, p := range pods.Items {
+				for _, previous := range []string{"--previous=true", "--previous=false"} {
+					fmt.Fprintf(&b, "==== %s %s\n%s\n", p.Name, previous, kubectl("-n", ns, "logs", p.Name, "--all-containers", previous))
+				}
+			}
+			fmt.Fprintf(&b, "==== events\n%s\n", kubectl("get", "events", "-A", "--sort-by=.lastTimestamp"))
+			fmt.Fprintf(&b, "==== runs and bindings\n%s\n", kubectl("get", "assessmentruns,compliancebindings", "-o", "yaml"))
+			_ = os.WriteFile(filepath.Join(l.out, t.Name()+"-pods.log"), []byte(b.String()), 0o644)
+		}
+		_, _ = l.helm("uninstall", "konstapel", "--namespace", ns, "--wait")
+		_, _ = l.helm("uninstall", "konstapel-crds", "--namespace", ns)
+		_ = l.c.Delete(l.ctx, tlsSecret)
+	})
+	return caPEM
+}
+
+// downloadPackage downloads a run's package from the download server at addr
+// as the operator ServiceAccount and returns the status and the SHA-256 of
+// the body.
+func (l *live) downloadPackage(addr, ns, operator string, caPEM []byte, runUID string) (int, string) {
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(caPEM)
+	hc := &http.Client{Timeout: 3 * time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "konstapel-download.konstapel-system.svc"}}}
+	code, body := fetch(l.t, hc, "https://"+addr+"/v1/assessmentruns/"+runUID+"/download", l.token(ns, operator, downloadAudience))
+	return code, fmt.Sprintf("%x", sha256.Sum256(body))
 }
