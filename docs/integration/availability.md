@@ -37,6 +37,29 @@ marked unavailable.
   graceful leader stop took about 20s in `TestLiveLeaderElection`, because the
   Lease expires rather than being released.
 
+## What runs where
+
+Every replica starts the same process. What each part does depends on
+leadership:
+
+| Part | Runs on | Why |
+| --- | --- | --- |
+| Profile, binding, assessment, run, destination and exception controllers | leader only | they write managed resources, status and storage |
+| Capability trigger and deferred engine watches | leader only | they re-queue reconciliation |
+| Informer caches and field indexes | every replica | a follower that takes over starts from a warm, synchronized view |
+| Probes (`/healthz`, `/readyz`) | every replica | they report serving health, not leadership |
+| Exception admission webhooks (when served) | every replica | they read through the API reader and write nothing |
+| Startup reads (`kube-system` identity, evidence runtime, staging directory) | every replica | local initialization only; no cluster writes |
+
+controller-runtime (v0.25) starts and syncs the caches before it joins the
+election. Each controller also waits for its own watches to sync before its
+workers start. A new leader therefore never acts on a partial view.
+`TestBackgroundWorkersNeedLeadership` pins the leader-only setting for the
+two custom runnables. `TestLiveLeaderElection` gives each candidate its own
+user agent and edits a binding while both run. The test then checks the field
+managers of the binding, its profile, its engine policies, the Lease and every
+Event: the follower's agent appears on none of them, and the leader's does.
+
 ## Shutdown and leadership loss
 
 | Setting | Default | Flag |
