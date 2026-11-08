@@ -8,6 +8,8 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"net"
 	"os"
+	"strings"
+	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,6 +28,9 @@ func runDownload(args []string) error {
 	addr := fs.String("listen", ":8443", "TLS listen address")
 	cert := fs.String("tls-cert-file", "", "TLS certificate (required)")
 	key := fs.String("tls-private-key-file", "", "TLS private key (required)")
+	caFile := fs.String("tls-ca-file", "", "CA bundle clients use to trust this server; when set, the certificate must chain to it")
+	var names stringList
+	fs.Var(&names, "tls-server-name", "a service DNS name clients use; the certificate must cover it (repeatable)")
 	audience := fs.String("audience", "konstapel-download", "token audience callers must request (kubectl create token --audience)")
 	tmp := fs.String("temp-dir", os.TempDir(), "directory for archives while they are verified")
 	maxConcurrent := fs.Int("max-concurrent", 4, "concurrent downloads")
@@ -43,6 +48,9 @@ func runDownload(args []string) error {
 	}
 	c, err := client.New(cfg, client.Options{Scheme: controller.Scheme()})
 	if err != nil {
+		return err
+	}
+	if err := download.VerifyServingCertificate(*cert, *key, *caFile, names, time.Now()); err != nil {
 		return err
 	}
 	ctx := ctrl.SetupSignalHandler()
@@ -64,3 +72,9 @@ func runDownload(args []string) error {
 	}
 	return download.Serve(ctx, l, *cert, *key, srv.Handler(), *drain)
 }
+
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (s *stringList) String() string     { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }

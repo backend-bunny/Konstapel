@@ -1,0 +1,75 @@
+{{- if and .Values.download.enabled (eq .Values.tls.mode "certManager") }}
+{{- $issuer := (.Values.tls.certManager | default dict).issuerRef | default dict }}
+{{- if not $issuer.name }}
+# Without a platform issuer, the chart issues from its own self-signed CA.
+# cert-manager itself is installed separately; the chart never manages it.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: konstapel-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: konstapel-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: konstapel-ca
+  secretName: konstapel-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: konstapel-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: konstapel-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: konstapel-ca
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: konstapel-download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  secretName: konstapel-download-tls
+  dnsNames:
+    - konstapel-download
+    - konstapel-download.{{ .Release.Namespace }}
+    - konstapel-download.{{ .Release.Namespace }}.svc
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [server auth, digital signature, key encipherment]
+  issuerRef:
+    {{- if $issuer.name }}
+    name: {{ $issuer.name }}
+    kind: {{ $issuer.kind }}
+    group: cert-manager.io
+    {{- else }}
+    name: konstapel-ca
+    kind: Issuer
+    group: cert-manager.io
+    {{- end }}
+{{- end }}

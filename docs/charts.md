@@ -255,6 +255,41 @@ renders:
   `terminationGracePeriodSeconds`;
 - `podDisruptionBudget.minAvailable` that isn't below `replicaCount`.
 
+**Download server and TLS.** With `download.enabled` (the default), the chart
+also renders the evidence download server:
+- a `konstapel-download` ServiceAccount bound to the shipped download roles;
+- a Deployment with two replicas and the same rollout, placement and
+  hardening as the controller;
+- the `konstapel-download` Service (port 443, every ready replica, no session
+  affinity);
+- a PodDisruptionBudget.
+
+The server reads its certificate from a Secret holding `tls.crt`, `tls.key`
+and `ca.crt`. It refuses to start, and so never becomes ready, if any of these
+holds:
+- the key pair is missing or mismatched;
+- the certificate is expired or not yet valid;
+- the certificate doesn't cover `konstapel-download.<namespace>.svc`;
+- the certificate doesn't chain to `ca.crt`.
+
+The flags are `--tls-ca-file` and `--tls-server-name`. `tls.mode` chooses
+where the Secret comes from:
+
+| `tls.mode` | Secret | Requires |
+| --- | --- | --- |
+| `certManager` (default) | `konstapel-download-tls`, from a `Certificate` for the Service's DNS names. The issuer is the chart's self-signed CA (`Issuer` → CA `Certificate` → CA `Issuer`), or your `tls.certManager.issuerRef` (`Issuer` or `ClusterIssuer`) | cert-manager installed separately; the chart never installs or manages it |
+| `secret` | yours, named by `tls.secret.name` | nothing else; the chart only mounts it and never creates, changes or deletes it |
+
+```sh
+kubectl -n konstapel-system create secret generic operator-download-tls \
+  --from-file=tls.crt --from-file=tls.key --from-file=ca.crt
+helm install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
+  --namespace konstapel-system --set tls.mode=secret --set tls.secret.name=operator-download-tls
+```
+
+Clients trust the server through that CA (`ca.crt`) and use the
+`konstapel-download.konstapel-system.svc` name.
+
 **Installed-image acceptance.** The `charts` acceptance group builds the
 controller image from the checkout (`scripts/image/build.sh`). It loads the
 image into the disposable kind node and names it by its manifest digest, then
@@ -269,15 +304,20 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
    from inside the pod to a test-owned S3 service on the kind network. This
    proves the read-only root and the chart's bounded writable volumes are
    enough.
+5. The test installs in `tls.mode=secret` with a test CA. A platform operator
+   downloads the package through the installed download server (port-forwarded
+   Service, TLS trusted only through that CA), and its SHA-256 matches the
+   receipt.
+6. After uninstall, the operator's Secret still exists.
 
 ```sh
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
 ```
 
-The schema also rejects unknown values. No Service is rendered yet: the
-exception webhooks are unavailable and the download server isn't in the chart
-yet, so there is no handler to route to. `internal/charttest` checks the
-defaults, the development case, that every binding refers to a shipped role,
+The schema also rejects unknown values. The exception webhooks are
+unavailable, so no webhook Service or configuration is rendered.
+`internal/charttest` checks the defaults, the development case, the download
+server and all three TLS shapes, that every binding refers to a shipped role,
 and the refusals.
 
 ## Values contract
@@ -372,7 +412,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller Deployment, RBAC, availability defaults and installed-image acceptance done; TLS and the download server pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, operator-Secret TLS and installed-image acceptance done; cert-manager TLS rendered and awaiting a live run; certificate reload pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |

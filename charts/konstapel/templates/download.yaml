@@ -1,0 +1,178 @@
+{{- if .Values.download.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: konstapel-download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-evidence-download
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-evidence-download
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-download
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: konstapel-evidence-download-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: konstapel-evidence-download-credentials
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-download
+    namespace: {{ .Release.Namespace }}
+---
+# Every ready replica serves; no leader routing or session affinity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: konstapel-download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "konstapel.downloadSelector" . | nindent 4 }}
+  sessionAffinity: None
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konstapel-download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: download
+spec:
+  replicas: {{ .Values.download.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "konstapel.downloadSelector" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "konstapel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: download
+    spec:
+      serviceAccountName: konstapel-download
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "konstapel.downloadSelector" . | nindent 20 }}
+      containers:
+        - name: download
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - download-server
+            - --listen=:8443
+            - --tls-cert-file=/etc/konstapel/tls/tls.crt
+            - --tls-private-key-file=/etc/konstapel/tls/tls.key
+            - --tls-ca-file=/etc/konstapel/tls/ca.crt
+            - --tls-server-name=konstapel-download.{{ .Release.Namespace }}.svc
+            - --audience={{ .Values.download.audience }}
+            - --temp-dir=/var/lib/konstapel/download
+            - --max-concurrent={{ .Values.download.maxConcurrent }}
+            - --max-temp-bytes={{ int64 .Values.download.maxTempBytes }}
+            - --shutdown-drain={{ .Values.download.shutdownDrainSeconds }}s
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: https
+              containerPort: 8443
+          # The server refuses to start with an invalid, expired, untrusted or
+          # misnamed certificate, so it never becomes ready.
+          startupProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with .Values.download.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/konstapel/tls
+              readOnly: true
+            - name: work
+              mountPath: /var/lib/konstapel/download
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "konstapel.downloadTLSSecret" . }}
+        # Bounded per-pod verification buffer; packages are fetched from the
+        # durable destination on every request.
+        - name: work
+          emptyDir:
+            sizeLimit: {{ .Values.download.tempSizeLimit }}
+{{- if and (gt (int .Values.download.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: konstapel-download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "konstapel.downloadSelector" . | nindent 6 }}
+{{- end }}
+{{- end }}
