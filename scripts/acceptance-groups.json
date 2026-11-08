@@ -9,7 +9,6 @@
       "TestLiveTargetingWorkflow",
       "TestLiveHardeningAdmission",
       "TestLiveHardeningUserNamespaces",
-      "TestLiveCRDChartLifecycle",
       "TestLiveLeaderElection",
       "TestLiveBoundedShutdown"
     ]
@@ -49,6 +48,7 @@
     "image": true,
     "certManager": true,
     "goTests": [
+      "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall"
     ]
   },

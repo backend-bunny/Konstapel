@@ -74,6 +74,27 @@ tasks:
     cmds:
       - scripts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT" "$KONSTAPEL_TASK_GROUP"
 
+  charts:package:
+    desc: Package and freeze both charts for a verified image digest (clean checkout; fresh OUT; IMAGE_DIGEST=sha256:...)
+    requires:
+      vars: [OUT, IMAGE_DIGEST]
+    env:
+      KONSTAPEL_TASK_OUT: '{{.OUT}}'
+      KONSTAPEL_TASK_DIGEST: '{{.IMAGE_DIGEST}}'
+    cmds:
+      - scripts/charts/package.sh "$KONSTAPEL_TASK_OUT" "$KONSTAPEL_TASK_DIGEST"
+
+  charts:acceptance:
+    desc: Run installed-chart acceptance on frozen ARCHIVES and IMAGE (repo@sha256) and bind the result (requires Docker; fresh OUTPUT)
+    requires:
+      vars: [OUTPUT, ARCHIVES, IMAGE]
+    env:
+      KONSTAPEL_TASK_OUTPUT: '{{.OUTPUT}}'
+      KONSTAPEL_TASK_ARCHIVES: '{{.ARCHIVES}}'
+      KONSTAPEL_TASK_IMAGE: '{{.IMAGE}}'
+    cmds:
+      - scripts/charts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT" "$KONSTAPEL_TASK_ARCHIVES" "$KONSTAPEL_TASK_IMAGE"
+
   test:failures:
     desc: Run disposable-cluster failure probes (requires Docker and a fresh OUTPUT)
     requires:

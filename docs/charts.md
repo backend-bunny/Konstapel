@@ -479,6 +479,58 @@ python3 scripts/charts/manifest.py verify --archives out/charts --manifest out/c
 An existing manifest is never overwritten. `scripts/ci/test_chart_manifest.py`
 packages real archives with the pinned Helm and exercises each rejection.
 
+## Release packaging and publication
+
+A release publishes the charts that passed acceptance, unchanged. Nothing is
+rebuilt or re-rendered between acceptance and the registry.
+
+1. **Package.** `task charts:package OUT=… IMAGE_DIGEST=sha256:…`
+   (`scripts/charts/package.sh`) needs a clean checkout, because
+   `publication.json` records `HEAD` as the source. It works on an isolated
+   copy of both charts, sets the runtime chart's default `image.digest` to
+   the verified published image, adds `LICENSE` and `NOTICE`, lints, packages,
+   and refuses archives containing key material or registry credentials. It
+   then freezes the archives with the [publication manifest](#publication-manifest).
+   The output directory must not exist: frozen inputs are never replaced.
+2. **Accept those bytes.** `task charts:acceptance OUTPUT=… ARCHIVES=… IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…`
+   (`scripts/charts/acceptance.sh`) first verifies the manifest against
+   `HEAD` and the image digest. It then runs the `charts` group:
+   - the kind node pulls the image by its registry digest (`crictl pull`)
+     instead of building one;
+   - the tests install the frozen `.tgz` files, and the runtime chart's own
+     default digest, with no image override.
+
+   On success it writes `chart-acceptance.json` with the result, the source
+   commit and tag, both archive checksums, the CRD content identity, the image,
+   the tests run, and the kind, node, Kyverno, cert-manager and S3 versions.
+3. **Publish write-once.** `scripts/charts/publish.py --archives … --acceptance chart-acceptance.json --registry oci://ghcr.io/backend-bunny/charts --out release.json`
+   checks two things before any registry write: the frozen manifest, and an
+   acceptance record that passed for exactly those inputs (a pass for
+   another source, image, archive or CRD content is refused). Then, CRD chart
+   first:
+   - If the version doesn't exist, the frozen archive is pushed.
+   - If it exists, its chart layer must be byte-identical to the frozen
+     archive. A released version is never replaced, and different content
+     stops the publication.
+   - The OCI manifest is read back by digest, and its single chart layer must
+     carry the frozen archive's digest.
+
+   `release.json` records both OCI subjects, and is written only when both
+   verify. A retry after a partial publication runs the same steps and
+   pushes only what is missing.
+
+`scripts/ci/test_chart_publish.py` runs the publisher against an in-process
+OCI registry (`scripts/ci/oci_fake.py`) with the pinned Helm. It covers:
+- publication and read-back;
+- republishing as a no-op;
+- refusal without a passing or matching acceptance record, or with a changed
+  archive, before any write;
+- a failed second push that a retry resumes;
+- an existing version with other bytes, which is never replaced.
+
+Signing, attestations, remote verification and the release workflow are
+described in [Releases](releases.md).
+
 ## Checks you can run
 
 `task check` runs `scripts/charts/check.sh` through `task lint`. It needs no

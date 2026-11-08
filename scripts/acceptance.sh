@@ -86,7 +86,16 @@ if includes certManager; then
     -n cert-manager --create-namespace --set crds.enabled=true --wait --timeout 10m 2>&1 | tee "$out/cert-manager-install.log"
   export KONSTAPEL_LIVE_CERT_MANAGER=true
 fi
-if includes image; then
+if includes image && [[ -n ${KONSTAPEL_ACCEPTANCE_IMAGE:-} ]]; then
+  # Release acceptance: the node pulls the published image by its registry
+  # digest, so the cluster runs exactly the bytes that will be released.
+  [[ $KONSTAPEL_ACCEPTANCE_IMAGE =~ ^ghcr\.io/backend-bunny/konstapel@sha256:[0-9a-f]{64}$ ]] || {
+    echo "KONSTAPEL_ACCEPTANCE_IMAGE must be ghcr.io/backend-bunny/konstapel@sha256:<digest>" >&2; exit 1; }
+  stage 'Pulling the published controller image by digest into the disposable cluster'
+  docker exec "$KONSTAPEL_CLUSTER_NAME-control-plane" crictl pull "$KONSTAPEL_ACCEPTANCE_IMAGE" 2>&1 | tee "$out/image-load.log"
+  export KONSTAPEL_LIVE_IMAGE=$KONSTAPEL_ACCEPTANCE_IMAGE
+  echo "$KONSTAPEL_LIVE_IMAGE" | tee "$out/image-ref.txt"
+elif includes image; then
   # The Helm-installed controller runs the image built from this checkout,
   # loaded into the disposable node and referenced by its digest.
   stage 'Building the controller image and loading it into the disposable cluster'

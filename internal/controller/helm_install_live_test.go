@@ -60,7 +60,7 @@ func TestLiveHelmInstall(t *testing.T) {
 	}
 	l := newLive(t)
 	const ns = "konstapel-system"
-	if out, err := l.helm("install", "konstapel-crds", "../../charts/konstapel-crds", "--namespace", ns, "--create-namespace", "--wait"); err != nil {
+	if out, err := l.helm("install", "konstapel-crds", chartArchive(t, "konstapel-crds"), "--namespace", ns, "--create-namespace", "--wait"); err != nil {
 		t.Fatalf("install CRD chart: %v\n%s", err, out)
 	}
 	// Helm does not wait for CRDs to be established, discovery can lag
@@ -93,7 +93,7 @@ func TestLiveHelmInstall(t *testing.T) {
 			}
 			ready++
 		}
-		want, _ := filepath.Glob("../../charts/konstapel-crds/templates/*.yaml")
+		want, _ := filepath.Glob(filepath.Join(chartDir(t, "konstapel-crds"), "templates/*.yaml"))
 		if ready != len(want) {
 			return false, fmt.Sprintf("%d of %d established and discoverable", ready, len(want))
 		}
@@ -107,9 +107,8 @@ func TestLiveHelmInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = l.c.Delete(l.ctx, tlsSecret) })
-	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
-		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never",
-		"-f", "../../docs/examples/charts/operator-tls.yaml"); err != nil {
+	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m",
+		"-f", "../../docs/examples/charts/operator-tls.yaml"}, imageValues(repo, digest)...)...); err != nil {
 		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	t.Cleanup(func() {
@@ -352,8 +351,8 @@ func TestLiveHelmInstall(t *testing.T) {
 		t.Log("cert-manager is not installed in this environment; the default TLS mode is covered by the charts acceptance group")
 		return
 	}
-	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
-		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never"); err != nil {
+	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m"},
+		imageValues(repo, digest)...)...); err != nil {
 		t.Fatalf("install in cert-manager mode: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	issued := &corev1.Secret{}
@@ -443,9 +442,8 @@ func TestLiveHelmInstall(t *testing.T) {
 	// CA ClusterIssuer reissues the download certificate from it, which
 	// every replica serves in place.
 	l.platformIssuer()
-	if out, err := l.helm("upgrade", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
-		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never",
-		"-f", "../../docs/examples/charts/platform-issuer.yaml"); err != nil {
+	if out, err := l.helm(append([]string{"upgrade", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m",
+		"-f", "../../docs/examples/charts/platform-issuer.yaml"}, imageValues(repo, digest)...)...); err != nil {
 		t.Fatalf("upgrade to the platform issuer: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	before = l.downloadPods(ns)
