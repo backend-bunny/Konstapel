@@ -58,7 +58,8 @@
     "goTests": [
       "TestLiveTargetingFailures",
       "TestLiveAssessmentFaults",
-      "TestLiveEvidenceRecovery"
+      "TestLiveEvidenceRecovery",
+      "TestLiveLeaderHandoverRecovery"
     ]
   }
 }

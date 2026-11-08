@@ -168,6 +168,28 @@ Tests:
 - `TestDeleteRequiresTheListedObject` changes a policy between listing and
   delete; the result is a conflict, not a deletion.
 
+## Recovery on leadership acquisition
+
+Staging is durable in S3, not in the pod. A run's package is staged as an
+attempt under the run's prefix before it is committed, and a new leader
+recovers it with `Publisher.Recover`. It never needs the former leader's
+staging directory.
+- **Run identity.** Run names are deterministic and each binding has at most
+  one active run, so a new leader continues the same run instead of starting
+  another.
+- **Unreachable S3.** If S3 is unreachable while the new leader recovers, the
+  run stays `Publishing`. That is uncertain backend access, not `CaptureLost`,
+  and the run is retried until S3 answers.
+- **Committing.** The new leader commits exactly the bytes the former leader
+  staged.
+
+`TestLiveLeaderHandoverRecovery` (`recovery` group) checks this. Leader A
+stages a run's package in S3 and stalls before the commit. S3 is paused and A
+is stopped. Candidate B, with its own empty staging directory, takes over.
+For 30 seconds the single run stays `Publishing` and is never `CaptureLost`.
+After S3 returns, B commits the same run with A's publication ID and package
+SHA-256.
+
 ## Downloads without the leader
 
 The download server is its own Deployment (`konstapel-download`, two
