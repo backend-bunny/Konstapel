@@ -1,0 +1,9 @@
+# cert-manager mode with your own issuer instead of the chart's self-signed
+# CA. cert-manager must already be installed and the issuer must exist; the
+# chart creates only the download Certificate that references it.
+tls:
+  mode: certManager
+  certManager:
+    issuerRef:
+      name: platform-ca
+      kind: ClusterIssuer

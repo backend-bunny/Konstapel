@@ -1,0 +1,8 @@
+# Operator-managed TLS, without cert-manager. Create the Secret first in
+# konstapel-system with tls.crt, tls.key and ca.crt; the certificate must
+# name konstapel-download.konstapel-system.svc and chain to ca.crt. The
+# chart only mounts it: upgrades and uninstall never change or delete it.
+tls:
+  mode: secret
+  secret:
+    name: operator-download-tls

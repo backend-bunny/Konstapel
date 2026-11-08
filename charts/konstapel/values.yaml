@@ -1,6 +1,6 @@
-# Runtime templates are added once their inputs are resolved from merged code
-# (docs/charts.md, "Chart input contract"). Only settings with a named owner
-# appear here.
+# Runtime chart values. docs/charts.md ("Values contract") describes each
+# one; values.schema.json rejects anything else. Every setting traces to a
+# merged owner (docs/charts.md, "Chart input contract").
 
 image:
   repository: ghcr.io/backend-bunny/konstapel

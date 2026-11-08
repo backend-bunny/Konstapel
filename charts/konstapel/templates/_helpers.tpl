@@ -35,6 +35,9 @@ app.kubernetes.io/component: controller
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.replicaCount)) -}}
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.replicaCount) -}}
 {{- end -}}
+{{- if and .Values.download.enabled (gt (int .Values.download.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.download.replicaCount)) -}}
+{{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than download.replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.download.replicaCount) -}}
+{{- end -}}
 {{- end }}
 
 {{- define "konstapel.downloadSelector" -}}

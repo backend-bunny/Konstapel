@@ -1,0 +1,5 @@
+# A single-node development install: one controller and one download
+# replica, so no PodDisruptionBudgets. Leader election stays on.
+replicaCount: 1
+download:
+  replicaCount: 1
