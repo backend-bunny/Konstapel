@@ -50,6 +50,8 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
 | `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
+| `task charts:package OUT=/fresh/path IMAGE_DIGEST=sha256:…` | From a clean checkout, package both charts with the runtime chart defaulting to that image digest, and freeze them with `publication.json` ([Helm charts](charts.md#release-packaging-and-publication)). |
+| `task charts:acceptance OUTPUT=/fresh/path ARCHIVES=/path IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…` | Run the `charts` acceptance group on those exact archives, with the cluster pulling that image by digest. Writes `chart-acceptance.json`, which binds the pass to the frozen inputs. |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
 
 After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
@@ -98,6 +100,8 @@ runner with its own disposable kind cluster and test-owned S3 services:
 | `assessments` | Assessment status/runs, engine correlation, integrated assessments, and authenticated exception admission |
 | `storage` | Destination/credential changes, downloads, retention, and orphaning |
 | `recovery` | Kyverno outages and assessment/publication faults |
+| `capabilities` | Engine API and permission loss and recovery without a controller restart |
+| `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving); installs cert-manager and builds the image |
 
 `scripts/acceptance-groups.json` defines the matrix and Go test selection. The
 normal `task test` checks that every compiled `TestLive*` test is assigned exactly

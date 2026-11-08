@@ -15,6 +15,7 @@ package controller
 // Run through scripts/targeting-live.sh.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +43,7 @@ func (l *live) helm(args ...string) (string, error) {
 func chartCopy(t *testing.T, version string, edit func(name string, body string) string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "konstapel-crds")
-	if err := os.CopyFS(dir, os.DirFS("../../charts/konstapel-crds")); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(chartDir(t, "konstapel-crds"))); err != nil {
 		t.Fatal(err)
 	}
 	meta := filepath.Join(dir, "Chart.yaml")
@@ -85,7 +86,7 @@ func TestLiveCRDChartLifecycle(t *testing.T) {
 		}
 		return out
 	}
-	files, _ := filepath.Glob("../../charts/konstapel-crds/templates/*.yaml")
+	files, _ := filepath.Glob(filepath.Join(chartDir(t, "konstapel-crds"), "templates/*.yaml"))
 
 	// 1. Install. Earlier tests in the same cluster may have applied the
 	// generated CRDs directly; the chart then takes ownership of them.
@@ -108,6 +109,15 @@ func TestLiveCRDChartLifecycle(t *testing.T) {
 	if len(installed) != len(files) {
 		t.Fatalf("installed CRDs %v, chart has %d", installed, len(files))
 	}
+	// Last: remove what this test created, including the retained CRDs, so
+	// later tests in the same cluster (the installed-chart test) install
+	// their own CRD release. Cleanups run in reverse, after the uninstall.
+	t.Cleanup(func() {
+		for name := range crdUIDs() {
+			_ = l.c.Delete(l.ctx, &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: name}})
+		}
+		l.eventually("lifecycle CRDs removed", func() (bool, string) { left := crdUIDs(); return len(left) == 0, fmt.Sprint(len(left)) })
+	})
 	t.Cleanup(func() { _, _ = l.helm("uninstall", release, "--namespace", ns) })
 	l.record("installed", map[string]any{"crds": len(installed), "tookOwnership": adopted})
 
