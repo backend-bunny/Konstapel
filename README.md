@@ -45,17 +45,29 @@ privileged-container check, with further assessment integration in progress.
 Native self-service exceptions remain disabled pending the documented
 [engine compatibility gates](docs/integration/policy-exceptions.md).
 
+Konstapel installs with two Helm charts, distributed as signed OCI artifacts
+alongside a signed, digest-pinned controller image. The CRD chart is installed
+first and keeps its CRDs on uninstall. The runtime chart runs two controller
+and two download-server replicas. See [Helm charts](docs/charts.md) and, for
+exactly what the first early-adopter release (v0.1.0) ships, is tested
+against, and leaves out, the [v0.1.0 readiness](docs/release-readiness.md)
+checklist.
+
 [Trivy vulnerability assessment](openspec/changes/add-trivy-vulnerability-assessment/proposal.md)
 is planned: read-only scanner evidence through C2P, dedicated Audit bindings, and
 separate scan-coverage and vulnerability-exposure checks. Vulnerability admission
-blocking is deferred. Signed OCI policy bundles and Helm distribution are also
-tracked in [active OpenSpec changes](openspec/changes).
+blocking is deferred. Signed OCI policy bundles, evidence signing and metrics
+are tracked in [active OpenSpec changes](openspec/changes).
 
 ## Documentation
 
 Start with the [documentation index](docs/README.md) for implemented workflows,
 in-progress capabilities, and historical validation records.
 
+- [Helm charts](docs/charts.md): installation, TLS modes, values, upgrades and
+  uninstall.
+- [v0.1.0 readiness](docs/release-readiness.md): what ships, the test behind each
+  claim, and known limitations.
 - [Development](docs/development.md): Devbox/direnv setup, Task commands, CI,
   and dependency updates with Renovate.
 - [Images](docs/images.md): melange/apko builds, SBOMs, signatures, provenance,
