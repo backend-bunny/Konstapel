@@ -1,0 +1,216 @@
+name: charts
+# Publishes the release's two Helm charts as OCI artifacts after the image:
+# freeze -> accept those exact bytes -> publish write-once -> sign, attest and
+# verify. Called by release-please for a new release; dispatch it on main
+# with an existing tag to resume a partial publication. A retry reuses the
+# frozen archives attached to the GitHub Release and never repackages a
+# version that already has them.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      image-digest:
+        description: Published and verified controller image digest
+        type: string
+        required: true
+    outputs:
+      release:
+        description: release.json with both OCI chart subjects
+        value: ${{ jobs.publish.outputs.release }}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z) whose charts to publish or resume
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: publish-charts
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/backend-bunny/konstapel
+  CHARTS: oci://ghcr.io/backend-bunny/charts
+  RELEASE_TAG: ${{ inputs.tag }}
+  ISSUER: https://token.actions.githubusercontent.com
+  IMAGE_IDENTITY: '^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$'
+  CHART_IDENTITY: '^https://github.com/backend-bunny/Konstapel/\.github/workflows/(charts|release-please)\.yml@refs/heads/main$'
+jobs:
+  freeze:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # attach the frozen inputs to the release, write-once
+    outputs:
+      image-digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD origin/main
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+      - uses: ./.github/actions/setup-tools
+      - name: Resolve and verify the released image
+        id: image
+        env:
+          INPUT_DIGEST: ${{ inputs.image-digest }}
+        run: |
+          digest=$INPUT_DIGEST
+          if [[ -z $digest ]]; then
+            digest=$(docker buildx imagetools inspect "$IMAGE:${RELEASE_TAG#v}" --format '{{json .Manifest}}' | jq -er .digest)
+          fi
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
+          devbox run -- cosign verify --certificate-identity-regexp "$IMAGE_IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE@$digest" > /dev/null
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Freeze chart inputs, or reuse the release's frozen inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: devbox run -- bash scripts/charts/release-inputs.sh out/charts "$RELEASE_TAG" "$DIGEST"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frozen-charts
+          path: out/charts/
+          retention-days: 14
+
+  acceptance:
+    needs: freeze
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - name: Require full acceptance for this source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: devbox run -- python3 scripts/ci/require-acceptance.py --commit "$(git rev-parse HEAD)"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frozen-charts
+          path: out/charts
+      - name: Accept the frozen charts with the released image
+        env:
+          DIGEST: ${{ needs.freeze.outputs.image-digest }}
+        run: devbox run -- task charts:acceptance OUTPUT="$RUNNER_TEMP/chart-acceptance" ARCHIVES=out/charts IMAGE="$IMAGE@$DIGEST"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: chart-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/chart-acceptance
+            !${{ runner.temp }}/chart-acceptance/**/kubeconfig*
+            !${{ runner.temp }}/chart-acceptance/**/*.test
+            !${{ runner.temp }}/chart-acceptance/environment/helm-manifest.yaml
+            !${{ runner.temp }}/chart-acceptance/kind-logs
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chart-acceptance
+          path: ${{ runner.temp }}/chart-acceptance/chart-acceptance.json
+          retention-days: 14
+
+  publish:
+    needs: [freeze, acceptance]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # attach release.json and verification results
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      release: ${{ steps.publish.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frozen-charts
+          path: out/charts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: chart-acceptance
+          path: out/acceptance
+      - name: Publish the accepted archives write-once
+        id: publish
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          printf '%s' "$REGISTRY_PASSWORD" | devbox run -- helm registry login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          devbox run -- python3 scripts/charts/publish.py --archives out/charts --acceptance out/acceptance/chart-acceptance.json \
+            --registry "$CHARTS" --out out/charts-release.json
+          echo "release=$(jq -c . out/charts-release.json)" >> "$GITHUB_OUTPUT"
+          for chart in konstapel-crds konstapel; do
+            echo "${chart//-/_}=$(jq -er --arg c "$chart" '.charts[$c].digest' out/charts-release.json)" >> "$GITHUB_OUTPUT"
+          done
+      - name: Sign and attest chart inputs
+        run: |
+          devbox run -- python3 scripts/charts/attest.py sign --release out/charts-release.json --archives out/charts \
+            --acceptance out/acceptance/chart-acceptance.json --identity-regexp "$CHART_IDENTITY" --issuer "$ISSUER"
+      - name: Attest build provenance (konstapel-crds)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/backend-bunny/charts/konstapel-crds
+          subject-digest: ${{ steps.publish.outputs.konstapel_crds }}
+          push-to-registry: true
+      - name: Attest build provenance (konstapel)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/backend-bunny/charts/konstapel
+          subject-digest: ${{ steps.publish.outputs.konstapel }}
+          push-to-registry: true
+      - name: Verify both published charts
+        id: verify
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out/chart-verification
+          devbox run -- python3 scripts/charts/attest.py verify --release out/charts-release.json --archives out/charts \
+            --identity-regexp "$CHART_IDENTITY" --issuer "$ISSUER" --out out/chart-verification
+          for chart in konstapel-crds konstapel; do
+            subject=$(jq -er --arg c "$chart" '.charts[$c] | "oci://\(.reference)@\(.digest)"' out/charts-release.json)
+            gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --format json > "out/chart-verification/provenance-$chart.json"
+          done
+          image=$(jq -er '.image.digest' out/charts-release.json)
+          devbox run -- cosign verify --certificate-identity-regexp "$IMAGE_IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE@$image" > out/chart-verification/image-signature.json
+      - name: Attach the release record
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: devbox run -- bash scripts/charts/release-assets.sh "$RELEASE_TAG" out/charts-release.json
+      - name: Chart summary
+        if: always()
+        env:
+          VERIFY: ${{ steps.verify.outcome }}
+        run: devbox run -- python3 scripts/charts/summary.py out/charts-release.json "$VERIFY" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: published-chart-evidence
+          path: |
+            out/charts-release.json
+            out/chart-verification/
+          retention-days: 14

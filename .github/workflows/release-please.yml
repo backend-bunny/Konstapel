@@ -51,8 +51,21 @@ jobs:
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
 
-  release-notes:
+  publish-charts:
     needs: [release-please, publish-release]
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/charts.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      image-digest: ${{ needs.publish-release.outputs.digest }}
+
+  release-notes:
+    needs: [release-please, publish-release, publish-charts]
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -60,8 +73,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
       IMAGE_DIGEST: ${{ needs.publish-release.outputs.digest }}
+      CHARTS_RELEASE: ${{ needs.publish-charts.outputs.release }}
     steps:
-      - name: Add verified image digest to the GitHub Release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      - name: Add verified image digest and charts to the GitHub Release
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
           python3 - <<'PY'
@@ -79,4 +97,5 @@ jobs:
           body = re.sub(re.escape(start) + r'.*?' + re.escape(end), '', path.read_text(), flags=re.S).rstrip()
           path.write_text(body + '\n\n' + block + '\n')
           PY
+          python3 scripts/charts/release-notes.py "$RUNNER_TEMP/release-notes.md"
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"

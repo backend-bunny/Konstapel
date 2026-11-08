@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,6 +28,8 @@ def load(name, path):
 
 
 manifest = load("manifest", ROOT / "scripts/charts/manifest.py")
+attest = load("attest", ROOT / "scripts/charts/attest.py")
+notes = load("release_notes", ROOT / "scripts/charts/release-notes.py")
 publish = load("publish", ROOT / "scripts/charts/publish.py")
 fixtures = load("test_chart_manifest", ROOT / "scripts/ci/test_chart_manifest.py")
 from oci_fake import FakeRegistry  # noqa: E402
@@ -164,6 +167,107 @@ class PublishTests(unittest.TestCase):
         self.assertIn("never replaced", err)
         self.assertEqual(self.registry.tags, before)
         self.assertEqual(len(self.registry.manifest_writes()), writes)
+
+    def test_documented_install_commands_pull_the_frozen_archives(self):
+        self.assertEqual(self.publish()[0], 0)
+        r = self.result()
+        text = notes.update("Generated changelog.\n\nUser note.\n", r)
+        commands = [l for l in text.splitlines() if l.startswith(("helm pull", "echo '", "helm install"))]
+        work = self.dir / "install"
+        work.mkdir()
+        for cmd in commands:
+            if cmd.startswith("helm pull"):
+                cmd += " --plain-http"
+            if cmd.startswith("helm install"):
+                # Render instead of installing: the archive the command names
+                # is the one pulled and checked above.
+                cmd = cmd.replace("helm install", "helm template", 1)
+            p = subprocess.run(cmd, shell=True, cwd=work, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, f"{cmd}: {p.stderr}")
+        self.assertEqual(len(commands), 6)
+
+    def test_release_notes_block_is_idempotent(self):
+        self.assertEqual(self.publish()[0], 0)
+        r = self.result()
+        once = notes.update("## Changelog\n\n* feat: x\n\nOperator note.\n", r)
+        twice = notes.update(once, r)
+        self.assertEqual(once, twice)
+        self.assertIn("Operator note.", twice)
+        self.assertEqual(twice.count(notes.START), 1)
+        for c in r["charts"].values():
+            self.assertIn(f"{c['reference']}@{c['digest']}", twice)
+        bad = json.loads(json.dumps(r))
+        bad["charts"]["konstapel"]["digest"] = "latest"
+        with self.assertRaises(ValueError):
+            notes.update(once, bad)
+
+
+class AttestTests(PublishTests):
+    """Signing and verification of the published subjects, with a key pair
+    standing in for the release's keyless identity (5.3)."""
+
+    def setUp(self):
+        super().setUp()
+        self.keys = self.dir / "keys"
+        self.keys.mkdir()
+        for prefix in ("release", "other"):
+            subprocess.run(["cosign", "generate-key-pair", "--output-key-prefix", str(self.keys / prefix)], check=True,
+                           capture_output=True, env=dict(os.environ, COSIGN_PASSWORD=""))
+        self.assertEqual(self.publish()[0], 0)
+
+    def attest(self, command, key="release", release="result.json", acceptance=None):
+        suffix = ".key" if command == "sign" else ".pub"
+        args = [command, "--release", str(self.dir / release), "--archives", str(self.archives), "--key", str(self.keys / (key + suffix)), "--plain-http"]
+        if command == "sign":
+            args += ["--acceptance", str(acceptance or self.acceptance)]
+        return self.quiet(attest.main, args)
+
+    def test_signed_release_verifies_and_pulls_the_frozen_bytes(self):
+        self.assertEqual(self.attest("sign")[0], 0)
+        code, err = self.attest("verify")
+        self.assertEqual(code, 0, err)
+
+    def test_unsigned_or_foreign_signatures_do_not_verify(self):
+        code, err = self.attest("verify")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.attest("sign", key="other")[0], 0)
+        code, err = self.attest("verify")
+        self.assertNotEqual(code, 0, "a signature by another key verified")
+
+    def test_attestation_for_other_inputs_does_not_verify(self):
+        forged = self.dir / "forged-acceptance.json"
+        forged.write_text(json.dumps(acceptance_for(self.frozen, source={"commit": "f" * 40, "tag": fixtures.TAG})))
+        self.assertEqual(self.attest("sign", acceptance=forged)[0], 0)
+        code, err = self.attest("verify")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no chart-inputs attestation", err)
+
+    def test_release_record_naming_other_bytes_does_not_verify(self):
+        self.assertEqual(self.attest("sign")[0], 0)
+        r = self.result()
+        r["charts"]["konstapel"]["digest"] = r["charts"]["konstapel-crds"]["digest"]
+        r["charts"]["konstapel"]["reference"] = r["charts"]["konstapel-crds"]["reference"]
+        (self.dir / "swapped.json").write_text(json.dumps(r))
+        code, err = self.attest("verify", release="swapped.json")
+        self.assertNotEqual(code, 0)
+
+    def test_signing_resumes_without_duplicating(self):
+        self.assertEqual(self.attest("sign")[0], 0)
+        writes = len(self.registry.manifest_writes())
+        code, err = self.attest("sign")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.registry.manifest_writes()), writes, "a verified subject was signed again")
+
+    # The publication cases are inherited; skip re-running them here.
+    test_publishes_both_subjects_with_the_frozen_layers = None
+    test_republishing_is_a_no_op = None
+    test_requires_passing_acceptance = None
+    test_acceptance_of_other_inputs_is_refused = None
+    test_changed_archive_is_refused = None
+    test_partial_publication_resumes = None
+    test_existing_version_with_other_content_is_never_replaced = None
+    test_documented_install_commands_pull_the_frozen_archives = None
+    test_release_notes_block_is_idempotent = None
 
 
 if __name__ == "__main__":
