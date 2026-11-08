@@ -604,7 +604,10 @@ verification cannot be disabled: an untrusted endpoint fails until its CA is in
 ## Downloads
 
 `konstapel download-server` serves committed packages over TLS. It takes
-`--tls-cert-file`, `--tls-private-key-file` and `--audience` (default `konstapel-download`). Its service account needs
+`--tls-cert-file`, `--tls-private-key-file`, optionally `--tls-ca-file` and
+repeatable `--tls-server-name` (it refuses to start unless the certificate is
+currently valid, covers those names and chains to that CA), and `--audience`
+(default `konstapel-download`). Its service account needs
 `config/rbac/evidence-download.yaml`. That file holds a ClusterRole with
 TokenReview and SubjectAccessReview `create` plus read on requests, runs and
 namespaces, and for a `credentialSecret` destination a Role reading that

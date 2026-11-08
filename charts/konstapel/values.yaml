@@ -45,3 +45,20 @@ tls:
   #   secret: operator-managed; set secret.name to a kubernetes.io/tls Secret
   #     with tls.crt, tls.key and ca.crt in the release namespace.
   mode: certManager
+
+# The evidence download server (`konstapel download-server`): every ready
+# replica serves through the konstapel-download Service, authenticating and
+# authorizing each request and fetching the package from its destination.
+# Its TLS certificate comes from tls (above).
+download:
+  enabled: true
+  replicaCount: 2
+  audience: konstapel-download
+  maxConcurrent: 4
+  # Bytes buffered for verification across concurrent downloads, per pod.
+  maxTempBytes: 2147483648
+  tempSizeLimit: 3Gi
+  shutdownDrainSeconds: 20
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 512Mi}

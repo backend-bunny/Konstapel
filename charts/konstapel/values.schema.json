@@ -8,7 +8,8 @@
     "replicaCount",
     "tls",
     "podDisruptionBudget",
-    "controller"
+    "controller",
+    "download"
   ],
   "properties": {
     "image": {
@@ -186,6 +187,51 @@
           "items": {
             "type": "object"
           }
+        }
+      }
+    },
+    "download": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "replicaCount",
+        "audience",
+        "maxConcurrent",
+        "maxTempBytes",
+        "tempSizeLimit",
+        "shutdownDrainSeconds"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTempBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tempSizeLimit": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti)$"
+        },
+        "shutdownDrainSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resources": {
+          "type": "object"
         }
       }
     }

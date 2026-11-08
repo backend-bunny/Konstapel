@@ -16,7 +16,17 @@ package controller
 // Run through scripts/targeting-live.sh (charts acceptance group).
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +36,7 @@ import (
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,8 +82,16 @@ func TestLiveHelmInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.c = fresh
+	// Operator-managed TLS: a test CA issues the download server's
+	// certificate for its service name, without cert-manager.
+	tlsSecret, caPEM := downloadTLSSecret(t, ns)
+	if err := l.c.Create(l.ctx, tlsSecret); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, tlsSecret) })
 	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
-		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never"); err != nil {
+		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never",
+		"--set", "tls.mode=secret", "--set", "tls.secret.name="+tlsSecret.Name); err != nil {
 		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	t.Cleanup(func() {
@@ -202,6 +221,88 @@ func TestLiveHelmInstall(t *testing.T) {
 		t.Fatalf("installed controller run: %s", toJSON(run.Status))
 	}
 	l.record("published", map[string]any{"run": run.Name, "export": run.Status.Summary.Export, "publication": run.Status.Publication.PublicationID})
+
+	// 4. The installed download server serves the package over TLS trusted
+	// only through the operator's CA, authorizing a platform operator.
+	operator := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "hi-operator"}}
+	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "hi-operator"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "konstapel-assessment-operator"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: operator.Name}}}
+	for _, o := range []client.Object{operator, crb} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, crb); _ = l.c.Delete(l.ctx, operator) })
+	local := l.portForward(ns, "svc/konstapel-download", 443)
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(caPEM)
+	hc := &http.Client{Timeout: time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "konstapel-download.konstapel-system.svc"}}}
+	code, body := fetch(t, hc, "https://"+local+"/v1/assessmentruns/"+string(run.UID)+"/download", l.token(ns, operator.Name, downloadAudience))
+	if code != http.StatusOK || len(body) == 0 {
+		t.Fatalf("download through the installed server: %d %s", code, body)
+	}
+	if sum := fmt.Sprintf("%x", sha256.Sum256(body)); sum != run.Status.Publication.PackageSHA256 {
+		t.Fatalf("downloaded %d bytes with sha256 %s, receipt %s", len(body), sum, run.Status.Publication.PackageSHA256)
+	}
+	l.record("downloaded", map[string]any{"bytes": len(body), "sha256": run.Status.Publication.PackageSHA256, "tls": "operator Secret"})
+
+	// 5. Uninstalling keeps the operator's Secret: the chart never owned it.
+	if out, err := l.helm("uninstall", "konstapel", "--namespace", ns, "--wait"); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, out)
+	}
+	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(tlsSecret), &corev1.Secret{}); err != nil {
+		t.Fatalf("operator TLS Secret removed by uninstall: %v", err)
+	}
+}
+
+// downloadTLSSecret issues a test CA and a serving certificate for the
+// download Service, as an operator would provide them.
+func downloadTLSSecret(t *testing.T, ns string) (*corev1.Secret, []byte) {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "konstapel live test CA"}, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour)}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, _ := x509.ParseCertificate(caDER)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "konstapel-download"},
+		DNSNames:    []string{"konstapel-download", "konstapel-download." + ns, "konstapel-download." + ns + ".svc"},
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, _ := x509.MarshalECPrivateKey(key)
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "operator-download-tls"}, Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{"tls.crt": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+			"tls.key": pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), "ca.crt": caPEM}}, caPEM
+}
+
+// portForward forwards a local port to target's port for the rest of the
+// test and returns the local address.
+func (l *live) portForward(ns, target string, port int) string {
+	l.t.Helper()
+	cmd := exec.CommandContext(l.ctx, "kubectl", "--kubeconfig", os.Getenv("KONSTAPEL_LIVE_KUBECONFIG"), "--context", os.Getenv("KONSTAPEL_LIVE_CONTEXT"),
+		"-n", ns, "port-forward", target, fmt.Sprintf("0:%d", port))
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		l.t.Fatal(err)
+	}
+	l.t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	buf := make([]byte, 256)
+	n, _ := stdout.Read(buf)
+	// "Forwarding from 127.0.0.1:41235 -> 8443"
+	line := string(buf[:n])
+	i, j := strings.Index(line, "127.0.0.1:"), strings.Index(line, " ->")
+	if i < 0 || j < i {
+		l.t.Fatalf("port-forward: %q", line)
+	}
+	return line[i:j]
 }
 
 // podDiagnostics summarizes the namespace's pods for a failure message.

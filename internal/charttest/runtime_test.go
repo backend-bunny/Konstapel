@@ -1,6 +1,7 @@
 package charttest
 
 import (
+	"fmt"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -111,7 +112,11 @@ func TestRuntimeChartDefaults(t *testing.T) {
 		if find(docs, roleKind, at(d, "roleRef", "name").(string)) == nil {
 			t.Errorf("%v %v binds a %s the chart does not ship", d["kind"], metadata(d)["name"], roleKind)
 		}
-		if at(d, "subjects", 0, "name") != "konstapel-controller" || at(d, "subjects", 0, "namespace") != "konstapel-system" {
+		sa := "konstapel-controller"
+		if strings.HasPrefix(at(d, "roleRef", "name").(string), "konstapel-evidence-download") {
+			sa = "konstapel-download"
+		}
+		if at(d, "subjects", 0, "name") != sa || at(d, "subjects", 0, "namespace") != "konstapel-system" {
 			t.Errorf("%v %v binds %v", d["kind"], metadata(d)["name"], d["subjects"])
 		}
 	}
@@ -149,5 +154,60 @@ func TestRuntimeChartRefusesUnsafeInstalls(t *testing.T) {
 		if _, out, err := render(t, c.ns, c.set...); err == nil || !strings.Contains(out, c.want) {
 			t.Errorf("%s: %v %s", name, err, out)
 		}
+	}
+}
+
+// The download server serves on every ready replica behind a Service with no
+// session affinity, verifying its certificate's identity and trust at start.
+// TLS comes from cert-manager (a chart self-signed CA or a platform issuer)
+// or from an operator Secret, never both.
+func TestRuntimeChartDownloadTLS(t *testing.T) {
+	docs, _, err := render(t, "konstapel-system", "image.digest="+digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := find(docs, "Deployment", "konstapel-download")
+	svc := find(docs, "Service", "konstapel-download")
+	if d == nil || svc == nil || find(docs, "PodDisruptionBudget", "konstapel-download") == nil {
+		t.Fatal("download server, Service, or PDB missing")
+	}
+	args := at(d, "spec", "template", "spec", "containers", 0, "args").([]any)
+	for _, want := range []string{"download-server", "--tls-ca-file=/etc/konstapel/tls/ca.crt", "--tls-server-name=konstapel-download.konstapel-system.svc", "--shutdown-drain=20s"} {
+		if !slices.Contains(args, any(want)) {
+			t.Errorf("download args lack %s: %v", want, args)
+		}
+	}
+	if at(svc, "spec", "sessionAffinity") != "None" || !reflect.DeepEqual(at(svc, "spec", "selector"), at(d, "spec", "selector", "matchLabels")) {
+		t.Errorf("Service %v", svc["spec"])
+	}
+	if at(d, "spec", "template", "spec", "volumes", 0, "secret", "secretName") != "konstapel-download-tls" {
+		t.Error("cert-manager mode does not mount the issued Secret")
+	}
+	cert := find(docs, "Certificate", "konstapel-download")
+	if cert == nil || !slices.Contains(at(cert, "spec", "dnsNames").([]any), any("konstapel-download.konstapel-system.svc")) ||
+		at(cert, "spec", "issuerRef", "name") != "konstapel-ca" || find(docs, "Issuer", "konstapel-selfsigned") == nil {
+		t.Fatalf("default cert-manager chain: %v", cert)
+	}
+	// A platform issuer replaces the chart's CA.
+	docs, _, err = render(t, "konstapel-system", "image.digest="+digest, "tls.certManager.issuerRef.name=platform-ca", "tls.certManager.issuerRef.kind=ClusterIssuer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := find(docs, "Certificate", "konstapel-download"); at(c, "spec", "issuerRef", "name") != "platform-ca" || at(c, "spec", "issuerRef", "kind") != "ClusterIssuer" ||
+		find(docs, "Issuer", "konstapel-selfsigned") != nil || find(docs, "Certificate", "konstapel-ca") != nil {
+		t.Fatal("platform issuer not used exclusively")
+	}
+	// Operator-managed Secret: no cert-manager resources at all.
+	docs, _, err = render(t, "konstapel-system", "image.digest="+digest, "tls.mode=secret", "tls.secret.name=my-tls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range docs {
+		if strings.HasPrefix(fmt.Sprint(d["apiVersion"]), "cert-manager.io/") {
+			t.Fatalf("secret mode renders %v %v", d["kind"], metadata(d)["name"])
+		}
+	}
+	if at(find(docs, "Deployment", "konstapel-download"), "spec", "template", "spec", "volumes", 0, "secret", "secretName") != "my-tls" {
+		t.Fatal("secret mode does not mount the operator Secret")
 	}
 }

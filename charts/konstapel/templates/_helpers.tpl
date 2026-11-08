@@ -29,7 +29,25 @@ app.kubernetes.io/component: controller
 {{- if ge (int .Values.controller.shutdownTimeoutSeconds) (int .Values.controller.terminationGracePeriodSeconds) -}}
 {{- fail (printf "controller.shutdownTimeoutSeconds (%v) must be less than controller.terminationGracePeriodSeconds (%v)" .Values.controller.shutdownTimeoutSeconds .Values.controller.terminationGracePeriodSeconds) -}}
 {{- end -}}
+{{- if ge (int .Values.download.shutdownDrainSeconds) (int .Values.controller.terminationGracePeriodSeconds) -}}
+{{- fail (printf "download.shutdownDrainSeconds (%v) must be less than controller.terminationGracePeriodSeconds (%v)" .Values.download.shutdownDrainSeconds .Values.controller.terminationGracePeriodSeconds) -}}
+{{- end -}}
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.replicaCount)) -}}
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.replicaCount) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "konstapel.downloadSelector" -}}
+app.kubernetes.io/name: konstapel
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: download
+{{- end }}
+
+{{/* The Secret holding the download server's tls.crt, tls.key, and ca.crt. */}}
+{{- define "konstapel.downloadTLSSecret" -}}
+{{- if eq .Values.tls.mode "secret" -}}
+{{ .Values.tls.secret.name }}
+{{- else -}}
+konstapel-download-tls
 {{- end -}}
 {{- end }}

@@ -22,11 +22,15 @@ rules:
   - apiGroups: [compliance.erenius.io]
     resources: [assessmentrequests, assessmentruns]
     verbs: [get, list]
+  # A run's package is served from its pinned EvidenceDestination.
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidencedestinations]
+    verbs: [get, list]
   - apiGroups: [""]
     resources: [namespaces]
     verbs: [get]
 ---
-# Only for a credentialSecret destination: read that Secret in the download
+# Read destination credential Secrets and CA-trust ConfigMaps in the download
 # service's namespace. Bind with a RoleBinding in that namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -37,5 +41,5 @@ metadata:
     app.kubernetes.io/part-of: konstapel
 rules:
   - apiGroups: [""]
-    resources: [secrets]
+    resources: [secrets, configmaps]
     verbs: [get]
