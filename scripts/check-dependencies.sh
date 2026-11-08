@@ -34,4 +34,6 @@ if [[ ${chart_kyverno#v} != "$expected_kyverno" ]]; then
   echo "Kyverno versions differ: Devbox CLI=$expected_kyverno chart=$chart_kyverno" >&2
   exit 1
 fi
+# The cert-manager pin must resolve to the checksummed archive.
+scripts/fetch-chart.sh cert-manager >/dev/null
 printf 'Dependency pins agree: Go %s, Kyverno %s, chart %s\n' "$expected_go" "$expected_kyverno" "$KONSTAPEL_KYVERNO_CHART_VERSION"
