@@ -33,7 +33,7 @@ release can't substitute a fixture or a guess for it.
 | Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
 | Probes | `GET /healthz` and `/readyz` on the probe address. Both are ping checks today; engine health is reported in Conditions, not readiness. | targeting | resolved; the readiness semantics belong to high availability (pending) |
 | Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
-| Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`; RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing | resolved |
+| Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`; HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing | resolved |
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
@@ -290,6 +290,32 @@ helm install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <v
 Clients trust the server through that CA (`ca.crt`) and use the
 `konstapel-download.konstapel-system.svc` name.
 
+**Certificate rotation.** The server re-reads the mounted Secret every 10
+seconds. The kubelet usually updates a mounted Secret within a minute, so a
+rotation reaches the pods without a restart:
+- A new leaf, key or `ca.crt` is served on new connections once it passes the
+  same checks as at startup.
+- If the new files fail those checks, the server keeps serving its last good
+  certificate and `/readyz` fails. The pod leaves the Service until a valid
+  Secret arrives, and the log names the failed check.
+- `/readyz` also fails once the served certificate expires, even without a
+  rotation.
+- Downloads always require an authorized token, so a TLS problem never opens
+  an unauthenticated path.
+
+The probes use HTTPS on the serving port. Startup and liveness use `/healthz`
+and readiness uses `/readyz`. Neither path needs a token or returns data.
+
+Who rotates depends on `tls.mode`:
+- **`certManager`:** cert-manager renews the leaf before it expires. Replacing
+  the chart CA (for example by deleting the `konstapel-ca` Secret) changes
+  `ca.crt` in `konstapel-download-tls` once the leaf is reissued. Clients must
+  then trust the new `ca.crt`.
+- **`secret`:** the operator updates the Secret in place. To change CAs without
+  breaking clients, first give clients a bundle trusting both CAs, then
+  replace `tls.crt`, `tls.key` and `ca.crt` together, then drop the old CA from
+  client trust.
+
 **Installed-image acceptance.** The `charts` acceptance group builds the
 controller image from the checkout (`scripts/image/build.sh`). It loads the
 image into the disposable kind node and names it by its manifest digest, then
@@ -308,12 +334,21 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
    downloads the package through the installed download server (port-forwarded
    Service, TLS trusted only through that CA), and its SHA-256 matches the
    receipt.
+   It then rotates the operator's Secret to a new CA and leaf. Every replica
+   serves the new certificate without restarting, and a download that trusts
+   only the new CA matches the receipt. Next it installs a certificate for the
+   wrong name: every replica stops being ready but keeps rejecting
+   unauthenticated downloads. Restoring a valid Secret makes them ready again,
+   still without restarts.
 6. After uninstall, the operator's Secret still exists.
 7. The test reinstalls in the default `certManager` mode. The `charts` group
    installs cert-manager first, separately and pinned in
    `scripts/runtime.env`. cert-manager issues `konstapel-download-tls` from the
    chart's `konstapel-ca` for the Service's three DNS names, and a download that
    trusts only that Secret's `ca.crt` matches the receipt.
+8. The test deletes the `konstapel-ca` and `konstapel-download-tls` Secrets.
+   cert-manager reissues the CA and then the leaf. Every replica serves the
+   new leaf without restarting, trusted through the new `ca.crt`.
 
 ```sh
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
@@ -417,7 +452,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes and installed-image acceptance done; certificate reload pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download certificate reload and installed-image acceptance done; exception webhook serving pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |

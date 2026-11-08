@@ -122,19 +122,28 @@ spec:
             - name: https
               containerPort: 8443
           # The server refuses to start with an invalid, expired, untrusted or
-          # misnamed certificate, so it never becomes ready.
+          # misnamed certificate. It re-reads the mounted Secret, serving a
+          # rotated certificate or CA once it verifies; while the mounted TLS
+          # is invalid or the served certificate has expired, /readyz fails
+          # and the pod leaves the Service without a restart.
           startupProbe:
-            tcpSocket:
+            httpGet:
+              scheme: HTTPS
               port: https
+              path: /healthz
             periodSeconds: 2
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              scheme: HTTPS
               port: https
+              path: /readyz
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              scheme: HTTPS
               port: https
+              path: /healthz
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false

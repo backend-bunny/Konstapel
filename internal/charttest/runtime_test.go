@@ -177,6 +177,12 @@ func TestRuntimeChartDownloadTLS(t *testing.T) {
 			t.Errorf("download args lack %s: %v", want, args)
 		}
 	}
+	c := at(d, "spec", "template", "spec", "containers", 0)
+	for probe, path := range map[string]string{"startupProbe": "/healthz", "readinessProbe": "/readyz", "livenessProbe": "/healthz"} {
+		if at(c, probe, "httpGet", "path") != path || at(c, probe, "httpGet", "scheme") != "HTTPS" {
+			t.Errorf("download %s is not HTTPS %s: %v", probe, path, at(c, probe))
+		}
+	}
 	if at(svc, "spec", "sessionAffinity") != "None" || !reflect.DeepEqual(at(svc, "spec", "selector"), at(d, "spec", "selector", "matchLabels")) {
 		t.Errorf("Service %v", svc["spec"])
 	}

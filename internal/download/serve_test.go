@@ -44,7 +44,7 @@ func TestServeIsTLSOnly(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, l, cert, key, e.h, DefaultDrain) }()
+	go func() { done <- Serve(ctx, l, mustLoad(t, cert, key), e.h, DefaultDrain) }()
 	base := "://" + l.Addr().String() + teamPath
 	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // test-only self-signed cert
 	var resp *http.Response
@@ -65,7 +65,7 @@ func TestServeIsTLSOnly(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := Serve(context.Background(), l, "", "", e.h, DefaultDrain); err == nil {
+	if err := Serve(context.Background(), l, nil, e.h, DefaultDrain); err == nil {
 		t.Fatal("served without a certificate")
 	}
 }
@@ -88,7 +88,7 @@ func TestServeDrainIsBounded(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, l, cert, key, hang, 300*time.Millisecond) }()
+	go func() { done <- Serve(ctx, l, mustLoad(t, cert, key), hang, 300*time.Millisecond) }()
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // test-only self-signed cert
 	go func() {
 		for range 50 {
@@ -114,7 +114,16 @@ func TestServeDrainIsBounded(t *testing.T) {
 	if waited := time.Since(begin); waited < 300*time.Millisecond || waited > 2*time.Second {
 		t.Fatalf("shutdown took %s for a 300ms drain", waited)
 	}
-	if err := Serve(context.Background(), l, cert, key, hang, 0); err == nil {
+	if err := Serve(context.Background(), l, mustLoad(t, cert, key), hang, 0); err == nil {
 		t.Fatal("non-positive drain accepted")
 	}
+}
+
+func mustLoad(t *testing.T, cert, key string) *Certificates {
+	t.Helper()
+	c, err := LoadCertificates(cert, key, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

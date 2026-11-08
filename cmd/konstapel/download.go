@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,10 +49,15 @@ func runDownload(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := download.VerifyServingCertificate(*cert, *key, *caFile, names, time.Now()); err != nil {
+	certs, err := download.LoadCertificates(*cert, *key, *caFile, names)
+	if err != nil {
 		return err
 	}
 	ctx := ctrl.SetupSignalHandler()
+	// A rotated certificate or CA bundle is served once it verifies; until
+	// then the readiness probe fails and the last good certificate serves.
+	log := ctrl.Log.WithName("download-tls")
+	go certs.Watch(ctx, download.DefaultReloadInterval, func(err error) { log.Error(err, "serving certificate not reloaded; reporting not ready") })
 	ns := os.Getenv("POD_NAMESPACE")
 	// Runs are served from their pinned EvidenceDestination; a legacy run
 	// is served once its migration attached it to one.
@@ -70,7 +74,7 @@ func runDownload(args []string) error {
 	if err != nil {
 		return err
 	}
-	return download.Serve(ctx, l, *cert, *key, srv.Handler(), *drain)
+	return download.Serve(ctx, l, certs, srv.Handler(), *drain)
 }
 
 // stringList is a repeatable string flag.
