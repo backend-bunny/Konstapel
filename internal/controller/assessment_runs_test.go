@@ -344,3 +344,32 @@ func TestStaleBindingCreatesNoDuplicateRun(t *testing.T) {
 		t.Fatalf("stale plan created a duplicate run: %d runs", n)
 	}
 }
+
+// A plan that created the first scheduled run but whose status write then
+// lost to another writer must not leave that run behind: the replan, a second
+// later, adopts it instead of deriving a new anchor and a duplicate run.
+func TestLostFirstScheduleWriteAdoptsTheCreatedRun(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	b := &v1alpha1.ComplianceBinding{}
+	if err := e.c.Get(context.Background(), client.ObjectKey{Name: "audit-prod"}, b); err != nil {
+		t.Fatal(err)
+	}
+	// The plan creates the run; its schedule is never persisted.
+	if _, _, _, _, err := e.ar.plan(context.Background(), b, e.now); err != nil {
+		t.Fatal(err)
+	}
+	created := e.runs()
+	if len(created) != 1 {
+		t.Fatalf("setup: %d runs", len(created))
+	}
+	e.now = e.now.Add(time.Second)
+	e.assess("audit-prod")
+	if got := e.runs(); len(got) != 1 {
+		t.Fatalf("replan created a duplicate scheduled run: %d runs", len(got))
+	}
+	s := e.schedule("audit-prod")
+	if s.ActiveRun == nil || s.ActiveRun.Name != created[0].Name || !s.Anchor.Time.Equal(created[0].Spec.Trigger.ScheduledTime.Time) {
+		t.Fatalf("schedule %+v does not adopt %s", s, created[0].Name)
+	}
+}

@@ -176,6 +176,31 @@ func (r *AssessmentReconciler) releaseFinished(ctx context.Context, prev *v1alph
 	return out, nil
 }
 
+// adoptFirstScheduledRun anchors a schedule that has no persisted anchor at
+// an unfinished scheduled run this binding already has. The first anchor is
+// the planning clock, so a plan whose run was created but whose status write
+// then lost to another writer would otherwise replan at a later second, derive
+// another run name and leave the first run Pending forever. Adopting its time
+// makes the replan find that run by its deterministic name.
+func adoptFirstScheduledRun(st schedule.State, b *v1alpha1.ComplianceBinding, runs []v1alpha1.AssessmentRun, interval time.Duration) schedule.State {
+	var first time.Time
+	for i := range runs {
+		run := &runs[i]
+		t := run.Spec.Trigger
+		if run.Labels[LabelRunBinding] != string(b.UID) || run.Spec.BindingRef.Name != b.Name || t == nil || t.Type != v1alpha1.TriggerScheduled ||
+			t.ScheduledTime == nil || runDone(run) || !run.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if at := t.ScheduledTime.UTC(); first.IsZero() || at.Before(first) {
+			first = at
+		}
+	}
+	if !first.IsZero() {
+		st.Anchor, st.Interval = first, interval
+	}
+	return st
+}
+
 // plan runs the binding's schedule. It returns the schedule and latest run to
 // persist, the next due time, and a limitation when scheduling is disabled.
 func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.AssessmentSchedule, *v1alpha1.RunReference, time.Time, string, error) {
@@ -221,6 +246,13 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 	if err != nil {
 		return prev, latest, time.Time{}, "", err
 	}
+	var runs v1alpha1.AssessmentRunList
+	if err := r.Client.List(ctx, &runs); err != nil {
+		return prev, latest, time.Time{}, "", err
+	}
+	if st.Anchor.IsZero() {
+		st = adoptFirstScheduledRun(st, b, runs.Items, interval)
+	}
 	activeDone, activeUID := false, ""
 	if st.Active != "" {
 		run := &v1alpha1.AssessmentRun{}
@@ -232,10 +264,6 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		default:
 			activeDone, activeUID = runDone(run), string(run.UID)
 		}
-	}
-	var runs v1alpha1.AssessmentRunList
-	if err := r.Client.List(ctx, &runs); err != nil {
-		return prev, latest, time.Time{}, "", err
 	}
 	var pending []schedule.Pending
 	for _, run := range runs.Items {
