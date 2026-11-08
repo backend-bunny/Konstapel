@@ -38,7 +38,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 ## 4. Recover state and drain bounded work
 
-- [ ] 4.1 Integrate recovery of durable runs and staging on leadership acquisition; verify one-active-run coordination, deterministic triggers and same-byte recovery using the real S3 backend, with uncertain backend access kept distinct from CaptureLost.
+- [x] 4.1 Integrate recovery of durable runs and staging on leadership acquisition; verify one-active-run coordination, deterministic triggers and same-byte recovery using the real S3 backend, with uncertain backend access kept distinct from CaptureLost.
 - [ ] 4.2 Inject loss before staging and after commit but before the Kubernetes receipt; verify diagnostic CaptureLost/new-run identity in the former case and original package/expiry recovery in the latter, without duplicate publication or lost retention obligations.
 - [ ] 4.3 Reconstruct local bundle/observation state after pod loss using the owners' contracts; verify current trust revalidation, explicit cold-cache outages, retained applied policies and incomplete evidence when watch continuity cannot be established.
 - [x] 4.4 Implement the 45s application/20s HTTP drain defaults within 60s pod grace, cancellation and owned-child cleanup with validated overrides; verify a long download or provider call cannot hold termination indefinitely and interrupted work remains recoverable or explicitly lost.
