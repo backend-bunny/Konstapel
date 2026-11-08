@@ -276,7 +276,7 @@ func (l *live) watchRun(name string, uid types.UID) func() []string {
 	var bad string
 	go func() {
 		defer close(done)
-		for {
+		for last := false; ; {
 			if r := l.run(name); r != nil {
 				mu.Lock()
 				ph := string(r.Status.Phase)
@@ -291,9 +291,12 @@ func (l *live) watchRun(name string, uid types.UID) func() []string {
 				}
 				mu.Unlock()
 			}
+			if last {
+				return
+			}
 			select {
 			case <-stop:
-				return
+				last = true // observe once more after the caller saw the end
 			case <-time.After(time.Second):
 			}
 		}
