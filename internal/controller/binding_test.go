@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -584,5 +585,71 @@ func TestStaleStatusWriteConflictsInsteadOfClobbering(t *testing.T) {
 	}
 	if b := e.binding("deny-prod"); b.Status.Assessment == nil || statusJSON(b.Status.Assessment) != statusJSON(fresh.Status.Assessment) {
 		t.Fatal("stale reconcile clobbered status.assessment")
+	}
+}
+
+// staleReads serves the binding and its profile from a frozen snapshot, as
+// a former leader's cache would after a pause; every other read and every
+// write reaches the API server.
+type staleReads struct {
+	client.Client
+	snapshot client.Client
+}
+
+func (s staleReads) Get(ctx context.Context, key client.ObjectKey, o client.Object, opts ...client.GetOption) error {
+	switch o.(type) {
+	case *v1alpha1.ComplianceBinding, *v1alpha1.ComplianceProfile:
+		return s.snapshot.Get(ctx, key, o, opts...)
+	}
+	return s.Client.Get(ctx, key, o, opts...)
+}
+
+// A former leader resumes with the binding and profile it read before
+// another replica delivered a newer profile generation. It neither recreates
+// the superseded policy nor withdraws the current one, and it does not
+// overwrite the newer status; it resolves again
+// (add-controller-high-availability 2.4).
+func TestDelayedFormerLeaderResolvesAgain(t *testing.T) {
+	p := profileObj(t, "baseline", pol)
+	b := bindingObj("all", "baseline", v1alpha1.ModeAudit, nil)
+	e := newEnv(t, nsObj("prod"), p, b)
+	e.reconcile("all")
+	e.markAllReady()
+	e.reconcile("all")
+	old := e.policies()[0].GetName()
+
+	// The former leader's view: generation 1 of both.
+	frozenB, frozenP := e.binding("all"), &v1alpha1.ComplianceProfile{}
+	_ = e.c.Get(context.Background(), client.ObjectKeyFromObject(p), frozenP)
+	snapshot := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(frozenB.DeepCopy(), frozenP.DeepCopy()).Build()
+
+	// The new leader delivers profile generation 2 and retires the old revision.
+	frozenP.Spec.Policies[0].Exceptions = v1alpha1.ExceptionSettings{Eligibility: v1alpha1.ExceptionsSelfService, MaxLifetime: &metav1.Duration{Duration: time.Hour}}
+	frozenP.Generation = 2
+	if err := e.c.Update(context.Background(), frozenP); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile("all")
+	e.markAllReady()
+	e.reconcile("all")
+	current := e.policies()
+	if len(current) != 1 || current[0].GetName() == old {
+		t.Fatalf("new leader: %v", current)
+	}
+	statusBefore := e.binding("all").Status
+
+	former := &BindingReconciler{Client: staleReads{Client: e.c, snapshot: snapshot}, Reader: e.c, Content: content, Cluster: "kube-system:test",
+		Engine: func(context.Context) (bool, error) { return true, nil },
+		Ready:  func(*unstructured.Unstructured) bool { return true }}
+	res, err := former.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "all"}})
+	if err != nil || res.RequeueAfter == 0 {
+		t.Fatalf("former leader: %v %+v", err, res)
+	}
+	after := e.policies()
+	if len(after) != 1 || after[0].GetName() != current[0].GetName() {
+		t.Fatalf("former leader changed policies: %v", after)
+	}
+	if got := e.binding("all").Status; !equality.Semantic.DeepEqual(got, statusBefore) {
+		t.Fatalf("former leader overwrote status:\n%s\n%s", statusJSON(got), statusJSON(statusBefore))
 	}
 }

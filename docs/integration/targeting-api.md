@@ -291,6 +291,14 @@ passing, so selector inclusion is also checked in Go.
   It never resolves to an empty desired set.
 - **Removal.** An owned policy whose logical policy is no longer desired, and
   not held, is deleted.
+- **Stale snapshots.** With `Delivery.Current` set (the controller sets it),
+  the binding and profile are re-read from the API server before the first
+  write and again before any delete. If either has a new UID or generation,
+  the Sync stops with `ErrStaleSnapshot`, and the binding resolves again.
+  Deletes carry the listed policy's UID and `resourceVersion` as
+  preconditions. A delayed attempt from an old snapshot, such as a former
+  leader resuming, can't withdraw a newer revision. See
+  [Controller availability](availability.md#delayed-former-leaders).
 
 `Delivery.Withdraw(binding UID)` deletes every policy the binding owns,
 including superseded revisions, and nothing else. Owner references also let

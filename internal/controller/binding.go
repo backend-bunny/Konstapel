@@ -135,8 +135,16 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if reader == nil {
 			reader = r.Client
 		}
-		d := &targeting.Delivery{Client: readThrough{Client: r.Client, reader: reader}, Ready: r.Ready}
+		d := &targeting.Delivery{Client: readThrough{Client: r.Client, reader: reader}, Ready: r.Ready,
+			Current: r.snapshotCurrent(reader, b, profile)}
 		sync, err := d.Sync(ctx, b.UID, desired, hold)
+		if errors.Is(err, targeting.ErrStaleSnapshot) {
+			// A newer binding or profile exists than this cache snapshot (a
+			// lagging cache, or a former leader resuming): resolve again
+			// from the newer state instead of acting on this one.
+			logger.V(1).Info("stale snapshot; resolving again", "reason", err.Error())
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -157,6 +165,39 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// snapshotCurrent confirms through reader (the API server, uncached) that
+// the binding and profile a reconcile resolved from are still the current
+// ones: same UID and generation, and the profile still absent or present
+// as it was. Status-only writes do not change generations, so assessment
+// status updates never make a snapshot stale.
+func (r *BindingReconciler) snapshotCurrent(reader client.Reader, b *v1alpha1.ComplianceBinding, profile *v1alpha1.ComplianceProfile) func(context.Context) error {
+	return func(ctx context.Context) error {
+		cur := &v1alpha1.ComplianceBinding{}
+		if err := reader.Get(ctx, client.ObjectKeyFromObject(b), cur); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fmt.Errorf("%w: binding %s was deleted", targeting.ErrStaleSnapshot, b.Name)
+			}
+			return err
+		}
+		if cur.UID != b.UID || cur.Generation != b.Generation || !cur.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("%w: binding %s is at generation %d, resolved from %d", targeting.ErrStaleSnapshot, b.Name, cur.Generation, b.Generation)
+		}
+		p := &v1alpha1.ComplianceProfile{}
+		err := reader.Get(ctx, client.ObjectKey{Name: b.Spec.ProfileRef.Name}, p)
+		switch {
+		case apierrors.IsNotFound(err):
+			if profile != nil {
+				return fmt.Errorf("%w: profile %s was deleted", targeting.ErrStaleSnapshot, profile.Name)
+			}
+		case err != nil:
+			return err
+		case profile == nil || p.UID != profile.UID || p.Generation != profile.Generation:
+			return fmt.Errorf("%w: profile %s changed", targeting.ErrStaleSnapshot, b.Spec.ProfileRef.Name)
+		}
+		return nil
+	}
 }
 
 // input builds the resolver snapshot for one binding: its profile, that
