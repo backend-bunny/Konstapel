@@ -16,6 +16,7 @@ package controller
 // Run through scripts/targeting-live.sh (charts acceptance group).
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -44,6 +45,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -107,7 +109,7 @@ func TestLiveHelmInstall(t *testing.T) {
 	t.Cleanup(func() { _ = l.c.Delete(l.ctx, tlsSecret) })
 	if out, err := l.helm("install", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
 		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never",
-		"--set", "tls.mode=secret", "--set", "tls.secret.name="+tlsSecret.Name); err != nil {
+		"-f", "../../docs/examples/charts/operator-tls.yaml"); err != nil {
 		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	t.Cleanup(func() {
@@ -431,6 +433,115 @@ func TestLiveHelmInstall(t *testing.T) {
 	}
 	l.assertNoRestarts(ns, before)
 	l.record("cert-manager-renewal", map[string]any{"oldSerial": oldSerial, "newSerial": renewed.SerialNumber.String(), "replicas": len(before), "restarts": 0})
+
+	// 8. The documented platform-issuer example: upgrading to a platform
+	// CA ClusterIssuer reissues the download certificate from it, which
+	// every replica serves in place.
+	l.platformIssuer()
+	if out, err := l.helm("upgrade", "konstapel", "../../charts/konstapel", "--namespace", ns, "--wait", "--timeout", "5m",
+		"--set", "image.repository="+repo, "--set", "image.digest="+digest, "--set", "image.pullPolicy=Never",
+		"-f", "../../docs/examples/charts/platform-issuer.yaml"); err != nil {
+		t.Fatalf("upgrade to the platform issuer: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
+	}
+	before = l.downloadPods(ns)
+	var platformLeaf *x509.Certificate
+	platformRoots := x509.NewCertPool()
+	l.eventually("download certificate reissued by the platform issuer", func() (bool, string) {
+		s := &corev1.Secret{}
+		if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: "konstapel-download-tls"}, s); err != nil {
+			return false, err.Error()
+		}
+		b, _ := pem.Decode(s.Data["tls.crt"])
+		if b == nil {
+			return false, "no leaf"
+		}
+		c, err := x509.ParseCertificate(b.Bytes)
+		if err != nil || c.Issuer.CommonName != "konstapel platform test CA" {
+			return false, fmt.Sprintf("issuer %v %v", c.Issuer.CommonName, err)
+		}
+		platformLeaf = c
+		platformRoots = x509.NewCertPool()
+		platformRoots.AppendCertsFromPEM(s.Data["ca.crt"])
+		return true, ""
+	})
+	podAddrs = map[string]string{}
+	for name := range before {
+		podAddrs[name] = l.portForward(ns, "pod/"+name, 8443)
+	}
+	l.eventually("every download replica serves the platform certificate", func() (bool, string) {
+		for name, addr := range podAddrs {
+			serial, err := servedSerial(addr, platformRoots)
+			if err != nil || serial != platformLeaf.SerialNumber.String() {
+				return false, fmt.Sprintf("%s: %s %v", name, serial, err)
+			}
+		}
+		return true, ""
+	})
+	for _, name := range []string{"konstapel-ca", "konstapel-selfsigned"} {
+		if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: name}, issuerObj("Issuer")); !apierrors.IsNotFound(err) {
+			t.Errorf("chart Issuer %s with a platform issuer: %v", name, err)
+		}
+	}
+	local = l.portForward(ns, "svc/konstapel-download", 443)
+	hc = &http.Client{Timeout: time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: platformRoots, ServerName: "konstapel-download.konstapel-system.svc"}}}
+	if code, body = fetch(t, hc, "https://"+local+"/v1/assessmentruns/"+string(run.UID)+"/download", l.token(ns, operator.Name, downloadAudience)); code != http.StatusOK ||
+		fmt.Sprintf("%x", sha256.Sum256(body)) != run.Status.Publication.PackageSHA256 {
+		t.Fatalf("download through the platform issuer's certificate: %d", code)
+	}
+	l.assertNoRestarts(ns, before)
+	l.record("platform-issuer", map[string]any{"issuer": platformLeaf.Issuer.CommonName, "serial": platformLeaf.SerialNumber.String(), "restarts": 0})
+}
+
+func issuerObj(kind string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion("cert-manager.io/v1")
+	u.SetKind(kind)
+	return u
+}
+
+// platformIssuer creates what a platform team would already have: a CA
+// ClusterIssuer named platform-ca, backed by a cert-manager-issued root in
+// the cert-manager namespace. It is removed when the test ends.
+func (l *live) platformIssuer() {
+	l.t.Helper()
+	root := issuerObj("ClusterIssuer")
+	root.SetName("platform-root")
+	_ = unstructured.SetNestedMap(root.Object, map[string]any{}, "spec", "selfSigned")
+	ca := issuerObj("Certificate")
+	ca.SetNamespace("cert-manager")
+	ca.SetName("platform-ca")
+	_ = unstructured.SetNestedMap(ca.Object, map[string]any{
+		"isCA": true, "commonName": "konstapel platform test CA", "secretName": "platform-ca",
+		"privateKey": map[string]any{"algorithm": "ECDSA", "size": int64(256)},
+		"issuerRef":  map[string]any{"name": "platform-root", "kind": "ClusterIssuer", "group": "cert-manager.io"},
+	}, "spec")
+	issuer := issuerObj("ClusterIssuer")
+	issuer.SetName("platform-ca")
+	_ = unstructured.SetNestedMap(issuer.Object, map[string]any{"secretName": "platform-ca"}, "spec", "ca")
+	for _, o := range []*unstructured.Unstructured{root, ca, issuer} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			l.t.Fatal(err)
+		}
+	}
+	l.t.Cleanup(func() {
+		for _, o := range []client.Object{issuer, ca, root, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cert-manager", Name: "platform-ca"}}} {
+			_ = l.c.Delete(context.Background(), o)
+		}
+	})
+	l.eventually("platform-ca ClusterIssuer ready", func() (bool, string) {
+		u := issuerObj("ClusterIssuer")
+		if err := l.c.Get(l.ctx, client.ObjectKey{Name: "platform-ca"}, u); err != nil {
+			return false, err.Error()
+		}
+		conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+		for _, c := range conds {
+			m, _ := c.(map[string]any)
+			if m["type"] == "Ready" && m["status"] == "True" {
+				return true, ""
+			}
+		}
+		return false, fmt.Sprint(conds)
+	})
 }
 
 // downloadTLSSecret issues a test CA and a serving certificate for the

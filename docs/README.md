@@ -23,6 +23,7 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 | [S3 evidence](integration/s3-evidence.md) | Implemented publishing, download and retention behavior; destination API, legacy-file migration, retirement, and orphaning details. |
 | [Linux hardening](integration/linux-hardening.md) | Shipped policy variants, partial mappings, and live admission coverage; background/applicability and exception integration still in progress. |
 | [Policy exceptions](integration/policy-exceptions.md) | API, authenticated admission and acceptance snapshots exist; native grants remain disabled pending engine compatibility and lifecycle work. |
+| [Helm charts](charts.md) | CRD and runtime charts: installation, both TLS modes and certificate rotation, values, feature availability and installed-image acceptance; not yet published, and exception admission is not in the chart. |
 | [Assessment-loop prototype](integration/assessment-loop.md) | Standalone Kyverno/C2P runner and shared disposable-cluster acceptance commands. |
 | [Trivy proposal](../openspec/changes/add-trivy-vulnerability-assessment/proposal.md) | Planned reporting-only image vulnerability assessment; no implemented Trivy provider yet. |
 

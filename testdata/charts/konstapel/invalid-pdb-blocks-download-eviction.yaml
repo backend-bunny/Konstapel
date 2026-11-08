@@ -1,0 +1,6 @@
+# expect: must be less than download.replicaCount
+replicaCount: 3
+podDisruptionBudget:
+  minAvailable: 2
+download:
+  replicaCount: 2

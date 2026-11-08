@@ -13,10 +13,25 @@ depend on it, and neither chart depends on or installs Kyverno or
 cert-manager.
 
 **Status.** The CRD chart packages the generated definitions and has been
-lifecycle-tested in kind (groups 1–2). The runtime chart renders the
-controller (group 3, in progress). TLS modes, the download server and the
-installed-image acceptance aren't done yet, and nothing is published. Every later piece is listed with its
-owner and prerequisite under Phases.
+lifecycle-tested in kind (groups 1–2). The runtime chart installs the
+controller and the download server from a digest-pinned image. It supports
+both TLS modes and is tested installed in kind (group 3). Exception admission
+is not in the chart yet, and nothing is published (groups 5–6). Every
+remaining piece is listed with its owner and prerequisite under Phases.
+
+## Feature availability
+
+What an installed runtime chart provides today. The `konstapel` CLI workflow
+in the [assessment-loop guide](integration/assessment-loop.md) is unchanged
+and doesn't need the charts.
+
+| Feature | In the chart | Needs |
+| --- | --- | --- |
+| Policy delivery (`ComplianceProfile`, `ComplianceBinding`) | yes | Kyverno serving `policies.kyverno.io/v1` ValidatingPolicy; see [External engine capabilities](#external-engine-capabilities) |
+| Continuous assessments (`AssessmentRun`, `AssessmentRequest`) | yes | Kyverno PolicyReports (`wgpolicyk8s.io/v1alpha2`) |
+| Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
+| Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
+| Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
 
 ## Chart input contract
 
@@ -31,15 +46,15 @@ release can't substitute a fixture or a guess for it.
 | Role catalog | `config/rbac/{compliance-admin,compliance-viewer,assessment-operator,assessment-requester,exception-editor,evidence-download,controller-assessments}.yaml` | the feature owners | resolved |
 | Admission policies | `config/admission/*.yaml` (Mutating/ValidatingAdmissionPolicies; MutatingAdmissionPolicy needs Kubernetes ≥ 1.36, hence `kubeVersion: >=1.36.0-0`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
-| Probes | `GET /healthz` and `/readyz` on the probe address. Both are ping checks today; engine health is reported in Conditions, not readiness. | targeting | resolved; the readiness semantics belong to high availability (pending) |
+| Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` fails while the manager shuts down; engine health is reported in Conditions, not readiness. | targeting, add-controller-high-availability | resolved; further replica serving readiness belongs to high availability (pending) |
 | Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
 | Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`; HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing | resolved |
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
-| Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; replica serving readiness and leader/serving separation do not yet | add-controller-high-availability | **pending**: the defaults are recorded in the values schema, and the Deployment and PDB wait for it |
-| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed `kubernetes.io/tls` Secret | this change (group 3) | values contract defined; templates pending |
-| Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | pending |
+| Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; replica serving readiness and leader/serving separation do not yet | add-controller-high-availability | resolved for the Lease, shutdown budgets, Deployment and PDB; replica serving readiness is pending |
+| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server; webhook TLS waits for exception admission |
+| Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
 
 ## CRD chart
 
@@ -253,7 +268,11 @@ renders:
 - a missing `image.digest`;
 - `controller.shutdownTimeoutSeconds` that isn't below
   `terminationGracePeriodSeconds`;
-- `podDisruptionBudget.minAvailable` that isn't below `replicaCount`.
+- `download.shutdownDrainSeconds` that isn't below
+  `terminationGracePeriodSeconds`;
+- `podDisruptionBudget.minAvailable` that isn't below `replicaCount`, or
+  below `download.replicaCount` when the download server runs more than one
+  replica.
 
 **Download server and TLS.** With `download.enabled` (the default), the chart
 also renders the evidence download server:
@@ -280,12 +299,29 @@ where the Secret comes from:
 | `certManager` (default) | `konstapel-download-tls`, from a `Certificate` for the Service's DNS names. The issuer is the chart's self-signed CA (`Issuer` → CA `Certificate` → CA `Issuer`), or your `tls.certManager.issuerRef` (`Issuer` or `ClusterIssuer`) | cert-manager installed separately; the chart never installs or manages it |
 | `secret` | yours, named by `tls.secret.name` | nothing else; the chart only mounts it and never creates, changes or deletes it |
 
+Install examples. Each values file is rendered by `internal/charttest`, and
+`TestLiveHelmInstall` installs the default mode, the operator Secret and the
+platform issuer:
+
 ```sh
+# Default: cert-manager (installed separately) with the chart's own CA.
+helm install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
+  --namespace konstapel-system
+
+# Operator-managed TLS (docs/examples/charts/operator-tls.yaml).
 kubectl -n konstapel-system create secret generic operator-download-tls \
   --from-file=tls.crt --from-file=tls.key --from-file=ca.crt
 helm install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
-  --namespace konstapel-system --set tls.mode=secret --set tls.secret.name=operator-download-tls
+  --namespace konstapel-system -f docs/examples/charts/operator-tls.yaml
+
+# Your cert-manager issuer instead of the chart CA (docs/examples/charts/platform-issuer.yaml).
+helm upgrade --install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
+  --namespace konstapel-system -f docs/examples/charts/platform-issuer.yaml
 ```
+
+For a single-node development cluster,
+`docs/examples/charts/development.yaml` runs one replica of each Deployment
+without PodDisruptionBudgets. Leader election stays on.
 
 Clients trust the server through that CA (`ca.crt`) and use the
 `konstapel-download.konstapel-system.svc` name.
@@ -330,7 +366,7 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
    from inside the pod to a test-owned S3 service on the kind network. This
    proves the read-only root and the chart's bounded writable volumes are
    enough.
-5. The test installs in `tls.mode=secret` with a test CA. A platform operator
+5. The test installs with `docs/examples/charts/operator-tls.yaml` and a test CA. A platform operator
    downloads the package through the installed download server (port-forwarded
    Service, TLS trusted only through that CA), and its SHA-256 matches the
    receipt.
@@ -349,6 +385,11 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
 8. The test deletes the `konstapel-ca` and `konstapel-download-tls` Secrets.
    cert-manager reissues the CA and then the leaf. Every replica serves the
    new leaf without restarting, trusted through the new `ca.crt`.
+9. The test creates a platform CA `ClusterIssuer` named `platform-ca` and
+   upgrades with `docs/examples/charts/platform-issuer.yaml`. The chart CA
+   issuers are removed, and cert-manager reissues the download certificate
+   from the platform CA. Every replica serves it without restarting, and a
+   download that trusts the platform CA matches the receipt.
 
 ```sh
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
@@ -370,10 +411,24 @@ retention.
   - `repository`
   - `digest`: `sha256:<64 hex>`. It is empty only in source charts; release packaging fills it in.
   - `pullPolicy`
-- **`replicaCount`:** at least 1, default 2. 1 is for development and omits the default PodDisruptionBudget once that exists.
+- **`replicaCount`:** controller replicas, at least 1, default 2. 1 is for development and omits the controller PodDisruptionBudget.
+- **`podDisruptionBudget`:** `enabled` (true) and `minAvailable` (1), which must be below each replica count. Rendered only for Deployments with more than one replica.
+- **`controller`:**
+  - `shutdownTimeoutSeconds` (45): must be below `terminationGracePeriodSeconds` (60), which the download server shares.
+  - `stagingSizeLimit` (2Gi): the per-pod evidence staging volume.
+  - `resources`, `affinity` (empty means preferred hostname anti-affinity; a value replaces it), `nodeSelector`, `tolerations`.
 - **`tls.mode`:** exactly one of the following.
   - `certManager` (default), optionally with `certManager.issuerRef {name, kind: Issuer|ClusterIssuer}`.
   - `secret` with `secret.name`. Setting both, or `secret` without a name, is rejected.
+- **`download`:**
+  - `enabled` (true), `replicaCount` (2).
+  - `audience` (`konstapel-download`): the token audience callers request.
+  - `maxConcurrent` (4), `maxTempBytes` (2 GiB) and `tempSizeLimit` (3Gi): download concurrency and per-pod scratch space.
+  - `shutdownDrainSeconds` (20): must be below the grace period.
+  - `resources`.
+
+There are no values for evidence locations, credentials, Kyverno or
+cert-manager installation, or exception enablement.
 
 The CRD chart accepts no values. Its definitions are generated, and retention
 can't be turned off.
@@ -452,7 +507,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download certificate reload and installed-image acceptance done; exception webhook serving pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download certificate reload, documented examples and installed-image acceptance done; exception webhook serving pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |
