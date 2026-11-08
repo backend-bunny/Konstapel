@@ -16,6 +16,8 @@ package controller
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,11 +114,42 @@ func TestLiveCRDChartLifecycle(t *testing.T) {
 	// Last: remove what this test created, including the retained CRDs, so
 	// later tests in the same cluster (the installed-chart test) install
 	// their own CRD release. Cleanups run in reverse, after the uninstall.
+	// Every step is idempotent and repeated until the CRDs are gone: a
+	// one-shot cleanup that ignored a transient API error under CI load left
+	// an instance holding its finalizer, or a CRD never deleted, for good.
 	t.Cleanup(func() {
-		for name := range crdUIDs() {
-			_ = l.c.Delete(l.ctx, &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: name}})
-		}
-		l.eventually("lifecycle CRDs removed", func() (bool, string) { left := crdUIDs(); return len(left) == 0, fmt.Sprint(len(left)) })
+		l.eventually("lifecycle CRDs removed", func() (bool, string) {
+			ed := &v1alpha1.EvidenceDestination{}
+			if err := l.c.Get(l.ctx, client.ObjectKey{Name: "crd-lifecycle"}, ed); err == nil && controllerutil.RemoveFinalizer(ed, "compliance.erenius.io/crd-lifecycle-test") {
+				_ = l.c.Update(l.ctx, ed)
+			}
+			left := crdUIDs()
+			if len(left) == 0 {
+				return true, ""
+			}
+			// Delete what is not yet deleting, and say which CRDs are left
+			// and why, so a recurrence is diagnosable.
+			var detail []string
+			for name := range left {
+				crd := &apiextensionsv1.CustomResourceDefinition{}
+				if err := l.c.Get(l.ctx, client.ObjectKey{Name: name}, crd); err != nil {
+					detail = append(detail, name+": "+err.Error())
+					continue
+				}
+				if crd.DeletionTimestamp.IsZero() {
+					_ = l.c.Delete(l.ctx, crd)
+				}
+				var instances unstructured.UnstructuredList
+				instances.SetGroupVersionKind(schema.GroupVersionKind{Group: crd.Spec.Group, Version: crd.Spec.Versions[0].Name, Kind: crd.Spec.Names.ListKind})
+				_ = l.c.List(l.ctx, &instances)
+				var held []string
+				for _, o := range instances.Items {
+					held = append(held, fmt.Sprintf("%s finalizers=%v deleting=%v", o.GetName(), o.GetFinalizers(), o.GetDeletionTimestamp() != nil))
+				}
+				detail = append(detail, fmt.Sprintf("%s deleting=%v finalizers=%v conditions=%v instances=%v", name, crd.DeletionTimestamp != nil, crd.Finalizers, toJSON(crd.Status.Conditions), held))
+			}
+			return false, fmt.Sprintf("%d left: %s", len(left), strings.Join(detail, "; "))
+		})
 	})
 	t.Cleanup(func() { _, _ = l.helm("uninstall", release, "--namespace", ns) })
 	l.record("installed", map[string]any{"crds": len(installed), "tookOwnership": adopted})
