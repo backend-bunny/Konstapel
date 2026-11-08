@@ -13,8 +13,8 @@ marked unavailable.
 | --- | --- | --- | --- |
 | Controller | `konstapel controller` (`cmd/konstapel/controller.go`, `controller.NewManager`) | Elected: reconcilers, the capability trigger and deferred engine watches run only on the Lease holder | available |
 | Exception admission webhooks | the controller's webhook server (`--webhook-cert-dir`, port 9443) | none: served on every replica | **unavailable**: add-self-service-policy-exceptions waits on an upstream Kyverno release |
-| Evidence downloads | `konstapel download-server` (`--listen :8443`) | none: a separate stateless process reading run status and the pinned destination | available; the chart Deployment is pending |
-| Probes | `GET /healthz`, `/readyz` on `--health-probe-bind-address` (`:8081`) | independent of leadership and engine health | available (ping checks; serving-readiness wiring is task 3.1) |
+| Evidence downloads | `konstapel download-server` (`--listen :8443`) | none: a separate stateless process reading run status and the pinned destination | available; the chart renders it as its own two-replica Deployment |
+| Probes | `GET /healthz`, `/readyz` on `--health-probe-bind-address` (`:8081`) | independent of leadership and engine health | available. The controller's `/readyz` fails while it shuts down. The download server answers `/healthz` and `/readyz` over HTTPS on `:8443`, and its `/readyz` fails while its TLS is invalid. The rest of the serving-readiness wiring is task 3.1. |
 
 ## Leader election
 
