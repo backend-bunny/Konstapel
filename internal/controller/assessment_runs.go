@@ -177,13 +177,16 @@ func (r *AssessmentReconciler) releaseFinished(ctx context.Context, prev *v1alph
 }
 
 // adoptFirstScheduledRun anchors a schedule that has no persisted anchor at
-// an unfinished scheduled run this binding already has. The first anchor is
-// the planning clock, so a plan whose run was created but whose status write
-// then lost to another writer would otherwise replan at a later second, derive
-// another run name and leave the first run Pending forever. Adopting its time
-// makes the replan find that run by its deterministic name.
-func adoptFirstScheduledRun(st schedule.State, b *v1alpha1.ComplianceBinding, runs []v1alpha1.AssessmentRun, interval time.Duration) schedule.State {
-	var first time.Time
+// the earliest unfinished scheduled run of this binding (by UID). The first
+// anchor is the planning clock, so a plan whose run was created but whose
+// status write then lost to another writer would otherwise replan with a
+// later clock, derive another run name and leave the first run Pending
+// forever. The adopted run becomes the active, last scheduled run, so it is
+// admitted however much later the replan happens; once it finishes, the
+// schedule records any gap and catches up normally. It reports the adopted
+// run, or nil.
+func adoptFirstScheduledRun(st schedule.State, b *v1alpha1.ComplianceBinding, runs []v1alpha1.AssessmentRun, interval time.Duration) (schedule.State, *v1alpha1.AssessmentRun) {
+	var first *v1alpha1.AssessmentRun
 	for i := range runs {
 		run := &runs[i]
 		t := run.Spec.Trigger
@@ -191,14 +194,15 @@ func adoptFirstScheduledRun(st schedule.State, b *v1alpha1.ComplianceBinding, ru
 			t.ScheduledTime == nil || runDone(run) || !run.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if at := t.ScheduledTime.UTC(); first.IsZero() || at.Before(first) {
-			first = at
+		if first == nil || t.ScheduledTime.Before(first.Spec.Trigger.ScheduledTime) {
+			first = run
 		}
 	}
-	if !first.IsZero() {
-		st.Anchor, st.Interval = first, interval
+	if first != nil {
+		at := first.Spec.Trigger.ScheduledTime.UTC()
+		st.Anchor, st.Interval, st.LastScheduled, st.Active = at, interval, at, first.Name
 	}
-	return st
+	return st, first
 }
 
 // plan runs the binding's schedule. It returns the schedule and latest run to
@@ -251,7 +255,16 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		return prev, latest, time.Time{}, "", err
 	}
 	if st.Anchor.IsZero() {
-		st = adoptFirstScheduledRun(st, b, runs.Items, interval)
+		// Uncached: the binding's newer status can arrive before the run
+		// informer has seen a run the lost plan created.
+		var own v1alpha1.AssessmentRunList
+		if err := r.reader().List(ctx, &own, client.MatchingLabels{LabelRunBinding: string(b.UID)}); err != nil {
+			return prev, latest, time.Time{}, "", err
+		}
+		var adopted *v1alpha1.AssessmentRun
+		if st, adopted = adoptFirstScheduledRun(st, b, own.Items, interval); adopted != nil && latest == nil {
+			latest = &v1alpha1.RunReference{Name: adopted.Name, UID: string(adopted.UID)}
+		}
 	}
 	activeDone, activeUID := false, ""
 	if st.Active != "" {
