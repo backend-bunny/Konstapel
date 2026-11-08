@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
@@ -68,11 +69,15 @@ func (l *live) scaleEngine(replicas int32) { l.scaleKyverno("kyverno-admission-c
 func (l *live) scaleKyverno(name string, replicas int32) {
 	l.t.Helper()
 	d := &appsv1.Deployment{}
-	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "kyverno", Name: name}, d); err != nil {
-		l.t.Fatal(err)
-	}
-	d.Spec.Replicas = &replicas
-	if err := l.c.Update(l.ctx, d); err != nil {
+	// The Deployment controller updates the object concurrently (status,
+	// rollout of the previous scale): re-read and retry on conflict.
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: "kyverno", Name: name}, d); err != nil {
+			return err
+		}
+		d.Spec.Replicas = &replicas
+		return l.c.Update(l.ctx, d)
+	}); err != nil {
 		l.t.Fatal(err)
 	}
 	l.eventually(name+" scaled", func() (bool, string) {
