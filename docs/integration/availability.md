@@ -71,6 +71,52 @@ marked unavailable.
 3. when another holder takes the Lease, the leader's work is cancelled within
    5s and the manager exits with `leader election lost`.
 
+## Downloads without the leader
+
+The download server is its own Deployment (`konstapel-download`, two
+replicas). It isn't elected and doesn't talk to the controller. Each request
+is handled the same way on any replica:
+1. It authenticates the token (TokenReview, audience `konstapel-download`)
+   and authorizes it (SubjectAccessReview), every time, with no cache.
+2. It resolves the run from the API: the run UID, or the request UID plus the
+   UID of the namespace the request was admitted in.
+3. It reads the pinned EvidenceDestination and its current credential Secret.
+4. It fetches the package from S3 and checks it against the run's receipt
+   before streaming it.
+
+No replica keeps local files between requests, and the Service has no session
+affinity. A client that loses a connection retries the same URL, and any
+ready replica answers it.
+
+| Condition on retry | Answer from every replica |
+| --- | --- |
+| Still authorized, package available | `200` and the same package (same SHA-256 as the receipt) |
+| Grant revoked, or the request or its namespace was recreated | `403`, the same answer as for a missing object |
+| Wrong token audience | `401` |
+| The destination's credential Secret is missing | `503` until the Secret exists again |
+| S3 unreachable | `503`, within the S3 client's bound of three attempts of 30 seconds each |
+| Package expired or handed off | `410` |
+
+`TestLiveHelmInstall` (`charts` group) checks this with no controller pod
+running at all. It scales `konstapel-controller` to zero after a team request
+and a scheduled run are published, then calls each download pod directly
+through its own port-forward. It checks:
+- both packages match their receipts on each pod;
+- revoking and restoring the operator's and the team's grants takes effect
+  on each pod;
+- a wrong audience is rejected;
+- a missing credential Secret, and then a rotated one, take effect without a
+  restart;
+- a paused S3 container gives `503` on each pod, and serving resumes once S3
+  is back;
+- after the team namespace is recreated with the same names, neither the old
+  nor the new request UID reaches the old evidence, while the platform
+  operator still can;
+- no pod logged the S3 secret, a private key or a token.
+
+The certificate rotations in the same test (operator Secret and cert-manager)
+also check every pod.
+
 ## Lifecycle matrix
 
 `testdata/availability/lifecycle-matrix.json` maps every requirement in the
@@ -102,5 +148,7 @@ disposable cluster and checks four things:
 
 ## Not yet available
 
-- Serving readiness, which needs TLS and synchronized state (task 3.1).
+- Serving readiness for the controller's admission webhooks, which wait for
+  exception admission (task 3.1). The download server's readiness already
+  follows its TLS state.
 - Multi-replica recovery and node-loss acceptance (group 5).

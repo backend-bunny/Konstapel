@@ -333,6 +333,11 @@ func TestLiveHelmInstall(t *testing.T) {
 	l.assertNoRestarts(ns, before)
 	l.record("tls-rotation", map[string]any{"replicas": len(before), "caRotated": true, "invalidNotReady": true, "restarts": 0})
 
+	// 4c. Downloads do not depend on the controller that published: with
+	// no controller running, each download replica serves the same packages
+	// under current authorization, credentials and namespace identity.
+	l.followerDownloads(ns, b, run, operator.Name, crb, rotatedRoots, ed, secret)
+
 	// 5. Uninstalling keeps the operator's Secret: the chart never owned it.
 	if out, err := l.helm("uninstall", "konstapel", "--namespace", ns, "--wait"); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
