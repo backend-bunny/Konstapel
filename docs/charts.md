@@ -529,7 +529,7 @@ OCI registry (`scripts/ci/oci_fake.py`) with the pinned Helm. It covers:
 - an existing version with other bytes, which is never replaced.
 
 Signing, attestations, remote verification and the release workflow are
-described in [Releases](releases.md).
+described in [Releases](releases.md#chart-publication).
 
 ## Checks you can run
 
@@ -561,8 +561,8 @@ Fixtures stay outside `charts/` so they are never packaged.
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
 | 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download certificate reload, documented examples and installed-image acceptance done; exception webhook serving pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
-| 5 | Package, sign, attest and publish the OCI charts from the verified image digest | groups 2 and 3 tested |
-| 6 | `charts:package` and `charts:acceptance` tasks, Go black-box acceptance of the installed charts, and the required CI gate | groups 2–5 |
+| 5 | Package, sign, attest and publish the OCI charts from the verified image digest (packaging, frozen-input acceptance, write-once publisher, signing/verification tooling, release workflow, release notes and recovery done; the keyless signing identity and release-please integration are exercised by the first release) | groups 2 and 3 tested |
+| 6 | `charts:package` and `charts:acceptance` tasks (done), Go black-box acceptance of the installed charts, the required CI gate (the `charts` group within the required `acceptance` check) and release gating (done) | groups 2–5 |
 
 Exception admission and its webhook stay out of the chart until
 add-self-service-policy-exceptions merges its handlers and passes its gates.

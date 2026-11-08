@@ -103,6 +103,7 @@ class FakeRegistry:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()
 
     def manifest_writes(self):
         return [w for w in self.writes if "/manifests/" in w[1]]

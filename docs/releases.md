@@ -67,6 +67,82 @@ failed jobs in the original release-please workflow also retries the release
 notes update. Re-running release-please from scratch after a release already
 exists may only update the next release PR.
 
+## Chart publication
+
+After the image is published and verified, release-please calls the reusable
+`charts` workflow (`.github/workflows/charts.yml`) with the tag and the image
+digest. Its three jobs run in order, and any failure stops the publication:
+
+1. **freeze** first checks the release target the same way image publishing
+   does, and verifies the image's signature under the image identity. It
+   then packages both charts with `charts:package` and attaches
+   `konstapel-crds-X.Y.Z.tgz`, `konstapel-X.Y.Z.tgz` and `publication.json`
+   to the GitHub Release. A retry downloads those assets and verifies them
+   instead of packaging again.
+2. **acceptance** requires the full main-branch acceptance for the tagged
+   commit (`scripts/ci/require-acceptance.py`), as image publishing does. It
+   then runs `charts:acceptance` on the frozen archives with the released
+   image pulled by digest. Only a passing `chart-acceptance.json` for
+   exactly those inputs lets the next job run.
+3. **publish**:
+   1. pushes the archives write-once (`scripts/charts/publish.py`);
+   2. signs each OCI subject and attaches a chart-inputs attestation, which
+      records `publication.json` and the acceptance record
+      (`scripts/charts/attest.py sign`);
+   3. adds GitHub build provenance for each subject;
+   4. verifies everything remotely: the signatures, the attestation
+      predicate (source commit, tag, image digest, archive checksum,
+      acceptance passed), the provenance, the image signature, and that
+      pulling each subject by digest yields the frozen archive bytes;
+   5. attaches `charts-release.json` to the release.
+
+The release-notes job then adds a chart block next to the image block. It
+shows both OCI subjects with their digests and archive checksums, and
+copyable commands that verify each subject, pull it by digest, check the
+archive checksum and install that file. Rerunning it replaces only that
+block.
+
+Ordinary pushes to `main` publish no charts. Pull requests run the same
+`charts` acceptance group, but never sign or write to the chart registry.
+
+**Trust identities.**
+
+| Subject | Signed by (certificate identity) | Issuer |
+| --- | --- | --- |
+| `ghcr.io/backend-bunny/konstapel@sha256:…` (image) | `https://github.com/backend-bunny/Konstapel/.github/workflows/(publish\|release-please).yml@refs/heads/main` | `https://token.actions.githubusercontent.com` |
+| `ghcr.io/backend-bunny/charts/konstapel-crds@sha256:…`, `ghcr.io/backend-bunny/charts/konstapel@sha256:…` | `https://github.com/backend-bunny/Konstapel/.github/workflows/(charts\|release-please).yml@refs/heads/main` | `https://token.actions.githubusercontent.com` |
+
+A valid signature by any other identity doesn't satisfy verification. The
+chart-inputs attestation (`https://github.com/backend-bunny/Konstapel/chart-inputs/v1`)
+must name the released source commit, image digest and archive checksum.
+Provenance for the archive file alone isn't accepted: the subject is the OCI
+manifest digest.
+
+**Retries and partial publication.** The two registries can't be written
+atomically, so each step is safe to repeat. To resume, run the `charts`
+workflow on `main` with the release tag:
+
+| Interrupted after | A retry |
+| --- | --- |
+| freezing (assets attached) | reuses the attached archives and manifest; it never repackages |
+| a partial asset upload, with nothing published | discards the incomplete assets and freezes again |
+| pushing one chart | finds that version byte-identical and pushes only the other |
+| signing or attesting one subject | skips what already verifies under the release identity and adds the rest |
+| publishing, with different bytes already at that version | stops: a released version is never replaced |
+| publishing, with frozen assets missing | stops with a diagnostic instead of rebuilding a replacement |
+
+A release is complete only when `charts-release.json` is attached and the
+notes show the chart block. If acceptance failed, fix the cause, rerun the
+failed main-branch `test` workflow if needed, and run `charts` again with
+the tag. The frozen inputs and the image stay the same.
+
+**Image and CRD provenance.** The image keeps its own SBOMs, notices,
+signature and provenance (see [Images](images.md#verify)). The runtime chart
+references the image only by digest. The CRD chart's templates are generated
+from `config/crd/bases`, and `publication.json` records their content
+identity (`crdContent`), which the acceptance record and the chart-inputs
+attestation repeat.
+
 ## Tooling provenance
 
 The release configuration and workflow follow the Apache-2.0 implementation in
