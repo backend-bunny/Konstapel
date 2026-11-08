@@ -55,16 +55,27 @@ func (c *Certificates) Reload() error {
 	if c.CertFile == "" || c.KeyFile == "" {
 		return errors.New("a TLS certificate and key are required")
 	}
-	m, err := readMaterial(c.CertFile, c.KeyFile, c.CAFile)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err == nil && c.current != nil && m.equal(c.loaded) {
-		c.err = nil
-		return nil
-	}
-	var pair *tls.Certificate
-	if err == nil {
-		pair, err = m.verify(c.Names, c.now())
+	var (
+		m    material
+		pair *tls.Certificate
+		err  error
+	)
+	// The files are read one at a time, so a Secret update landing between
+	// reads can pair an old certificate with a new key: read once more
+	// before reporting a failure.
+	for range 2 {
+		m, err = readMaterial(c.CertFile, c.KeyFile, c.CAFile)
+		if err == nil && c.current != nil && m.equal(c.loaded) {
+			c.err = nil
+			return nil
+		}
+		if err == nil {
+			if pair, err = m.verify(c.Names, c.now()); err == nil {
+				break
+			}
+		}
 	}
 	if err != nil {
 		c.err = err

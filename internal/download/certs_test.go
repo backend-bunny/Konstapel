@@ -14,25 +14,63 @@ import (
 	"time"
 )
 
-// mounted mimics a Secret volume: fixed paths whose content is replaced.
+// mounted mimics a Secret volume as the kubelet writes it: each file is a
+// symlink through ..data, and an update atomically swaps ..data to a new
+// directory, so readers never see a mix of old and new files.
 type mounted struct{ dir string }
 
 func (m mounted) path(n string) string { return filepath.Join(m.dir, n) }
 
 func (m mounted) set(t *testing.T, ca testCA, cert, key string) {
 	t.Helper()
+	files := map[string][]byte{"ca.crt": ca.pem}
 	for n, src := range map[string]string{"tls.crt": cert, "tls.key": key} {
 		b, err := os.ReadFile(src)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(m.path(n), b, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		files[n] = b
 	}
-	if err := os.WriteFile(m.path("ca.crt"), ca.pem, 0o600); err != nil {
+	m.write(t, files)
+}
+
+func (m mounted) write(t *testing.T, files map[string][]byte) {
+	t.Helper()
+	gen, err := os.MkdirTemp(m.dir, "..gen")
+	if err != nil {
 		t.Fatal(err)
 	}
+	for n, b := range files {
+		if err := os.WriteFile(filepath.Join(gen, n), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := m.path(n)
+		if _, err := os.Lstat(link); os.IsNotExist(err) {
+			if err := os.Symlink(filepath.Join("..data", n), link); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	tmp := m.path("..data_tmp")
+	_ = os.Remove(tmp)
+	if err := os.Symlink(filepath.Base(gen), tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, m.path("..data")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// read returns the current files, for a rotation that changes one of them.
+func (m mounted) read(t *testing.T) map[string][]byte {
+	t.Helper()
+	out := map[string][]byte{}
+	for _, n := range []string{"tls.crt", "tls.key", "ca.crt"} {
+		if b, err := os.ReadFile(m.path(n)); err == nil {
+			out[n] = b
+		}
+	}
+	return out
 }
 
 func servedSerial(t *testing.T, addr string, roots *x509.CertPool) (string, error) {
@@ -132,7 +170,11 @@ func TestCertificatesReloadRotation(t *testing.T) {
 		"wrong service name": func() { m.set(t, newCA, wrongName, wrongKey) },
 		"mismatched key":     func() { m.set(t, newCA, c3, k1) },
 		"untrusted by CA":    func() { m.set(t, oldCA, c3, k3) },
-		"missing key":        func() { _ = os.Remove(m.path("tls.key")) },
+		"missing key": func() {
+			f := m.read(t)
+			delete(f, "tls.key")
+			m.write(t, f)
+		},
 	}
 	for name, apply := range cases {
 		apply()
