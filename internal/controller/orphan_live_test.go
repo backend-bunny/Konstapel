@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -212,4 +213,26 @@ func TestLiveOrphanFence(t *testing.T) {
 		}
 	}
 	l.record("orphan-fence", map[string]any{"run": name, "phase": r.Status.Phase, "drained": hdr.Drained, "uncertainOperations": hdr.Uncertain})
+
+	// The documented operator path closes the handoff (S3 evidence,
+	// "Removing the inventory"): keep the inventory as evidence (it names
+	// runs, keys and receipts, never credentials), then delete the handoff's
+	// ConfigMaps by their label. Konstapel itself never deletes them.
+	handoff := header.Labels[LabelOrphanHandoff]
+	if handoff == "" {
+		t.Fatalf("inventory header lacks %s", LabelOrphanHandoff)
+	}
+	if err := os.WriteFile(filepath.Join(l.out, "TestLiveOrphanFence-inventory.json"),
+		[]byte(header.Data["inventory.json"]+"\n"+chunk.Data["inventory.json"]+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.c.DeleteAllOf(l.ctx, &corev1.ConfigMap{}, client.InNamespace(ns), client.MatchingLabels{LabelOrphanHandoff: handoff}); err != nil {
+		t.Fatal(err)
+	}
+	l.eventually("handoff inventory removed by the operator path", func() (bool, string) {
+		var left corev1.ConfigMapList
+		_ = l.c.List(l.ctx, &left, client.InNamespace(ns), client.MatchingLabels{LabelOrphanHandoff: handoff})
+		return len(left.Items) == 0, fmt.Sprint(len(left.Items))
+	})
+	l.record("orphan-cleanup", map[string]any{"handoff": handoff, "inventoryKept": "TestLiveOrphanFence-inventory.json", "configMaps": "deleted by label"})
 }

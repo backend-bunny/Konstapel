@@ -775,6 +775,31 @@ public registry. Known limits: conditional create is required, so services
 without `If-None-Match: *` support are refused at readiness. Archives are
 capped at 512 MiB because they are uploaded in a single request.
 
+**Final evidence for this change (v0.1.0 candidate).** Validation matrix:
+
+| Component | Version |
+| --- | --- |
+| S3 service | RustFS 1.0.3 (`KONSTAPEL_S3_IMAGE`, digest-pinned): compatibility suite passed in all three versioning modes on 2026-11-08 ([s3-compat.json](s3-compat.json)) |
+| Kubernetes | 1.37.0 (kind node pinned in `scripts/runtime.env`) |
+| Kyverno | 1.19.2 (chart 3.9.2) |
+| cert-manager | v1.21.3 (`charts` group) |
+| Helm | 4.3.1 |
+
+CI acceptance: main-branch run [42491849299](https://github.com/backend-bunny/Konstapel/actions/runs/42491849299) for `9f130990a348ea23b1e4fefc02baf3bba6c2415a`. Every
+group passed. The S3 behaviour is exercised by:
+- `storage`: destinations, pins, downloads, retention, orphaning, legacy
+  migration;
+- `recovery`: outages, faults, handover recovery and loss;
+- `charts` and `availability`: publication from the Helm-installed image;
+- `admission`: the preserved prototype runner validation (`konstapel
+  acceptance`/`validate`, the upstream Chainsaw fixtures, the offline replay).
+
+Each group tears down its own cluster and S3 container.
+`TestLiveOrphanFence` closes its intentional orphan handoff through the
+documented operator path ([Removing the inventory](#recovery-and-handoff-walkthrough)):
+it keeps the inventory as evidence (run identities, keys and receipts, no
+credentials), then deletes the handoff's ConfigMaps by label.
+
 Run the suite against a disposable, test-owned instance:
 
 ```sh
