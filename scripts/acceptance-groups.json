@@ -2,6 +2,7 @@
   "admission": {
     "core": true,
     "exceptionAdmission": false,
+    "release": false,
     "goTests": [
       "TestLiveDelivery",
       "TestLiveManager",
@@ -17,6 +18,7 @@
   "assessments": {
     "core": false,
     "exceptionAdmission": true,
+    "release": false,
     "goTests": [
       "TestLiveAssessmentStatus",
       "TestLiveAssessmentRuns",
@@ -27,6 +29,7 @@
   "storage": {
     "core": false,
     "exceptionAdmission": false,
+    "release": false,
     "goTests": [
       "TestLiveDestinationPins",
       "TestLiveEvidenceDownload",
@@ -39,6 +42,7 @@
   "capabilities": {
     "core": false,
     "exceptionAdmission": false,
+    "release": false,
     "goTests": [
       "TestLiveEngineCapabilityRecovery"
     ]
@@ -48,6 +52,7 @@
     "exceptionAdmission": false,
     "image": true,
     "certManager": true,
+    "release": true,
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall"
@@ -56,6 +61,7 @@
   "recovery": {
     "core": false,
     "exceptionAdmission": false,
+    "release": false,
     "goTests": [
       "TestLiveTargetingFailures",
       "TestLiveAssessmentFaults",
@@ -69,6 +75,7 @@
     "exceptionAdmission": false,
     "image": true,
     "workers": 2,
+    "release": true,
     "goTests": [
       "TestLiveHelmAvailability"
     ]

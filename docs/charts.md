@@ -519,21 +519,51 @@ rebuilt or re-rendered between acceptance and the registry.
    then freezes the archives with the [publication manifest](#publication-manifest).
    The output directory must not exist: frozen inputs are never replaced.
 2. **Accept those bytes.** `task charts:acceptance OUTPUT=… ARCHIVES=… IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…`
-   (`scripts/charts/acceptance.sh`) first verifies the manifest against
-   `HEAD` and the image digest. It then runs the `charts` group:
-   - the kind node pulls the image by its registry digest (`crictl pull`)
-     instead of building one;
+   (`scripts/charts/acceptance.sh`) needs a clean checkout of the frozen
+   source. It verifies the manifest against `HEAD` and the image digest, then
+   runs every **release-required group**: those marked `"release": true` in
+   `scripts/acceptance-groups.json` as committed at `HEAD`, today `charts`
+   (CRD chart lifecycle, installed controller, both TLS modes, downloads) and
+   `availability` (multi-node placement, disruption budgets, upgrades,
+   leader, pod and node loss, and recovery). Each group runs through
+   `scripts/acceptance.sh` on its own fresh disposable cluster, one after
+   another, in `OUTPUT/groups/<group>/`:
+   - every kind node pulls the image by its registry digest (`crictl pull`)
+     instead of building one (`image-ref.txt` records it);
    - the tests install the frozen `.tgz` files, and the runtime chart's own
      default digest, with no image override.
 
-   On success it writes `chart-acceptance.json` with the result, the source
-   commit and tag, both archive checksums, the CRD content identity, the image,
-   the tests run, and the kind, node, Kyverno, cert-manager and S3 versions.
+   A failed group stops the run. `scripts/charts/evidence.py` then derives
+   each test's result from the group's real `go test -v` log: a test passes
+   only if its own top-level `--- PASS:` line appears exactly once, with no
+   `FAIL` or `SKIP` for it or its subtests. A failed, skipped, missing or
+   duplicated result, a failed package, a panic, an unexpected test, a
+   nonzero exit status, or a cluster that ran another image fails the gate.
+   Only if every required group fully passed does it write
+   `chart-acceptance.json` (`konstapel.dev/chart-acceptance/v2`): the source
+   commit and tag, both archive checksums, the CRD content identity, the
+   image, and for each group its tests and their results, its exit status
+   and the SHA-256 of its log, result and image reference, plus the kind,
+   node, Kyverno, cert-manager and S3 versions.
+
+   The other groups (`admission`, `assessments`, `storage`, `capabilities`,
+   `recovery`) run in-process managers against a disposable cluster and
+   install no chart or image, so the release does not repeat them; it
+   requires their full main-branch pass for the tagged commit instead
+   (`scripts/ci/require-acceptance.py`). `task test` keeps the split honest:
+   every group must state `release`, release groups are exactly the groups
+   that install the image, and a live test that installs the charts or the
+   image must belong to one.
 3. **Publish write-once.** `scripts/charts/publish.py --archives … --acceptance chart-acceptance.json --registry oci://ghcr.io/backend-bunny/charts --out release.json`
    checks two things before any registry write: the frozen manifest, and an
-   acceptance record that passed for exactly those inputs (a pass for
-   another source, image, archive or CRD content is refused). Then, CRD chart
-   first:
+   acceptance record that passed for exactly those inputs. It reads the
+   required groups and tests from `scripts/acceptance-groups.json` at the
+   frozen source commit (`git show`), never from the record, and refuses a
+   record that is missing, unreadable, of another `apiVersion`, for another
+   source, tag, image, archive, chart version or CRD content, that lacks a
+   required group or has an extra one, or whose group did not pass, exited
+   nonzero, lacks its evidence digests, or lists other tests than the frozen
+   source or any result other than `pass`. Then, CRD chart first:
    - If the version doesn't exist, the frozen archive is pushed.
    - If it exists, its chart layer must be byte-identical to the frozen
      archive. A released version is never replaced, and different content
@@ -549,10 +579,16 @@ rebuilt or re-rendered between acceptance and the registry.
 OCI registry (`scripts/ci/oci_fake.py`) with the pinned Helm. It covers:
 - publication and read-back;
 - republishing as a no-op;
-- refusal without a passing or matching acceptance record, or with a changed
-  archive, before any write;
+- refusal, before any write, of a changed archive and of every class of bad
+  acceptance evidence above (missing, partial, failed, cancelled, skipped,
+  stale or for other inputs), with the requirements taken from the frozen
+  source commit;
 - a failed second push that a retry resumes;
 - an existing version with other bytes, which is never replaced.
+
+`scripts/ci/test_chart_evidence.py` covers deriving results from `go test -v`
+logs, reading the required groups from a commit rather than the working
+tree, and writing no record unless every required group fully passed.
 
 Signing, attestations, remote verification and the release workflow are
 described in [Releases](releases.md#chart-publication).

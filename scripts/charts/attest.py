@@ -13,14 +13,18 @@ sign is resumable: a subject whose signature, or whose chart-inputs
 attestation, already verifies under TRUST is not signed again, so a retry
 after a partial publication adds only what is missing. The attestation
 predicate (type CHART_INPUTS) records the frozen publication manifest and
-the passing acceptance record, so the OCI subject is bound to its source
-commit, image digest and archive checksum.
+the passing acceptance record with its per-group test results, so the OCI
+subject is bound to its source commit, image digest, archive checksum and
+the release acceptance that tested them. sign refuses an acceptance record
+that the publisher would refuse.
 
 verify checks, for both charts:
   - a signature on the OCI subject (repository@digest) under TRUST;
   - a chart-inputs attestation under TRUST whose in-toto subject is that
     digest and whose predicate names the release's source commit, tag,
-    image digest and that chart's archive checksum, with acceptance passed;
+    image digest and that chart's archive checksum, and whose acceptance
+    record is a full pass of every release-required group and test of the
+    released source commit for those inputs (scripts/charts/evidence.py);
   - pulling the subject by digest yields exactly the frozen archive bytes,
     so what is verified is what an operator installs.
 Nothing is reported verified unless both charts pass.
@@ -35,6 +39,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import evidence  # noqa: E402
 
 CHART_INPUTS = "https://github.com/backend-bunny/Konstapel/chart-inputs/v1"
 CHARTS = ("konstapel-crds", "konstapel")
@@ -104,6 +111,12 @@ def check_predicate(release: dict, name: str, statement: dict) -> None:
     for what, got, want in wants:
         if got != want:
             raise Failed(f"{name}: attested {what} {got!r}, released {want!r}")
+    # The attested acceptance must be a full pass of every release-required
+    # group and test of the released source commit, for the attested inputs.
+    try:
+        evidence.check(pub, acc, evidence.frozen_groups(release["source"]["commit"]))
+    except (evidence.Rejected, KeyError, TypeError, AttributeError) as e:
+        raise Failed(f"{name}: attested acceptance: {e}")
 
 
 def verified_attestation(args, release, name) -> bool:
@@ -125,6 +138,10 @@ def sign(args) -> None:
     acceptance = json.loads(Path(args.acceptance).read_text())
     if publication["source"] != release["source"] or publication["image"] != release["image"]:
         raise Failed("release.json and publication.json disagree")
+    try:
+        evidence.check(publication, acceptance, evidence.frozen_groups(publication["source"]["commit"]))
+    except evidence.Rejected as e:
+        raise Failed(f"acceptance: {e}")
     predicate = Path(tempfile.mkdtemp()) / "chart-inputs.json"
     predicate.write_text(json.dumps({"publication": publication, "acceptance": acceptance}, sort_keys=True))
     for name in CHARTS:

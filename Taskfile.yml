@@ -85,7 +85,7 @@ tasks:
       - scripts/charts/package.sh "$KONSTAPEL_TASK_OUT" "$KONSTAPEL_TASK_DIGEST"
 
   charts:acceptance:
-    desc: Run installed-chart acceptance on frozen ARCHIVES and IMAGE (repo@sha256) and bind the result (requires Docker; fresh OUTPUT)
+    desc: Run every release-required acceptance group on frozen ARCHIVES and IMAGE (repo@sha256) and bind the per-test results (clean checkout; requires Docker; fresh OUTPUT)
     requires:
       vars: [OUTPUT, ARCHIVES, IMAGE]
     env:

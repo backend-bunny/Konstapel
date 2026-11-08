@@ -54,7 +54,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task charts:package OUT=/fresh/path IMAGE_DIGEST=sha256:…` | From a clean checkout, package both charts with the runtime chart defaulting to that image digest, and freeze them with `publication.json` ([Helm charts](charts.md#release-packaging-and-publication)). |
-| `task charts:acceptance OUTPUT=/fresh/path ARCHIVES=/path IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…` | Run the `charts` acceptance group on those exact archives, with the cluster pulling that image by digest. Writes `chart-acceptance.json`, which binds the pass to the frozen inputs. |
+| `task charts:acceptance OUTPUT=/fresh/path ARCHIVES=/path IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…` | From a clean checkout, run every release-required acceptance group (`"release": true`: `charts` and `availability`) in turn, each on its own disposable cluster, on those exact archives with every node pulling that image by digest. Writes `chart-acceptance.json` only if every required test passed, binding the per-test results to the frozen inputs. |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
 
 After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
@@ -109,7 +109,14 @@ runner with its own disposable kind cluster and test-owned S3 services:
 
 `scripts/acceptance-groups.json` defines the matrix and Go test selection. The
 normal `task test` checks that every compiled `TestLive*` test is assigned exactly
-once. Tests stay sequential inside each cluster: failure probes stop shared
+once, and that every group states `"release": true` or `false`. Release groups
+(`charts`, `availability`) install the Helm charts and the controller image, so
+[release acceptance](charts.md#release-packaging-and-publication) runs them
+again on the frozen archives and the published image digest; `task test` fails
+if a test that installs the charts or the image sits in a non-release group.
+The other groups exercise in-process managers against a disposable cluster and
+install no chart; a release relies on their main-branch pass for the tagged
+commit (`scripts/ci/require-acceptance.py`). Tests stay sequential inside each cluster: failure probes stop shared
 Kyverno deployments, managers watch cluster-wide resources, and tests configure
 process-global assessment settings. Matrix fail-fast is disabled so every group
 can finish and upload diagnostics even if another fails.

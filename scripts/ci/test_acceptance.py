@@ -38,6 +38,43 @@ class GroupCoverageTests(unittest.TestCase):
         self.assertEqual(sum(group["core"] for group in acceptance.GROUPS.values()), 1)
 
 
+class ReleaseGroupTests(unittest.TestCase):
+    """Release acceptance (scripts/charts/acceptance.sh) runs exactly the
+    groups marked "release": true against the frozen chart archives and the
+    released image digest. Every group must be classified consciously, and a
+    test that installs the charts or the controller image cannot sit in a
+    group that release acceptance skips."""
+
+    CHART_USE = re.compile(r"\b(chartArchive|chartDir|imageValues)\(|KONSTAPEL_LIVE_IMAGE")
+
+    def release(self):
+        spec = importlib.util.spec_from_file_location("evidence", HERE.parent / "charts/evidence.py")
+        evidence = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evidence)
+        return evidence.release_groups(acceptance.GROUPS)
+
+    def test_every_group_is_classified_and_release_groups_install_the_image(self):
+        for name, group in acceptance.GROUPS.items():
+            with self.subTest(group=name):
+                self.assertIsInstance(group.get("release"), bool)
+                self.assertEqual(group["release"], group.get("image") is True,
+                                 "a group that installs the controller image must run in release acceptance, and only those")
+        self.assertLessEqual({"charts", "availability"}, set(self.release()))
+
+    def test_tests_that_install_charts_or_the_image_run_in_release_acceptance(self):
+        release = {test for tests in self.release().values() for test in tests}
+        found = set()
+        for path in sorted((HERE.parents[1] / "internal").rglob("*_live_test.go")):
+            text = path.read_text()
+            if path.name == "chartsource_live_test.go" or not self.CHART_USE.search(text):
+                continue
+            for test in re.findall(r"(?m)^func (TestLive\w+)\(", text):
+                found.add(test)
+                with self.subTest(test=test, file=path.name):
+                    self.assertIn(test, release)
+        self.assertTrue(found, "no chart-installing live tests found")
+
+
 class ScopeTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
