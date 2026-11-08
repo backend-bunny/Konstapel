@@ -18,6 +18,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 - [x] 1.1 Add a lifecycle fixture matrix for startup, leadership, serving, termination and recovery boundaries; verify every availability requirement maps to an expected state or observable result and name the implementing feature owner.
 - [ ] 1.2 Add fault fixtures around the existing publication contract for lost responses, same-run conflicting bytes and recovery from a separate client; verify matching operations retain identity/expiry and fixtures distinguish a shared fake store from real durable-backend acceptance.
+  <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [x] 1.3 Document the manager/Helm integration contract, defaults, dependencies and fixture commands; verify it names existing entry points/interfaces after their owners merge and marks unimplemented services unavailable.
 
 ## 2. Integrate election and background worker lifecycle
@@ -27,11 +28,14 @@ Do not create another manager, shared filesystem, or placeholder service.
 - [x] 2.3 Propagate leadership cancellation through worker retries and owned C2P processes, retaining normal manager error/exit behavior and no early Lease release; verify leadership loss stops new work and terminates children within the configured bound.
 - [x] 2.4 Exercise delayed former-leader Kubernetes writes/deletes against newer generations and ownership; verify optimistic conflicts trigger fresh resolution and stale attempts cannot overwrite protected state or withdraw a current/unmanaged contribution.
 - [ ] 2.5 Integrate lifecycle transitions with the observability owner's projections when available; verify former-leader summaries clear, successors reconstruct before publishing, and document Lease inspection, permission failures and measured recovery limits.
+  <!-- agent: tier=deep risk=medium reason="Leadership-aware observability projections" -->
 
 ## 3. Serve and authorize requests on every ready replica
 
 - [ ] 3.1 Register implemented admission/download servers outside the elected worker group and wire startup/readiness/liveness to their local prerequisites; verify a ready follower serves requests, invalid TLS/unsynchronized state prevents readiness, and missing external capabilities fail only affected operations.
+  <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [ ] 3.2 Exercise protected admission against each replica during central edits, renewal and leadership changes; verify authoritative scope/revision checks, authenticated attribution and dry-run behavior remain intact and no grant is broadened or renewed by failover.
+  <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [x] 3.3 Integrate follower downloads with durable request/run lookup and the S3 owner; verify identical package digests after the producing pod is removed, current authorization on retry, namespace-UID isolation and explicit expiry/backend errors without leader-local files.
 - [x] 3.4 Exercise certificate/credential rotation and authorization revocation on both serving pods; verify each uses current trust/access rules, records no secret values and does not depend on session affinity or a leader proxy.
 - [x] 3.5 Document serving versus leadership readiness and client retry behavior; verify the Helm owner can select/probe all ready replicas and the documented service requests work through a known follower.
@@ -49,7 +53,10 @@ Do not create another manager, shared filesystem, or placeholder service.
 - [x] 5.1 Consume the Helm owner's merged availability values and render tests; verify default two replicas, explicit development one, preferred hostname separation, default multi-replica minAvailable 1 PDB, development PDB omission and zero-unavailable/one-surge rolling updates without duplicating chart ownership.
 - [x] 5.2 Extend the shared chart acceptance harness with a pinned multi-node cluster, real packaged image and test-owned S3 backend; verify both pods become ready, record their placement/Lease holder, and prove admission/download requests reach the follower when those features are enabled.
 - [ ] 5.3 Exercise abrupt leader failure, graceful leader/follower replacement and node loss under traffic; verify bounded cancellation/recovery, retained policy/acceptance identities, same-run publication recovery and truthful metrics/evidence rather than inferring correctness from Lease ownership.
+  <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [x] 5.4 Exercise a supported rolling image upgrade and sequential voluntary evictions; verify replacement readiness before normal rollout retirement, PDB rejection of an availability-breaking eviction and explicit pending rollout when surge capacity is constrained.
 - [x] 5.5 Run single-node preferred-placement and single-replica development cases; verify both replicas can co-locate when capacity permits, development permits drain, and documentation does not claim node redundancy or redundant single-replica service.
 - [ ] 5.6 Exercise leader API loss, registry/backend outages, trust rotation and authorization revocation during handover; verify fail-closed affected operations, stable retained enforcement/expiry, no stale healthy summaries and recovery without fabricated evidence.
+  <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [ ] 5.7 Record the supported version matrix, observed recovery/traffic results and operational runbook, then run the applicable existing checks; verify release acceptance covers every advertised enabled feature and tear down task-owned clusters, releases, objects and processes while retaining diagnostics.
+  <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

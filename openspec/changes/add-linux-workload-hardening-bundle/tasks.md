@@ -50,12 +50,19 @@ the other agents' CRDs or task lists.
 ## 5. Integrate recorded exceptions and final assessment output
 
 - [ ] 5.1 After exception integration lands, add eligible non-root and non-negotiable policy cases using real application credentials; verify only an authorized scoped exception permits the deviation, sibling namespaces/workloads remain constrained, and unrelated policies still deny.
+  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 5.2 Exercise renewal, expiry, revocation, and policy revision changes on the bundle; verify accepted revisions never silently expand, expired grants stop working on the compatible engine, and retained snapshots explain historical evaluations.
+  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 5.3 Export combined raw outcomes, applicability, and accepted-risk context through C2P to OSCAL; verify skip/pass influenced by exceptions is distinct from ordinary passing evidence and unresolved/missing/stale evidence cannot establish compliance.
+  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 5.4 Document the bundle exception walkthrough, whole-policy waiver consequences, and final report interpretation; verify a retained output package remains understandable after live exception cleanup.
+  <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 6. Verify the complete expanded assessment
 
 - [ ] 6.1 Run the combined acceptance command from clean state with the original privileged check and all four new checks; verify targeting, admission, background collection, exception lifecycle, and declared-schema OSCAL validation satisfy the capability scenarios together.
+  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 6.2 Run failure/cleanup paths for unsupported prerequisites, missing evidence, unexpected admission, and failed exception attribution; verify failures retain diagnostics and cleanup affects only owned resources without fabricating pass results.
+  <!-- agent: tier=deep risk=high reason="Exception governance and attributable compliance evidence" -->
 - [ ] 6.3 Repeat the documented clean-state workflow on the final engine pin and retain the tested matrix, rendered digests, and acceptance artifacts; verify any engine update needed for expiry also passes the original loop and all rendered-policy regressions.
+  <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
