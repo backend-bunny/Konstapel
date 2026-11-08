@@ -209,3 +209,27 @@ func TestEarlyLossAndCorruptionAreUnavailable(t *testing.T) {
 		t.Fatalf("outage changed availability: %+v", p)
 	}
 }
+
+// A deletion whose response was lost (the objects are gone, the controller
+// saw an error) keeps the retention obligation: the finalizer stays, the
+// next attempt after backoff finds nothing owned left and records the
+// Deleted tombstone (add-controller-high-availability 4.5).
+func TestLostDeleteResponseIsRetriedToDeleted(t *testing.T) {
+	e, name := completedRun(t, "10m")
+	e.now = e.run(name).Status.Publication.ExpiresAt.Add(time.Second)
+	e.pub.LoseResponse(fake.OpDelete)
+	e.step(name)
+	r := e.run(name)
+	if r.Status.Publication.Phase == "Deleted" || !controllerutil.ContainsFinalizer(r, RetentionFinalizer) {
+		t.Fatalf("a lost delete response released the run: %+v", r.Status.Publication)
+	}
+	e.now = e.now.Add(2 * time.Hour) // past the cleanup backoff
+	e.step(name)
+	r = e.run(name)
+	if r.Status.Publication.Phase != "Deleted" || r.Status.Publication.Cleanup.State != "Deleted" || controllerutil.ContainsFinalizer(r, RetentionFinalizer) {
+		t.Fatalf("retry did not complete the deletion: %+v", r.Status.Publication)
+	}
+	if e.pub.Calls(fake.OpDelete) != 2 {
+		t.Fatalf("delete calls %d, want 2", e.pub.Calls(fake.OpDelete))
+	}
+}
