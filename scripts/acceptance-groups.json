@@ -70,6 +70,7 @@
     "image": true,
     "workers": 2,
     "goTests": [
+      "TestLiveHelmDurableRecovery",
       "TestLiveHelmAvailability"
     ]
   }

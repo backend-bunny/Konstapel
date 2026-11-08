@@ -207,6 +207,12 @@ rows across leaders:
 - In the lost-capture case, the test also checks that S3 holds no staging for
   the lost run, and that a following run publishes.
 
+These in-process tests use managers in the test process. On the
+Helm-installed image, `TestLiveHelmDurableRecovery` (`availability` group)
+checks the second and third rows and the last one with two installed
+replicas, and `TestLiveHelmAvailability` the first
+([Deployed availability](#deployed-availability-multi-node-acceptance)).
+
 ## Per-pod budgets
 
 Each replica has its own bounded storage and concurrency. Nothing is shared
@@ -279,7 +285,9 @@ Tests:
   and that the committed package is undamaged.
 - `TestLiveLeaderHandoverRecovery` and `TestLiveLeaderHandoverLoss` cover
   the staged, receipt-lost and capture-lost rows across leaders.
-- `TestLiveHelmAvailability` covers capture loss with the installed image.
+- `TestLiveHelmAvailability` covers capture loss with the installed image,
+  and `TestLiveHelmDurableRecovery` the staged and receipt-lost rows
+  ([Deployed availability](#deployed-availability-multi-node-acceptance)).
 - `TestLiveEvidenceRecovery` and `TestLiveRetentionLifecycle` cover expiry
   deletion blocked by a legal hold and resumed, and a binding deleted during
   an S3 outage.
@@ -356,12 +364,29 @@ plane, so losing a worker removes Konstapel replicas but not the engine.
 | Leader loss during an S3 outage | after capture, with S3 paused, the leader pod is force-deleted. The run stays `Publishing` (uncertain access, never `CaptureLost`) while S3 is down. The capture lived only in that pod's staging volume, so once S3 returns the run ends as a truthful `CaptureLost`, and the next run publishes under a new identity |
 | Node loss | the leader's worker container is stopped. The replica on the other worker takes the Lease (about 19–21 s) and reconciles, and the download replica there serves the package |
 
-Not exercised on the deployed image: byte-identical recovery of a run that
-the former leader had already staged in S3. No reliable way exists to stop
-the installed controller between staging and commit, so this is covered with
-real S3 by the in-process `TestLiveLeaderHandoverRecovery` and
-`TestLiveLeaderHandoverLoss`, which run the same code
-([Recovery on leadership acquisition](#recovery-on-leadership-acquisition)).
+`TestLiveHelmDurableRecovery` (same group, same packaged image and charts)
+proves recovery of work that the leader had already made durable in S3. A
+test-owned fault proxy (`internal/s3fault`, built from the checkout and run
+in a disposable container on the kind network) sits between the pods and the
+test S3 service. It forwards requests with their signed `Host` header
+unchanged and interrupts one run's conditional commit
+(`PUT …/<run UID>/commit.json` with `If-None-Match: *`). The controller is
+not changed or replaced. Each case removes the pod that holds the Lease at
+that moment (force delete, grace 0) and waits until its container has
+stopped on the node; the other installed replica, with its own empty staging
+volume, takes over. The workers stay cordoned until it holds the Lease, so the
+Deployment's replacement pod cannot race it:
+
+| Case | What must hold |
+| --- | --- |
+| Staged, not committed | the proxy holds the leader's commit and never forwards it. Read directly from S3, the run has exactly one staged attempt whose archive matches its recorded SHA-256, and no commit. The binding's retention changes from 600s to 900s, S3 is blackholed, and the leader pod is removed. While the successor's S3 requests are held, the single run stays `Publishing` for 30 s and is never `CaptureLost`. After release the successor commits the same run (same name, UID and publication ID) with the leader's staged archive object: the staged, committed, receipt and downloaded SHA-256 are equal, the commit is forwarded once, and the retention and expiry are the binding's at the commit (900s), not the 600s recorded at closure |
+| Committed, receipt lost | the proxy forwards the leader's commit, which lands in S3, withholds the response and blackholes every later request. The binding's retention changes from 600s to 120s and the leader pod is removed. The run stays `Publishing`, never `CaptureLost`, while S3 is unreachable. After release the successor records the original commit: publication ID, archive key, manifest version, package SHA-256, `publishedAt` (the commit object's server time) and `expiresAt` (`publishedAt` + the committed 600s). The commit reached S3 once, the commit object has one version, and the downloaded package matches |
+
+A background watch over each run fails on any other UID, `Failed` or
+`CaptureLost`; the phases seen are recorded (`Collecting`, `Publishing`,
+`Completed`). The proxy's log and the recorded steps are kept with the test
+evidence (`<output>/targeting/TestLiveHelmDurableRecovery*.json` and
+`…-s3fault.log`).
 
 ## Lifecycle matrix
 
