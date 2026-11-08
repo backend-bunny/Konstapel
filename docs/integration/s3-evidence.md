@@ -607,7 +607,11 @@ verification cannot be disabled: an untrusted endpoint fails until its CA is in
 `--tls-cert-file`, `--tls-private-key-file`, optionally `--tls-ca-file` and
 repeatable `--tls-server-name` (it refuses to start unless the certificate is
 currently valid, covers those names and chains to that CA), and `--audience`
-(default `konstapel-download`). Its service account needs
+(default `konstapel-download`). It re-reads those files every 10 seconds and
+serves a rotated certificate once it passes the same checks. `GET /readyz`
+fails while the files are invalid or the served certificate has expired, and
+`GET /healthz` reports only that the process is serving. Neither probe needs a
+token. Its service account needs
 `config/rbac/evidence-download.yaml`. That file holds a ClusterRole with
 TokenReview and SubjectAccessReview `create` plus read on requests, runs and
 namespaces, and for a `credentialSecret` destination a Role reading that
