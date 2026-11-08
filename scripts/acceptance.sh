@@ -111,7 +111,19 @@ elif includes image; then
   # that manifest digest under its real repository so the chart's
   # repository@digest reference resolves locally (pullPolicy Never).
   node="$KONSTAPEL_CLUSTER_NAME-control-plane"
-  imported=$(docker exec "$node" crictl inspecti -o json ghcr.io/backend-bunny/konstapel:build-amd64 | jq -er '.status.repoDigests[0]')
+  # containerd can register an archive import a moment after kind returns:
+  # wait for it, and load once more if it never appears.
+  imported=
+  for attempt in $(seq 1 30); do
+    if imported=$(docker exec "$node" crictl inspecti -o json ghcr.io/backend-bunny/konstapel:build-amd64 2>/dev/null | jq -er '.status.repoDigests[0]'); then
+      break
+    fi
+    if (( attempt == 15 )); then
+      kind load image-archive out/image/image.tar --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee -a "$out/image-load.log"
+    fi
+    sleep 2
+  done
+  [[ -n $imported ]] || { echo "the loaded controller image never appeared on $node" | tee -a "$out/image-load.log"; exit 1; }
   KONSTAPEL_LIVE_IMAGE=ghcr.io/backend-bunny/konstapel@${imported##*@}
   for each in $(kind get nodes --name "$KONSTAPEL_CLUSTER_NAME"); do
     docker exec "$each" ctr -n k8s.io images tag ghcr.io/backend-bunny/konstapel:build-amd64 "$KONSTAPEL_LIVE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
