@@ -26,6 +26,7 @@ import (
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -120,9 +121,15 @@ func TestLiveBoundedShutdown(t *testing.T) {
 		return err == nil && lease.Spec.HolderIdentity != nil, ""
 	})
 	other, long := "another-replica", int32(3600)
-	now := metav1.NewMicroTime(time.Now())
-	lease.Spec.HolderIdentity, lease.Spec.LeaseDurationSeconds, lease.Spec.AcquireTime, lease.Spec.RenewTime = &other, &long, &now, &now
-	if err := l.c.Update(l.ctx, lease); err != nil {
+	// The leader renews every second: re-read and retry on conflict.
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: LeaderElectionID}, lease); err != nil {
+			return err
+		}
+		now := metav1.NewMicroTime(time.Now())
+		lease.Spec.HolderIdentity, lease.Spec.LeaseDurationSeconds, lease.Spec.AcquireTime, lease.Spec.RenewTime = &other, &long, &now, &now
+		return l.c.Update(l.ctx, lease)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	stolen := time.Now()
