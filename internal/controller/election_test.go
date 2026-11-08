@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"strings"
 	"testing"
 	"time"
@@ -38,5 +39,20 @@ func TestShutdownTimeoutValidated(t *testing.T) {
 	_, err := NewManager(&rest.Config{Host: "https://127.0.0.1:1"}, Options{ShutdownTimeout: -time.Second})
 	if err == nil || !strings.Contains(err.Error(), "shutdown timeout") {
 		t.Fatalf("negative shutdown timeout accepted: %v", err)
+	}
+}
+
+// Background workers that act on the cluster run only on the elected
+// leader (add-controller-high-availability 2.2). controller-runtime starts
+// and syncs the caches before leader election, and every controller here
+// is leader-elected by default, so a leader never acts on an unsynced view.
+func TestBackgroundWorkersNeedLeadership(t *testing.T) {
+	for name, r := range map[string]manager.LeaderElectionRunnable{
+		"deferred engine watch": &deferredWatch{},
+		"capability trigger":    &capabilityTrigger{},
+	} {
+		if !r.NeedLeaderElection() {
+			t.Errorf("%s runs on followers", name)
+		}
 	}
 }
