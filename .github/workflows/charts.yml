@@ -186,6 +186,14 @@ jobs:
           for chart in konstapel-crds konstapel; do
             echo "${chart//-/_}=$(jq -er --arg c "$chart" '.charts[$c].digest' out/charts-release.json)" >> "$GITHUB_OUTPUT"
           done
+      # Helm's registry login does not authenticate Cosign or the provenance
+      # action: those clients use Docker's credential store.
+      - name: Authenticate chart signing and provenance to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Sign and attest chart inputs
         run: |
           devbox run -- python3 scripts/charts/attest.py sign --release out/charts-release.json --archives out/charts \

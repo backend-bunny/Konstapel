@@ -159,3 +159,21 @@ attestation repeat.
 The release configuration and workflow follow the Apache-2.0 implementation in
 [talos-nyckelpiga](https://github.com/backend-bunny/talos-nyckelpiga/tree/3505994c1009ac01f5f0cc526b82468c94e3ab4c),
 adapted to Go and Konstapel's existing image publishing pipeline.
+
+### Chart signing authentication failures
+
+Helm's registry login and Docker's credential store are separate. The chart
+publisher authenticates Helm for chart uploads and uses `docker/login-action`
+with the job's package-write token for Cosign and OCI provenance uploads.
+A successful Helm push does not prove that signing clients are authenticated.
+
+If publication stops at signing, keep the frozen release assets and existing
+OCI subjects. After a workflow authentication fix is merged, dispatch `charts`
+on **main** with the existing release tag. Rerunning an old failed workflow
+uses its original workflow revision and will not pick up the fix. The new
+run reuses the release's frozen inputs, repeats their acceptance, and adds
+missing signatures and attestations without replacing the charts. Verify both
+subjects and the attached `charts-release.json` before reporting completion.
+The original release-please notes job will remain skipped after a separate
+chart retry; update the release notes using the verified chart record and the
+existing release-note helper, preserving the changelog and user text.
