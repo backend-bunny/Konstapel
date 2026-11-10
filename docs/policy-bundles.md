@@ -261,6 +261,129 @@ sources:
 This is the configuration contract and its validation only. Nothing reads the
 ConfigMap, watches Secrets, contacts a registry or verifies a signature yet.
 
+## Registry retrieval
+
+[`internal/bundle/registry`](../internal/bundle/registry) retrieves one pinned
+bundle and the proofs attached to it, using ORAS Go (`oras.land/oras-go/v2`
+v2.7.0) for the OCI distribution protocol and its standard registry
+challenge/token handling. It is **not yet wired into the controller**: nothing
+calls it at runtime, and it is not linked into the shipped binaries. It has been
+tested only against an in-process fake registry serving real `bundle.Build`
+bytes; validation against a real authenticated TLS registry is the separate
+registry fixture task (2.4).
+
+`Client.Fetch(ctx, source, digest)` takes a configured `BundleSource` and the
+profile's pinned manifest digest and returns the manifest, the layer and the
+proofs, or a typed error. Its contract:
+
+- **By digest only.** The manifest is requested as
+  `/v2/<path>/manifests/sha256:<hex>`; no tag is ever resolved, so a moved tag
+  has no effect. The manifest bytes' SHA-256 must equal the pinned digest (a
+  `Docker-Content-Digest` header is not trusted), and every blob and referrer is
+  checked against its descriptor's digest *and* size.
+- **Bundle shape.** Indexes, non-OCI manifests and any manifest rejected by
+  `bundle.ValidateManifest` (artifact type, empty config, exactly one tar+gzip
+  layer) fail with `ErrUnexpectedDescriptor`. The empty config is not
+  downloaded.
+- **OCI 1.1 referrers API only.** Proofs are listed with
+  `GET /v2/<path>/referrers/<digest>`. A registry that answers 404 (other than
+  `NAME_UNKNOWN`), 405, 501 or a non-index body fails with
+  `ErrReferrersUnsupported`. There is no fallback to the `sha256-<hex>`
+  referrers tag schema and no separate signature repository.
+- **Exact subject.** A listed referrer becomes a proof only if its downloaded,
+  digest-checked manifest names the pinned digest (and its size) as `subject`,
+  repeats the listed artifact type, carries a recognized predicate type and has
+  exactly one Sigstore bundle layer. Anything else (another subject, an
+  unrelated artifact or predicate type, an unexpected layout) is not an error:
+  it is reported in `Result.Skipped` with a reason and never used. Integrity and
+  limit failures, by contrast, fail the whole retrieval.
+- **Proofs are reported, not trusted.** `Result.Missing` and
+  `Result.RequireProofs(RequiredProofs...)` name the required kinds
+  (`signature`, `provenance`) that were not found (`ErrMissingProofs`).
+  Signature and provenance verification are the later verifier's job; the
+  predicate-type annotation used for classification is unauthenticated, so the
+  verifier must check the signed statement itself.
+
+### Referrer layout
+
+The recognized layout is what the pinned Cosign (v3.1.3, `devbox.json`) writes
+by default ("new bundle format", OCI referrers). It was determined from the
+Cosign v3.1.3 source (`pkg/oci/remote/write.go`: `WriteReferrer`,
+`WriteAttestationNewBundleFormat`; `cmd/cosign/cli/sign/sign.go`;
+`pkg/types/predicate.go`) and sigstore-go v1.2.2 `bundle.MediaTypeString("0.3")`.
+`cosign sign` and `cosign attest --type slsaprovenance1` each push one image
+manifest to the bundle's own repository:
+
+| Field | Value |
+| --- | --- |
+| `mediaType` | `application/vnd.oci.image.manifest.v1+json` |
+| `artifactType` | `application/vnd.dev.sigstore.bundle.v0.3+json` (both kinds) |
+| `config` | the OCI empty descriptor (`application/vnd.oci.empty.v1+json`, `{}`) |
+| `layers` | exactly one, media type `application/vnd.dev.sigstore.bundle.v0.3+json`: the Sigstore bundle JSON |
+| `subject` | the pinned bundle manifest (media type, digest, size) |
+| annotation `dev.sigstore.bundle.predicateType` | `https://sigstore.dev/cosign/sign/v1` → signature; `https://slsa.dev/provenance/v1` → provenance |
+
+Cosign also sets `dev.sigstore.bundle.content: dsse-envelope` and
+`org.opencontainers.image.created`; they are not used for selection. The
+registry fixture must serve this layout through the referrers API. Legacy
+`.sig`/`.att` tags, the older bundle media type spellings and other predicate
+types (for example SLSA v0.2) are not recognized.
+
+### Limits and defaults
+
+`registry.DefaultLimits()`; every field is configurable, and exceeding a size or
+count limit is an error, never a truncation:
+
+| Limit | Default |
+| --- | --- |
+| Concurrent retrievals (all sources) | 4 |
+| Each HTTP exchange, including its body and token requests | 30 s |
+| One retrieval attempt, after it obtains a slot | 2 min |
+| Retry backoff (`RetryPolicy.Delay`, jittered) | 5 s to 5 min |
+| Subject manifest and each referrers page | 4 MiB |
+| Referrers listed for the subject (any type) | 64 |
+| Verification metadata: listing bodies, referrer manifests and proof layers | 16 MiB in total |
+| Compressed bundle layer | 64 MiB |
+
+Declared sizes are checked before a download starts, and reads stop one byte
+past the declared size whatever `Content-Length` says. `RetryPolicy.Delay`
+draws uniformly from `[ceiling/2, ceiling]` where the ceiling doubles from
+10 s per attempt up to 5 min, never below 5 s; the random source is injected.
+The retry loop belongs to the resolver. `Classify` sorts errors into
+*canceled* (the caller left), *permanent* for this configuration and digest
+(`ErrIntegrity`, `ErrUnexpectedDescriptor`, `ErrLimitExceeded`,
+`ErrReferrersUnsupported`, `ErrInvalidRequest`) and *retryable* (timeouts,
+transport errors, `ErrNotFound`, `ErrUnauthorized`, `ErrUnavailable`,
+`ErrCredentials`).
+
+### Concurrency and cancellation
+
+Concurrent `Fetch` calls for the same source, credential reference and digest
+share one retrieval; different digests or credentials never do. A finished
+retrieval is not cached (caching is a later group). The work runs on its own
+goroutine, so a reconciler or health handler bounds only its own wait with
+`ctx`. A caller that cancels gets its context error immediately while the
+shared work continues for the remaining callers; the work is canceled when its
+last caller leaves.
+
+### Transport and credentials seam
+
+`Options.Transport` (an `http.RoundTripper`, defaulting to a clone of
+`http.DefaultTransport` with system roots) is where custom CA pools are
+configured; a transport with `InsecureSkipVerify` is rejected. Plain HTTP is
+possible only with `Options.TestOnlyPlainHTTP`, used by in-process fixtures.
+Redirects are limited to five and may not leave HTTPS (`ErrInsecureRedirect`);
+net/http drops the `Authorization` header on a redirect to another host.
+`Options.Credentials` is a `CredentialProvider` that is asked only for the
+source's own registry host, never for a token realm or another origin. When a
+source references a credential Secret, the credential is obtained before any
+request and an error or empty credential fails with `ErrCredentials`, so a
+public registry is never read anonymously instead. Token caches are kept per
+source and credential reference; `Client.ResetTokens` discards one after a
+rotation. Credential values never appear in returned errors: values the
+attempt sent, including any echoed back by the registry, are replaced with
+`[REDACTED]`, and `Credential` formats as redacted.
+
 ## Create and package a bundle
 
 1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal

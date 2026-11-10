@@ -25,7 +25,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 - [x] 2.1 Define and document the versioned name-to-source configuration and its credential/CA/publisher references; test duplicate or missing sources, invalid repositories, invalid trust rules and payload-name mismatches while preserving the profile name/digest schema.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.2 Add pinned ORAS Go dependencies and a bounded digest/referrer retrieval adapter; test exact-subject selection, moved tags, unexpected descriptors, missing proofs, timeout/cancellation, referrer limits and concurrent request deduplication.
+- [x] 2.2 Add pinned ORAS Go dependencies and a bounded digest/referrer retrieval adapter; test exact-subject selection, moved tags, unexpected descriptors, missing proofs, timeout/cancellation, referrer limits and concurrent request deduplication.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
 - [ ] 2.3 Implement namespace-local dockerconfigjson Secret credentials and custom CA handling; test rotation/token invalidation, missing configured Secrets, malformed credentials, helper rejection and prevention of credential disclosure or forwarding to unrelated origins.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
