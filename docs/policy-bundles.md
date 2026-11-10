@@ -108,3 +108,34 @@ count and size limits before the descriptor and inventory are verified.
 
 The command-line workflow (`bundles:package`) that drives this, and the
 publication path, are not available yet.
+
+## Bundle definitions
+
+A bundle is defined by a small JSON file at `bundles/<name>/definition.json`.
+It holds the descriptor fields (name, version, source repository, policy and
+check inventory, scope, compatibility, OSCAL entry points) and an `include` list
+that selects existing repository files into archive paths:
+
+```json
+{"from": "content/component-definition.json", "to": "content/component-definition.json", "role": "component-definition"}
+```
+
+The definition selects content that other owners maintain; it does not copy or
+replace it, and it does not rename any C2P `Rule_Id`/`Check_Id`. It cannot name
+its own commit: the build supplies `source.revision` and the commit time.
+`{"generate": "sha256sums", "to": "content/SHA256SUMS", "role": "checksums"}`
+makes the builder write a `sha256sum -c` compatible list of every `content/`
+file. Upstream test fixtures stay beside the policy they exercise, so their
+relative paths keep working when the archive is unpacked and tested.
+
+### First bundle: `konstapel-privileged-containers`
+
+`bundles/konstapel-privileged-containers/definition.json` packages the existing
+Kyverno `disallow-privileged-containers` policy with its upstream tests,
+licenses, provenance, the pinned NIST catalog and Moderate profile, the OSCAL
+1.1.3 and 1.2.3 schemas, and the existing bounded AC-6 component definition
+(partial technical evidence only; it does not claim AC-6 or Moderate
+satisfaction). Tests build it from this repository and check, on the unpacked
+payload: the packaged checksums verify and agree with `content/SHA256SUMS`, the
+AC-6 mapping and descriptor inventory correspond, and the upstream Kyverno
+fixtures pass. The bundle is defined but **not published**.
