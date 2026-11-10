@@ -18,6 +18,11 @@ manifest changes. Do not manually synchronize that historical baseline with
 `VERSION` before the first release PR. The bootstrap commit marks the project's
 fresh start, so the initial changelog excludes work from the previous codebase.
 
+Policy bundles are released separately, with their own versions and
+`bundle/<name>/vX.Y.Z` tags, by a dispatched workflow that does not involve
+release-please, `VERSION`, the image or the charts; see
+[Release a bundle](policy-bundles.md#release-a-bundle).
+
 ## Commit conventions
 
 PR titles must use Conventional Commits because the repository normally squash

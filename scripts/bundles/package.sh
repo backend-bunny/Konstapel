@@ -5,6 +5,8 @@
 # taken from HEAD, so the same commit always yields the same digests. OUT_DIR
 # receives an OCI image layout (the exact bytes publication will push) and
 # package.json, and must not exist: frozen inputs are never replaced.
+# Bundles are versioned in their definition, independently of the application
+# VERSION, charts and release-please, so none of those are read here.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 name=${1:?usage: package.sh NAME OUT_DIR}
@@ -16,7 +18,6 @@ if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
   echo 'Bundle packaging requires a clean checkout: the package records HEAD as the source' >&2
   exit 1
 fi
-sh scripts/check-version.sh
 sha256sum --check --quiet content/SHA256SUMS
 go run -mod=readonly ./cmd/bundlepack \
   -root . -name "$name" -out "$out" \

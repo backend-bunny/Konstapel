@@ -106,7 +106,7 @@ shape, the descriptor and every inventoried file.
 regular files in valid payload locations, rejects duplicates, and enforces file
 count and size limits before the descriptor and inventory are verified.
 
-`bundles:package` (below) drives this; the publication path is not available yet.
+`bundles:package` (below) drives this; registry publication is not available yet (see [Release a bundle](#release-a-bundle)).
 
 ## Bundle definitions
 
@@ -238,3 +238,61 @@ Rendered engine-policy hashes are recorded per policy by the renderer
 
 The produced layout can be inspected with any OCI tool. It is not signed and
 not published, and Konstapel cannot yet consume it.
+
+## Release a bundle
+
+Bundles are released independently of the application, the controller image
+and the Helm charts. A bundle release needs no release-please release, does
+not read the application `VERSION` file and never runs the image or chart
+publishers.
+
+- **Version.** The `version` in `bundles/<name>/definition.json` is the bundle's
+  own SemVer, written bare (`1.2.0`, not `v1.2.0`). Pre-release versions such as
+  `1.2.0-rc.1` are allowed. Build metadata (`1.2.0+x`) is rejected because SemVer
+  ignores it for precedence and OCI tags cannot contain `+`. Bump the version in
+  a reviewed PR before releasing changed content.
+- **Tag.** The release is marked by the Git tag `bundle/<name>/v<version>`, for
+  example `bundle/konstapel-privileged-containers/v0.1.0`. Application releases
+  use bare `vX.Y.Z` tags, so the namespaces never overlap. A bundle tag is
+  created once and is never moved or deleted.
+- **Source.** The release is built from one reviewed commit: a full 40-character
+  SHA that is an ancestor of `origin/main`. The version is read from that commit,
+  not from the current tip of `main`, so an older reviewed commit can be
+  released or retried later.
+
+To release, dispatch the `bundle-release` workflow on `main` (Actions → bundle-release → Run workflow, or
+`gh workflow run bundle-release.yml --ref main -f bundle=<name> -f commit=<sha>`).
+Runs for the same bundle are serialized and never cancelled. The workflow:
+
+1. validates the request with `cmd/bundlerelease verify` (read-only token): the
+   name is a DNS label with a `bundles/<name>/definition.json` at that commit
+   whose `name` matches the directory, the commit is on reviewed `main`
+   history, the version is valid, and any fetched tag for that version marks
+   the same commit;
+2. packages exactly that commit with `scripts/bundles/package.sh` from a
+   detached worktree, re-verifies the frozen OCI layout and `package.json`
+   against the request, and uploads it as the workflow artifact
+   `bundle-<name>-<version>`;
+3. in a separate job, the only one with `contents: write`, re-validates and
+   runs `cmd/bundlerelease tag`: it pushes the tag when absent (never forced)
+   or verifies that the existing tag marks exactly that commit. A tag at any
+   other commit, or a ref blocking the `bundle/<name>/` namespace, fails the
+   run. Rerunning a successful release is therefore harmless.
+
+The same checks run locally against any full-history checkout:
+
+```sh
+devbox run -- go run ./cmd/bundlerelease verify -name <name> -commit <sha>
+```
+
+`cmd/bundlerelease` is a build tool; it is not part of the controller image.
+
+**Not implemented yet.** The workflow does not push to
+`ghcr.io/backend-bunny/bundles/<name>`, sign or attest anything, run the
+policy fixtures against the frozen bytes, or write release notes. A bundle tag
+therefore means "this version is this reviewed commit", not "this version is
+published". The uploaded artifact is retained for 14 days and is not yet a
+durable publication record. Write-once publication with recoverable frozen
+inputs, OIDC signing and provenance, and release notes/summaries extend the
+`package` job's frozen layout in later work (tasks 6.2 to 6.4 of
+`add-policy-bundle-distribution`).
