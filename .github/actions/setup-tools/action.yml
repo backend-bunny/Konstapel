@@ -12,7 +12,7 @@ runs:
   steps:
     - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
       with:
-        devbox-version: '0.19.0'
+        devbox-version: '0.20.0'
         enable-cache: 'true'
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
