@@ -267,34 +267,51 @@ ConfigMap, watches Secrets, contacts a registry or verifies a signature yet.
 bundle and the proofs attached to it, using ORAS Go (`oras.land/oras-go/v2`
 v2.7.0) for the OCI distribution protocol and its standard registry
 challenge/token handling. It is **not yet wired into the controller**: nothing
-calls it at runtime, and it is not linked into the shipped binaries. It has been
-tested only against an in-process fake registry serving real `bundle.Build`
-bytes; validation against a real authenticated TLS registry is the separate
-registry fixture task (2.4).
+calls it at runtime, and it is not linked into the shipped binaries. Its unit
+tests use an in-process fake registry serving real `bundle.Build` bytes; the
+compatibility suite (`scripts/registry-compat.sh`, see
+[Real-registry compatibility](#real-registry-compatibility)) runs it against
+the pinned reference registry over TLS.
 
 `Client.Fetch(ctx, source, digest)` takes a configured `BundleSource` and the
 profile's pinned manifest digest and returns the manifest, the layer and the
 proofs, or a typed error. Its contract:
 
 - **By digest only.** The manifest is requested as
-  `/v2/<path>/manifests/sha256:<hex>`; no tag is ever resolved, so a moved tag
-  has no effect. The manifest bytes' SHA-256 must equal the pinned digest (a
+  `/v2/<path>/manifests/sha256:<hex>`; no tag is ever resolved to select
+  content, so a moved tag has no effect. (The only tag read is the referrers
+  tag schema index below, as an untrusted listing.) The manifest bytes' SHA-256 must equal the pinned digest (a
   `Docker-Content-Digest` header is not trusted), and every blob and referrer is
   checked against its descriptor's digest *and* size.
 - **Bundle shape.** Indexes, non-OCI manifests and any manifest rejected by
   `bundle.ValidateManifest` (artifact type, empty config, exactly one tar+gzip
   layer) fail with `ErrUnexpectedDescriptor`. The empty config is not
   downloaded.
-- **OCI 1.1 referrers API only.** Proofs are listed with
-  `GET /v2/<path>/referrers/<digest>`. A registry that answers 404 (other than
-  `NAME_UNKNOWN`), 405, 501 or a non-index body fails with
-  `ErrReferrersUnsupported`. There is no fallback to the `sha256-<hex>`
-  referrers tag schema and no separate signature repository.
-- **Exact subject.** A listed referrer becomes a proof only if its downloaded,
+- **Referrers API, then the referrers tag schema.** Proofs are listed with
+  `GET /v2/<path>/referrers/<digest>`. When the registry does not serve it (404
+  other than `NAME_UNKNOWN`, 405, 501, or a body that is not an image index),
+  the OCI referrers tag schema index is read instead:
+  `GET /v2/<path>/manifests/sha256-<hex>`, where `<hex>` is the pinned
+  digest's hex. A 404 there means the subject has no referrers.
+  `Result.ReferrersSource` records `api`, `tag-schema` or `none`. Cosign's
+  legacy `.sig`/`.att` tags and separate signature repositories are never
+  read. There is no `ErrReferrersUnsupported`: an unserved API is not an error,
+  and a subject with no listing simply has no proofs.
+- **The tag index is untrusted.** Anyone who can push to the repository can
+  move the tag, so the index is only a hint. It must be served as an image
+  index of at most 4 MiB; its body is charged to the metadata budget, must
+  match the size and digest the registry declares for it, and must parse as
+  JSON with `schemaVersion` 2, the image index `mediaType` and a `manifests`
+  list. Violations fail the retrieval (`ErrUnexpectedDescriptor`,
+  `ErrIntegrity`, `ErrLimitExceeded`). Its entries then go through exactly
+  the checks of an API listing below.
+- **Exact subject.** Every listed entry counts toward the 64-referrer limit
+  (duplicates included). A listed referrer becomes a proof only if its downloaded,
   digest-checked manifest names the pinned digest (and its size) as `subject`,
   repeats the listed artifact type, carries a recognized predicate type and has
   exactly one Sigstore bundle layer. Anything else (another subject, an
-  unrelated artifact or predicate type, an unexpected layout) is not an error:
+  unrelated artifact or predicate type, a non-manifest entry, a duplicate entry,
+  an unexpected layout) is not an error:
   it is reported in `Result.Skipped` with a reason and never used. Integrity and
   limit failures, by contrast, fail the whole retrieval.
 - **Proofs are reported, not trusted.** `Result.Missing` and
@@ -324,8 +341,11 @@ manifest to the bundle's own repository:
 | annotation `dev.sigstore.bundle.predicateType` | `https://sigstore.dev/cosign/sign/v1` → signature; `https://slsa.dev/provenance/v1` → provenance |
 
 Cosign also sets `dev.sigstore.bundle.content: dsse-envelope` and
-`org.opencontainers.image.created`; they are not used for selection. The
-registry fixture must serve this layout through the referrers API. Legacy
+`org.opencontainers.image.created`; they are not used for selection. On a
+registry without the referrers API, the referrers are listed in the
+`sha256-<hex>` tag schema index that the pushing client maintains (Cosign and
+ORAS Go both do); GitHub Container Registry, for example, answers the referrers
+API with `404 MANIFEST_UNKNOWN` and serves this index. Legacy
 `.sig`/`.att` tags, the older bundle media type spellings and other predicate
 types (for example SLSA v0.2) are not recognized.
 
@@ -340,9 +360,9 @@ count limit is an error, never a truncation:
 | Each HTTP exchange, including its body and token requests | 30 s |
 | One retrieval attempt, after it obtains a slot | 2 min |
 | Retry backoff (`RetryPolicy.Delay`, jittered) | 5 s to 5 min |
-| Subject manifest and each referrers page | 4 MiB |
+| Subject manifest, each referrers page and the referrers tag index | 4 MiB |
 | Referrers listed for the subject (any type) | 64 |
-| Verification metadata: listing bodies, referrer manifests and proof layers | 16 MiB in total |
+| Verification metadata: listing bodies (API pages or the tag index), referrer manifests and proof layers | 16 MiB in total |
 | Compressed bundle layer | 64 MiB |
 
 Declared sizes are checked before a download starts, and reads stop one byte
@@ -352,7 +372,7 @@ draws uniformly from `[ceiling/2, ceiling]` where the ceiling doubles from
 The retry loop belongs to the resolver. `Classify` sorts errors into
 *canceled* (the caller left), *permanent* for this configuration and digest
 (`ErrIntegrity`, `ErrUnexpectedDescriptor`, `ErrLimitExceeded`,
-`ErrReferrersUnsupported`, `ErrInvalidRequest`) and *retryable* (timeouts,
+`ErrInvalidRequest`) and *retryable* (timeouts,
 transport errors, `ErrNotFound`, `ErrUnauthorized`, `ErrUnavailable`,
 `ErrCredentials`).
 
@@ -382,7 +402,38 @@ public registry is never read anonymously instead. Token caches are kept per
 source and credential reference; `Client.ResetTokens` discards one after a
 rotation. Credential values never appear in returned errors: values the
 attempt sent, including any echoed back by the registry, are replaced with
-`[REDACTED]`, and `Credential` formats as redacted.
+`[REDACTED]`, and `Credential` formats as redacted. A registry that challenges
+for authentication when no usable credential is available (none for an
+anonymous source, or a username without a password) fails with
+`ErrUnauthorized`, like a refused credential.
+
+### Real-registry compatibility
+
+`scripts/registry-compat.sh OUTPUT_DIR` (through Devbox; `OUTPUT_DIR` must not
+exist) runs `TestRegistryCompat` (build tag `registrycompat`) against two
+disposable containers of the digest-pinned `KONSTAPEL_REGISTRY_IMAGE` from
+`scripts/runtime.env` (distribution registry 3.1.2), one anonymous and one
+htpasswd-protected, both over TLS with a throwaway CA, then removes them and
+fails if any remain. It records the registry, Docker, ORAS Go and Go versions
+and each case in `OUTPUT_DIR/registry-compat.json`. It verifies:
+
+- this registry answers the referrers API with 404, and pushing the Cosign
+  layout with ORAS Go leaves a `sha256-<hex>` referrers tag index; retrieval
+  then reports `ReferrersSource` `tag-schema`, finds the signature and the
+  provenance, and skips the unrelated SBOM-style referrer;
+- anonymous retrieval with the custom CA, and authenticated retrieval with
+  credentials;
+- a wrong password is `ErrUnauthorized` and never echoed; no credential against
+  the protected registry is `ErrUnauthorized`; a configured but empty
+  credential is `ErrCredentials` without any anonymous request;
+- an untrusted CA fails TLS verification;
+- a moved tag does not change what the digest returns;
+- a bundle with no referrers reports `none`, zero proofs and
+  `ErrMissingProofs` from `RequireProofs`;
+- an unknown digest is `ErrNotFound`.
+
+Not covered by the suite: bearer-token (token service) authentication, and a
+real registry that serves the referrers API (only the in-process fake does).
 
 ## Create and package a bundle
 

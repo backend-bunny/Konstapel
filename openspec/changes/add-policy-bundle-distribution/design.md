@@ -150,11 +150,20 @@ explicit isolated test fixtures. Preserve standard authenticated registry token
 flows without forwarding credentials across unrelated redirects or repositories.
 
 The same adapter retrieves the subject and required signature/provenance
-referrers from the configured repository. The initial registry contract requires
-the OCI referrers behavior used by the pinned Cosign publisher; validate it
-against a real registry. Do not claim arbitrary OCI registries work solely
-because they accept a manifest. Automatic legacy signature-tag fallback and
-separate signature repositories are not part of this version.
+referrers from the configured repository, in the OCI referrers layout written by
+the pinned Cosign publisher. It lists referrers through the OCI 1.1 referrers
+API first; when a registry does not serve that API, it reads the OCI referrers
+tag schema index (the image index tagged `sha256-<subject hex>`, OCI
+distribution spec "backwards compatibility"), which is how registries without
+the API, including the reference registry and GitHub Container Registry, keep
+referrers. Either listing is an unauthenticated, mutable hint: every listed
+entry is fetched by digest and must pass the same exact-subject checks, and the
+tag index is bounded, digest-checked against its declared descriptor and parsed
+strictly. A registry with neither yields no referrers, so required proofs are
+reported missing. Validate this against a real registry. Do not claim arbitrary
+OCI registries work solely because they accept a manifest. Cosign's legacy
+`.sig`/`.att` signature tags and separate signature repositories are not part of
+this version.
 
 Start with documented deployment defaults: 4 concurrent resolutions, 30-second
 individual network timeouts, a 2-minute resolution attempt, and jittered retry
