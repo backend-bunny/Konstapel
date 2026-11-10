@@ -622,6 +622,199 @@ connections, per-source trust, and concurrent rotation under `-race`. The
 [real-registry suite](#real-registry-compatibility) repeats the essential cases
 against real registries.
 
+## Private registry setup
+
+How to point a bundle name at a private registry. Everything here is the
+configuration contract plus tested examples: nothing in the controller reads
+these objects yet (task 5.1 wires them in), so the steps cannot be followed end
+to end today. The manifests below are the files in
+`testdata/bundles/private-registry/`; `TestPrivateRegistryExamples` parses them
+with the real code (the source configuration, the credential document, the CA
+bundle) and checks they agree with each other, including the Role, and
+`TestPrivateRegistryGuideEmbedsTheExamples` fails if this page and those files
+differ.
+
+### What the registry must provide
+
+| Requirement | Detail |
+| --- | --- |
+| TLS | Always verified, against the system roots plus the CA you configure. Plain HTTP and skipping verification are not possible. |
+| Access | Anonymous, or Basic credentials from a `kubernetes.io/dockerconfigjson` Secret. A bearer token service works when its token `realm` is on the registry's own origin (same scheme, host and port). With credentials configured, a realm on another origin (Docker Hub's `auth.docker.io`, GitLab.com's `gitlab.com/jwt/auth`) fails with `ErrCredentialScope`: credentials are never sent to another origin. Anonymous retrieval from a public repository may use any realm. |
+| Pull account | Read-only, limited to the bundle repositories. |
+| Referrers | The OCI 1.1 referrers API, or the referrers tag schema (`sha256-<hex>` index tag). Signatures and provenance must be Sigstore bundle v0.3 referrers (see [Referrer layout](#referrer-layout)). Cosign's legacy `.sig`/`.att` tags and separate signature repositories are not read. |
+
+A registry that merely accepts a manifest is not thereby compatible. The
+[compatibility suite](#real-registry-compatibility) ran against the Distribution
+registry 3.1.2 (tag schema, Basic auth, custom CA) and Zot v2.1.23 (referrers
+API); `ghcr.io`'s tag-schema format was checked with read-only anonymous
+requests. Other registries are unverified: run the suite's checks against yours
+before relying on it. Bearer-token services were only tested against an
+in-process fake.
+
+### Steps
+
+All objects live in the controller's namespace (`konstapel-system` here);
+references carry no namespace.
+
+1. **Trust the registry's CA** (skip if its certificate chains to the system
+   roots). The roots are added to the system roots, never replacing them, and
+   apply only to sources that reference this object. Private keys and other PEM
+   blocks are rejected.
+
+```yaml
+# Extra trusted roots for the private registry's TLS (added to the system roots).
+# This certificate is an example only: replace it with your registry's CA.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acme-registry-ca
+  namespace: konstapel-system
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBpzCCAU2gAwIBAgIUWqGwlbtMZve0onmxo6HS/dwykRIwCgYIKoZIzj0EAwIw
+    KDEmMCQGA1UEAwwdRXhhbXBsZSByZWdpc3RyeSBDQSAocmVwbGFjZSkwIBcNMjYx
+    MTEwMTUzMzQxWhgPMjEyNjEwMTcxNTMzNDFaMCgxJjAkBgNVBAMMHUV4YW1wbGUg
+    cmVnaXN0cnkgQ0EgKHJlcGxhY2UpMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
+    pz2SE5mzCPElOcOo8r767xkHfEFlkRBmQ5iH4hc1xyv/aBotNXuqn5oo0XL+7gPz
+    VEYDcnJDK66izey3J1Swi6NTMFEwHQYDVR0OBBYEFFdsJYCijhBWAJqCUiMAl8cV
+    RTWPMB8GA1UdIwQYMBaAFFdsJYCijhBWAJqCUiMAl8cVRTWPMA8GA1UdEwEB/wQF
+    MAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIhAPk+Gda2j/jmYMIk65a3FvXBDDiiA4Gk
+    wMvLpd1F44QnAiAmxNU4U/Jh/bHpqWi7OWWjuErPHkBHaAppl2Ixb8BAUw==
+    -----END CERTIFICATE-----
+```
+
+2. **Store the pull credential.** Create the Secret as below, or with
+   `kubectl create secret docker-registry acme-registry --docker-server=registry.acme.internal:5000 --docker-username=... --docker-password=...`,
+   which writes the same document. The entry key must be exactly the host of
+   the source's repository, including the port. Use a read-only account, and a
+   Secret of its own: it is not an `imagePullSecret`.
+
+```yaml
+# Registry credential, in the controller's namespace. Created like this, or with
+# kubectl create secret docker-registry (which writes the same document).
+# "reader:change-me" is a placeholder: use a read-only registry account.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: acme-registry
+  namespace: konstapel-system
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {"auths":{"registry.acme.internal:5000":{"auth":"cmVhZGVyOmNoYW5nZS1tZQ=="}}}
+```
+
+3. **Store the public key** for a public-key publisher rule, for example
+   `kubectl create secret generic acme-bundle-signing-key --from-file=cosign.pub`.
+   (Signature verification is a later task; the reference is validated now and
+   the Secret is read then.)
+4. **Configure the source.** The ConfigMap holds only references and rules, no
+   secret material; inline keys or credentials are rejected. Writing it is a
+   platform-administrator action.
+
+```yaml
+# Central bundle source configuration (see "Central source configuration").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: konstapel-bundle-sources
+  namespace: konstapel-system
+data:
+  sources.yaml: |
+    version: 1
+    sources:
+      - name: acme-baseline
+        repository: registry.acme.internal:5000/security/bundles/acme-baseline
+        credentialSecret:
+          name: acme-registry
+        ca:
+          kind: ConfigMap
+          name: acme-registry-ca
+        publisher:
+          type: public-key
+          publicKey:
+            kind: Secret
+            name: acme-bundle-signing-key
+            key: cosign.pub
+          keyFingerprint: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          provenance:
+            sourceRepository: https://git.acme.internal/security/policies
+            builder: https://git.acme.internal/ci/bundle-builder@refs/heads/main
+```
+
+5. **Grant read access.** The controller's ServiceAccount needs only `get`, by
+   name, on the objects above, and on the configuration ConfigMap itself. Bind
+   this Role to that ServiceAccount (the chart task defines it). The Role must
+   list every object the configuration references, including a Secret-held CA
+   or trust root when you use one.
+
+```yaml
+# Least-privilege read access: get, by name, in the controller's namespace only.
+# resourceNames lists every object the sources configuration references.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-bundle-sources
+  namespace: konstapel-system
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
+    resourceNames: [acme-registry-ca, konstapel-bundle-sources]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames: [acme-bundle-signing-key, acme-registry]
+```
+
+### Least privilege
+
+- A namespaced Role with `get` and `resourceNames` only: no `list`, no `watch`
+  from this loader, no ClusterRole, no other namespace. Change notification
+  (task 5.1) will need watches, which `resourceNames` restricts only for
+  single-object watches; that wiring decides how they are granted.
+- One credential Secret per registry, scoped to the bundle repositories, so a
+  leaked or rotated credential has a small blast radius.
+- Credentials are offered only for the source's own registry host, never to a
+  token realm, redirect target or repository outside the configured one, and
+  never appear in errors, logs or evidence.
+- A configured Secret that is missing, malformed, has no entry for the host, or
+  names a credential helper makes retrieval fail (`ErrCredentials`). There is no
+  anonymous fallback.
+
+### Node and kubelet credentials are not used
+
+Konstapel does **not** inherit node pull credentials. It never reads
+kubelet or container-runtime credential configuration, any Pod's
+`imagePullSecrets`, a ServiceAccount's pull secrets, or a cloud provider's
+credential helper, and it never runs a credential helper program. A registry
+that your nodes can pull from is therefore not accessible to Konstapel until you
+configure a `credentialSecret` as above. Cloud-specific credential providers are
+not supported.
+
+### Rotating credentials and CAs
+
+Update the Secret or ConfigMap in place. The loader caches an object for at most
+30 seconds (configurable up to five minutes) unless the watcher in task 5.1
+invalidates it sooner. When the credential for a source changes, the tokens
+cached for the old one are discarded before the next request, so a rotated
+credential is used immediately and an old token is never reused. Deleting or
+emptying the Secret makes retrieval fail with `ErrCredentials` (recoverable
+when it returns). A changed CA rebuilds that source's trust and closes its idle
+connections; an invalid or removed CA fails with `ErrTrustConfig` and never falls
+back to the system roots alone.
+
+### What has and has not been verified
+
+Verified: the parsing and agreement of the examples above (unit test), and, in
+the real-registry suite, Secret-backed credentials, a wrong password then a
+rotated Secret on the same client, a missing Secret, a ConfigMap-backed CA on top
+of the system roots, an invalid CA, and one source's CA not trusting another
+registry. Not verified: a running controller reading these objects, the Role
+against a real API server, and bearer-token services other than the in-process
+fake.
+
 ## Create and package a bundle
 
 1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal

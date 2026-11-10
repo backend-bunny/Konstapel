@@ -1,0 +1,16 @@
+# Least-privilege read access: get, by name, in the controller's namespace only.
+# resourceNames lists every object the sources configuration references.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-bundle-sources
+  namespace: konstapel-system
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
+    resourceNames: [acme-registry-ca, konstapel-bundle-sources]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames: [acme-bundle-signing-key, acme-registry]
