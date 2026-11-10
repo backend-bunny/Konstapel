@@ -14,7 +14,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
 - [ ] 1.3 Publish the resolved-content handle and verification-receipt contract, including cache leases and separate source/rendered/OCI digests; verify serialization fixtures and compatibility with the existing targeting contribution fields without changing its revision algorithm.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
-- [ ] 1.4 Implement deterministic archive and OCI-manifest construction from a bundle definition; verify repeated builds from identical source/tool inputs produce identical digests, with no circular descriptor checksum or runtime dependency downloads.
+- [x] 1.4 Implement deterministic archive and OCI-manifest construction from a bundle definition; verify repeated builds from identical source/tool inputs produce identical digests, with no circular descriptor checksum or runtime dependency downloads.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 1.5 Package the existing privileged-container policy with its source, tests, licenses, provenance and NIST content; verify checksums, fixtures and the existing bounded AC-6 mapping against the unpacked release payload.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

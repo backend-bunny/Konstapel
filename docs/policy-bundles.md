@@ -89,3 +89,22 @@ descriptor, never inferred from filenames.
 
 An organization bundle uses the same format and the same verifier as an
 official one; it differs only in who publishes and signs it.
+
+## Deterministic builds
+
+`bundle.Build` turns a definition (descriptor fields plus a list of
+`from`/`to`/`role` includes read from a source tree) into the archive layer and
+OCI manifest. Building is reproducible: identical definition, source bytes and
+source-commit time give byte-identical output and therefore identical digests.
+Entries are sorted, owned by uid/gid 0 with mode `0644`, stamped with the source
+commit time, and gzip headers carry no name or time. Nothing is downloaded at
+build time, and the descriptor never records the layer or manifest digest.
+Before returning, the builder re-reads its own output and verifies the manifest
+shape, the descriptor and every inventoried file.
+
+`bundle.Unpack` is the matching reader for untrusted archives: it accepts only
+regular files in valid payload locations, rejects duplicates, and enforces file
+count and size limits before the descriptor and inventory are verified.
+
+The command-line workflow (`bundles:package`) that drives this, and the
+publication path, are not available yet.
