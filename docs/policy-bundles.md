@@ -139,6 +139,38 @@ payload: the packaged checksums verify and agree with `content/SHA256SUMS`, the
 AC-6 mapping and descriptor inventory correspond, and the upstream Kyverno
 fixtures pass. The bundle is defined but **not published**.
 
+## Content validation
+
+`bundle.ValidateContent` checks an unpacked payload's declarative content. It
+reads only the payload (no network or registry access), never applies or runs
+anything in it, and runs during `bundles:package` and `task check`. It checks:
+
+- Only the installed provider contract (`konstapel-kyverno/v1`) is accepted;
+  bundle data cannot name another executable.
+- Every declared OSCAL entry point exists, validates against the pinned schema
+  for its declared version, and states that version itself. Mixed versions are
+  normal: authored component definitions must be C2P-compatible OSCAL 1.1.3,
+  and the official NIST catalog and Moderate profile keep 1.2.3. Each declared
+  version's schema must be in the archive and self-contained (no external
+  `$ref`).
+- Every import and control `source` resolves inside the archive. Informational
+  `links`/`rlinks` URLs are allowed and never fetched.
+- No JSON key (descriptor, OSCAL, parameter schemas) and no YAML key repeats.
+- The existing prototype validation runs on the payload unchanged: schema
+  validity, catalog and Moderate-profile consistency, controls restricted to
+  the Moderate baseline, statements that belong to their controls, every rule
+  described, mapped and given a matching `Check_Id`, and every rule backed by a
+  policy in the bundle. A bundle must therefore carry the NIST catalog and
+  profile and the schemas at their `content/` paths.
+- The descriptor's logical checks equal the rules the component definitions map
+  (`checkID` equals `ruleID`, the C2P convention the provider matches on), and
+  each policy is a `policies.kyverno.io/v1` `ValidatingPolicy` whose
+  `metadata.name` is the name the descriptor gives it.
+
+`bundle.ValidateParameters` validates a profile's parameters for one policy
+against its declared parameter schema. The schema must describe an object and
+be self-contained, and a policy that declares no schema accepts no parameters.
+
 ## Create and package a bundle
 
 1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal

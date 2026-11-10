@@ -10,7 +10,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 - [x] 1.1 Add the versioned bundle descriptor schema and OCI layout documentation; verify valid official/organization fixtures and rejection of unsupported formats, duplicate identities/keys, unexpected layers, and name/inventory mismatches.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.2 Generalize content validation around the existing OSCAL/C2P conventions; test local reference closure, parameter validation, Moderate mappings and mixed declared OSCAL versions with external content access disabled, preserving the prototype regression suite.
+- [x] 1.2 Generalize content validation around the existing OSCAL/C2P conventions; test local reference closure, parameter validation, Moderate mappings and mixed declared OSCAL versions with external content access disabled, preserving the prototype regression suite.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
 - [ ] 1.3 Publish the resolved-content handle and verification-receipt contract, including cache leases and separate source/rendered/OCI digests; verify serialization fixtures and compatibility with the existing targeting contribution fields without changing its revision algorithm.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->

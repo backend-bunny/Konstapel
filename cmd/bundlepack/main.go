@@ -58,6 +58,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	_, payload, err := bundle.Unpack(a.Layer)
+	if err != nil {
+		return err
+	}
+	if err := bundle.ValidateContent(a.Descriptor, payload); err != nil {
+		return fmt.Errorf("content validation: %w", err)
+	}
 	if err := bundle.WriteLayout(*out+".tmp", a); err != nil {
 		return err
 	}

@@ -84,6 +84,13 @@ func TestAllDefinitionsBuildAndVerify(t *testing.T) {
 		if _, _, err := VerifyLayout(dir); err != nil {
 			t.Fatalf("%s: %v", m, err)
 		}
+		d, payload, err := Unpack(a.Layer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateContent(d, payload); err != nil {
+			t.Fatalf("%s: content validation: %v", m, err)
+		}
 	}
 }
 
