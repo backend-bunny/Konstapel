@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/runtime.env
 
-for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE"; do
+for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE" "$KONSTAPEL_REGISTRY_IMAGE"; do
   if [[ ! $image =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[a-f0-9]{64}$ ]]; then
     echo "Runtime image must include a tag and complete SHA-256 digest: $image" >&2
     exit 1

@@ -1,0 +1,422 @@
+//go:build registrycompat
+
+package registry
+
+// Compatibility suite against a real registry: disposable, test-owned
+// instances of the pinned image (KONSTAPEL_REGISTRY_IMAGE) over TLS with a
+// throwaway CA, one anonymous and one htpasswd-authenticated. Run it with
+// scripts/registry-compat.sh. The fake registry in the other tests cannot show
+// real TLS, real custom-CA trust or a real authentication challenge; this can.
+//
+// Not covered: bearer-token (token service) authentication, which this
+// registry image only offers through a separate token server.
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math/big"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/crypto/bcrypt"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+
+	"github.com/backend-bunny/Konstapel/internal/bundle"
+)
+
+// pki is a throwaway CA and a server certificate for loopback.
+type pki struct {
+	caPEM, certPEM, keyPEM []byte
+	pool                   *x509.CertPool
+}
+
+func newPKI(t *testing.T) pki {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "konstapel registry-compat test CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	srvKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srvTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "registry-compat"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	srvDER, err := x509.CreateCertificate(rand.Reader, srvTmpl, caCert, &srvKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(srvKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	return pki{
+		caPEM:   pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
+		certPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvDER}),
+		keyPEM:  pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		pool:    pool,
+	}
+}
+
+func randHex(t *testing.T, n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%x", b)
+}
+
+func docker(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+type regInstance struct {
+	host string // 127.0.0.1:port
+	name string
+}
+
+// startRegistry runs one registry container over TLS, optionally requiring
+// htpasswd authentication, and registers its removal.
+func startRegistry(t *testing.T, image, run string, p pki, htpasswd string) regInstance {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{"server.crt": p.certPEM, "server.key": p.keyPEM}
+	if htpasswd != "" {
+		files["htpasswd"] = []byte(htpasswd)
+	}
+	for n, b := range files {
+		if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := "konstapel-registry-compat-" + randHex(t, 4)
+	args := []string{"run", "-d", "--name", name, "--label", "konstapel.test=" + run, "-p", "127.0.0.1::5000",
+		"-v", dir + ":/certs:ro",
+		"-e", "REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt", "-e", "REGISTRY_HTTP_TLS_KEY=/certs/server.key"}
+	if htpasswd != "" {
+		args = append(args, "-e", "REGISTRY_AUTH=htpasswd", "-e", "REGISTRY_AUTH_HTPASSWD_REALM=konstapel-test",
+			"-e", "REGISTRY_AUTH_HTPASSWD_PATH=/certs/htpasswd")
+	}
+	args = append(args, image)
+	docker(t, args...)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
+	port := docker(t, "port", name, "5000/tcp")
+	port = port[strings.LastIndex(port, ":")+1:]
+	r := regInstance{host: "127.0.0.1:" + port, name: name}
+
+	hc := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: p.pool}}}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := hc.Get("https://" + r.host + "/v2/")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
+				return r
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registry %s not ready: %v\n%s", name, err, docker(t, "logs", name))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+type hostCreds map[string]Credential
+
+func (s hostCreds) Credential(_ context.Context, _ bundle.BundleSource, host string) (Credential, error) {
+	return s[host], nil
+}
+
+func transportFor(pool *x509.CertPool) http.RoundTripper {
+	return &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+}
+
+// pushSigned publishes the official bundle, a signature, a provenance
+// attestation and an unrelated referrer into repo, plus a moved tag pointing at
+// a different bundle. It returns the published manifest digest.
+func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest.Digest {
+	t.Helper()
+	ctx := context.Background()
+	repo, err := remote.NewRepository(r.host + "/" + repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Client = &auth.Client{
+		Client:     &http.Client{Transport: transportFor(p.pool)},
+		Credential: auth.StaticCredential(r.host, cred),
+	}
+	push := func(mediaType string, body []byte) ocispec.Descriptor {
+		d := ocispec.Descriptor{MediaType: mediaType, Digest: digest.FromBytes(body), Size: int64(len(body))}
+		if err := repo.Push(ctx, d, bytes.NewReader(body)); err != nil {
+			t.Fatalf("push %s: %v", d.Digest, err)
+		}
+		return d
+	}
+	a := official(t)
+	push(ocispec.MediaTypeEmptyJSON, []byte("{}"))
+	push(bundle.LayerMediaType, a.Layer)
+	subject := push(ocispec.MediaTypeImageManifest, a.Manifest)
+
+	for _, pt := range []string{CosignSignPredicateType, SLSAProvenanceV1PredicateType} {
+		b := sigstoreBundle(pt)
+		push(SigstoreBundleArtifactType, b)
+		push(ocispec.MediaTypeImageManifest, cosignReferrer(subject.Digest, subject.Size, pt, b))
+	}
+	// An unrelated referrer on the same subject: listed, never used.
+	other := map[string]any{
+		"schemaVersion": 2, "mediaType": ocispec.MediaTypeImageManifest, "artifactType": "application/vnd.example.sbom",
+		"config":  map[string]any{"mediaType": ocispec.MediaTypeEmptyJSON, "digest": bundle.EmptyConfigDigest, "size": 2},
+		"layers":  []any{map[string]any{"mediaType": ocispec.MediaTypeEmptyJSON, "digest": bundle.EmptyConfigDigest, "size": 2}},
+		"subject": map[string]any{"mediaType": ocispec.MediaTypeImageManifest, "digest": subject.Digest.String(), "size": subject.Size},
+	}
+	raw, _ := json.Marshal(other)
+	push(ocispec.MediaTypeImageManifest, raw)
+
+	// A moved tag: "stable" points at a different manifest than the pin.
+	decoy := push(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","artifactType":"application/vnd.example.decoy","config":{"mediaType":"application/vnd.oci.empty.v1+json","digest":"`+bundle.EmptyConfigDigest+`","size":2},"layers":[]}`))
+	if err := repo.Tag(ctx, decoy, "stable"); err != nil {
+		t.Fatal(err)
+	}
+	return subject.Digest
+}
+
+type compatRecord struct {
+	Case   string `json:"case"`
+	Result string `json:"result"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func TestRegistryCompat(t *testing.T) {
+	image := os.Getenv("KONSTAPEL_REGISTRY_IMAGE")
+	run := os.Getenv("KONSTAPEL_REGISTRY_RUN")
+	if image == "" || run == "" {
+		t.Skip("run through scripts/registry-compat.sh (KONSTAPEL_REGISTRY_IMAGE, KONSTAPEL_REGISTRY_RUN)")
+	}
+	p := newPKI(t)
+	user, pass := "konstapel-"+randHex(t, 3), randHex(t, 16)
+	hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anon := startRegistry(t, image, run, p, "")
+	authd := startRegistry(t, image, run, p, user+":"+string(hash)+"\n")
+
+	subjectAnon := pushSigned(t, anon, p, auth.Credential{})
+	subjectAuth := pushSigned(t, authd, p, auth.Credential{Username: user, Password: pass})
+	if subjectAnon != subjectAuth {
+		t.Fatalf("the same bundle has two digests: %s vs %s", subjectAnon, subjectAuth)
+	}
+	pinned := subjectAnon.String()
+
+	var records []compatRecord
+	record := func(name string, err error, detail string) {
+		r := compatRecord{Case: name, Result: "pass", Detail: detail}
+		if err != nil {
+			r.Result, r.Detail = "fail", err.Error()
+		}
+		records = append(records, r)
+	}
+	src := func(r regInstance, withSecret bool) bundle.BundleSource {
+		s := bundle.BundleSource{Name: "konstapel-privileged-containers", Repository: r.host + "/" + repoPath}
+		if withSecret {
+			s.CredentialSecret = &bundle.ObjectRef{Name: "registry-creds"}
+		}
+		return s
+	}
+	newClient := func(pool *x509.CertPool, creds CredentialProvider) *Client {
+		c, err := NewClient(Options{Transport: transportFor(pool), Credentials: creds})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	a := official(t)
+
+	checkFetched := func(t *testing.T, res *Result) {
+		t.Helper()
+		if res.Digest != pinned || !bytes.Equal(res.Manifest, a.Manifest) || !bytes.Equal(res.Layer, a.Layer) {
+			t.Fatalf("retrieved bytes differ from what was published")
+		}
+		if err := res.RequireProofs(RequiredProofs...); err != nil {
+			t.Fatal(err)
+		}
+		if res.ReferrerCount != 3 || len(res.Proofs) != 2 || len(res.Skipped) != 1 || res.Skipped[0].ArtifactType != "application/vnd.example.sbom" {
+			t.Fatalf("referrers: listed %d, proofs %d, skipped %+v", res.ReferrerCount, len(res.Proofs), res.Skipped)
+		}
+	}
+
+	t.Run("anonymous retrieval with the custom CA", func(t *testing.T) {
+		res, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), pinned)
+		record(t.Name(), err, fmt.Sprintf("manifest %s, %d proofs, %d skipped", pinned, len(res.proofsOrNil()), len(res.skippedOrNil())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFetched(t, res)
+	})
+
+	t.Run("authenticated retrieval with credentials", func(t *testing.T) {
+		creds := hostCreds{authd.host: {Username: user, Password: pass}}
+		res, err := newClient(p.pool, creds).Fetch(ctx, src(authd, true), pinned)
+		record(t.Name(), err, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFetched(t, res)
+	})
+
+	t.Run("wrong password is refused and never echoed", func(t *testing.T) {
+		creds := hostCreds{authd.host: {Username: user, Password: "wrong-" + pass}}
+		_, err := newClient(p.pool, creds).Fetch(ctx, src(authd, true), pinned)
+		ok := errors.Is(err, ErrUnauthorized) && !strings.Contains(err.Error(), pass) && !strings.Contains(err.Error(), "wrong-")
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v", err)}[ok], "")
+		if !ok {
+			t.Fatalf("want ErrUnauthorized without the password, got %v", err)
+		}
+	})
+
+	t.Run("no credentials against a protected registry fails", func(t *testing.T) {
+		_, err := newClient(p.pool, nil).Fetch(ctx, src(authd, false), pinned)
+		ok := errors.Is(err, ErrUnauthorized)
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v", err)}[ok], "")
+		if !ok {
+			t.Fatalf("want ErrUnauthorized, got %v", err)
+		}
+	})
+
+	t.Run("a configured credential Secret never falls back to anonymous", func(t *testing.T) {
+		// The anonymous registry would serve this request; the configured
+		// Secret has no credential, so retrieval must not even try.
+		_, err := newClient(p.pool, hostCreds{}).Fetch(ctx, src(anon, true), pinned)
+		ok := errors.Is(err, ErrCredentials)
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v", err)}[ok], "")
+		if !ok {
+			t.Fatalf("want ErrCredentials, got %v", err)
+		}
+	})
+
+	t.Run("an untrusted CA fails TLS verification", func(t *testing.T) {
+		_, err := newClient(x509.NewCertPool(), nil).Fetch(ctx, src(anon, false), pinned)
+		var unknown x509.UnknownAuthorityError
+		ok := err != nil && (errors.As(err, &unknown) || strings.Contains(err.Error(), "certificate signed by unknown authority"))
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v", err)}[ok], "")
+		if !ok {
+			t.Fatalf("want a TLS verification failure, got %v", err)
+		}
+	})
+
+	t.Run("a moved tag does not change what a digest returns", func(t *testing.T) {
+		res, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), pinned)
+		record(t.Name(), err, `tag "stable" points at a different manifest`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFetched(t, res)
+	})
+
+	t.Run("an unknown digest is not found", func(t *testing.T) {
+		missing := digest.FromString("not published").String()
+		_, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), missing)
+		ok := errors.Is(err, ErrNotFound)
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v", err)}[ok], "")
+		if !ok {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	writeCompatEvidence(t, image, run, records)
+}
+
+func (r *Result) proofsOrNil() []Proof {
+	if r == nil {
+		return nil
+	}
+	return r.Proofs
+}
+
+func (r *Result) skippedOrNil() []Skipped {
+	if r == nil {
+		return nil
+	}
+	return r.Skipped
+}
+
+// writeCompatEvidence records the versions the suite ran against and each case.
+func writeCompatEvidence(t *testing.T, image, run string, records []compatRecord) {
+	t.Helper()
+	out := os.Getenv("KONSTAPEL_REGISTRY_OUTPUT")
+	if out == "" {
+		return
+	}
+	orasVersion := ""
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, d := range bi.Deps {
+			if d.Path == "oras.land/oras-go/v2" {
+				orasVersion = d.Version
+			}
+		}
+	}
+	registryVersion := docker(t, "run", "--rm", "--entrypoint", "registry", image, "--version")
+	ev := map[string]any{
+		"run": run, "recordedAt": time.Now().UTC().Format(time.RFC3339),
+		"registryImage": image, "registryVersion": registryVersion,
+		"docker": docker(t, "version", "--format", "client {{.Client.Version}} server {{.Server.Version}}"),
+		"orasGo": orasVersion, "go": runtime.Version(),
+		"layout":         "OCI 1.1 referrers API; Sigstore bundle v0.3 referrers (see docs/policy-bundles.md)",
+		"authentication": "anonymous and htpasswd (basic); bearer-token service not covered",
+		"tls":            "throwaway CA, verification always on", "cases": records,
+	}
+	b, err := json.MarshalIndent(ev, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "registry-compat.json"), append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
