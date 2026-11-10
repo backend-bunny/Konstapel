@@ -316,6 +316,27 @@ func checkTagSchema(t *testing.T, r regInstance, p pki, cred auth.Credential, su
 	}
 }
 
+// CompatEnv exposes the running registries to compatibility cases that live
+// in the external test package registry_test, which may import packages that
+// import this one (kubeaccess's Secret-backed credentials and CAs).
+type CompatEnv struct {
+	Ctx    context.Context
+	Pinned string // the published bundle manifest digest
+	// Hosts (127.0.0.1:port): anonymous and htpasswd-protected registries
+	// with CA CAPEM, and an anonymous registry with an unrelated CA
+	// OtherCAPEM.
+	Anon, Authd, Other string
+	CAPEM, OtherCAPEM  []byte
+	User, Pass         string
+	// Record adds a case to the evidence; CheckFetched asserts a complete
+	// tag-schema retrieval of the published bundle.
+	Record       func(name string, err error, detail string)
+	CheckFetched func(t *testing.T, res *Result)
+}
+
+// CompatCases are run by TestRegistryCompat after its own cases.
+var CompatCases []func(t *testing.T, env CompatEnv)
+
 type compatRecord struct {
 	Case   string `json:"case"`
 	Result string `json:"result"`
@@ -342,7 +363,14 @@ func TestRegistryCompat(t *testing.T) {
 		t.Fatal("KONSTAPEL_REGISTRY_API_IMAGE is required (run through scripts/registry-compat.sh)")
 	}
 	api := startZot(t, apiImage, run, p)
+	// A registry with its own, unrelated CA: trust configured for one
+	// registry must not extend to it.
+	otherPKI := newPKI(t)
+	other := startRegistry(t, image, run, otherPKI, "")
 	subjectAnon := pushSigned(t, anon, p, auth.Credential{}, true)
+	if s := pushSigned(t, other, otherPKI, auth.Credential{}, true); s != subjectAnon {
+		t.Fatalf("the same bundle has different digests: %s, %s", s, subjectAnon)
+	}
 	subjectAuth := pushSigned(t, authd, p, auth.Credential{Username: user, Password: pass}, true)
 	subjectAPI := pushSigned(t, api, p, auth.Credential{}, false)
 	if subjectAnon != subjectAuth || subjectAnon != subjectAPI {
@@ -522,6 +550,15 @@ func TestRegistryCompat(t *testing.T) {
 		}
 	})
 
+	env := CompatEnv{
+		Ctx: ctx, Pinned: pinned, Anon: anon.host, Authd: authd.host, Other: other.host,
+		CAPEM: p.caPEM, OtherCAPEM: otherPKI.caPEM, User: user, Pass: pass,
+		Record: record, CheckFetched: checkFetched,
+	}
+	for _, c := range CompatCases {
+		c(t, env)
+	}
+
 	writeCompatEvidence(t, image, apiImage, run, records)
 }
 
@@ -569,8 +606,8 @@ func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []co
 		"docker": docker(t, "version", "--format", "client {{.Client.Version}} server {{.Server.Version}}"),
 		"orasGo": orasVersion, "go": runtime.Version(),
 		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md): listed through the OCI referrers tag schema on registryImage (no referrers API) and through the referrers API on apiRegistryImage",
-		"authentication": "anonymous and htpasswd (basic); bearer-token service not covered",
-		"tls":            "throwaway CA, verification always on", "cases": records,
+		"authentication": "anonymous and htpasswd (basic), directly and through kubeaccess (dockerconfigjson Secret, rotation, CA ConfigMap); bearer-token service not covered",
+		"tls":            "throwaway CAs (a second, unrelated one for the per-source trust case), verification always on", "cases": records,
 	}
 	b, err := json.MarshalIndent(ev, "", "  ")
 	if err != nil {

@@ -39,6 +39,13 @@ var (
 	ErrLimitExceeded = errors.New("retrieval limit exceeded")
 	// ErrInsecureRedirect: the registry redirected to plain HTTP.
 	ErrInsecureRedirect = errors.New("refusing a redirect to non-HTTPS")
+	// ErrTrustConfig: the TLS trust configured for the source (a custom CA)
+	// is unavailable or invalid. There is no fallback to other roots.
+	ErrTrustConfig = errors.New("registry TLS trust configuration is unavailable")
+	// ErrCredentialScope: a request would have carried registry credentials
+	// to an origin other than the source's registry (for example a token
+	// realm on another host); it was not sent.
+	ErrCredentialScope = errors.New("refusing to send registry credentials to another origin")
 	// ErrMissingProofs: a required proof kind was not attached to the subject.
 	ErrMissingProofs = errors.New("required verification proofs are missing")
 )

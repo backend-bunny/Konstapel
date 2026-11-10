@@ -11,15 +11,19 @@
 // reports which proofs it found but does not decide trust: signature and
 // provenance verification are separate steps.
 //
-// Transport and credentials are injected (Options.Transport,
-// Options.Credentials) so that Secret-backed credentials and custom CA pools
-// can be supplied without changing retrieval. The package is not yet wired
-// into the controller.
+// Transport and credentials are injected (Options.Transport or
+// Options.Transports, and Options.Credentials) so that Secret-backed
+// credentials and per-source custom CA pools can be supplied without changing
+// retrieval; package kubeaccess provides both from namespace-local Kubernetes
+// objects. The package is not yet wired into the controller.
 package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -45,6 +49,23 @@ func (Credential) String() string { return "Credential{redacted}" }
 // GoString redacts the credential for %#v.
 func (Credential) GoString() string { return "registry.Credential{redacted}" }
 
+// Format redacts the credential for every fmt verb, including verbs such as
+// %d or %x that would otherwise print the fields of a struct.
+func (c Credential) Format(f fmt.State, verb rune) {
+	if verb == 'v' && f.Flag('#') {
+		_, _ = io.WriteString(f, c.GoString())
+		return
+	}
+	_, _ = io.WriteString(f, c.String())
+}
+
+// MarshalJSON redacts the credential, so it cannot leak through a returned
+// or logged structure.
+func (Credential) MarshalJSON() ([]byte, error) { return []byte(`"[REDACTED]"`), nil }
+
+// LogValue redacts the credential in structured logs.
+func (c Credential) LogValue() slog.Value { return slog.StringValue(c.String()) }
+
 func (c Credential) empty() bool { return c == Credential{} }
 
 // CredentialProvider supplies the credential for a source. It is asked only
@@ -56,12 +77,25 @@ type CredentialProvider interface {
 	Credential(ctx context.Context, src bundle.BundleSource, host string) (Credential, error)
 }
 
+// TransportProvider supplies the HTTP transport for one source, so that a
+// source's custom CA is trusted for that source only. It is asked once per
+// retrieval attempt, before any request. An error makes the attempt fail
+// with ErrTrustConfig; it never falls back to another transport. Errors must
+// not contain secret values.
+type TransportProvider interface {
+	Transport(ctx context.Context, src bundle.BundleSource) (http.RoundTripper, error)
+}
+
 // Options configures a Client.
 type Options struct {
 	// Transport performs HTTP exchanges; nil uses a clone of
 	// http.DefaultTransport (system roots). A transport that disables TLS
-	// verification is rejected. Custom CA pools are configured here.
+	// verification is rejected. It is mutually exclusive with Transports.
 	Transport http.RoundTripper
+	// Transports, when set, supplies a transport per source (custom CA
+	// pools); a returned transport that disables TLS verification fails the
+	// attempt.
+	Transports TransportProvider
 	// Credentials supplies registry credentials; nil means anonymous only, and
 	// a source with a credentialSecret then fails with ErrCredentials.
 	Credentials CredentialProvider
@@ -76,11 +110,12 @@ type Options struct {
 // Client retrieves pinned bundles. It is safe for concurrent use; concurrent
 // requests for the same source and digest share one retrieval.
 type Client struct {
-	transport http.RoundTripper
-	creds     CredentialProvider
-	limits    Limits
-	plainHTTP bool
-	slots     chan struct{}
+	transport  http.RoundTripper
+	transports TransportProvider
+	creds      CredentialProvider
+	limits     Limits
+	plainHTTP  bool
+	slots      chan struct{}
 
 	mu       sync.Mutex
 	inflight map[string]*call
@@ -93,22 +128,58 @@ func NewClient(opts Options) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.Transport != nil && opts.Transports != nil {
+		return nil, fmt.Errorf("%w: set Transport or Transports, not both", ErrInvalidRequest)
+	}
 	t := opts.Transport
 	if t == nil {
 		t = http.DefaultTransport.(*http.Transport).Clone()
 	}
-	if ht, ok := t.(*http.Transport); ok && ht.TLSClientConfig != nil && ht.TLSClientConfig.InsecureSkipVerify {
+	if insecureTransport(t) {
 		return nil, fmt.Errorf("%w: TLS verification must not be disabled", ErrInvalidRequest)
 	}
 	return &Client{
-		transport: t,
-		creds:     opts.Credentials,
-		limits:    limits,
-		plainHTTP: opts.TestOnlyPlainHTTP,
-		slots:     make(chan struct{}, limits.MaxConcurrentResolutions),
-		inflight:  map[string]*call{},
-		caches:    map[string]auth.Cache{},
+		transport:  t,
+		transports: opts.Transports,
+		creds:      opts.Credentials,
+		limits:     limits,
+		plainHTTP:  opts.TestOnlyPlainHTTP,
+		slots:      make(chan struct{}, limits.MaxConcurrentResolutions),
+		inflight:   map[string]*call{},
+		caches:     map[string]auth.Cache{},
 	}, nil
+}
+
+func insecureTransport(t http.RoundTripper) bool {
+	ht, ok := t.(*http.Transport)
+	return ok && ht.TLSClientConfig != nil && ht.TLSClientConfig.InsecureSkipVerify
+}
+
+// transportFor returns the transport for one attempt of src.
+func (c *Client) transportFor(ctx context.Context, src bundle.BundleSource) (http.RoundTripper, error) {
+	if c.transports == nil {
+		return c.transport, nil
+	}
+	t, err := c.transports.Transport(ctx, src)
+	switch {
+	case err != nil:
+		return nil, classed(ErrTrustConfig, src, err)
+	case t == nil:
+		return nil, fmt.Errorf("%w for source %q: no transport", ErrTrustConfig, src.Name)
+	case insecureTransport(t):
+		return nil, fmt.Errorf("%w: source %q: TLS verification must not be disabled", ErrInvalidRequest, src.Name)
+	}
+	return t, nil
+}
+
+// classed attaches sentinel to a provider error unless it already carries it.
+// Providers guarantee that their errors contain no secret values; the attempt
+// additionally redacts every value it used.
+func classed(sentinel error, src bundle.BundleSource, err error) error {
+	if errors.Is(err, sentinel) {
+		return fmt.Errorf("source %q: %w", src.Name, err)
+	}
+	return fmt.Errorf("%w for source %q: %w", sentinel, src.Name, err)
 }
 
 // Limits returns the effective limits.
@@ -242,7 +313,7 @@ func (c *Client) credentialFunc(src bundle.BundleSource, host string, rec *secre
 		}
 		cred, err := c.creds.Credential(ctx, src, host)
 		if err != nil {
-			return auth.EmptyCredential, fmt.Errorf("%w for source %q", ErrCredentials, src.Name)
+			return auth.EmptyCredential, classed(ErrCredentials, src, err)
 		}
 		rec.addCredential(cred)
 		return auth.Credential{
@@ -263,7 +334,7 @@ func (c *Client) preflightCredential(ctx context.Context, src bundle.BundleSourc
 	}
 	cred, err := c.creds.Credential(ctx, src, host)
 	if err != nil {
-		return fmt.Errorf("%w for source %q", ErrCredentials, src.Name)
+		return classed(ErrCredentials, src, err)
 	}
 	rec.addCredential(cred)
 	if cred.empty() {

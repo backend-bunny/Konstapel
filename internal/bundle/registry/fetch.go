@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -47,15 +49,80 @@ func (b *budget) left() int64 {
 
 func (b *budget) used() int64 { return b.limit - b.left() }
 
-// fetchTransport records the Authorization values it sends (for redaction)
-// and charges referrers listing bodies to the metadata budget.
+// fetchTransport records the Authorization values it sends (for redaction),
+// confines credentials to the source's registry and repository, and charges
+// referrers listing bodies to the metadata budget.
 type fetchTransport struct {
 	base   http.RoundTripper
 	rec    *secrets
 	budget *budget
+	scope  credentialScope
+}
+
+// credentialScope is where a retrieval may send credential material: the
+// source's registry origin, and on a redirect only paths of its repository.
+type credentialScope struct {
+	origin   string // scheme://host[:port], default port omitted
+	repoPath string // "/v2/<repository path>/"
+}
+
+func newCredentialScope(scheme, host, path string) credentialScope {
+	return credentialScope{origin: canonicalOrigin(scheme, host), repoPath: "/v2/" + path + "/"}
+}
+
+func canonicalOrigin(scheme, host string) string {
+	host = strings.ToLower(host)
+	if h, port, err := net.SplitHostPort(host); err == nil &&
+		((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) {
+		host = h
+		if strings.Contains(h, ":") {
+			host = "[" + h + "]"
+		}
+	}
+	return scheme + "://" + host
+}
+
+// inRepository reports whether p is the API root or a path of the source's
+// repository. Paths with dot segments or escapes are never inside it: OCI
+// repository names contain neither, and a server may resolve them elsewhere.
+func (s credentialScope) inRepository(u *url.URL) bool {
+	p := u.Path
+	if strings.Contains(p, "/.") || strings.Contains(u.EscapedPath(), "%") || strings.Contains(p, "\\") {
+		return false
+	}
+	return p == "/v2/" || strings.HasPrefix(p, s.repoPath)
+}
+
+// guard decides what may be sent. Credential material is an Authorization
+// header or a request body (an OAuth2 token request carries the password or
+// refresh token in its form). Another origin never receives it: a direct
+// request (such as a token fetch from a realm on another host or port) fails
+// before it is sent, and on a redirect the Authorization header is dropped.
+// On the registry's own origin a redirect keeps the header only within the
+// source's repository; direct requests there (the API and same-origin token
+// realms) are unchanged.
+func (s credentialScope) guard(req *http.Request) (*http.Request, error) {
+	authz := req.Header.Get("Authorization") != ""
+	sameOrigin := canonicalOrigin(req.URL.Scheme, req.URL.Host) == s.origin
+	if req.Response != nil { // a redirect hop built by net/http
+		if authz && !(sameOrigin && s.inRepository(req.URL)) {
+			req = req.Clone(req.Context())
+			req.Header.Del("Authorization")
+		}
+		return req, nil
+	}
+	bodied := req.Method != http.MethodGet && req.Method != http.MethodHead
+	if !sameOrigin && (authz || bodied) {
+		return nil, fmt.Errorf("%w: %s %s is not the source's registry %s", ErrCredentialScope, req.Method, req.URL.Host, s.origin)
+	}
+	return req, nil
 }
 
 func (t *fetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req, err := t.scope.guard(req)
+	if err != nil {
+		return nil, err
+	}
 	t.rec.addAuthorization(req.Header.Get("Authorization"))
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/referrers/") {
@@ -149,9 +216,18 @@ func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d dig
 	if err := c.preflightCredential(ctx, src, host, rec); err != nil {
 		return nil, err
 	}
+	base, err := c.transportFor(ctx, src)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if c.plainHTTP {
+		scheme = "http"
+	}
+	_, path, _ := strings.Cut(src.Repository, "/")
 	meta := &budget{limit: c.limits.MaxMetadataBytes, remaining: c.limits.MaxMetadataBytes}
 	httpClient := &http.Client{
-		Transport:     &fetchTransport{base: c.transport, rec: rec, budget: meta},
+		Transport:     &fetchTransport{base: base, rec: rec, budget: meta, scope: newCredentialScope(scheme, host, path)},
 		Timeout:       c.limits.RequestTimeout,
 		CheckRedirect: c.checkRedirect,
 	}
