@@ -34,24 +34,37 @@ var (
 func official(t *testing.T) *bundle.Archive {
 	t.Helper()
 	officialOnce.Do(func() {
-		root := "../../.."
-		raw, err := os.ReadFile(filepath.Join(root, "bundles/konstapel-privileged-containers/definition.json"))
-		if err != nil {
-			officialErr = err
-			return
-		}
-		def, err := bundle.LoadDefinition(raw)
+		def, err := loadOfficialDefinition()
 		if err != nil {
 			officialErr = err
 			return
 		}
 		def.Source.Revision = strings.Repeat("c", 40)
-		officialArch, officialErr = bundle.Build(def, os.DirFS(root), time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
+		officialArch, officialErr = bundle.Build(def, os.DirFS("../../.."), time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
 	})
 	if officialErr != nil {
 		t.Fatal(officialErr)
 	}
 	return officialArch
+}
+
+func loadOfficialDefinition() (bundle.Definition, error) {
+	raw, err := os.ReadFile(filepath.Join("../../..", "bundles/konstapel-privileged-containers/definition.json"))
+	if err != nil {
+		return bundle.Definition{}, err
+	}
+	return bundle.LoadDefinition(raw)
+}
+
+// officialDefinition loads a fresh copy of the privileged-container bundle
+// definition.
+func officialDefinition(t *testing.T) bundle.Definition {
+	t.Helper()
+	def, err := loadOfficialDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return def
 }
 
 type manifestEntry struct {
@@ -60,8 +73,8 @@ type manifestEntry struct {
 }
 
 // fakeRegistry is an in-process OCI distribution registry: manifests and
-// blobs by digest, tags, and the OCI 1.1 referrers API. Behaviour can be
-// overridden per test with hook.
+// blobs by digest, tags, the OCI 1.1 referrers API and, optionally, the OCI
+// referrers tag schema. Behaviour can be overridden per test with hook.
 type fakeRegistry struct {
 	t   *testing.T
 	srv *httptest.Server
@@ -76,6 +89,33 @@ type fakeRegistry struct {
 	hook func(w http.ResponseWriter, r *http.Request) bool
 	// basic, when set, requires these Basic credentials on /v2/ requests.
 	basicUser, basicPass string
+	// noAPI makes the referrers API answer 404 without a body, as
+	// distribution registry 3 does.
+	noAPI bool
+	// tagSchema serves the referrers listing as an image index under the
+	// referrers tag schema tag sha256-<hex>, as a registry without the API
+	// stores it when a client pushes a manifest with a subject.
+	tagSchema bool
+}
+
+// referrersTagOnly makes f behave like a registry without the referrers API
+// that keeps the referrers tag schema index.
+func (f *fakeRegistry) referrersTagOnly() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.noAPI, f.tagSchema = true, true
+}
+
+// referrersIndexBody is the index f serves for subject's referrers.
+func (f *fakeRegistry) referrersIndexBody(subject string) []byte {
+	descs := f.referrers[subject]
+	if descs == nil {
+		descs = []ocispec.Descriptor{}
+	}
+	body, _ := json.Marshal(ocispec.Index{
+		Versioned: specsVersioned, MediaType: ocispec.MediaTypeImageIndex, Manifests: descs,
+	})
+	return body
 }
 
 func newFakeRegistry(t *testing.T) *fakeRegistry {
@@ -232,6 +272,21 @@ func (f *fakeRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	switch kind {
 	case "manifests":
+		if hex, ok := strings.CutPrefix(ref, "sha256-"); ok && f.tagSchema {
+			// The referrers tag schema: the index exists once a referrer does.
+			if _, ok := f.referrers["sha256:"+hex]; !ok {
+				writeError(w, http.StatusNotFound, "MANIFEST_UNKNOWN", "manifest unknown")
+				return
+			}
+			body := f.referrersIndexBody("sha256:" + hex)
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageIndex)
+			w.Header().Set("Docker-Content-Digest", digest.FromBytes(body).String())
+			w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+			if r.Method == http.MethodGet {
+				w.Write(body)
+			}
+			return
+		}
 		if d, ok := f.tags[ref]; ok {
 			ref = d
 		}
@@ -256,15 +311,12 @@ func (f *fakeRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprint(len(b)))
 		w.Write(b)
 	case "referrers":
-		descs := f.referrers[ref]
-		if descs == nil {
-			descs = []ocispec.Descriptor{}
+		if f.noAPI {
+			w.WriteHeader(http.StatusNotFound)
+			return
 		}
-		body, _ := json.Marshal(ocispec.Index{
-			Versioned: specsVersioned, MediaType: ocispec.MediaTypeImageIndex, Manifests: descs,
-		})
 		w.Header().Set("Content-Type", ocispec.MediaTypeImageIndex)
-		w.Write(body)
+		w.Write(f.referrersIndexBody(ref))
 	default:
 		writeError(w, http.StatusNotFound, "NAME_UNKNOWN", "unknown endpoint")
 	}

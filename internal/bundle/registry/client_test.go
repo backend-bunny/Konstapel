@@ -352,7 +352,6 @@ func TestClassify(t *testing.T) {
 		{fmt.Errorf("x: %w", ErrIntegrity), ClassPermanent},
 		{fmt.Errorf("x: %w", ErrUnexpectedDescriptor), ClassPermanent},
 		{fmt.Errorf("x: %w", ErrLimitExceeded), ClassPermanent},
-		{fmt.Errorf("x: %w", ErrReferrersUnsupported), ClassPermanent},
 		{&redactedError{msg: "x", cause: ErrIntegrity}, ClassPermanent},
 	} {
 		if got := Classify(tc.err); got != tc.want {

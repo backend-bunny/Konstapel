@@ -65,6 +65,22 @@ type Skipped struct {
 	Reason       string
 }
 
+// ReferrersSource records how a subject's referrers were listed. Neither
+// listing is authenticated: every entry is fetched by digest and checked.
+type ReferrersSource string
+
+const (
+	// ReferrersFromAPI: the OCI 1.1 referrers API
+	// (GET /v2/<name>/referrers/<digest>).
+	ReferrersFromAPI ReferrersSource = "api"
+	// ReferrersFromTagSchema: the registry does not serve the referrers API,
+	// and the OCI referrers tag schema index (tag sha256-<hex>) was read.
+	ReferrersFromTagSchema ReferrersSource = "tag-schema"
+	// ReferrersNone: the registry serves neither the API nor a referrers tag
+	// for the subject, so there are no referrers and no proofs.
+	ReferrersNone ReferrersSource = "none"
+)
+
 // Result is a retrieved subject and its proofs. Its byte slices may be shared
 // between deduplicated callers and must not be modified.
 type Result struct {
@@ -81,8 +97,11 @@ type Result struct {
 	Proofs []Proof
 	// Skipped referrers were listed but are not usable proofs.
 	Skipped []Skipped
-	// ReferrerCount is how many referrers the registry listed.
+	// ReferrerCount is how many referrers the registry listed, counting
+	// duplicate entries.
 	ReferrerCount int
+	// ReferrersSource is how the listing was obtained.
+	ReferrersSource ReferrersSource
 	// MetadataBytes is the verification metadata downloaded.
 	MetadataBytes int64
 }

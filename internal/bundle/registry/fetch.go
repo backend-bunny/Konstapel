@@ -173,8 +173,12 @@ func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d dig
 	repo.ManifestMediaTypes = []string{ocispec.MediaTypeImageManifest, ocispec.MediaTypeImageIndex}
 	repo.MaxMetadataBytes = c.limits.MaxManifestBytes
 	repo.ReferrerListMaxPages = c.limits.MaxReferrers + 1
-	// Use only the referrers API: never fall back to the sha256-<digest> tag
-	// schema, which this version does not support.
+	// Make ORAS's Referrers call the referrers API only: when the registry
+	// does not serve it, listReferrers reads the referrers tag schema itself,
+	// so that the index is charged to the metadata budget and parsed strictly
+	// (ORAS's built-in fallback does neither: it ignores the index's
+	// schemaVersion and mediaType, treats a tag of the wrong media type as "no
+	// referrers", and cannot report which listing was used).
 	if err := repo.SetReferrersCapability(true); err != nil {
 		return nil, err
 	}
@@ -255,10 +259,11 @@ type referrerManifest struct {
 	Annotations  map[string]string    `json:"annotations"`
 }
 
-// collectProofs lists the subject's referrers through the referrers API and
-// downloads the recognized proofs. Integrity and limit failures are errors;
-// referrers that are merely unusable are recorded in res.Skipped.
-func (c *Client) collectProofs(ctx context.Context, repo *remote.Repository, subject ocispec.Descriptor, meta *budget, res *Result) error {
+// listReferrers lists the subject's referrers: through the OCI 1.1 referrers
+// API when the registry serves it, otherwise from the OCI referrers tag schema
+// (an image index tagged sha256-<hex>). Both listings are unauthenticated;
+// callers check every entry. Cosign's legacy .sig/.att tags are never read.
+func (c *Client) listReferrers(ctx context.Context, repo *remote.Repository, subject ocispec.Descriptor, meta *budget) ([]ocispec.Descriptor, ReferrersSource, error) {
 	var listed []ocispec.Descriptor
 	err := repo.Referrers(ctx, subject, "", func(page []ocispec.Descriptor) error {
 		if len(listed)+len(page) > c.limits.MaxReferrers {
@@ -267,25 +272,108 @@ func (c *Client) collectProofs(ctx context.Context, repo *remote.Repository, sub
 		listed = append(listed, page...)
 		return nil
 	})
-	if err != nil {
-		var resp *errcode.ErrorResponse
-		if errors.Is(err, errdef.ErrUnsupported) ||
-			(errors.As(err, &resp) && (resp.StatusCode == http.StatusNotImplemented || resp.StatusCode == http.StatusMethodNotAllowed)) {
-			return fmt.Errorf("%w: %s: %w", ErrReferrersUnsupported, repo.Reference.Registry, err)
-		}
-		return wrap("list referrers of "+subject.Digest.String(), err)
+	switch {
+	case err == nil:
+		return listed, ReferrersFromAPI, nil
+	case referrersAPIUnavailable(err):
+		return c.listReferrersByTagSchema(ctx, repo, subject, meta)
+	default:
+		return nil, "", wrap("list referrers of "+subject.Digest.String(), err)
 	}
+}
+
+// referrersAPIUnavailable reports that the registry does not serve the
+// referrers API: ORAS reports a 404 other than NAME_UNKNOWN, or a response
+// that is not an image index, as errdef.ErrUnsupported; 405 and 501 mean the
+// same. The OCI distribution spec then directs clients to the tag schema.
+func referrersAPIUnavailable(err error) bool {
+	var resp *errcode.ErrorResponse
+	return errors.Is(err, errdef.ErrUnsupported) ||
+		(errors.As(err, &resp) && (resp.StatusCode == http.StatusNotImplemented || resp.StatusCode == http.StatusMethodNotAllowed))
+}
+
+// referrersTag is the OCI referrers tag schema tag of a sha256 subject:
+// "<alg>-<hex>" (the spec's truncation to 32/64 characters never applies to
+// sha256).
+func referrersTag(subject digest.Digest) string {
+	return string(subject.Algorithm()) + "-" + subject.Encoded()
+}
+
+// referrersIndex is the strictly parsed referrers tag schema index.
+type referrersIndex struct {
+	SchemaVersion int                   `json:"schemaVersion"`
+	MediaType     string                `json:"mediaType"`
+	Manifests     *[]ocispec.Descriptor `json:"manifests"`
+}
+
+// listReferrersByTagSchema reads the referrers tag schema index. The tag is
+// mutable and unauthenticated: its body is bounded by MaxManifestBytes and
+// charged to the metadata budget, checked against the size and digest the
+// registry declares for it, and parsed strictly; its entries get the same
+// checks as an API listing. A missing tag means no referrers.
+func (c *Client) listReferrersByTagSchema(ctx context.Context, repo *remote.Repository, subject ocispec.Descriptor, meta *budget) ([]ocispec.Descriptor, ReferrersSource, error) {
+	tag := referrersTag(subject.Digest)
+	desc, rc, err := repo.Manifests().FetchReference(ctx, tag)
+	if err != nil {
+		if errors.Is(err, errdef.ErrNotFound) {
+			return nil, ReferrersNone, nil
+		}
+		return nil, "", wrap("fetch referrers tag "+tag, err)
+	}
+	defer rc.Close()
+	if desc.MediaType != ocispec.MediaTypeImageIndex {
+		return nil, "", fmt.Errorf("%w: referrers tag %s has media type %q, want %q", ErrUnexpectedDescriptor, tag, desc.MediaType, ocispec.MediaTypeImageIndex)
+	}
+	if desc.Digest.Validate() != nil || desc.Digest.Algorithm() != digest.SHA256 || desc.Digest == subject.Digest {
+		return nil, "", fmt.Errorf("%w: referrers tag %s resolves to %q, not a sha256 referrers index", ErrUnexpectedDescriptor, tag, desc.Digest)
+	}
+	if desc.Size > c.limits.MaxManifestBytes {
+		return nil, "", fmt.Errorf("%w: referrers index %s is %d bytes, limit %d", ErrLimitExceeded, tag, desc.Size, c.limits.MaxManifestBytes)
+	}
+	if err := meta.take(desc.Size); err != nil {
+		return nil, "", err
+	}
+	raw, err := readExact(rc, desc.Size, desc.Digest)
+	if err != nil {
+		return nil, "", wrap("read referrers index "+tag, err)
+	}
+	var index referrersIndex
+	switch err := json.Unmarshal(raw, &index); {
+	case err != nil:
+		return nil, "", fmt.Errorf("%w: referrers index %s is not valid JSON: %w", ErrUnexpectedDescriptor, tag, err)
+	case index.SchemaVersion != 2:
+		return nil, "", fmt.Errorf("%w: referrers index %s has schemaVersion %d, want 2", ErrUnexpectedDescriptor, tag, index.SchemaVersion)
+	case index.MediaType != ocispec.MediaTypeImageIndex:
+		return nil, "", fmt.Errorf("%w: referrers index %s declares media type %q, want %q", ErrUnexpectedDescriptor, tag, index.MediaType, ocispec.MediaTypeImageIndex)
+	case index.Manifests == nil:
+		return nil, "", fmt.Errorf("%w: referrers index %s has no manifests list", ErrUnexpectedDescriptor, tag)
+	case len(*index.Manifests) > c.limits.MaxReferrers:
+		return nil, "", fmt.Errorf("%w: more than %d referrers listed for %s", ErrLimitExceeded, c.limits.MaxReferrers, subject.Digest)
+	}
+	return *index.Manifests, ReferrersFromTagSchema, nil
+}
+
+// collectProofs lists the subject's referrers and downloads the recognized
+// proofs. Integrity and limit failures are errors; referrers that are merely
+// unusable are recorded in res.Skipped.
+func (c *Client) collectProofs(ctx context.Context, repo *remote.Repository, subject ocispec.Descriptor, meta *budget, res *Result) error {
+	listed, source, err := c.listReferrers(ctx, repo, subject, meta)
+	if err != nil {
+		return err
+	}
+	res.ReferrersSource = source
 	res.ReferrerCount = len(listed)
 
 	seen := map[digest.Digest]bool{}
 	for _, desc := range listed {
-		if seen[desc.Digest] {
-			continue
-		}
-		seen[desc.Digest] = true
 		skip := func(reason string) {
 			res.Skipped = append(res.Skipped, Skipped{Digest: desc.Digest.String(), ArtifactType: desc.ArtifactType, Reason: reason})
 		}
+		if seen[desc.Digest] {
+			skip("listed more than once")
+			continue
+		}
+		seen[desc.Digest] = true
 		if desc.ArtifactType != SigstoreBundleArtifactType {
 			skip("unrelated artifact type")
 			continue

@@ -8,8 +8,16 @@ package registry
 // scripts/registry-compat.sh. The fake registry in the other tests cannot show
 // real TLS, real custom-CA trust or a real authentication challenge; this can.
 //
+// The pinned registry does not serve the OCI referrers API
+// (GET /v2/<name>/referrers/<digest> answers 404), so this suite exercises the
+// referrers tag schema fallback: ORAS Go, when pushing a manifest that has a
+// subject to such a registry, also maintains the image index tagged
+// sha256-<subject hex>, and pushSigned relies on that deliberately (it checks
+// the API is absent and the tag index lists what was pushed).
+//
 // Not covered: bearer-token (token service) authentication, which this
-// registry image only offers through a separate token server.
+// registry image only offers through a separate token server, and a registry
+// that serves the referrers API (covered by the in-process fake only).
 
 import (
 	"bytes"
@@ -216,6 +224,7 @@ func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest
 	}
 	raw, _ := json.Marshal(other)
 	push(ocispec.MediaTypeImageManifest, raw)
+	checkTagSchema(t, r, p, cred, subject.Digest, 3)
 
 	// A moved tag: "stable" points at a different manifest than the pin.
 	decoy := push(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","artifactType":"application/vnd.example.decoy","config":{"mediaType":"application/vnd.oci.empty.v1+json","digest":"`+bundle.EmptyConfigDigest+`","size":2},"layers":[]}`))
@@ -223,6 +232,44 @@ func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest
 		t.Fatal(err)
 	}
 	return subject.Digest
+}
+
+// checkTagSchema confirms what the suite relies on: this registry does not
+// serve the referrers API, and the pushes above left a referrers tag schema
+// index listing want referrers. It reads with plain HTTP requests, not the
+// code under test.
+func checkTagSchema(t *testing.T, r regInstance, p pki, cred auth.Credential, subject digest.Digest, want int) {
+	t.Helper()
+	hc := &http.Client{Timeout: 10 * time.Second, Transport: transportFor(p.pool)}
+	get := func(path, accept string) (*http.Response, []byte) {
+		req, err := http.NewRequest(http.MethodGet, "https://"+r.host+"/v2/"+repoPath+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Accept", accept)
+		if cred.Username != "" {
+			req.SetBasicAuth(cred.Username, cred.Password)
+		}
+		resp, err := hc.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var buf bytes.Buffer
+		if _, err := buf.ReadFrom(resp.Body); err != nil {
+			t.Fatal(err)
+		}
+		return resp, buf.Bytes()
+	}
+	if resp, _ := get("/referrers/"+subject.String(), ocispec.MediaTypeImageIndex); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("registry answers the referrers API with %d; this suite expects a registry without it", resp.StatusCode)
+	}
+	resp, body := get("/manifests/sha256-"+subject.Encoded(), ocispec.MediaTypeImageIndex)
+	var index ocispec.Index
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != ocispec.MediaTypeImageIndex ||
+		json.Unmarshal(body, &index) != nil || len(index.Manifests) != want {
+		t.Fatalf("referrers tag index: status %d, type %q, body %s", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
 }
 
 type compatRecord struct {
@@ -287,14 +334,20 @@ func TestRegistryCompat(t *testing.T) {
 		if err := res.RequireProofs(RequiredProofs...); err != nil {
 			t.Fatal(err)
 		}
-		if res.ReferrerCount != 3 || len(res.Proofs) != 2 || len(res.Skipped) != 1 || res.Skipped[0].ArtifactType != "application/vnd.example.sbom" {
-			t.Fatalf("referrers: listed %d, proofs %d, skipped %+v", res.ReferrerCount, len(res.Proofs), res.Skipped)
+		if res.ReferrersSource != ReferrersFromTagSchema || res.ReferrerCount != 3 || len(res.Proofs) != 2 ||
+			len(res.Skipped) != 1 || res.Skipped[0].ArtifactType != "application/vnd.example.sbom" {
+			t.Fatalf("referrers: source %q, listed %d, proofs %d, skipped %+v", res.ReferrersSource, res.ReferrerCount, len(res.Proofs), res.Skipped)
+		}
+		kinds := res.Found()
+		if kinds[ProofSignature] != 1 || kinds[ProofProvenance] != 1 {
+			t.Fatalf("proof kinds %v", kinds)
 		}
 	}
 
 	t.Run("anonymous retrieval with the custom CA", func(t *testing.T) {
 		res, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), pinned)
-		record(t.Name(), err, fmt.Sprintf("manifest %s, %d proofs, %d skipped", pinned, len(res.proofsOrNil()), len(res.skippedOrNil())))
+		record(t.Name(), err, fmt.Sprintf("manifest %s, referrers via %s, %d proofs, %d skipped",
+			pinned, res.sourceOrNone(), len(res.proofsOrNil()), len(res.skippedOrNil())))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -360,6 +413,41 @@ func TestRegistryCompat(t *testing.T) {
 		checkFetched(t, res)
 	})
 
+	t.Run("a bundle without referrers has no proofs", func(t *testing.T) {
+		// Same bundle, another revision: a new subject nothing refers to, so
+		// the registry has no referrers tag for it.
+		def := officialDefinition(t)
+		def.Source.Revision = strings.Repeat("d", 40)
+		bare, err := bundle.Build(def, os.DirFS("../../.."), time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo, err := remote.NewRepository(anon.host + "/" + repoPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo.Client = &auth.Client{Client: &http.Client{Transport: transportFor(p.pool)}}
+		for _, b := range []struct {
+			mt   string
+			body []byte
+		}{{bundle.LayerMediaType, bare.Layer}, {ocispec.MediaTypeImageManifest, bare.Manifest}} {
+			d := ocispec.Descriptor{MediaType: b.mt, Digest: digest.FromBytes(b.body), Size: int64(len(b.body))}
+			if err := repo.Push(ctx, d, bytes.NewReader(b.body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), digest.FromBytes(bare.Manifest).String())
+		var missing error
+		if err == nil {
+			missing = res.RequireProofs(RequiredProofs...)
+		}
+		ok := err == nil && res.ReferrersSource == ReferrersNone && len(res.Proofs) == 0 && errors.Is(missing, ErrMissingProofs)
+		record(t.Name(), map[bool]error{true: nil, false: fmt.Errorf("got %v / %v", err, missing)}[ok], fmt.Sprintf("referrers via %s; %v", res.sourceOrNone(), missing))
+		if !ok {
+			t.Fatalf("want zero proofs from source none and ErrMissingProofs, got err %v, missing %v", err, missing)
+		}
+	})
+
 	t.Run("an unknown digest is not found", func(t *testing.T) {
 		missing := digest.FromString("not published").String()
 		_, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), missing)
@@ -378,6 +466,13 @@ func (r *Result) proofsOrNil() []Proof {
 		return nil
 	}
 	return r.Proofs
+}
+
+func (r *Result) sourceOrNone() ReferrersSource {
+	if r == nil {
+		return ""
+	}
+	return r.ReferrersSource
 }
 
 func (r *Result) skippedOrNil() []Skipped {
@@ -408,7 +503,7 @@ func writeCompatEvidence(t *testing.T, image, run string, records []compatRecord
 		"registryImage": image, "registryVersion": registryVersion,
 		"docker": docker(t, "version", "--format", "client {{.Client.Version}} server {{.Server.Version}}"),
 		"orasGo": orasVersion, "go": runtime.Version(),
-		"layout":         "OCI 1.1 referrers API; Sigstore bundle v0.3 referrers (see docs/policy-bundles.md)",
+		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md), listed through the OCI referrers tag schema: the registry does not serve the referrers API",
 		"authentication": "anonymous and htpasswd (basic); bearer-token service not covered",
 		"tls":            "throwaway CA, verification always on", "cases": records,
 	}
