@@ -39,6 +39,14 @@
     {
       "path": "content/component-definition.json",
       "version": "1.1.3"
+    },
+    {
+      "path": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+      "version": "1.2.3"
+    },
+    {
+      "path": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json",
+      "version": "1.2.3"
     }
   ],
   "include": [

@@ -133,6 +133,9 @@ var (
 // ParseDescriptor strictly decodes bundle.json: unknown fields, trailing data
 // and unsupported formats are rejected, then the descriptor is validated.
 func ParseDescriptor(data []byte) (*Descriptor, error) {
+	if err := noDuplicateJSONKeys(data); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", DescriptorPath, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var d Descriptor

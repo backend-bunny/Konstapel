@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -19,7 +20,21 @@ const officialDef = "bundles/konstapel-privileged-containers/definition.json"
 
 // buildOfficial builds the checked-in privileged-container bundle from this
 // repository's real content, as the release workflow will.
+var (
+	officialOnce  sync.Once
+	officialArch  *Archive
+	officialFiles fstest.MapFS
+)
+
+// buildOfficial builds once per test binary; callers must not modify the
+// returned payload (officialPayload hands out private copies).
 func buildOfficial(t *testing.T) (*Archive, fstest.MapFS) {
+	t.Helper()
+	officialOnce.Do(func() { officialArch, officialFiles = buildOfficialFresh(t) })
+	return officialArch, officialFiles
+}
+
+func buildOfficialFresh(t *testing.T) (*Archive, fstest.MapFS) {
 	t.Helper()
 	root := os.DirFS("../..")
 	raw, err := os.ReadFile(filepath.Join("../..", officialDef))
@@ -44,7 +59,7 @@ func buildOfficial(t *testing.T) (*Archive, fstest.MapFS) {
 
 func TestOfficialBundleIsReproducible(t *testing.T) {
 	a, _ := buildOfficial(t)
-	b, _ := buildOfficial(t)
+	b, _ := buildOfficialFresh(t)
 	if a.LayerDigest != b.LayerDigest || a.ManifestDigest != b.ManifestDigest {
 		t.Fatal("the official bundle is not reproducible")
 	}
