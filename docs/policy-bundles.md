@@ -171,6 +171,46 @@ anything in it, and runs during `bundles:package` and `task check`. It checks:
 against its declared parameter schema. The schema must describe an object and
 be self-contained, and a policy that declares no schema accepts no parameters.
 
+## Resolved-content handle and verification receipt
+
+This is the contract a resolver will publish and that rendering and the
+assessment producer will consume (`bundle.ResolvedContent`, `bundle.Receipt`,
+`bundle.Lease`). Only the contract exists today: nothing resolves, verifies,
+signs or caches a bundle yet. Serialized examples are pinned in
+`testdata/bundles/contract/` and a drift fails the tests.
+
+Four identities stay separate and are never interchangeable:
+
+| Digest | Meaning |
+| --- | --- |
+| `revision` | the source commit the content was built from |
+| `content` | digest of the canonical file inventory, independent of packaging |
+| `archive` | the deterministic layer digest |
+| `oci` | the manifest digest: the signed identity and the only one targeting uses |
+
+Rendered engine-policy hashes are recorded per policy by the renderer
+(`policies[].rendered`), separately from all four.
+
+- **Targeting compatibility.** `BundleDigest()` is the OCI digest and fills
+  `targeting.Contribution.BundleDigest`; the handle's name and policy names fill
+  `BundleName` and `Policy`. `targeting.EnforcementRevision` is unchanged and a
+  test pins its value. A mirror, re-verification, credential rotation, lease
+  change, engine state or rendered hash cannot change it; a new manifest digest
+  does.
+- **Content versus engine.** `compatibility.content` is the verdict on the
+  content alone; `compatibility.engine` (`unknown`, `ready`, `unavailable`) is
+  reported separately, starts `unknown`, and neither implies the other.
+- **Receipt.** Records the verified subject (name, version, manifest digest),
+  where it was retrieved from (a location, not publisher identity), the source
+  rule and trust configuration revisions, the signer (keyless issuer and
+  identity, or a public-key fingerprint), the SLSA provenance v1 claims checked
+  against the descriptor, and digests of the retained signature and attestation.
+  It is evidence that verification happened under named trust inputs, not a
+  standing authorization: a change to those inputs invalidates it.
+- **Lease.** An explicit pin on the cache entry by a holder (`profile`,
+  `applied` or `assessment`), released when that holder finishes or advances.
+- The handle carries no credentials and no payload bytes.
+
 ## Create and package a bundle
 
 1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal

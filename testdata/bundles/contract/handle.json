@@ -1,0 +1,75 @@
+{
+  "handleVersion": 1,
+  "name": "konstapel-privileged-containers",
+  "version": "0.1.0",
+  "digests": {
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "content": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "archive": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "oci": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "policies": [
+    {
+      "name": "disallow-privileged-containers",
+      "path": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+      "checks": [
+        {
+          "ruleID": "disallow-privileged-containers",
+          "checkID": "disallow-privileged-containers"
+        }
+      ]
+    }
+  ],
+  "checkedPaths": [
+    "LICENSE",
+    "bundle.json",
+    "content/component-definition.json"
+  ],
+  "compatibility": {
+    "content": {
+      "compatible": true,
+      "provider": "konstapel-kyverno/v1",
+      "konstapel": "0.1.0",
+      "oscal": [
+        "1.1.3",
+        "1.2.3"
+      ]
+    },
+    "engine": "unknown"
+  },
+  "receipt": {
+    "version": 1,
+    "verifiedAt": "2026-11-10T09:00:00Z",
+    "subject": {
+      "name": "konstapel-privileged-containers",
+      "version": "0.1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "retrievedFrom": "ghcr.io/backend-bunny/bundles/konstapel-privileged-containers",
+    "sourceRule": "official",
+    "trustRevision": "rev-7",
+    "trustRoot": "sigstore-public-good",
+    "signer": {
+      "kind": "keyless",
+      "issuer": "https://token.actions.githubusercontent.com",
+      "identity": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
+    },
+    "proofs": {
+      "signature": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "attestation": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1",
+      "repository": "https://github.com/backend-bunny/Konstapel",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "builder": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
+    }
+  },
+  "lease": {
+    "id": "lease-1",
+    "holder": "profile",
+    "owner": "profile/baseline",
+    "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "acquiredAt": "2026-11-10T09:00:01Z"
+  }
+}

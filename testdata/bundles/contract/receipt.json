@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-11-10T09:00:00Z",
+  "subject": {
+    "name": "konstapel-privileged-containers",
+    "version": "0.1.0",
+    "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "retrievedFrom": "ghcr.io/backend-bunny/bundles/konstapel-privileged-containers",
+  "sourceRule": "official",
+  "trustRevision": "rev-7",
+  "trustRoot": "sigstore-public-good",
+  "signer": {
+    "kind": "keyless",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "identity": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
+  },
+  "proofs": {
+    "signature": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "attestation": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "provenance": {
+    "predicateType": "https://slsa.dev/provenance/v1",
+    "repository": "https://github.com/backend-bunny/Konstapel",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "builder": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
+  }
+}
