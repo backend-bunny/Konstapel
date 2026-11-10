@@ -374,7 +374,8 @@ The retry loop belongs to the resolver. `Classify` sorts errors into
 (`ErrIntegrity`, `ErrUnexpectedDescriptor`, `ErrLimitExceeded`,
 `ErrInvalidRequest`) and *retryable* (timeouts,
 transport errors, `ErrNotFound`, `ErrUnauthorized`, `ErrUnavailable`,
-`ErrCredentials`).
+`ErrCredentials`, `ErrTrustConfig`, `ErrCredentialScope`: a Secret, CA object
+or registry configuration can be fixed).
 
 ### Concurrency and cancellation
 
@@ -389,11 +390,24 @@ last caller leaves.
 ### Transport and credentials seam
 
 `Options.Transport` (an `http.RoundTripper`, defaulting to a clone of
-`http.DefaultTransport` with system roots) is where custom CA pools are
-configured; a transport with `InsecureSkipVerify` is rejected. Plain HTTP is
+`http.DefaultTransport` with system roots) or, instead, `Options.Transports`
+(a `TransportProvider` asked for one transport per source and attempt, so a
+custom CA is trusted only for its own source) carries the TLS trust; a
+transport with `InsecureSkipVerify` is rejected, and a `TransportProvider`
+error fails the attempt with `ErrTrustConfig` before any request. Plain HTTP is
 possible only with `Options.TestOnlyPlainHTTP`, used by in-process fixtures.
-Redirects are limited to five and may not leave HTTPS (`ErrInsecureRedirect`);
-net/http drops the `Authorization` header on a redirect to another host.
+Redirects are limited to five and may not leave HTTPS (`ErrInsecureRedirect`).
+Credential material is confined to the source's registry origin
+(scheme, host and port): a request that would carry an `Authorization` header
+or a body (an OAuth2 token request) to another origin, such as a bearer token
+`realm` on another host or port, is not sent and fails with
+`ErrCredentialScope`; an anonymous token request to such a realm is allowed.
+On a redirect the `Authorization` header is dropped unless the target is the
+registry's origin *and* a path of the source's repository (`/v2/<path>/...`
+without dot segments or escapes), so neither another host nor another
+repository on the same registry receives it. A consequence: registries whose
+token service lives on another host (Docker Hub's `auth.docker.io`,
+GitLab.com's `gitlab.com/jwt/auth`) cannot be used with credentials yet.
 `Options.Credentials` is a `CredentialProvider` that is asked only for the
 source's own registry host, never for a token realm or another origin. When a
 source references a credential Secret, the credential is obtained before any
@@ -416,7 +430,7 @@ disposable, test-owned containers of two digest-pinned registries from
 
 | Instance | Image | Referrers listing |
 | --- | --- | --- |
-| anonymous and htpasswd-protected | `KONSTAPEL_REGISTRY_IMAGE` (distribution registry 3.1.2) | no `/referrers/` API (404): tag schema |
+| anonymous and htpasswd-protected, plus an anonymous one with another CA | `KONSTAPEL_REGISTRY_IMAGE` (distribution registry 3.1.2) | no `/referrers/` API (404): tag schema |
 | anonymous | `KONSTAPEL_REGISTRY_API_IMAGE` (Zot v2.1.23) | OCI 1.1 referrers API |
 
 Random credentials are generated per run. The Go test starts and removes its
@@ -442,7 +456,15 @@ every case. It verifies:
 - a moved tag does not change what the digest returns;
 - a bundle with no referrers reports `none`, zero proofs and
   `ErrMissingProofs` from `RequireProofs`;
-- an unknown digest is `ErrNotFound`.
+- an unknown digest is `ErrNotFound`;
+- through `kubeaccess` with an in-memory object reader: anonymous retrieval
+  with a ConfigMap CA added to the real system roots; a wrong password in the
+  dockerconfigjson Secret is `ErrUnauthorized` and never echoed, and the same
+  `Client` succeeds after the Secret is rotated and invalidated; a missing
+  Secret is `ErrCredentials` although the registry is anonymous; an invalid
+  CA object is `ErrTrustConfig`; and the CA ConfigMap of one registry does not
+  trust a third registry instance with its own unrelated CA, which succeeds
+  with its own CA object.
 
 Why two registries: the first run of this suite found that neither the
 reference registry nor `ghcr.io` (the planned official registry) serves the
@@ -455,6 +477,150 @@ offers without a separate token server, and `ghcr.io` itself (only its tag
 schema format was checked, by read-only anonymous requests). The suite is run on
 demand; it is not part of `task check` or CI, and `task bundles:acceptance`
 (task 8.1) will compose it. It is deliberately not a Taskfile task.
+
+## Registry credentials and custom CAs
+
+[`internal/bundle/registry/kubeaccess`](../internal/bundle/registry/kubeaccess)
+turns a source's `credentialSecret` and `ca` references into what the
+retrieval adapter consumes: `Provider` implements both
+`registry.CredentialProvider` and `registry.TransportProvider`, and
+`kubeaccess.NewClient(provider, opts)` builds a `registry.Client` bound to it.
+It is **not wired into the controller yet** (task 5.1 adds the watches and
+calls) and, like the adapter, is not linked into the shipped binaries. Node
+or kubelet pull credentials are never used, and nothing is pulled through image
+volumes, loader Jobs or a `docker`/helper process.
+
+### Object access
+
+The provider reads through a narrow `ObjectReader`: `Get(kind, name)` of one
+`Secret` or `ConfigMap` in the controller's own namespace, fixed when the reader
+is built. References have no namespace field, so no other namespace can be
+named. There is no list, watch or cluster-wide access. `NewClientReader` adapts
+a controller-runtime `client.Reader`; use the manager's uncached `APIReader`,
+because a cached client would need `list`/`watch` on every Secret in the
+namespace. `MemoryReader` is the in-memory reader for tests and fixtures.
+
+RBAC for the later chart task: a namespaced `Role` in the controller namespace
+with only
+
+```yaml
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get]
+  resourceNames: [<every configured credentialSecret and Secret-held ca>]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get]
+  resourceNames: [<every ConfigMap-held ca>]
+```
+
+`resourceNames` is possible because every object is fetched by name. Change
+notification (task 5.1) needs `watch` as well; `resourceNames` cannot restrict
+`list`, and restricts `watch` only for single-object watches selected by
+`metadata.name`, so how the watches are granted is decided by that wiring
+task, not here.
+
+### Credential Secret
+
+The Secret must have type `kubernetes.io/dockerconfigjson`; its data key is
+`.dockerconfigjson` unless the reference names another key. The document is
+parsed strictly, and every failure is a non-secret error wrapping
+`registry.ErrCredentials` (`kubeaccess.ErrMalformedCredentials` or
+`kubeaccess.ErrNoCredentialForHost`):
+
+- At most 1 MiB, valid UTF-8, one JSON object, at most 8 levels deep, and no
+  repeated key anywhere (a duplicate could hide a credential from review).
+- The only top-level field is `auths`. `credsStore` and `credHelpers` are
+  rejected and their programs are never executed; `HttpHeaders` and `proxies`
+  are rejected too, as is any other field (a Secret created by
+  `kubectl create secret docker-registry` has only `auths`).
+- Every entry is validated, not only the one used. Entry fields are `auth`,
+  `username`, `password`, `identitytoken`, `registrytoken`, and the ignored
+  legacy `email` and `serveraddress`; values are strings without control
+  characters. An entry holds exactly one credential form: `username` with
+  `password`; `auth` (strict, padded base64 of `user:password`, non-empty user
+  and password), which must agree with `username`/`password` if both are
+  present; `identitytoken` (optionally with the account name Docker stores
+  next to it, but no password); or `registrytoken`.
+
+**Host matching.** The entry is chosen by exact equality with the registry
+host of the source's `repository` (`host[:port]`). An `auths` key may be written
+as `host`, `host:port`, `https://host[:port]`, `https://host[:port]/` or
+`https://host[:port]/v1/`; nothing else is normalized. Comparison is exact:
+no case folding (repository hosts are lowercase, so `GHCR.IO` does not match
+`ghcr.io`), no wildcard, prefix or suffix matching (`evil-ghcr.io` and
+`sub.ghcr.io` do not match `ghcr.io`), and the port is part of the host: an
+entry for `registry.example` does not match a repository on
+`registry.example:5000`, and `registry.example:443` does not match
+`registry.example`. Two keys that name the same host are rejected as
+ambiguous; no matching entry is an error, never a fallback to another entry
+or to anonymous access. The provider only answers for the source's own
+registry host; the adapter never asks it for a token realm or another origin.
+
+A source without `credentialSecret` is anonymous. A configured but missing
+Secret, a missing key, a wrong type, a malformed document or a missing entry
+fails before any request is sent.
+
+### Rotation and invalidation
+
+An object read is reused for at most `Options.CacheFor` (30 seconds by
+default, at most 5 minutes; negative disables reuse). The watcher that will be
+wired in task 5.1 calls `Provider.Invalidate(kind, name)` on every change or
+deletion of a referenced object (or `InvalidateAll` after a watch restarts), so
+the next retrieval re-reads at once; an invalidation that races with a read
+forces another read. Resolution is serialized per source, so a slower, older
+read can never replace a newer credential.
+
+The provider remembers a SHA-256 fingerprint of the credential each source
+last resolved to (never logged or returned). When it changes, or the Secret
+becomes unusable, it calls `Client.ResetTokens(source)` *before* returning, so
+bearer tokens and cached Basic state obtained with the old credential are
+discarded and the next requests authenticate with the current credential. The
+adapter asks for the credential at the start of every retrieval, before it
+takes the token cache, so a retrieval that starts after a rotation is observed
+never uses a token of the old credential (one already in flight finishes with
+what it had). A removed or emptied Secret is a recoverable `ErrCredentials`:
+never the old credential, never anonymous. A provider that is not bound to a
+client (`Bind`, done by `kubeaccess.NewClient`) refuses to release
+credentials, because it could not reset tokens.
+
+### Custom CA
+
+`ca` references a ConfigMap (`data` or `binaryData`) or Secret key, default
+`ca.crt`, holding PEM certificates. The bundle is parsed strictly
+(`kubeaccess.ErrMalformedCA`, wrapping `registry.ErrTrustConfig`): only
+`CERTIFICATE` blocks without PEM headers and whitespace between them, at least
+one and at most 512 certificates, at most 1 MiB; a private key, any other block
+type, text outside blocks or a malformed block is rejected. The certificates are
+trust anchors and need not be CA certificates.
+
+Each source with a CA gets its own transport whose roots are the **system
+roots plus** the referenced certificates; extra roots are never used alone,
+and if the system roots cannot be loaded the source is unavailable. Another
+source never shares that pool, so one source's CA does not vouch for another
+source's registry. The transport requires TLS 1.2 or later, never skips
+verification, and keeps `http.DefaultTransport`'s other settings, including
+`HTTPS_PROXY`/`NO_PROXY` from the environment (a CONNECT proxy sees no
+credentials: TLS is end to end). When the bundle's content changes the
+transport is rebuilt and the old one's idle connections are closed. A missing,
+emptied or invalid CA object makes the source unavailable
+(`ErrTrustConfig`), never a silent fall back to system roots only. Sources
+without `ca` share one transport with the system roots.
+
+### Verification
+
+Unit tests use an in-process TLS registry with Basic and bearer-token
+authentication and throwaway CAs: strict parsing and every rejection above,
+exact host matching and its near misses, missing Secret/key/entry with no
+request reaching the registry, rotation (the old credential until the change
+is observed, then the new; `ResetTokens` exactly when the credential changes
+or is removed), a cached bearer token dropped after rotation although the
+registry would still accept it, a realm on another port, a redirect to another
+host and a redirect to another repository receiving no credential, redaction
+in every `fmt` verb, `slog` and JSON, CA rejections, CA rotation closing idle
+connections, per-source trust, and concurrent rotation under `-race`. The
+[real-registry suite](#real-registry-compatibility) repeats the essential cases
+against real registries.
 
 ## Create and package a bundle
 

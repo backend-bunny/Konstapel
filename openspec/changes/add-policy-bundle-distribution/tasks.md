@@ -27,7 +27,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 2.2 Add pinned ORAS Go dependencies and a bounded digest/referrer retrieval adapter; test exact-subject selection, moved tags, unexpected descriptors, missing proofs, timeout/cancellation, referrer limits and concurrent request deduplication.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
-- [ ] 2.3 Implement namespace-local dockerconfigjson Secret credentials and custom CA handling; test rotation/token invalidation, missing configured Secrets, malformed credentials, helper rejection and prevention of credential disclosure or forwarding to unrelated origins.
+- [x] 2.3 Implement namespace-local dockerconfigjson Secret credentials and custom CA handling; test rotation/token invalidation, missing configured Secrets, malformed credentials, helper rejection and prevention of credential disclosure or forwarding to unrelated origins.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 2.4 Add a disposable authenticated TLS OCI registry fixture supporting the chosen referrer layout; verify real anonymous/authenticated subject and proof retrieval, authentication failure, custom-CA trust and task-owned teardown with recorded versions.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
