@@ -29,7 +29,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
 - [ ] 2.3 Implement namespace-local dockerconfigjson Secret credentials and custom CA handling; test rotation/token invalidation, missing configured Secrets, malformed credentials, helper rejection and prevention of credential disclosure or forwarding to unrelated origins.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 2.4 Add a disposable authenticated TLS OCI registry fixture supporting the chosen referrer layout; verify real anonymous/authenticated subject and proof retrieval, authentication failure, custom-CA trust and task-owned teardown with recorded versions.
+- [x] 2.4 Add a disposable authenticated TLS OCI registry fixture supporting the chosen referrer layout; verify real anonymous/authenticated subject and proof retrieval, authentication failure, custom-CA trust and task-owned teardown with recorded versions.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 2.5 Document private registry setup, least-privilege Secret access and registry compatibility requirements; verify the setup against the fixture and state explicitly that Konstapel does not inherit node pull credentials.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->

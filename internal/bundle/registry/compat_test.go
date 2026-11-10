@@ -127,7 +127,18 @@ type regInstance struct {
 
 // startRegistry runs one registry container over TLS, optionally requiring
 // htpasswd authentication, and registers its removal.
+const zotConfig = `{"distSpecVersion":"1.1.0","storage":{"rootDirectory":"/var/lib/zot"},"http":{"address":"0.0.0.0","port":"5000","tls":{"cert":"/certs/server.crt","key":"/certs/server.key"}},"log":{"level":"error"}}`
+
+// startZot runs a registry that serves the OCI 1.1 referrers API (anonymous, TLS).
+func startZot(t *testing.T, image, run string, p pki) regInstance {
+	return startRegistryWith(t, image, run, p, "", true)
+}
+
 func startRegistry(t *testing.T, image, run string, p pki, htpasswd string) regInstance {
+	return startRegistryWith(t, image, run, p, htpasswd, false)
+}
+
+func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, zot bool) regInstance {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o755); err != nil {
@@ -137,6 +148,9 @@ func startRegistry(t *testing.T, image, run string, p pki, htpasswd string) regI
 	if htpasswd != "" {
 		files["htpasswd"] = []byte(htpasswd)
 	}
+	if zot {
+		files["config.json"] = []byte(zotConfig)
+	}
 	for n, b := range files {
 		if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
 			t.Fatal(err)
@@ -144,13 +158,18 @@ func startRegistry(t *testing.T, image, run string, p pki, htpasswd string) regI
 	}
 	name := "konstapel-registry-compat-" + randHex(t, 4)
 	args := []string{"run", "-d", "--name", name, "--label", "konstapel.test=" + run, "-p", "127.0.0.1::5000",
-		"-v", dir + ":/certs:ro",
-		"-e", "REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt", "-e", "REGISTRY_HTTP_TLS_KEY=/certs/server.key"}
+		"-v", dir + ":/certs:ro"}
+	if !zot {
+		args = append(args, "-e", "REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt", "-e", "REGISTRY_HTTP_TLS_KEY=/certs/server.key")
+	}
 	if htpasswd != "" {
 		args = append(args, "-e", "REGISTRY_AUTH=htpasswd", "-e", "REGISTRY_AUTH_HTPASSWD_REALM=konstapel-test",
 			"-e", "REGISTRY_AUTH_HTPASSWD_PATH=/certs/htpasswd")
 	}
 	args = append(args, image)
+	if zot {
+		args = append(args, "serve", "/certs/config.json")
+	}
 	docker(t, args...)
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
 	port := docker(t, "port", name, "5000/tcp")
@@ -187,7 +206,7 @@ func transportFor(pool *x509.CertPool) http.RoundTripper {
 // pushSigned publishes the official bundle, a signature, a provenance
 // attestation and an unrelated referrer into repo, plus a moved tag pointing at
 // a different bundle. It returns the published manifest digest.
-func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest.Digest {
+func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential, tagSchema bool) digest.Digest {
 	t.Helper()
 	ctx := context.Background()
 	repo, err := remote.NewRepository(r.host + "/" + repoPath)
@@ -224,7 +243,11 @@ func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest
 	}
 	raw, _ := json.Marshal(other)
 	push(ocispec.MediaTypeImageManifest, raw)
-	checkTagSchema(t, r, p, cred, subject.Digest, 3)
+	if tagSchema {
+		checkTagSchema(t, r, p, cred, subject.Digest, 3)
+	} else {
+		checkReferrersAPI(t, r, p, subject.Digest, 3)
+	}
 
 	// A moved tag: "stable" points at a different manifest than the pin.
 	decoy := push(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","artifactType":"application/vnd.example.decoy","config":{"mediaType":"application/vnd.oci.empty.v1+json","digest":"`+bundle.EmptyConfigDigest+`","size":2},"layers":[]}`))
@@ -232,6 +255,27 @@ func pushSigned(t *testing.T, r regInstance, p pki, cred auth.Credential) digest
 		t.Fatal(err)
 	}
 	return subject.Digest
+}
+
+// checkReferrersAPI confirms the registry really serves the OCI 1.1 referrers
+// API for the subject (a 200 image index listing want referrers), reading with
+// plain HTTP requests, not the code under test.
+func checkReferrersAPI(t *testing.T, r regInstance, p pki, subject digest.Digest, want int) {
+	t.Helper()
+	hc := &http.Client{Timeout: 10 * time.Second, Transport: transportFor(p.pool)}
+	resp, err := hc.Get("https://" + r.host + "/v2/" + repoPath + "/referrers/" + subject.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var idx struct {
+		MediaType string               `json:"mediaType"`
+		Manifests []ocispec.Descriptor `json:"manifests"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&idx) != nil ||
+		idx.MediaType != ocispec.MediaTypeImageIndex || len(idx.Manifests) != want {
+		t.Fatalf("referrers API: status %d, index %+v: want an image index listing %d referrers", resp.StatusCode, idx, want)
+	}
 }
 
 // checkTagSchema confirms what the suite relies on: this registry does not
@@ -293,10 +337,16 @@ func TestRegistryCompat(t *testing.T) {
 	anon := startRegistry(t, image, run, p, "")
 	authd := startRegistry(t, image, run, p, user+":"+string(hash)+"\n")
 
-	subjectAnon := pushSigned(t, anon, p, auth.Credential{})
-	subjectAuth := pushSigned(t, authd, p, auth.Credential{Username: user, Password: pass})
-	if subjectAnon != subjectAuth {
-		t.Fatalf("the same bundle has two digests: %s vs %s", subjectAnon, subjectAuth)
+	apiImage := os.Getenv("KONSTAPEL_REGISTRY_API_IMAGE")
+	if apiImage == "" {
+		t.Fatal("KONSTAPEL_REGISTRY_API_IMAGE is required (run through scripts/registry-compat.sh)")
+	}
+	api := startZot(t, apiImage, run, p)
+	subjectAnon := pushSigned(t, anon, p, auth.Credential{}, true)
+	subjectAuth := pushSigned(t, authd, p, auth.Credential{Username: user, Password: pass}, true)
+	subjectAPI := pushSigned(t, api, p, auth.Credential{}, false)
+	if subjectAnon != subjectAuth || subjectAnon != subjectAPI {
+		t.Fatalf("the same bundle has different digests: %s, %s, %s", subjectAnon, subjectAuth, subjectAPI)
 	}
 	pinned := subjectAnon.String()
 
@@ -326,7 +376,7 @@ func TestRegistryCompat(t *testing.T) {
 	defer cancel()
 	a := official(t)
 
-	checkFetched := func(t *testing.T, res *Result) {
+	checkFetchedVia := func(t *testing.T, res *Result, via ReferrersSource) {
 		t.Helper()
 		if res.Digest != pinned || !bytes.Equal(res.Manifest, a.Manifest) || !bytes.Equal(res.Layer, a.Layer) {
 			t.Fatalf("retrieved bytes differ from what was published")
@@ -334,7 +384,7 @@ func TestRegistryCompat(t *testing.T) {
 		if err := res.RequireProofs(RequiredProofs...); err != nil {
 			t.Fatal(err)
 		}
-		if res.ReferrersSource != ReferrersFromTagSchema || res.ReferrerCount != 3 || len(res.Proofs) != 2 ||
+		if res.ReferrersSource != via || res.ReferrerCount != 3 || len(res.Proofs) != 2 ||
 			len(res.Skipped) != 1 || res.Skipped[0].ArtifactType != "application/vnd.example.sbom" {
 			t.Fatalf("referrers: source %q, listed %d, proofs %d, skipped %+v", res.ReferrersSource, res.ReferrerCount, len(res.Proofs), res.Skipped)
 		}
@@ -343,6 +393,20 @@ func TestRegistryCompat(t *testing.T) {
 			t.Fatalf("proof kinds %v", kinds)
 		}
 	}
+
+	checkFetched := func(t *testing.T, res *Result) {
+		t.Helper()
+		checkFetchedVia(t, res, ReferrersFromTagSchema)
+	}
+
+	t.Run("referrers API registry: anonymous retrieval through the API", func(t *testing.T) {
+		res, err := newClient(p.pool, nil).Fetch(ctx, src(api, false), pinned)
+		record(t.Name(), err, fmt.Sprintf("referrers via %s, %d proofs, %d skipped", res.sourceOrNone(), len(res.proofsOrNil()), len(res.skippedOrNil())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFetchedVia(t, res, ReferrersFromAPI)
+	})
 
 	t.Run("anonymous retrieval with the custom CA", func(t *testing.T) {
 		res, err := newClient(p.pool, nil).Fetch(ctx, src(anon, false), pinned)
@@ -458,7 +522,7 @@ func TestRegistryCompat(t *testing.T) {
 		}
 	})
 
-	writeCompatEvidence(t, image, run, records)
+	writeCompatEvidence(t, image, apiImage, run, records)
 }
 
 func (r *Result) proofsOrNil() []Proof {
@@ -483,7 +547,7 @@ func (r *Result) skippedOrNil() []Skipped {
 }
 
 // writeCompatEvidence records the versions the suite ran against and each case.
-func writeCompatEvidence(t *testing.T, image, run string, records []compatRecord) {
+func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []compatRecord) {
 	t.Helper()
 	out := os.Getenv("KONSTAPEL_REGISTRY_OUTPUT")
 	if out == "" {
@@ -501,9 +565,10 @@ func writeCompatEvidence(t *testing.T, image, run string, records []compatRecord
 	ev := map[string]any{
 		"run": run, "recordedAt": time.Now().UTC().Format(time.RFC3339),
 		"registryImage": image, "registryVersion": registryVersion,
+		"apiRegistryImage": apiImage, "apiRegistryVersion": docker(t, "run", "--rm", "--entrypoint", "/usr/local/bin/zot-linux-amd64", apiImage, "--version"),
 		"docker": docker(t, "version", "--format", "client {{.Client.Version}} server {{.Server.Version}}"),
 		"orasGo": orasVersion, "go": runtime.Version(),
-		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md), listed through the OCI referrers tag schema: the registry does not serve the referrers API",
+		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md): listed through the OCI referrers tag schema on registryImage (no referrers API) and through the referrers API on apiRegistryImage",
 		"authentication": "anonymous and htpasswd (basic); bearer-token service not covered",
 		"tls":            "throwaway CA, verification always on", "cases": records,
 	}

@@ -271,7 +271,7 @@ calls it at runtime, and it is not linked into the shipped binaries. Its unit
 tests use an in-process fake registry serving real `bundle.Build` bytes; the
 compatibility suite (`scripts/registry-compat.sh`, see
 [Real-registry compatibility](#real-registry-compatibility)) runs it against
-the pinned reference registry over TLS.
+two pinned real registries over TLS, one per way of listing referrers.
 
 `Client.Fetch(ctx, source, digest)` takes a configured `BundleSource` and the
 profile's pinned manifest digest and returns the manifest, the layer and the
@@ -410,17 +410,29 @@ anonymous source, or a username without a password) fails with
 ### Real-registry compatibility
 
 `scripts/registry-compat.sh OUTPUT_DIR` (through Devbox; `OUTPUT_DIR` must not
-exist) runs `TestRegistryCompat` (build tag `registrycompat`) against two
-disposable containers of the digest-pinned `KONSTAPEL_REGISTRY_IMAGE` from
-`scripts/runtime.env` (distribution registry 3.1.2), one anonymous and one
-htpasswd-protected, both over TLS with a throwaway CA, then removes them and
-fails if any remain. It records the registry, Docker, ORAS Go and Go versions
-and each case in `OUTPUT_DIR/registry-compat.json`. It verifies:
+exist) runs `TestRegistryCompat` (build tag `registrycompat`) against
+disposable, test-owned containers of two digest-pinned registries from
+`scripts/runtime.env`, all over TLS with a throwaway CA and loopback ports:
 
-- this registry answers the referrers API with 404, and pushing the Cosign
-  layout with ORAS Go leaves a `sha256-<hex>` referrers tag index; retrieval
-  then reports `ReferrersSource` `tag-schema`, finds the signature and the
-  provenance, and skips the unrelated SBOM-style referrer;
+| Instance | Image | Referrers listing |
+| --- | --- | --- |
+| anonymous and htpasswd-protected | `KONSTAPEL_REGISTRY_IMAGE` (distribution registry 3.1.2) | no `/referrers/` API (404): tag schema |
+| anonymous | `KONSTAPEL_REGISTRY_API_IMAGE` (Zot v2.1.23) | OCI 1.1 referrers API |
+
+Random credentials are generated per run. The Go test starts and removes its
+containers itself; the script also removes anything still carrying the run's
+label and fails if a container remains. Evidence, in
+`OUTPUT_DIR/registry-compat.json` and `registry-images.json`, records both
+registries' versions and image digests, the Docker, ORAS Go and Go versions, and
+every case. It verifies:
+
+- each registry really behaves as claimed before retrieval is judged: the
+  distribution registry answers `/referrers/` with 404 and holds a
+  `sha256-<hex>` index listing the referrers that ORAS Go's pushes created,
+  while Zot answers `/referrers/` with an image index listing them;
+- retrieval reports `ReferrersSource` `tag-schema` against the distribution
+  registry and `api` against Zot, finds the signature and the provenance, and
+  skips the unrelated SBOM-style referrer;
 - anonymous retrieval with the custom CA, and authenticated retrieval with
   credentials;
 - a wrong password is `ErrUnauthorized` and never echoed; no credential against
@@ -432,8 +444,17 @@ and each case in `OUTPUT_DIR/registry-compat.json`. It verifies:
   `ErrMissingProofs` from `RequireProofs`;
 - an unknown digest is `ErrNotFound`.
 
-Not covered by the suite: bearer-token (token service) authentication, and a
-real registry that serves the referrers API (only the in-process fake does).
+Why two registries: the first run of this suite found that neither the
+reference registry nor `ghcr.io` (the planned official registry) serves the
+referrers API, although `ghcr.io` stores referrers under the tag-schema tag
+(`cosign tree` reads them that way). The fallback exists because of that
+finding, and Zot keeps the API path covered by a real server.
+
+Not covered: bearer-token (token service) authentication, which neither image
+offers without a separate token server, and `ghcr.io` itself (only its tag
+schema format was checked, by read-only anonymous requests). The suite is run on
+demand; it is not part of `task check` or CI, and `task bundles:acceptance`
+(task 8.1) will compose it. It is deliberately not a Taskfile task.
 
 ## Create and package a bundle
 
