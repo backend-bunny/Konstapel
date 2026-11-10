@@ -16,7 +16,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
 - [x] 1.4 Implement deterministic archive and OCI-manifest construction from a bundle definition; verify repeated builds from identical source/tool inputs produce identical digests, with no circular descriptor checksum or runtime dependency downloads.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.5 Package the existing privileged-container policy with its source, tests, licenses, provenance and NIST content; verify checksums, fixtures and the existing bounded AC-6 mapping against the unpacked release payload.
+- [x] 1.5 Package the existing privileged-container policy with its source, tests, licenses, provenance and NIST content; verify checksums, fixtures and the existing bounded AC-6 mapping against the unpacked release payload.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 1.6 Add the documented `bundles:package` workflow and integrate format/content checks into existing checks; verify the documented Devbox commands and confirm Taskfile exposes no individual signing, checksum or summary helper tasks.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->

@@ -31,11 +31,36 @@ var maxPayloadBytes int64 = MaxPayloadBytes
 // size and digest; the author supplies only where it comes from, where it goes
 // and what it is.
 type Include struct {
-	// From is a slash-separated path relative to the source root.
-	From string `json:"from"`
+	// From is a slash-separated path relative to the source root. It is empty
+	// for a generated file.
+	From string `json:"from,omitempty"`
+	// Generate names a file the builder produces itself instead of reading
+	// one. The only generator is "sha256sums": a sha256sum-compatible list of
+	// every other content/ file, so the archive can be checked with
+	// `sha256sum -c` from its root.
+	Generate string `json:"generate,omitempty"`
 	// To is the archive path (see validPayloadPath).
 	To   string `json:"to"`
 	Role string `json:"role"`
+}
+
+// GenerateSHA256Sums is the only supported Include.Generate value.
+const GenerateSHA256Sums = "sha256sums"
+
+// LoadDefinition strictly decodes a checked-in bundle definition. The source
+// revision is supplied by the caller at build time, because a definition lives
+// in the repository it is built from and cannot name its own commit.
+func LoadDefinition(data []byte) (Definition, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var def Definition
+	if err := dec.Decode(&def); err != nil {
+		return Definition{}, fmt.Errorf("decode definition: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return Definition{}, errors.New("decode definition: unexpected data after the definition")
+	}
+	return def, nil
 }
 
 // Definition is the build input: everything in bundle.json except the file
@@ -91,6 +116,7 @@ func Build(def Definition, root fs.FS, sourceTime time.Time) (*Archive, error) {
 		Format: FormatV1, Name: def.Name, Version: def.Version, Source: def.Source,
 		Policies: def.Policies, Scope: def.Scope, Compatibility: def.Compatibility, OSCAL: def.OSCAL,
 	}
+	var generated []Include
 	for _, inc := range def.Include {
 		if seen[inc.To] {
 			return nil, fmt.Errorf("duplicate archive path %q", inc.To)
@@ -98,6 +124,13 @@ func Build(def Definition, root fs.FS, sourceTime time.Time) (*Archive, error) {
 		seen[inc.To] = true
 		if err := validPayloadPath(inc.To); err != nil {
 			return nil, err
+		}
+		if inc.Generate != "" {
+			if inc.Generate != GenerateSHA256Sums || inc.From != "" || !strings.HasPrefix(inc.To, "content/") {
+				return nil, fmt.Errorf("include %q: unsupported generator %q (only %q under content/, without from)", inc.To, inc.Generate, GenerateSHA256Sums)
+			}
+			generated = append(generated, inc)
+			continue
 		}
 		if inc.From == "" || path.IsAbs(inc.From) || path.Clean(inc.From) != inc.From || !fs.ValidPath(inc.From) {
 			return nil, fmt.Errorf("include %q: from %q must be a clean relative path", inc.To, inc.From)
@@ -109,6 +142,19 @@ func Build(def Definition, root fs.FS, sourceTime time.Time) (*Archive, error) {
 		sum := sha256.Sum256(data)
 		d.Files = append(d.Files, File{Path: inc.To, Role: inc.Role, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
 		entries = append(entries, entry{inc.To, data})
+	}
+	for _, g := range generated {
+		var lines []string
+		for _, f := range d.Files {
+			if strings.HasPrefix(f.Path, "content/") {
+				lines = append(lines, f.SHA256+"  "+f.Path+"\n")
+			}
+		}
+		sort.Strings(lines)
+		data := []byte(strings.Join(lines, ""))
+		sum := sha256.Sum256(data)
+		d.Files = append(d.Files, File{Path: g.To, Role: g.Role, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
+		entries = append(entries, entry{g.To, data})
 	}
 	sort.Slice(d.Files, func(i, j int) bool { return d.Files[i].Path < d.Files[j].Path })
 	if err := d.Validate(); err != nil {
