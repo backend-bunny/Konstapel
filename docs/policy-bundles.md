@@ -211,6 +211,56 @@ Rendered engine-policy hashes are recorded per policy by the renderer
   `applied` or `assessment`), released when that holder finishes or advances.
 - The handle carries no credentials and no payload bytes.
 
+## Central source configuration
+
+A `ComplianceProfile` keeps its existing `spec.bundle` of `name` and `digest`.
+Where a name's bytes come from, and whom to trust for them, is configured once,
+centrally, in a versioned document (`bundle.Sources`) stored under the
+`sources.yaml` key of a ConfigMap in the controller's namespace. Only platform
+administrators write it. Examples that the tests parse are in
+`testdata/bundles/sources/` (an official keyless release, and an organization
+mirror with a registry credential, custom CA and public key).
+
+```yaml
+version: 1
+sources:
+  - name: konstapel-privileged-containers   # the profile's bundle name, exact match only
+    repository: ghcr.io/backend-bunny/bundles/konstapel-privileged-containers
+    credentialSecret: {name: registry-creds}     # optional dockerconfigjson Secret
+    ca: {kind: ConfigMap, name: registry-ca, key: ca.crt}   # optional extra trusted roots
+    publisher:
+      type: keyless                              # or public-key
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/<org>/<repo>/.github/workflows/bundle-release.yml@refs/heads/main
+      provenance:
+        sourceRepository: https://github.com/<org>/<repo>
+        builder: https://github.com/<org>/<repo>/.github/workflows/bundle-release.yml@refs/heads/main
+```
+
+- **One entry per name, exact selection.** Duplicate names are rejected; there
+  is no prefix matching and no default registry, so an unconfigured name is
+  unresolved. Several registries and bundle families are separate entries.
+- **`repository` is `host[:port]/path`** in lowercase OCI form. A scheme, tag or
+  embedded digest is rejected: the profile's digest alone selects the content,
+  and TLS is always verified. A mirror replaces `repository` and nothing else;
+  the pinned digest and the publisher rule are unchanged.
+- **References, not secrets.** Credentials, the CA, trust roots and public keys
+  are references to objects in the controller's namespace; a reference has no
+  namespace field. Inline key material or credentials are rejected.
+- **Publisher rule.** Keyless fixes the exact OIDC issuer and signing identity
+  (an optional `trustRoot` reference replaces the built-in Sigstore public-good
+  root); public-key fixes a referenced key and its SHA-256 fingerprint.
+  Provenance fixes the exact source repository and builder either way. No
+  wildcards or patterns are accepted, and nothing the bundle itself carries can
+  change the rule.
+- **Strict and atomic.** Unknown fields, repeated keys, unsupported versions and
+  any invalid entry reject the whole revision; nothing is partially accepted.
+  `BundleSource.CheckPayload` requires the fetched payload's name to equal the
+  requested name.
+
+This is the configuration contract and its validation only. Nothing reads the
+ConfigMap, watches Secrets, contacts a registry or verifies a signature yet.
+
 ## Create and package a bundle
 
 1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal

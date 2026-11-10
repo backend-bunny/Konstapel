@@ -23,7 +23,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 ## 2. Central source configuration and registry transport
 
-- [ ] 2.1 Define and document the versioned name-to-source configuration and its credential/CA/publisher references; test duplicate or missing sources, invalid repositories, invalid trust rules and payload-name mismatches while preserving the profile name/digest schema.
+- [x] 2.1 Define and document the versioned name-to-source configuration and its credential/CA/publisher references; test duplicate or missing sources, invalid repositories, invalid trust rules and payload-name mismatches while preserving the profile name/digest schema.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 2.2 Add pinned ORAS Go dependencies and a bounded digest/referrer retrieval adapter; test exact-subject selection, moved tags, unexpected descriptors, missing proofs, timeout/cancellation, referrer limits and concurrent request deduplication.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
