@@ -74,6 +74,16 @@ tasks:
     cmds:
       - scripts/acceptance.sh "$KONSTAPEL_TASK_OUTPUT" "$KONSTAPEL_TASK_GROUP"
 
+  bundles:package:
+    desc: Build and freeze a policy bundle as an OCI layout (clean checkout; NAME=bundles/<name>; fresh OUT)
+    requires:
+      vars: [NAME, OUT]
+    env:
+      KONSTAPEL_TASK_NAME: '{{.NAME}}'
+      KONSTAPEL_TASK_OUT: '{{.OUT}}'
+    cmds:
+      - scripts/bundles/package.sh "$KONSTAPEL_TASK_NAME" "$KONSTAPEL_TASK_OUT"
+
   charts:package:
     desc: Package and freeze both charts for a verified image digest (clean checkout; fresh OUT; IMAGE_DIGEST=sha256:...)
     requires:

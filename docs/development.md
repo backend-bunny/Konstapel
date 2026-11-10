@@ -55,6 +55,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task charts:package OUT=/fresh/path IMAGE_DIGEST=sha256:…` | From a clean checkout, package both charts with the runtime chart defaulting to that image digest, and freeze them with `publication.json` ([Helm charts](charts.md#release-packaging-and-publication)). |
 | `task charts:acceptance OUTPUT=/fresh/path ARCHIVES=/path IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…` | From a clean checkout, run every release-required acceptance group (`"release": true`: `charts` and `availability`) in turn, each on its own disposable cluster, on those exact archives with every node pulling that image by digest. Writes `chart-acceptance.json` only if every required test passed, binding the per-test results to the frozen inputs. |
+| `task bundles:package NAME=<bundle> OUT=/fresh/path` | From a clean checkout, build `bundles/<NAME>/definition.json` into a frozen OCI image layout plus `package.json` at that commit, and re-verify it. Identical commits give identical digests. Publication is not available yet ([policy bundles](policy-bundles.md)). |
 | `task clean` | Remove generated binaries and Task cache; retain assessment evidence. |
 
 After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
