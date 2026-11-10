@@ -1,0 +1,37 @@
+# An organization's own bundle, mirrored in a private registry with a custom CA
+# and a registry credential Secret, verified against a referenced public key.
+# A mirror only changes `repository`; the pinned digest and the publisher rule
+# stay the same.
+version: 1
+sources:
+  - name: acme-baseline
+    repository: registry.acme.internal:5000/security/bundles/acme-baseline
+    credentialSecret:
+      name: acme-registry
+    ca:
+      kind: ConfigMap
+      name: acme-registry-ca
+      key: ca.crt
+    publisher:
+      type: public-key
+      publicKey:
+        kind: Secret
+        name: acme-bundle-signing-key
+        key: cosign.pub
+      keyFingerprint: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      provenance:
+        sourceRepository: https://git.acme.internal/security/policies
+        builder: https://git.acme.internal/ci/bundle-builder@refs/heads/main
+  # The same family can have several entries; selection is by exact name only.
+  - name: acme-restricted
+    repository: registry.acme.internal:5000/security/bundles/acme-restricted
+    publisher:
+      type: keyless
+      issuer: https://sso.acme.internal
+      identity: bundle-publisher@acme.internal
+      trustRoot:
+        kind: ConfigMap
+        name: acme-sigstore-root
+      provenance:
+        sourceRepository: https://git.acme.internal/security/policies
+        builder: https://git.acme.internal/ci/bundle-builder@refs/heads/main
