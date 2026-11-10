@@ -1,0 +1,27 @@
+# Central bundle source configuration (see "Central source configuration").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: konstapel-bundle-sources
+  namespace: konstapel-system
+data:
+  sources.yaml: |
+    version: 1
+    sources:
+      - name: acme-baseline
+        repository: registry.acme.internal:5000/security/bundles/acme-baseline
+        credentialSecret:
+          name: acme-registry
+        ca:
+          kind: ConfigMap
+          name: acme-registry-ca
+        publisher:
+          type: public-key
+          publicKey:
+            kind: Secret
+            name: acme-bundle-signing-key
+            key: cosign.pub
+          keyFingerprint: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          provenance:
+            sourceRepository: https://git.acme.internal/security/policies
+            builder: https://git.acme.internal/ci/bundle-builder@refs/heads/main
