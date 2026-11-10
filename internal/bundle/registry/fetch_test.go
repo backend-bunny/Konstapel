@@ -37,15 +37,21 @@ func fetch(t *testing.T, f *fakeRegistry, limits Limits, d digest.Digest) (*Resu
 }
 
 // noTagRequests fails if any manifest was requested by something other than
-// a digest: retrieval must never resolve a tag.
-func noTagRequests(t *testing.T, f *fakeRegistry) {
+// a digest, except the referrers tag schema tags in allowed: retrieval must
+// never resolve a tag to select content, and never reads Cosign's legacy
+// .sig/.att tags.
+func noTagRequests(t *testing.T, f *fakeRegistry, allowed ...digest.Digest) {
 	t.Helper()
 	for _, r := range f.log() {
-		if _, ref, ok := strings.Cut(r, "/manifests/"); ok && !strings.HasPrefix(ref, "sha256:") {
-			t.Errorf("tag requested: %s", r)
+		if strings.Contains(r, ".sig") || strings.Contains(r, ".att") {
+			t.Errorf("legacy cosign tag requested: %s", r)
 		}
-		if strings.Contains(r, "sha256-") {
-			t.Errorf("legacy referrers tag requested: %s", r)
+		_, ref, ok := strings.Cut(r, "/manifests/")
+		if !ok || strings.HasPrefix(ref, "sha256:") {
+			continue
+		}
+		if !slices.ContainsFunc(allowed, func(d digest.Digest) bool { return ref == "sha256-"+d.Encoded() }) {
+			t.Errorf("tag requested: %s", r)
 		}
 	}
 }
@@ -68,7 +74,7 @@ func TestFetchSuccess(t *testing.T) {
 	if _, _, err := bundle.Unpack(res.Layer); err != nil {
 		t.Fatalf("retrieved layer does not unpack: %v", err)
 	}
-	if res.ReferrerCount != 3 || len(res.Proofs) != 2 || len(res.Skipped) != 1 || res.Skipped[0].Reason != "unrelated artifact type" {
+	if res.ReferrersSource != ReferrersFromAPI || res.ReferrerCount != 3 || len(res.Proofs) != 2 || len(res.Skipped) != 1 || res.Skipped[0].Reason != "unrelated artifact type" {
 		t.Fatalf("proofs %+v skipped %+v count %d", res.Proofs, res.Skipped, res.ReferrerCount)
 	}
 	for _, p := range res.Proofs {
@@ -382,42 +388,6 @@ func TestLimits(t *testing.T) {
 			if tc.check != nil {
 				tc.check(t, f)
 			}
-		})
-	}
-}
-
-func TestReferrersUnsupported(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		serve func(w http.ResponseWriter)
-	}{
-		{"404 without a body", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }},
-		{"404 with a non-repository error", func(w http.ResponseWriter) { writeError(w, http.StatusNotFound, "UNSUPPORTED", "nope") }},
-		{"501", func(w http.ResponseWriter) { writeError(w, http.StatusNotImplemented, "UNSUPPORTED", "nope") }},
-		{"405", func(w http.ResponseWriter) { w.WriteHeader(http.StatusMethodNotAllowed) }},
-		{"not an index", func(w http.ResponseWriter) {
-			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte("<html></html>"))
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newFakeRegistry(t)
-			d := f.publishSigned(t)
-			f.setHook(func(w http.ResponseWriter, r *http.Request) bool {
-				if !strings.Contains(r.URL.Path, "/referrers/") {
-					return false
-				}
-				tc.serve(w)
-				return true
-			})
-			_, err := fetch(t, f, Limits{}, d)
-			if !errors.Is(err, ErrReferrersUnsupported) || Classify(err) != ClassPermanent {
-				t.Fatalf("err %v", err)
-			}
-			if !strings.Contains(err.Error(), "referrers API") {
-				t.Fatalf("unclear error %q", err)
-			}
-			noTagRequests(t, f)
 		})
 	}
 }

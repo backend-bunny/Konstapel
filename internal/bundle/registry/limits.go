@@ -138,8 +138,7 @@ const (
 	ClassRetryable
 	// ClassPermanent covers content that can never become acceptable under the
 	// same configuration and digest: digest/size mismatches, unexpected
-	// descriptors, exceeded limits, an unsupported referrers API and invalid
-	// requests. Retry only after the source configuration changes.
+	// descriptors, exceeded limits and invalid requests. Retry only after the source configuration changes.
 	ClassPermanent
 )
 
@@ -156,8 +155,7 @@ func Classify(err error) Class {
 	case errors.Is(err, context.Canceled):
 		return ClassCanceled
 	case errors.Is(err, ErrIntegrity), errors.Is(err, ErrUnexpectedDescriptor),
-		errors.Is(err, ErrLimitExceeded), errors.Is(err, ErrReferrersUnsupported),
-		errors.Is(err, ErrInvalidRequest):
+		errors.Is(err, ErrLimitExceeded), errors.Is(err, ErrInvalidRequest):
 		return ClassPermanent
 	default:
 		return ClassRetryable

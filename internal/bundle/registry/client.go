@@ -3,10 +3,13 @@
 // limits. It uses ORAS Go for the OCI distribution protocol and its standard
 // registry challenge/token handling.
 //
-// The adapter never resolves tags, verifies every byte it downloads against
-// its digest, rejects indexes and unexpected layouts, and requires the OCI 1.1
-// referrers API. It reports which proofs it found but does not decide trust:
-// signature and provenance verification are separate steps.
+// The adapter never resolves a tag to select content, verifies every byte it
+// downloads against its digest, and rejects indexes and unexpected layouts.
+// Proofs are listed through the OCI 1.1 referrers API or, when a registry does
+// not serve it, the OCI referrers tag schema index; either listing is treated
+// as unauthenticated and every entry is fetched by digest and checked. It
+// reports which proofs it found but does not decide trust: signature and
+// provenance verification are separate steps.
 //
 // Transport and credentials are injected (Options.Transport,
 // Options.Credentials) so that Secret-backed credentials and custom CA pools
@@ -132,7 +135,8 @@ func sourceKey(src bundle.BundleSource) string {
 }
 
 // Fetch retrieves the manifest pinned by manifestDigest from src.Repository,
-// its bundle layer and the proofs that refer to it. It never resolves a tag.
+// its bundle layer and the proofs that refer to it. The only tag it reads is
+// the subject's referrers tag schema index, as an untrusted listing.
 //
 // Concurrent calls for the same source and digest share one retrieval. A
 // caller whose ctx ends stops waiting and gets ctx's error; the shared work

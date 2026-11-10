@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"oras.land/oras-go/v2/errdef"
+	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
@@ -22,7 +23,8 @@ var (
 	// ErrCredentials: a configured credential could not be obtained. There is
 	// no anonymous fallback.
 	ErrCredentials = errors.New("registry credentials are unavailable")
-	// ErrUnauthorized: the registry refused the request (401/403).
+	// ErrUnauthorized: the registry refused the request (401/403), or it
+	// challenged for authentication and no usable credential was available.
 	ErrUnauthorized = errors.New("registry denied access")
 	// ErrNotFound: the pinned manifest or one of its blobs is absent.
 	ErrNotFound = errors.New("content not found in the configured repository")
@@ -35,9 +37,6 @@ var (
 	ErrUnexpectedDescriptor = errors.New("unexpected OCI content")
 	// ErrLimitExceeded: a size, count or page limit would be exceeded.
 	ErrLimitExceeded = errors.New("retrieval limit exceeded")
-	// ErrReferrersUnsupported: the registry does not implement the OCI 1.1
-	// referrers API, which this version requires.
-	ErrReferrersUnsupported = errors.New("registry does not support the OCI referrers API")
 	// ErrInsecureRedirect: the registry redirected to plain HTTP.
 	ErrInsecureRedirect = errors.New("refusing a redirect to non-HTTPS")
 	// ErrMissingProofs: a required proof kind was not attached to the subject.
@@ -51,6 +50,10 @@ func wrap(what string, err error) error {
 	}
 	var resp *errcode.ErrorResponse
 	switch {
+	case errors.Is(err, ErrCredentials):
+		// A configured credential could not be obtained; keep that class.
+	case noUsableCredential(err):
+		return fmt.Errorf("%w: %s: %w", ErrUnauthorized, what, err)
 	case errors.As(err, &resp):
 		switch code := resp.StatusCode; {
 		case code == http.StatusUnauthorized || code == http.StatusForbidden:
@@ -66,6 +69,20 @@ func wrap(what string, err error) error {
 		return fmt.Errorf("%w: %s: %w", ErrLimitExceeded, what, err)
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// noUsableCredential reports an ORAS auth client failure meaning the
+// registry challenged for authentication and the credential at hand cannot
+// answer it: none at all for a Basic challenge (auth.ErrBasicCredentialNotFound),
+// or a partial one. ORAS v2.7.0 reports the partial case only as unexported
+// error text, matched here exactly.
+func noUsableCredential(err error) bool {
+	if errors.Is(err, auth.ErrBasicCredentialNotFound) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "missing username or password for basic auth") ||
+		strings.Contains(msg, "missing username or password for bearer auth")
 }
 
 // secrets records the credential values one retrieval used, so they can be
