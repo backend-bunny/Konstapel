@@ -1,0 +1,94 @@
+name: bundle-release
+# Releases one policy bundle independently of the application, image and
+# charts: validate a reviewed main commit, package exactly that commit into a
+# frozen OCI layout, then create or verify its bundle/<name>/vX.Y.Z tag.
+# The version comes from bundles/<name>/definition.json at that commit. This
+# workflow never calls the image or chart publishers and never reads the
+# application release automation's state. Registry publication, signatures,
+# provenance and release notes are not implemented yet; they extend the
+# package job's frozen layout (docs/policy-bundles.md).
+on:
+  workflow_dispatch:
+    inputs:
+      bundle:
+        description: Bundle name (directory under bundles/)
+        type: string
+        required: true
+      commit:
+        description: Full 40-character reviewed source commit on main
+        type: string
+        required: true
+permissions:
+  contents: read
+defaults:
+  run:
+    # Explicit bash runs with -eo pipefail, so a failing tool fails its step.
+    shell: bash
+concurrency:
+  # One release of a bundle at a time; never cancel a release in progress.
+  group: bundle-release-${{ inputs.bundle }}
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.request.outputs.version }}
+      tag: ${{ steps.request.outputs.tag }}
+    env:
+      BUNDLE: ${{ inputs.bundle }}
+      SOURCE_COMMIT: ${{ inputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history and tags: ancestry on origin/main and existing tags.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - name: Validate the release request
+        id: request
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease verify
+          -name "$BUNDLE" -commit "$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Package the source commit
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/source" "$SOURCE_COMMIT"
+          devbox run -- bash "$RUNNER_TEMP/source/scripts/bundles/package.sh" "$BUNDLE" "$RUNNER_TEMP/bundle"
+      - name: Verify the frozen package
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease verify
+          -name "$BUNDLE" -commit "$SOURCE_COMMIT" -package "$RUNNER_TEMP/bundle"
+          | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Retain the frozen package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-${{ steps.request.outputs.name }}-${{ steps.request.outputs.version }}
+          path: ${{ runner.temp }}/bundle/
+          if-no-files-found: error
+          retention-days: 14
+  tag:
+    needs: package
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      # Only to push a new bundle/<name>/vX.Y.Z tag; existing tags are verified, never moved.
+      contents: write
+    env:
+      BUNDLE: ${{ inputs.bundle }}
+      SOURCE_COMMIT: ${{ inputs.commit }}
+      BUNDLE_VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: ./.github/actions/setup-tools
+      - name: Create or verify the release tag
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease tag
+          -name "$BUNDLE" -commit "$SOURCE_COMMIT" -version "$BUNDLE_VERSION"
+          | tee -a "$GITHUB_STEP_SUMMARY"
