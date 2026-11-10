@@ -6,14 +6,14 @@ NIST controls. A profile references a bundle by name and digest; the controller
 resolves it centrally and verifies it before use.
 
 > **Status.** This page documents the payload contract implemented in
-> [`internal/bundle`](../internal/bundle). Building an archive
-> (`bundles:package`), publishing a release, and runtime resolution are tracked
-> in the `add-policy-bundle-distribution` OpenSpec change and are **not
-> available yet**: no official bundle has been released, and no bundle can be
-> built with a Konstapel command today. Until those land, the only supported
-> way to deliver policies is the existing prototype workflow in
-> [development](development.md). This page will gain build, release and
-> mirroring instructions as each group lands.
+> [`internal/bundle`](../internal/bundle) and how to build a bundle locally.
+> Publishing a release, signing, and runtime resolution by the controller are
+> tracked in the `add-policy-bundle-distribution` OpenSpec change and are **not
+> available yet**: no official bundle has been released, and a locally built
+> bundle cannot yet be consumed by a profile. Until those land, the only
+> supported way to deliver policies is the existing prototype workflow in
+> [development](development.md). This page gains release and mirroring
+> instructions as each group lands.
 
 ## OCI layout
 
@@ -106,8 +106,7 @@ shape, the descriptor and every inventoried file.
 regular files in valid payload locations, rejects duplicates, and enforces file
 count and size limits before the descriptor and inventory are verified.
 
-The command-line workflow (`bundles:package`) that drives this, and the
-publication path, are not available yet.
+`bundles:package` (below) drives this; the publication path is not available yet.
 
 ## Bundle definitions
 
@@ -139,3 +138,31 @@ satisfaction). Tests build it from this repository and check, on the unpacked
 payload: the packaged checksums verify and agree with `content/SHA256SUMS`, the
 AC-6 mapping and descriptor inventory correspond, and the upstream Kyverno
 fixtures pass. The bundle is defined but **not published**.
+
+## Create and package a bundle
+
+1. Add `bundles/<name>/definition.json` (the name is a DNS label and must equal
+   the directory). Start from `bundles/konstapel-privileged-containers/` and
+   edit the policies, checks, scope, compatibility and `include` list. Every
+   included source must already be in the repository; keep upstream licenses,
+   provenance, the NIST catalog and profile, and the OSCAL schemas in the
+   bundle, and keep `Rule_Id`/`Check_Id` values from the existing C2P mapping.
+2. Commit it. Packaging reads the committed tree and records `HEAD` as the
+   source, so it refuses a dirty tracked tree.
+3. Package it:
+
+   ```sh
+   devbox run -- task bundles:package NAME=<name> OUT=/fresh/dir
+   ```
+
+   `OUT` must not exist. It receives an OCI image layout (`oci-layout`,
+   `index.json`, `blobs/sha256/…`) holding the exact manifest and layer bytes
+   that would be pushed, and `package.json` recording name, version, source
+   revision and time, both digests and the Go version. The layout is verified
+   after writing: blob digests and sizes, manifest shape, descriptor, and every
+   inventoried file. Packaging the same commit again gives the same digests.
+4. `task check` builds and verifies every `bundles/*/definition.json`, so a
+   malformed definition fails there rather than at release time.
+
+The produced layout can be inspected with any OCI tool. It is not signed and
+not published, and Konstapel cannot yet consume it.
