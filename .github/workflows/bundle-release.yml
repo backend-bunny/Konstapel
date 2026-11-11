@@ -6,7 +6,9 @@ name: bundle-release
 # frozen bytes write-once to the bundle registry and read them back
 # anonymously, sign and attest exactly that digest with this workflow's OIDC
 # identity, and verify the result anonymously under the checked-in official
-# publisher rule (bundles/official-sources.yaml) before reporting it complete.
+# publisher rule (bundles/official-sources.yaml) before reporting it complete,
+# and only then announce it: render its notes and create or update its GitHub
+# release.
 # The version comes from bundles/<name>/definition.json at that commit. This
 # workflow never calls the image or chart publishers and never reads the
 # application release automation's state (docs/policy-bundles.md#release-a-bundle).
@@ -179,3 +181,47 @@ jobs:
           path: ${{ runner.temp }}/publication/
           if-no-files-found: warn
           retention-days: 90
+  release-notes:
+    # Announce the release only after publish has verified it end to end as a
+    # consumer would: the notes are rendered from the frozen package and the
+    # COMPLETE verification record, and rendering refuses anything else.
+    needs: [package, publish]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      # Only to create or update the GitHub release of the bundle tag.
+      contents: write
+    env:
+      BUNDLE: ${{ inputs.bundle }}
+      BUNDLE_VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - name: Retrieve the frozen package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-${{ inputs.bundle }}-${{ needs.package.outputs.version }}
+          path: ${{ runner.temp }}/bundle
+      - name: Retrieve the verification record
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-${{ inputs.bundle }}-${{ needs.package.outputs.version }}-publication-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication
+      - name: Render the notes and announce the release
+        id: notes
+        # The GitHub token reaches the tool only through this step's
+        # environment. An identical release is left untouched, a changed one
+        # is updated, and the release never becomes the repository's latest.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease release-notes \
+            -name "$BUNDLE" -package "$RUNNER_TEMP/bundle" \
+            -verification "$RUNNER_TEMP/publication/verification.json" \
+            -out "$RUNNER_TEMP/release-notes.md" -announce | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Show the notes in the run summary
+        run: cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"

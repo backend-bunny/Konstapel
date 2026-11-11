@@ -1471,7 +1471,7 @@ publishers.
 To release, dispatch the `bundle-release` workflow on `main` (Actions → bundle-release → Run workflow, or
 `gh workflow run bundle-release.yml --ref main -f bundle=<name> -f commit=<sha>`).
 Runs for the same bundle are serialized (one concurrency group per bundle) and
-never cancelled. The workflow has three jobs:
+never cancelled. The workflow has four jobs:
 
 1. **package** (`contents: read`) validates the request with
    `cmd/bundlerelease verify`: the name is a DNS label with a
@@ -1514,6 +1514,11 @@ never cancelled. The workflow has three jobs:
    variables to every step of a job with `id-token: write`; besides the tool,
    the only steps in this job are the pinned first-party checkout,
    upload/download-artifact actions and the repository's own setup action.
+4. **release-notes** (`contents: write`, no packages, no OIDC) runs only after
+   publish succeeded, that is after `verify-release` reported the release
+   complete. It downloads the frozen package and the verification record of the
+   same run attempt, renders the notes and creates or updates the GitHub release
+   for the bundle tag ([below](#release-notes-and-the-github-release)).
 
 The same checks run locally against any full-history checkout:
 
@@ -1777,6 +1782,56 @@ pushed with the same job token and package Write role as the bundle.
 Never delete a package version or tag to "fix" a run: versions are write-once
 and consumers pin digests.
 
+### Release notes and the GitHub release
+
+`bundlerelease release-notes` renders the notes of a release and, with
+`-announce`, makes the GitHub release for its tag match them. The notes are a
+pure function of two inputs of the same run: the frozen package (descriptor and
+publication record) and the verification record `verify-release` wrote
+(`verification.json`). They contain the bundle name and version; the registry,
+the manifest digest and the exact `spec.bundle` pin; the source repository and
+commit and, separately, the release workflow's revision; the content and
+archive digests; the builder, signer, signing time and trust root; the declared
+compatibility (provider contract, minimum Konstapel, OSCAL versions, workload
+kinds, operating systems) with the statement that this is not a claim about a
+particular cluster; the policy inventory with rule and check IDs; the fixtures
+that passed against the frozen bytes with their digests; the license and notice
+files; the build tools; and copyable verification commands for the exact digest:
+
+```sh
+cosign verify "$ref" --certificate-identity '<workflow identity>' --certificate-oidc-issuer '<issuer>'
+cosign verify-attestation "$ref" --type slsaprovenance1 --certificate-identity '<workflow identity>' --certificate-oidc-issuer '<issuer>'
+```
+
+The two Cosign commands were run with the pinned Cosign v3.1.3 against the real
+signed `ghcr.io/backend-bunny/konstapel` image under its workflow identity
+(they pass; a different identity fails). Cosign checks who signed, not what the
+provenance says, so the notes also give the `verify-release` command, which
+checks the attested builder, source, name, version and materials as well.
+
+- **Not announced unless complete.** Rendering refuses a verification whose
+  status is not `complete` (`ErrNotComplete`), a missing record, and any
+  disagreement between the receipt, the publication record and the frozen
+  descriptor on digest, name, version, content digest, source commit or
+  repository (`ErrNotesInput`), a public-key signer (`ErrNotesUnsupported`: the
+  notes describe keyless official releases, organizations publish by hand), and
+  values that would not survive being pasted into a shell command. The workflow
+  job also runs only after publish succeeded.
+- **Idempotent.** The output contains no clock: re-verifying later (a new
+  verification time) renders the same bytes. `EnsureRelease` creates the release
+  when absent, updates it only when its title, notes or pre-release flag differ,
+  and does nothing when they match, so a retry or a re-run writes nothing. A
+  draft release is refused, never edited or published.
+- **Never the latest release.** Creation uses `--verify-tag` (the tag must
+  already exist; the release never creates it) and `--latest=false`, so a bundle
+  release cannot take the "latest" marker from the application's releases.
+  Versions with a pre-release part are marked as pre-releases.
+- **Credentials.** The token reaches only the announce step, through
+  `GH_TOKEN`, and the tool drops everything else from the GitHub CLI's
+  environment. The notes travel in a private temporary file, never on the
+  command line, and errors never include the token.
+- The notes are also appended to the run's step summary.
+
 ### What has and has not been verified
 
 Verified locally: every publication safeguard above against an in-process
@@ -1826,11 +1881,12 @@ OIDC token exchange, a Fulcio certificate whose identity is the workflow on
 `verify-release` accepting those proofs with the embedded root; the workflow on
 GitHub (it has not been dispatched); the `ghcr.io` package creation,
 permissions and visibility steps above; Cosign's writes to `ghcr.io` with the
-job token; artifact download across re-run attempts; and any write to
-`ghcr.io`. Keyless proofs made by this repository's other workflow with the
+job token; artifact download across re-run attempts; any write to `ghcr.io`;
+and the GitHub CLI creating or editing the release with the job token
+(including `--verify-tag` and `--latest=false` behaving as documented). Keyless proofs made by this repository's other workflow with the
 same Cosign version verify offline (`internal/bundle/verify/testdata/ghcr`),
 which is the closest local evidence.
 
-**Not implemented yet.** Release notes and summaries (6.4), organization
-publication and mirroring (6.5), and live acceptance evidence for official
-compatibility claims. No official bundle has been released yet.
+**Not implemented yet.** Organization publication and mirroring (6.5), and live
+acceptance evidence for official compatibility claims. No official bundle has
+been released yet.

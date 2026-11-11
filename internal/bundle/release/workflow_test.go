@@ -101,19 +101,22 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 		t.Error("workflow references the application VERSION file")
 	}
 
-	// Least privilege: read-only by default; the tag job may write only
-	// repository contents; the publish job alone may write packages and
-	// request an OIDC token (to sign as this workflow).
+	// Least privilege: read-only by default; only the tag job and the
+	// release-notes job may write repository contents (a tag, a GitHub
+	// release); the publish job alone may write packages and request an OIDC
+	// token (to sign as this workflow).
 	if len(w.Permissions) != 1 || w.Permissions["contents"] != "read" {
 		t.Errorf("workflow permissions = %v, want contents: read", w.Permissions)
 	}
-	if len(w.Jobs) != 3 {
-		t.Fatalf("jobs = %d, want package, tag and publish", len(w.Jobs))
+	if len(w.Jobs) != 4 {
+		t.Fatalf("jobs = %d, want package, tag, publish and release-notes", len(w.Jobs))
 	}
 	wantPerms := map[string]map[string]string{
 		"package": {"contents": "read"},
 		"tag":     {"contents": "write"},
 		"publish": {"contents": "read", "id-token": "write", "packages": "write"},
+		// Announces a release that publish verified; no packages, no OIDC.
+		"release-notes": {"contents": "write"},
 	}
 	// Words that must never appear in a run script: secrets reach tools only
 	// through a step's env block, never through a command line.
@@ -141,9 +144,13 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 			if secretWords.MatchString(step.Run) {
 				t.Errorf("job %s step %q mentions a secret on its command line: %q", name, step.Name, step.Run)
 			}
-			// The registry token reaches only the publish step, by env.
+			// The token reaches exactly two steps, by env: the registry
+			// password of the publish step and GH_TOKEN of the step that
+			// announces the verified release.
 			for k, v := range step.Env {
-				if strings.Contains(v, "github.token") && (name != "publish" || step.ID != "publish" || k != "BUNDLE_REGISTRY_PASSWORD") {
+				publishStep := name == "publish" && step.ID == "publish" && k == "BUNDLE_REGISTRY_PASSWORD"
+				notesStep := name == "release-notes" && step.ID == "notes" && k == "GH_TOKEN"
+				if strings.Contains(v, "github.token") && !publishStep && !notesStep {
 					t.Errorf("job %s step env %s carries the token", name, k)
 				}
 			}
@@ -161,8 +168,8 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 			}
 		}
 	}
-	if strings.Count(raw, "github.token") != 1 {
-		t.Errorf("the token appears %d times, want once (the publish step)", strings.Count(raw, "github.token"))
+	if strings.Count(raw, "github.token") != 2 {
+		t.Errorf("the token appears %d times, want twice (the publish step and the release-notes step)", strings.Count(raw, "github.token"))
 	}
 	if strings.Count(raw, "id-token") != 1 {
 		t.Errorf("id-token appears %d times, want once (the publish job's permission)", strings.Count(raw, "id-token"))
@@ -172,6 +179,10 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	}
 	if fmt.Sprint(w.Jobs["publish"].Needs) != "[package tag]" {
 		t.Errorf("publish job needs = %v, want [package tag] (publish only a tagged, frozen package)", w.Jobs["publish"].Needs)
+	}
+
+	if fmt.Sprint(w.Jobs["release-notes"].Needs) != "[package publish]" {
+		t.Errorf("release-notes job needs = %v, want [package publish] (announce only a published, verified release)", w.Jobs["release-notes"].Needs)
 	}
 
 	// Order within jobs: freeze (fixtures on the frozen bytes) before the
@@ -197,6 +208,22 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	}
 	order("package", "bundlerelease verify", "package.sh", "bundlerelease freeze", "bundlerelease verify", "actions/upload-artifact")
 	order("publish", "actions/download-artifact", "bundlerelease verify", "bundlerelease publish", "bundlerelease verify-release", "actions/upload-artifact")
+	order("release-notes", "actions/download-artifact", "actions/download-artifact", "bundlerelease release-notes")
+	// The announcement is rendered only from the verification record of the
+	// same run, and the notes step gets nothing but the token.
+	for _, step := range w.Jobs["release-notes"].Steps {
+		if !strings.Contains(step.Run, "bundlerelease release-notes") {
+			continue
+		}
+		if step.ID != "notes" || len(step.Env) != 1 || step.Env["GH_TOKEN"] != "${{ github.token }}" {
+			t.Errorf("the notes step must get only GH_TOKEN: id %q env %v", step.ID, step.Env)
+		}
+		for _, want := range []string{`-verification "$RUNNER_TEMP/publication/verification.json"`, `-package "$RUNNER_TEMP/bundle"`, "-announce"} {
+			if !strings.Contains(step.Run, want) {
+				t.Errorf("the notes step lacks %s: %q", want, step.Run)
+			}
+		}
+	}
 	var pub, ver int = -1, -1
 	for i, step := range w.Jobs["publish"].Steps {
 		switch {

@@ -15,6 +15,8 @@
 //	bundlerelease verify-release -name NAME -digest sha256:HEX [-sources FILE]
 //	                      [-record FILE] [-public-key-file FILE] [-trust-root-file FILE] [-out FILE]
 //	bundlerelease provenance -package DIR -out FILE [-sources FILE] [-workflow-* ...]
+//	bundlerelease release-notes -name NAME -package DIR -verification FILE [-out FILE]
+//	                      [-announce [-repository OWNER/REPO]]
 //
 // verify is read-only. It prints name, version, commit and tag (and digest
 // when -package is given) as key=value lines for $GITHUB_OUTPUT; with
@@ -32,7 +34,11 @@
 // retrieving the digest anonymously through the consumer's adapter and
 // verifying its signature, provenance and content under that configured
 // rule. provenance writes the Konstapel provenance predicate of a frozen
-// package, for publishers who sign by hand.
+// package, for publishers who sign by hand. release-notes renders the
+// release's notes from the frozen package and a COMPLETE verification record
+// (it refuses anything else) and, with -announce, creates or updates the
+// GitHub release for the bundle tag, leaving an identical release untouched;
+// the token comes only from GH_TOKEN.
 //
 // The registry credential comes only from the environment
 // (BUNDLE_REGISTRY_USERNAME, BUNDLE_REGISTRY_PASSWORD), never from a flag, and
@@ -79,15 +85,16 @@ type options struct {
 	repo, name, commit, mainRef, pkg, version, remote, registryPrefix, out string
 	deferProofs                                                            bool
 	sources, signing, key, recordOut, record, digest                       string
-	publicKeyFile, trustRootFile                                           string
+	publicKeyFile, trustRootFile, verification, repository                 string
+	announce                                                               bool
 	tlogUpload                                                             bool
 	wf                                                                     publish.Workflow
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
-	cmds := map[string]bool{"verify": true, "tag": true, "freeze": true, "publish": true, "verify-release": true, "provenance": true}
+	cmds := map[string]bool{"verify": true, "tag": true, "freeze": true, "publish": true, "verify-release": true, "provenance": true, "release-notes": true}
 	if len(args) == 0 || !cmds[args[0]] {
-		return fmt.Errorf("usage: bundlerelease verify|freeze|tag|publish|verify-release|provenance -name NAME ...")
+		return fmt.Errorf("usage: bundlerelease verify|freeze|tag|publish|verify-release|provenance|release-notes -name NAME ...")
 	}
 	var o options
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
@@ -110,6 +117,9 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.StringVar(&o.digest, "digest", "", "verify-release: the published manifest digest (sha256:<hex>)")
 	fs.StringVar(&o.publicKeyFile, "public-key-file", "", "verify-release: the public key a public-key rule references")
 	fs.StringVar(&o.trustRootFile, "trust-root-file", "", "verify-release: the trusted root a keyless rule references (default: embedded public-good root)")
+	fs.StringVar(&o.verification, "verification", "", "release-notes: the verification record verify-release wrote")
+	fs.StringVar(&o.repository, "repository", "", "release-notes -announce: OWNER/REPO of the GitHub repository (default: $GITHUB_REPOSITORY)")
+	fs.BoolVar(&o.announce, "announce", false, "release-notes: create or update the GitHub release for the bundle tag (needs GH_TOKEN)")
 	fs.StringVar(&o.wf.Repository, "workflow-repository", "", "outside GitHub Actions: the pipeline's repository URL recorded in provenance")
 	fs.StringVar(&o.wf.Path, "workflow-path", "", "outside GitHub Actions: the pipeline definition's path")
 	fs.StringVar(&o.wf.Ref, "workflow-ref", "", "outside GitHub Actions: the pipeline's ref (optional)")
@@ -154,6 +164,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 		fmt.Fprintf(stdout, "tag=%s\ncommit=%s\nstate=%s\n", rel.Tag, rel.Commit, state)
 		return nil
+	case "release-notes":
+		return releaseNotes(ctx, o, stdout)
 	case "verify-release":
 		return verifyRelease(ctx, o, stdout)
 	case "provenance":
@@ -352,17 +364,9 @@ func trustObjects(src bundle.BundleSource, publicKeyFile, trustRootFile string) 
 	return r, nil
 }
 
-// verification is the bounded record verify-release writes.
-type verification struct {
-	Format          string                   `json:"format"`
-	Status          string                   `json:"status"`
-	Error           string                   `json:"error,omitempty"`
-	Repository      string                   `json:"repository"`
-	Digest          string                   `json:"digest"`
-	ReferrersSource registry.ReferrersSource `json:"referrersSource,omitempty"`
-	SigningTime     string                   `json:"signingTime,omitempty"`
-	Receipt         *bundle.Receipt          `json:"receipt,omitempty"`
-}
+// verification is the bounded record verify-release writes (and release-notes
+// reads).
+type verification = release.Verification
 
 // verifyRelease verifies a published digest through the consumer's trust
 // contract and reports the release complete only if it passes.
@@ -397,14 +401,14 @@ func verifyRelease(ctx context.Context, o options, stdout io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	acc, res, verr := release.VerifyRelease(ctx, c)
-	out := verification{Format: "konstapel.policy.bundle.release-verification/v1", Repository: src.Repository, Digest: o.digest}
+	out := verification{Format: release.VerificationFormat, Repository: src.Repository, Digest: o.digest}
 	if res != nil {
 		out.ReferrersSource = res.ReferrersSource
 	}
 	if verr != nil {
 		out.Status, out.Error = "incomplete: verification failed", verr.Error()
 	} else {
-		out.Status, out.Receipt = "complete", &acc.Receipt
+		out.Status, out.Receipt = release.StatusComplete, &acc.Receipt
 		if t := acc.Proofs.Signature.SigningTime; !t.IsZero() {
 			out.SigningTime = t.UTC().Format(time.RFC3339)
 		}
@@ -626,4 +630,55 @@ func writeNewBytes(path string, b []byte) error {
 		return err
 	}
 	return fh.Close()
+}
+
+// releaseNotes renders the notes of a verified release and, with -announce,
+// makes the GitHub release for its tag match them. It never runs for an
+// incomplete release: the renderer refuses it.
+func releaseNotes(ctx context.Context, o options, stdout io.Writer) error {
+	if o.name == "" || o.pkg == "" || o.verification == "" {
+		return errors.New("release-notes requires -name, -package and -verification")
+	}
+	f, err := publish.Load(o.pkg)
+	if err != nil {
+		return err
+	}
+	if f.Record.Name != o.name {
+		return fmt.Errorf("the package is for %q, not %q", f.Record.Name, o.name)
+	}
+	vf, err := os.Open(o.verification)
+	if err != nil {
+		return err
+	}
+	defer vf.Close()
+	v, err := release.ParseVerification(vf)
+	if err != nil {
+		return fmt.Errorf("%s: %w", o.verification, err)
+	}
+	notes, err := release.RenderNotes(release.NotesInput{Frozen: f, Verification: v})
+	if err != nil {
+		return err
+	}
+	if o.out != "" {
+		if err := writeNewBytes(o.out, []byte(notes)); err != nil {
+			return err
+		}
+	}
+	tag := release.TagName(f.Record.Name, f.Record.Version)
+	if !o.announce {
+		fmt.Fprintf(stdout, "tag=%s\nnotes=rendered\n", tag)
+		return nil
+	}
+	repo := o.repository
+	if repo == "" {
+		repo = os.Getenv("GITHUB_REPOSITORY")
+	}
+	token := os.Getenv("GH_TOKEN")
+	os.Unsetenv("GH_TOKEN")
+	outcome, err := release.EnsureRelease(ctx, &release.GH{Repo: repo, Token: token}, f.Record.Name, f.Record.Version, notes)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "tag=%s\nrelease=%s\nstatus=announced\n", tag, outcome)
+	return nil
 }

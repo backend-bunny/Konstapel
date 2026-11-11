@@ -89,3 +89,22 @@ func TestVerifyReleaseArguments(t *testing.T) {
 		t.Fatal("reported complete")
 	}
 }
+
+// release-notes needs a package and a verification record, and never reaches
+// GitHub without them.
+func TestReleaseNotesArguments(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no arguments":            {"release-notes"},
+		"no package":              {"release-notes", "-name", "demo", "-verification", "v.json"},
+		"no verification":         {"release-notes", "-name", "demo", "-package", "p"},
+		"package that is missing": {"release-notes", "-name", "demo", "-package", filepath.Join(t.TempDir(), "absent"), "-verification", filepath.Join(t.TempDir(), "absent.json"), "-announce"},
+	} {
+		var out bytes.Buffer
+		if err := run(context.Background(), args, &out); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+		if strings.Contains(out.String(), "release=") {
+			t.Errorf("%s: reported a release: %q", name, out.String())
+		}
+	}
+}
