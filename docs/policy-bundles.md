@@ -175,8 +175,9 @@ be self-contained, and a policy that declares no schema accepts no parameters.
 
 This is the contract a resolver will publish and that rendering and the
 assessment producer will consume (`bundle.ResolvedContent`, `bundle.Receipt`,
-`bundle.Lease`). Only the contract exists today: nothing resolves, verifies,
-signs or caches a bundle yet. Serialized examples are pinned in
+`bundle.Lease`). Only the contract exists today: nothing resolves, signs or
+caches a bundle yet, and the [signature verifier](#signature-verification) is
+not wired into a resolver. Serialized examples are pinned in
 `testdata/bundles/contract/` and a drift fails the tests.
 
 Four identities stay separate and are never interchangeable:
@@ -258,8 +259,9 @@ sources:
   `BundleSource.CheckPayload` requires the fetched payload's name to equal the
   requested name.
 
-This is the configuration contract and its validation only. Nothing reads the
-ConfigMap, watches Secrets, contacts a registry or verifies a signature yet.
+This is the configuration contract and its validation. The registry adapter
+and the signature verifier below use it as libraries; nothing in the controller
+reads the ConfigMap or watches Secrets yet.
 
 ## Registry retrieval
 
@@ -814,6 +816,152 @@ of the system roots, an invalid CA, and one source's CA not trusting another
 registry. Not verified: a running controller reading these objects, the Role
 against a real API server, and bearer-token services other than the in-process
 fake.
+
+## Signature verification
+
+[`internal/bundle/verify`](../internal/bundle/verify) checks that the proofs the
+registry adapter retrieved were signed by the publisher the source rule names,
+for exactly the pinned manifest digest. It uses sigstore-go
+(`github.com/sigstore/sigstore-go` v1.3.0) and verifies **offline**: it never
+contacts a transparency log, Fulcio, a timestamp authority or a TUF repository.
+Like the adapter it is **not yet wired into the controller** and is not linked
+into the shipped binaries.
+
+`Verifier.VerifyProofs(ctx, source, result)` verifies the required signature
+and SLSA provenance of one `registry.Result` and returns both, or a typed
+error; `Verify` and `VerifyProof` check one kind or one proof. Trust inputs are
+read once per call, so the signature and the attestation are always judged
+under the same rule, key or root snapshot: a signature valid under one rule can
+never be combined with an attestation valid under another. Within one kind,
+candidates come from the unauthenticated predicate-type annotation, in listing
+order, and the first that verifies is used; none at all is
+`registry.ErrMissingProofs`, only failing candidates is `ErrNoValidProof`
+(which also matches each candidate's own error).
+
+### What is checked
+
+- **Trust only from central configuration.** Keys, trusted roots, issuers and
+  identities come from the source's `publisher` rule and the Secret or
+  ConfigMap it references, read by name in the controller namespace
+  (`kubeaccess.ObjectReader`). Material in the proof (a key hint, certificates,
+  log or timestamp data) is evidence checked against that trust, never an
+  anchor: a key hint naming another key is ignored, a certificate chain in a
+  proof is refused, and a certificate, log entry or timestamp from an instance
+  outside the configured root fails. The rule is validated again and patterns
+  in an identity are refused. A missing, unreadable, oversized or malformed
+  trust object fails with `ErrTrustConfig`; there is no fallback to another rule
+  or to the public-good root once a `trustRoot` is referenced, and no
+  verification-off switch.
+- **Proof format.** A Sigstore bundle v0.3 (`application/vnd.dev.sigstore.bundle.v0.3+json`),
+  at most 4 MiB, valid UTF-8 JSON with no duplicate or unknown keys, whose
+  bytes match the digest retrieval recorded, holding a DSSE envelope with
+  exactly one signature over an in-toto statement (`ErrMalformedProof`,
+  `ErrProofTooLarge`). This is what the pinned Cosign writes for both `cosign
+  sign` and `cosign attest`; a `cosign sign` proof is **not** a signature over
+  the manifest digest itself but a DSSE-signed in-toto statement with
+  predicate type `https://sigstore.dev/cosign/sign/v1` whose subject is the
+  manifest digest.
+- **Subject binding from the signed statement.** The statement (in-toto
+  Statement v1, or v0.1 as `cosign attest` writes it) is parsed strictly from
+  the signed payload: exact key names, no unknown or duplicate keys, a JSON
+  object predicate (`ErrStatement`). It must name exactly one subject whose
+  digest set is exactly one lowercase `sha256` equal to the pinned digest
+  (`ErrSubject`), and its predicate type must be the one the requested kind
+  needs (`ErrPredicateType`); the registry annotation is only used to choose
+  candidates. A subject `name` is ignored: it is a registry location (absent in
+  Cosign's signature statement, changed by a mirror), not identity.
+  sigstore-go checks the digest binding again in the final, authoritative call.
+- **Public-key rules.** The referenced value must be exactly one PEM `PUBLIC
+  KEY` block holding an ECDSA P-256 key, the type `cosign generate-key-pair`
+  creates; other key types are refused (`ErrUnsupportedKey`) rather than
+  verified with a guessed hash, and private keys are rejected. The SHA-256 of
+  the key's DER SubjectPublicKeyInfo must equal `keyFingerprint` (with or
+  without the `sha256:` prefix), even if the signature verifies under the key
+  (`ErrKeyFingerprint`). The DSSE signature is verified as ECDSA P-256 with
+  SHA-256 under that key only; a proof carrying a certificate instead of a key
+  fails (`ErrSigner`). Transparency log entries or timestamps in such a proof
+  are not verified or reported: a public-key rule configures no log or
+  timestamp authority, so `SigningTime` is zero and no evidence is claimed.
+- **Keyless rules.** The proof must carry one signing certificate (ECDSA P-256
+  or P-384; others are `ErrAlgorithm`) with exactly one subject alternative
+  name equal to `identity` and the Fulcio OIDC issuer extension equal to
+  `issuer`, both compared as exact strings (`ErrSigner`; a prefix, suffix or
+  case variant fails). A key-signed proof fails (`ErrSigner`). The trusted
+  root is the referenced object (a Sigstore `trusted_root.json`, at most 1 MiB,
+  parsed strictly, with at least one certificate authority and one
+  transparency log) or, when the rule references none, the embedded Sigstore
+  public-good root (`internal/bundle/verify/publicgood`, with its provenance and
+  refresh procedure; its SHA-256 is pinned in the code).
+- **Signing time and transparency.** The minimum for a keyless proof is at
+  least one transparency log entry that verifies under a log in the root
+  (inclusion proof, as bundle v0.3 requires, and/or a signed entry timestamp;
+  `ErrTransparency`), and at least one authenticated signing time: a log's
+  integrated time with a verified signed entry timestamp, or an RFC 3161
+  timestamp from an authority in the root (`ErrSigningTime`). When the root
+  lists certificate transparency logs, as the public-good root does, an
+  embedded SCT that verifies under one of them is also required. The leaf
+  must be valid, and chain to the root, at **every** authenticated time, and no
+  time may lie more than five minutes after the verifier's clock. The present
+  time plays no part: a short-lived certificate that expired after a valid
+  signing event verifies, while one whose only times are missing,
+  unauthenticated, from an authority outside the root, or outside its validity
+  fails. A log's unsigned integrated time (inclusion proof only) is not used.
+- **Root changes.** Each call reads the current root. A proof valid only under
+  a replaced root is rejected, and the result names the root used.
+
+### Result
+
+A `VerifiedProof` carries the proof kind established by the signed predicate
+type, the subject, the signer (`bundle.Signer`: issuer and identity, or key
+fingerprint), the trusted root's SHA-256 and source (keyless), the earliest
+authenticated signing time and every time evidence with its authority, the
+evidence kinds, the verification time from an injectable clock, the referrer
+manifest, bundle and signed-statement digests, and the verified statement
+including its raw predicate. It holds public identifiers and digests only, no
+key material or credentials. `Proofs.Provenance.Statement` is the seam for the
+provenance stage: it can check builder, source repository, revision, version
+and materials on the already verified statement without verifying again.
+
+### Not done yet
+
+- SLSA provenance policy (builder, source, revision, bundle version, materials
+  against the descriptor and `publisher.provenance`): task 3.3. Today a
+  provenance proof is only verified as signed, for the subject, with the SLSA
+  v1 predicate type, under the publisher rule.
+- Bounded receipts and recheck material (3.4); signing and trust-root
+  maintenance documentation, publisher rotation and CLI-output interoperability
+  for both methods (3.5); caching and controller wiring.
+- Public-key rules accept one ECDSA P-256 key; keyless certificates whose only
+  identity is an otherName SAN are not accepted.
+
+### What has and has not been verified
+
+Verified, by table-driven unit tests without network access (any HTTP request
+fails the run):
+
+- Public key: real proofs made by the pinned Cosign v3.1.3 CLI with generated
+  test keys against a disposable registry (`testdata/cosign/README.md`):
+  valid signature and provenance; wrong key, rotated key, fingerprint
+  mismatch, unreferenced key, unacceptable key objects; tampered payload and
+  signature, unsigned and doubly signed envelopes, truncated, garbled,
+  duplicate-key, unknown-field, oversized and older-format proofs; wrong
+  subject, wrong predicate type and mislabelled proofs; key hints and a
+  substituted certificate ignored or refused; strict statement shape.
+- Keyless: isolated Sigstore instances (sigstore-go's `VirtualSigstore` and a
+  test CA) for valid proofs with each kind of time evidence, wrong and
+  near-miss identities and issuers, several SANs, missing or foreign log
+  entries and timestamps, leaves expired after valid signing times versus
+  signing times outside validity, unauthenticated or from a foreign authority,
+  future times, swapped and mixed roots, foreign chains, missing SCTs,
+  Ed25519 leaves and malformed or missing roots.
+- Real Cosign v3 CI output: the signature and provenance of
+  `ghcr.io/backend-bunny/konstapel:0.1.0` verify offline against the embedded
+  public-good root under the publishing workflow's identity, two days after
+  their certificates expired (`testdata/ghcr/README.md`).
+
+Not verified: a keyless proof made by the Cosign CLI with an isolated Fulcio
+and Rekor (3.5), a private Sigstore deployment's real trusted root, and use
+from a running controller.
 
 ## Create and package a bundle
 

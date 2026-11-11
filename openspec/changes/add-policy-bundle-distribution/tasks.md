@@ -36,9 +36,9 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 ## 3. Signature and provenance verification
 
-- [ ] 3.1 Add pinned Cosign/Sigstore Go verification dependencies and public-key rules; verify valid signatures and rejection of unsigned content, wrong keys, tampering, wrong subjects and bundle-provided trust settings using independently signed fixtures.
+- [x] 3.1 Add pinned Cosign/Sigstore Go verification dependencies and public-key rules; verify valid signatures and rejection of unsigned content, wrong keys, tampering, wrong subjects and bundle-provided trust settings using independently signed fixtures.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 3.2 Implement keyless verification with exact issuer/identity, trusted roots and signing-time evidence; test wrong identities/issuers, invalid or missing proofs, root changes and expired leaf certificates with valid versus invalid authenticated signing times.
+- [x] 3.2 Implement keyless verification with exact issuer/identity, trusted roots and signing-time evidence; test wrong identities/issuers, invalid or missing proofs, root changes and expired leaf certificates with valid versus invalid authenticated signing times.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 3.3 Verify required SLSA provenance against the OCI subject and configured publisher/builder/source constraints; test wrong digests, mixed unauthorized signer rules, missing attestations, source-revision/version/material mismatches and correct organization-key provenance.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
