@@ -1178,7 +1178,7 @@ only) are excluded, so a mirror or credential rotation does not change it.
 subject manifest and, for the signature and the attestation, the referrer
 manifest and Sigstore bundle exactly as retrieved (the bundle contains the
 signed statement). It holds no credentials and no payload; the bundle layer is
-cached separately by digest (group 4). Bounds: at most 64 KiB per retained
+cached separately by digest ([content cache](#safe-materialization-and-the-content-cache)). Bounds: at most 64 KiB per retained
 manifest, 4 MiB per Sigstore bundle, and 16 MiB for the whole serialized
 material (the registry adapter's metadata budget). `Encode` is deterministic;
 `DecodeRecheckBundle` rejects oversized input, invalid UTF-8, duplicate,
@@ -1213,8 +1213,10 @@ certificate expired still verifies while the root still trusts it.
 
 - Signing and trust-root maintenance documentation and CLI interoperability
   for both methods (3.5).
-- Persisting `RecheckBundle`s, the content cache and leases, and invalidating
-  on configuration changes (group 4); controller wiring (group 5).
+- Persisting `RecheckBundle`s, cache leases and eviction, and invalidating on
+  configuration changes (tasks 4.3 and 4.4; the content cache itself exists,
+  see [safe materialization](#safe-materialization-and-the-content-cache));
+  controller wiring (group 5).
 - Provenance from a real run of the release workflow (it is implemented, but
   has not been dispatched; see [Release a bundle](#release-a-bundle)).
 
@@ -1418,6 +1420,215 @@ Fulcio, Rekor and timestamp authority (the keyless tests use sigstore-go's
 virtual Sigstore instead, and the real CI proof covers the public instance), the
 rotation steps end to end (only their building blocks are tested), and anything
 that runs in the controller. Because of the first item, task 3.5 is not ticked.
+
+## Safe materialization and the content cache
+
+Package `internal/bundle/cache` turns the digest-verified manifest and layer
+bytes from the [registry adapter](#registry-retrieval) into an extracted,
+verified, immutable tree on local disk that rendering and the assessment
+producer will read. It implements tasks 4.1 and 4.2 only and is **not wired
+into the controller yet**: nothing in the shipped binaries links it, no volume
+is mounted for it, and nothing reads from it.
+
+A cache entry is never an authorization. It proves only that the stored bytes
+are the ones the manifest digest names and that they passed the archive policy,
+the inventory check and the content check when stored. Trust, source rules and
+compatibility are evaluated separately each time content is used (task 4.3).
+
+### Layout
+
+| Path under the cache root | Contents |
+| --- | --- |
+| `blobs/sha256/<hex>` | the raw manifest and layer bytes, named by their digests |
+| `content/sha256/<manifest hex>/tree/` | the extracted payload, `bundle.json` included |
+| `content/sha256/<manifest hex>/record.json` | the integrity record |
+| `staging/<random>/` | in-flight work; never read as content |
+| `.lock` | the owner lock |
+
+Entries are addressed by the OCI manifest digest, the same identity targeting
+uses. A layer shared by two manifests is stored once. The integrity record
+holds the manifest and layer digests and sizes, the canonical inventory
+(`content`) digest, the digest of `bundle.json`, name, version, file count and
+unpacked size. It contains no time, so identical content always yields an
+identical record. Files are created read-only (`0444`, never executable,
+setuid, setgid or sticky). Directories are `0755` beneath a `0700` root.
+Archive modes, owners, times and extended attributes are ignored.
+
+### Limits and defaults
+
+`cache.DefaultLimits()`. Every value is configurable, and `Limits.Validate`
+rejects non-positive values, values beyond what a filesystem can hold
+(a component above 255 bytes, a path above 3072 bytes), a descriptor limit
+above the unpacked limit, and a capacity that cannot hold one maximal entry
+while it stages.
+
+| Limit | Default |
+| --- | --- |
+| Manifest | 4 MiB |
+| Compressed layer, as stored and as read | 64 MiB |
+| Unpacked payload (sum of file sizes) | 256 MiB |
+| Regular files, `bundle.json` included; implied directories are bounded by the same number | 4096 |
+| `bundle.json` | 4 MiB |
+| Path / path component / depth | 1024 bytes / 255 bytes / 32 components |
+| Cache capacity, including staging, blobs and records | 1 GiB |
+
+Decompressed tar metadata (headers, PAX records, padding) is bounded at 16 KiB
+per entry on top of the unpacked limit. Capacity is charged in whole 4 KiB
+blocks per file and directory, at least one block each, to approximate disk
+allocation. With the defaults, one maximal entry plus its staging reserves
+about 356 MiB.
+
+### Archive policy
+
+Extraction streams the layer and stops at the first violation, before reading
+or writing the bytes it governs. It rejects the following:
+
+- **Paths.** Absolute paths, `..`, `.`, empty components and trailing
+  slashes, meaning anything that is not exactly its `path.Clean` form. Also
+  backslashes, NUL, control characters, DEL and any non-ASCII byte. Paths
+  outside `content/`, `tests/`, `licenses/`, `LICENSE`, `NOTICE` and
+  `bundle.json` are rejected using the shared `bundle.ValidPayloadPath` rule.
+  Over-long paths, over-long components and over-deep paths are rejected too.
+- **Entry types.** Symlinks, hardlinks, character and block devices, FIFOs,
+  directory entries (directories are implied by file paths and created by the
+  cache), contiguous files, PAX global headers and any other non-regular type.
+  tar cannot carry sockets.
+- **Collisions.** Any two paths that would collide on a case-insensitive
+  filesystem. This covers exact duplicates, case variants of a file or of
+  any directory component, and a path used both as a file and as a directory.
+  Unicode is not admitted at all, so normalization collisions (NFC/NFD, the
+  Kelvin sign) are impossible by construction rather than detected by
+  tables.
+- **Malformed streams.** Data that is not gzip, a truncated or corrupt gzip
+  stream, a bad CRC or length, a second gzip member, bytes after the gzip
+  stream, anything other than zero padding after the tar end-of-archive marker,
+  truncated entries, and entry sizes that lie in either direction. A missing
+  end-of-archive marker is tolerated, because the inventory check enforces
+  completeness.
+- **Limits.** Any limit above. The compressed limit is enforced on bytes read.
+  The unpacked limit and the file limit are checked against each header
+  before its data is read.
+- **Inventory.** A missing or invalid `bundle.json`. An inventoried file that
+  is missing, resized or has another digest. Any file that `bundle.json`
+  does not inventory.
+- **Pairing.** A manifest that is not the bundle shape (`bundle.ValidateManifest`)
+  or a layer that is not exactly the digest and size the manifest names.
+
+### Storing an entry
+
+`Cache.Put(ctx, manifest, layer)` runs these steps in order:
+
+1. Check the manifest and pair the layer with it.
+2. Run a first pass over the in-memory layer. It applies the whole archive
+   policy and the inventory check and writes nothing. A rejected archive
+   therefore never touches the disk.
+3. Reserve the entry's exact charge plus its staging overhead against capacity
+   under a mutex. If it does not fit, return `ErrCapacity` having written
+   nothing.
+4. Create `staging/<random>/` with 128 random bits, never a name derived from
+   the archive. Write and fsync both blobs. Extract in a second pass under the
+   same policy: every file is created with `O_CREATE|O_EXCL` inside an
+   `os.Root` confined to the cache root, written exactly its declared size,
+   then fsynced and closed. Directories are synced deepest first.
+5. Verify the staged tree on disk against the inventory derived from the
+   layer. This is the on-disk equivalent of `Descriptor.VerifyPayload`, and it
+   also rejects links, special files, unexpected directories and writable or
+   executable modes. Each file is opened and compared with its `Lstat` result.
+6. Run the content check on the staged tree, by default
+   `bundle.ValidateContentDir`. This is `bundle.ValidateContent` reading the
+   tree in place: it only reads and parses, and it executes and applies
+   nothing.
+7. Write and sync the record and the staging directories.
+8. Promote under a commit lock. If an intact entry for the digest already
+   exists, discard the staged copy and return the existing entry, never
+   replacing it. Otherwise rename the blobs into `blobs/sha256/` (keeping an
+   intact existing blob and atomically replacing a corrupt one with the
+   verified copy), sync that directory, and rename the entry directory into
+   `content/sha256/`. That rename is the commit point. Finally sync `content/`.
+
+Every failure removes the staging directory and releases the reservation on
+every exit path, including a panic. Existing entries and anything outside the
+cache's own staging are left unchanged. Concurrent `Put`s of one digest
+coalesce: one stages and the others wait. If the first caller gives up, the
+next one tries. Concurrent `Put`s of different digests are admitted only while
+their reservations fit. An `ENOSPC`/`EDQUOT` while staging returns `ErrNoSpace`
+after the same rollback.
+
+### Reuse, integrity and recovery
+
+`Cache.Get(ctx, digest)` (and `Verify`) re-verifies an entry from its path
+digest down on every call, with no trust in the record. It checks that:
+
+- the manifest blob hashes to the digest and has the bundle shape;
+- the layer blob hashes to the digest the manifest names and passes the
+  archive policy as it is re-read;
+- the record is byte-for-byte the record those bytes produce;
+- the tree is exactly the inventory re-derived from the layer.
+
+A mismatch returns `ErrCorrupt`. The entry is first renamed out of
+`content/`, so it disappears atomically, and is then deleted. A corrupt entry
+is never returned. `Entry.Layer()` and `Entry.Manifest()` re-read the blobs
+and check their digests. The layer is the input `Verifier.Recheck` takes.
+Verification detects at-rest corruption. It does not defend against another
+writer modifying the tree while it is in use: the cache root belongs to the
+controller alone. Limits apply on reuse too, so lowering them makes larger
+stored entries unusable.
+
+`Open` takes an exclusive `flock` on `.lock`, so a second owner, in-process or
+not, gets `ErrInUse`. Because of the lock, Open can treat all of `staging/` as
+abandoned and removes it. It also removes entries whose record or blobs are
+missing or inconsistent, unreferenced blobs, and unexpected names inside
+`blobs/`, `content/` and `staging/`, and reports all of it in `Recovery()`.
+Payload trees are re-hashed lazily on reuse, not at Open. Nothing else in the
+root, such as a volume's `lost+found`, is touched. An interruption at any
+step of `Put` therefore leaves either no entry or a complete one, plus
+staging debris that the next Open removes.
+
+### Capacity
+
+The charge covers stored blobs, entries and in-flight reservations. When
+existing entries fill the capacity, `Put` returns `ErrCapacity` and leaves
+them intact. There is no eviction yet. `Stats()` exposes the bookkeeping that
+eviction will need: capacity, used and reserved bytes, and per entry its
+charge (including the layer blob unless shared) and last use. Reservation is
+the single admission point and entry removal a single internal path.
+
+### Not done yet
+
+- Leases for desired, applied and assessment holders, and LRU eviction of
+  unreferenced entries (task 4.4).
+- Acceptance records keyed by source, trust and compatibility revisions, and
+  their invalidation (task 4.3). The cache stores bytes, not decisions.
+- Documentation of cache lifetime across process restarts and Pod or cache
+  loss (task 4.5). The default will be a bounded `emptyDir` that does not
+  survive Pod replacement, optionally an operator-provided persistent volume
+  with the same integrity rules. Neither is mounted by the chart yet.
+- Storing verification material (`RecheckBundle`s, up to 16 MiB each) beside
+  entries and charging it against the same capacity, as the 1 GiB default
+  intends. Until then capacity covers payload, blobs, records and staging only,
+  and task 4.2 stays open.
+- Controller wiring (group 5).
+
+### What has and has not been verified
+
+Verified by unit tests on a real temporary directory with `-race`. A
+failure-injecting filesystem wrapper simulates `ENOSPC`, a process crash at
+every mutating step of a `Put`, and a panic. The tests cover:
+
+- every rejection class above, each checked to leave a snapshot of the cache
+  root, a sibling directory and a symlink unchanged and to perform no write;
+- the official bundle round trip, equal to `bundle.Unpack`;
+- inventory mismatches;
+- promotion atomicity seen by a polling observer, and commit ordering;
+- the destination-exists race, coalescing, and exact admission under
+  concurrent capacity pressure;
+- corruption of every stored component, with and without a restart, and
+  recovery.
+
+Not verified: behaviour on a real full disk or quota (only injected), a real
+power loss (fsync ordering is checked from the operation log, not by cutting
+power), filesystems other than the test host's, and anything in the
+controller.
 
 ## Create and package a bundle
 

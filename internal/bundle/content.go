@@ -176,6 +176,21 @@ func requiredLocal(v any, key string, out *[]string) {
 // prototype validation); the descriptor's logical checks equal the mapped
 // rules; and every policy is a ValidatingPolicy named as the descriptor says.
 func ValidateContent(d *Descriptor, payload fs.FS) error {
+	return validateContent(d, payload, "")
+}
+
+// ValidateContentDir is ValidateContent for a payload that is already
+// extracted to dir, such as a verified cache staging tree. It reads the files
+// in place instead of copying them to a temporary directory, so it needs no
+// writable space of its own. The caller must have rejected links and special
+// files in dir; nothing in it is executed or applied.
+func ValidateContentDir(d *Descriptor, dir string) error {
+	return validateContent(d, os.DirFS(dir), dir)
+}
+
+// validateContent reads payload; root, when set, is the same payload on disk
+// for the path-based OSCAL validation, otherwise it is materialized.
+func validateContent(d *Descriptor, payload fs.FS, root string) error {
 	if d.Compatibility.Provider != providerContract {
 		return fmt.Errorf("compatibility.provider %q: only %q is installed", d.Compatibility.Provider, providerContract)
 	}
@@ -300,11 +315,14 @@ func ValidateContent(d *Descriptor, payload fs.FS) error {
 	}
 
 	// Reference closure and Moderate membership through the existing validation.
-	root, cleanup, err := materialize(payload)
-	if err != nil {
-		return err
+	if root == "" {
+		dir, cleanup, err := materialize(payload)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		root = dir
 	}
-	defer cleanup()
 	mapped := map[string]bool{}
 	for _, rel := range componentDefs {
 		_, ms, err := assessment.ValidateDefinition(root, rel, rules)
