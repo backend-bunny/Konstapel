@@ -212,39 +212,11 @@ func (c *Client) retrieve(ctx context.Context, src bundle.BundleSource, d digest
 }
 
 func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d digest.Digest, rec *secrets) (*Result, error) {
-	host := registryHost(src.Repository)
-	if err := c.preflightCredential(ctx, src, host, rec); err != nil {
-		return nil, err
-	}
-	base, err := c.transportFor(ctx, src)
-	if err != nil {
-		return nil, err
-	}
-	scheme := "https"
-	if c.plainHTTP {
-		scheme = "http"
-	}
-	_, path, _ := strings.Cut(src.Repository, "/")
 	meta := &budget{limit: c.limits.MaxMetadataBytes, remaining: c.limits.MaxMetadataBytes}
-	httpClient := &http.Client{
-		Transport:     &fetchTransport{base: base, rec: rec, budget: meta, scope: newCredentialScope(scheme, host, path)},
-		Timeout:       c.limits.RequestTimeout,
-		CheckRedirect: c.checkRedirect,
-	}
-	authClient := &auth.Client{
-		Client:     httpClient,
-		Cache:      c.tokenCache(src),
-		Credential: c.credentialFunc(src, host, rec),
-	}
-	if c.plainHTTP {
-		authClient.BlockedRealmPrefixes = []netip.Prefix{}
-	}
-	repo, err := remote.NewRepository(src.Repository)
+	repo, err := c.repository(ctx, src, rec, meta)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		return nil, err
 	}
-	repo.Client = authClient
-	repo.PlainHTTP = c.plainHTTP
 	// Accept an index only to reject it with a clear error.
 	repo.ManifestMediaTypes = []string{ocispec.MediaTypeImageManifest, ocispec.MediaTypeImageIndex}
 	repo.MaxMetadataBytes = c.limits.MaxManifestBytes
@@ -284,6 +256,46 @@ func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d dig
 		return nil, err
 	}
 	return res, nil
+}
+
+// repository builds the ORAS repository for one attempt of src: the
+// credential preflight, the source's TLS transport, the credential scope
+// guard, bounded redirects and the per-source token cache. Every credential
+// value used is recorded in rec for redaction.
+func (c *Client) repository(ctx context.Context, src bundle.BundleSource, rec *secrets, meta *budget) (*remote.Repository, error) {
+	host := registryHost(src.Repository)
+	if err := c.preflightCredential(ctx, src, host, rec); err != nil {
+		return nil, err
+	}
+	base, err := c.transportFor(ctx, src)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if c.plainHTTP {
+		scheme = "http"
+	}
+	_, path, _ := strings.Cut(src.Repository, "/")
+	httpClient := &http.Client{
+		Transport:     &fetchTransport{base: base, rec: rec, budget: meta, scope: newCredentialScope(scheme, host, path)},
+		Timeout:       c.limits.RequestTimeout,
+		CheckRedirect: c.checkRedirect,
+	}
+	authClient := &auth.Client{
+		Client:     httpClient,
+		Cache:      c.tokenCache(src),
+		Credential: c.credentialFunc(src, host, rec),
+	}
+	if c.plainHTTP {
+		authClient.BlockedRealmPrefixes = []netip.Prefix{}
+	}
+	repo, err := remote.NewRepository(src.Repository)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	repo.Client = authClient
+	repo.PlainHTTP = c.plainHTTP
+	return repo, nil
 }
 
 // fetchSubject fetches the pinned manifest by digest and checks its bytes.

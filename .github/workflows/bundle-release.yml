@@ -1,12 +1,14 @@
 name: bundle-release
 # Releases one policy bundle independently of the application, image and
 # charts: validate a reviewed main commit, package exactly that commit into a
-# frozen OCI layout, then create or verify its bundle/<name>/vX.Y.Z tag.
-# The version comes from bundles/<name>/definition.json at that commit. This
-# workflow never calls the image or chart publishers and never reads the
-# application release automation's state. Registry publication, signatures,
-# provenance and release notes are not implemented yet; they extend the
-# package job's frozen layout (docs/policy-bundles.md).
+# frozen OCI layout, run its policy fixtures against the frozen bytes and
+# record them, create or verify its bundle/<name>/vX.Y.Z tag, then publish the
+# frozen bytes write-once to the bundle registry and read them back
+# anonymously. The version comes from bundles/<name>/definition.json at that
+# commit. This workflow never calls the image or chart publishers and never
+# reads the application release automation's state. Signatures, provenance
+# and release notes are not implemented yet: a publication stays incomplete
+# until they are (docs/policy-bundles.md#release-a-bundle).
 on:
   workflow_dispatch:
     inputs:
@@ -57,6 +59,13 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/source" "$SOURCE_COMMIT"
           devbox run -- bash "$RUNNER_TEMP/source/scripts/bundles/package.sh" "$BUNDLE" "$RUNNER_TEMP/bundle"
+      - name: Test and freeze the package
+        # Runs the declarative policy fixtures against the unpacked frozen
+        # layer and writes publication-record.json bound to those bytes.
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease freeze
+          -name "$BUNDLE" -commit "$SOURCE_COMMIT" -package "$RUNNER_TEMP/bundle"
+          | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Verify the frozen package
         run: >-
           devbox run -- go run -mod=readonly ./cmd/bundlerelease verify
@@ -92,3 +101,56 @@ jobs:
           devbox run -- go run -mod=readonly ./cmd/bundlerelease tag
           -name "$BUNDLE" -commit "$SOURCE_COMMIT" -version "$BUNDLE_VERSION"
           | tee -a "$GITHUB_STEP_SUMMARY"
+  publish:
+    # After the tag job: a registry version is only ever published for a
+    # version whose Git tag marks the source commit.
+    needs: [package, tag]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Only to push the frozen bundle; nothing else in this workflow writes
+      # to the registry. No OIDC or signing permissions until signing exists.
+      packages: write
+    env:
+      BUNDLE: ${{ inputs.bundle }}
+      SOURCE_COMMIT: ${{ inputs.commit }}
+      BUNDLE_VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history and tags: ancestry and the release tag the tag job made.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - name: Retrieve the frozen package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-${{ inputs.bundle }}-${{ needs.package.outputs.version }}
+          path: ${{ runner.temp }}/bundle
+      - name: Re-verify the frozen package
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease verify
+          -name "$BUNDLE" -commit "$SOURCE_COMMIT" -package "$RUNNER_TEMP/bundle"
+      - name: Publish write-once and read back anonymously
+        # The token reaches the tool only through this step's environment.
+        # -defer-proofs: signatures and provenance are added by a later
+        # step that does not exist yet, so the run reports incomplete.
+        env:
+          BUNDLE_REGISTRY_USERNAME: ${{ github.actor }}
+          BUNDLE_REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/publication"
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease publish \
+            -name "$BUNDLE" -commit "$SOURCE_COMMIT" -version "$BUNDLE_VERSION" \
+            -package "$RUNNER_TEMP/bundle" -out "$RUNNER_TEMP/publication/publication.json" \
+            -defer-proofs | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Retain the publication record
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-${{ inputs.bundle }}-${{ needs.package.outputs.version }}-publication-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication/
+          if-no-files-found: warn
+          retention-days: 90

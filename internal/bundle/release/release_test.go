@@ -2,6 +2,8 @@ package release
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,6 +201,12 @@ func TestValidate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// The definition digest is checked against the blob in
+			// TestRequireTagAndDefinitionDigest.
+			if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(rel.DefinitionSHA256) {
+				t.Fatalf("definition digest %q", rel.DefinitionSHA256)
+			}
+			rel.DefinitionSHA256 = ""
 			want := Release{Name: tc.req.Name, Version: tc.version, Commit: tc.req.Commit, Tag: "bundle/" + tc.req.Name + "/v" + tc.version}
 			if rel != want {
 				t.Fatalf("release = %+v, want %+v", rel, want)
@@ -357,5 +365,34 @@ func TestTagNamespaceIsSeparateFromApplicationTags(t *testing.T) {
 	// rather than producing bundle/<name>/vv1.0.0.
 	if err := ValidateVersion("v1.0.0"); err == nil {
 		t.Fatal("v-prefixed version accepted")
+	}
+}
+
+// Publication requires the release tag at the source commit, and the
+// release records the definition's digest exactly as stored at that commit.
+func TestRequireTagAndDefinitionDigest(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	c1 := f.commit(map[string]string{defPath("alpha"): def("alpha", "1.0.0")})
+	c2 := f.commit(map[string]string{"bundles/alpha/notes": "later"})
+	f.publishMain()
+	rel, err := Validate(ctx, f.git, Request{Name: "alpha", Commit: c1, MainRef: mainRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(def("alpha", "1.0.0")))
+	if rel.DefinitionSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("definition digest %s", rel.DefinitionSHA256)
+	}
+	if err := RequireTag(ctx, f.git, rel); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("absent tag: %v", err)
+	}
+	f.run(f.work, "tag", rel.Tag, c2)
+	if err := RequireTag(ctx, f.git, rel); err == nil || !strings.Contains(err.Error(), "marks") {
+		t.Fatalf("tag at another commit: %v", err)
+	}
+	f.run(f.work, "tag", "-f", rel.Tag, c1)
+	if err := RequireTag(ctx, f.git, rel); err != nil {
+		t.Fatal(err)
 	}
 }
