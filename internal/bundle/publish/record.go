@@ -225,6 +225,13 @@ func newFrozen(manifest, layer []byte, rec Record) (*Frozen, error) {
 	return f, nil
 }
 
+// CheckRecord verifies manifest and layer the way the consumer does and that
+// rec is a valid record describing exactly those bytes.
+func CheckRecord(manifest, layer []byte, rec Record) error {
+	_, err := newFrozen(manifest, layer, rec)
+	return err
+}
+
 // bind checks that rec describes exactly f's bytes and sets it.
 func (f *Frozen) bind(rec Record) error {
 	if err := rec.validate(); err != nil {

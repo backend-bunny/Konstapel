@@ -22,6 +22,18 @@ def objects(text):
         text = text.lstrip()[end:]
 
 
+def shipped_commands():
+    """The commands the image ships: exactly those scripts/build.sh builds.
+
+    Build-only tools under cmd/ (bundle packaging and release) are not in the
+    image, so their dependencies must neither be scanned nor attributed here.
+    """
+    commands = re.findall(r'^go build -o bin/\S+ (\./cmd/\S+)$', Path('scripts/build.sh').read_text(), re.M)
+    if not commands:
+        raise SystemExit('No shipped commands found in scripts/build.sh')
+    return commands
+
+
 def escape(value):
     return ''.join('!' + c.lower() if c.isupper() else c for c in value)
 
@@ -32,14 +44,15 @@ def main(output):
     env = dict(os.environ, CGO_ENABLED='0', GOOS='linux', GOARCH='amd64')
     os.environ.update(env)
     modules = {}
-    for pkg in objects(run('go', 'list', '-mod=readonly', '-deps', '-json', './cmd/...')):
+    shipped = shipped_commands()
+    for pkg in objects(run('go', 'list', '-mod=readonly', '-deps', '-json', *shipped)):
         if module := pkg.get('Module'):
             if module.get('Replace'):
                 raise SystemExit('Module replacements need explicit source attribution before image builds')
             modules[module['Path']] = module
-    report = run('go-licenses', 'report', './cmd/...')
+    report = run('go-licenses', 'report', *shipped)
     (out / 'go-licenses.csv').write_text(report)
-    subprocess.run(['go-licenses', 'save', './cmd/...', '--save_path', str(out / 'licenses')], check=True)
+    subprocess.run(['go-licenses', 'save', *shipped, '--save_path', str(out / 'licenses')], check=True)
     licenses = {path: set() for path in modules}
     for library, _, license_id in csv.reader(report.splitlines()):
         match = max((m for m in modules if library == m or library.startswith(m + '/')), key=len)

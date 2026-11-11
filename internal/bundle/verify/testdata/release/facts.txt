@@ -1,0 +1,6 @@
+subject sha256:2d574a6fd3c1553cd29b82faaa35b413fadf296e8af55d8ecb1d691f32cdc5bd
+workflow 834c259212c1f11d41faf42b81f361a7f7107e53
+org sha256:8299001c5ccccfd96d058e62dc69202907c0bdf9e79556ac337ff631f279bc2c
+builder https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
+other-builder https://github.com/backend-bunny/Konstapel/.github/workflows/other.yml@refs/heads/main
+cosign v3.1.3

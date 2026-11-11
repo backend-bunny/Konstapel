@@ -1,0 +1,11 @@
+version: 1
+sources:
+  - name: konstapel-privileged-containers
+    repository: registry.example.test/fixtures/konstapel-privileged-containers
+    publisher:
+      type: public-key
+      publicKey: {kind: Secret, name: org-signing-key}
+      keyFingerprint: sha256:8299001c5ccccfd96d058e62dc69202907c0bdf9e79556ac337ff631f279bc2c
+      provenance:
+        sourceRepository: https://github.com/backend-bunny/Konstapel
+        builder: https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main

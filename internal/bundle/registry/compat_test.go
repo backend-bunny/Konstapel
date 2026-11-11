@@ -625,6 +625,7 @@ func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []co
 		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md): listed through the OCI referrers tag schema on registryImage (no referrers API) and through the referrers API on apiRegistryImage",
 		"authentication": "anonymous and htpasswd (basic), directly and through kubeaccess (dockerconfigjson Secret, rotation, CA ConfigMap); bearer-token service not covered",
 		"publication":    "internal/bundle/publish write-once publication: anonymous-write distribution registry (tag schema) and Zot with htpasswd writes and anonymous reads (referrers API); recovery through a fault-injecting TLS proxy; anonymous read-back failure against the htpasswd distribution registry",
+		"signing":        "internal/bundle/sign (pinned Cosign CLI, key mode, no transparency log, outbound HTTP(S) to a closed port) through publish.Completer: digest-only signatures and SLSA provenance for missing kinds only, recovery, refusal of another subject; release.VerifyRelease anonymously under a test public-key rule; keyless (GitHub OIDC) not covered",
 		"tls":            "throwaway CAs (a second, unrelated one for the per-source trust case), verification always on", "cases": records,
 	}
 	b, err := json.MarshalIndent(ev, "", "  ")
