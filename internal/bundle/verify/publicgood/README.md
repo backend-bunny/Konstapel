@@ -34,4 +34,6 @@ test must still verify). An embedded root only becomes stale in the safe
 direction for new keys (proofs from new Sigstore instances fail closed); a key
 withdrawn from the public-good root stays trusted here until the next refresh,
 which is why operators can pin their own root object and why refreshing
-belongs to the release process (task 3.5 documents its maintenance).
+belongs to the release process
+(see "Maintaining the official trust root" in `docs/policy-bundles.md`, which also
+has an independent check of the hash against the live TUF targets metadata).

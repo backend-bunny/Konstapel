@@ -931,9 +931,10 @@ and materials on the already verified statement without verifying again.
 
 - The provenance policy, receipts and recheck are described in
   [Provenance verification](#provenance-verification).
-- Signing and trust-root maintenance documentation, publisher rotation and
-  CLI-output interoperability for both methods (3.5); caching and controller
-  wiring.
+- Signing, trust-root maintenance and publisher rotation are documented in
+  [Signing, trust roots and rotation](#signing-trust-roots-and-rotation);
+  keyless interoperability with the Cosign CLI under an isolated Sigstore stack
+  (3.5), caching and controller wiring are not done.
 - Public-key rules accept one ECDSA P-256 key; keyless certificates whose only
   identity is an otherName SAN are not accepted.
 
@@ -1206,6 +1207,149 @@ an explicit transport):
 Not verified: provenance produced by the release workflow (it produces none
 yet), keyless provenance made by the Cosign CLI, and use from a running
 controller.
+
+## Signing, trust roots and rotation
+
+A runbook for the two publisher rules, for maintaining the embedded official
+trust root, and for rotating a publisher. The verifier it relies on is described
+in [Signature verification](#signature-verification) and
+[Provenance verification](#provenance-verification). Nothing here is performed by
+the controller yet, and the release workflow does not sign yet (task 6.3): the
+commands below are what an organization runs by hand today and what 6.3 will
+automate for official releases.
+
+### The two signing methods
+
+| | Public key (organizations, offline) | Keyless (official releases) |
+| --- | --- | --- |
+| Rule fields | `publisher.type: public-key`, `publicKey` reference, `keyFingerprint` | `publisher.type: keyless`, exact `issuer` and `identity`, optional `trustRoot` reference |
+| Trust anchor | the referenced public key, checked against the configured fingerprint | the trusted root (the embedded Sigstore public-good root unless the rule references its own) |
+| Needs | a key pair you keep private; no Sigstore service | an OIDC identity (GitHub Actions for official releases) and the Sigstore services |
+| Evidence the verifier requires | the signature | a transparency-log entry and an authenticated signing time, plus a certificate transparency timestamp when the root lists CT logs; the leaf certificate only has to be valid at that signing time |
+| Provenance | same rule: the attestation must be signed by the same key | same rule: the same identity |
+
+Both proofs, the signature and the SLSA provenance attestation, are made over
+the **manifest digest** (never a tag) and are stored as Sigstore bundle v0.3
+referrers. The provenance predicate must follow
+[Bundle provenance v1](#bundle-provenance-v1).
+
+**Public key.** These are the commands the test fixtures were made with
+(`internal/bundle/verify/testdata/cosign/generate.sh`, Cosign v3.1.3), minus the
+flags that point at a plain-HTTP test registry:
+
+```sh
+cosign generate-key-pair            # keep cosign.key private; cosign.pub is public
+ref=<registry>/<repository>@sha256:<manifest digest>
+cosign sign   --key cosign.key --tlog-upload=false --use-signing-config=false "$ref"
+cosign attest --key cosign.key --tlog-upload=false --use-signing-config=false \
+  --type slsaprovenance1 --predicate predicate.json "$ref"
+# The fingerprint for the rule: SHA-256 of the key's DER SubjectPublicKeyInfo.
+sed '/-----/d' cosign.pub | base64 -d | sha256sum
+kubectl -n <controller namespace> create secret generic acme-bundle-signing-key --from-file=cosign.pub
+```
+
+Only ECDSA P-256 keys (Cosign's default) are accepted. `--tlog-upload=false`
+keeps the key mode independent of any public service; the verifier neither
+requires nor claims transparency evidence in this mode. See
+[the private registry guide](#private-registry-setup) for the Secret, the rule
+and the Role that lets the controller read the key.
+
+**Keyless.** Official releases are signed by the dedicated GitHub workflow with
+its OIDC identity. For reference, that is `cosign sign --yes "$ref"` and
+`cosign attest --yes --type slsaprovenance1 --predicate predicate.json "$ref"`
+in a job with `id-token: write`; the rule fixes the OIDC issuer
+(`https://token.actions.githubusercontent.com`) and the exact workflow identity,
+for example the one in `testdata/bundles/sources/official.yaml`. This is not
+run by anything in this repository yet (6.3 adds the signing step).
+
+### Maintaining the official trust root
+
+The verifier embeds the Sigstore public-good trusted root
+(`internal/bundle/verify/publicgood/`) and never fetches or refreshes it. A rule
+that references its own `trustRoot` object replaces it entirely and never falls
+back to it, which is also how a private Sigstore deployment is supported.
+
+The embedded copy only changes through a reviewed pull request:
+
+1. In a scratch directory, fetch it with the pinned Cosign, which verifies the
+   TUF metadata chain from the root embedded in Cosign:
+   `HOME=$(mktemp -d) TUF_ROOT=$HOME/.sigstore/root devbox run -- cosign initialize`
+   and take `trusted_root.json` from the TUF cache.
+2. Check the file against the signed targets metadata independently of Cosign.
+   The hash must equal the `trusted_root.json` entry in the current
+   `targets.json`, reached through the live `timestamp.json` and `snapshot.json`
+   of `https://tuf-repo-cdn.sigstore.dev`:
+
+   ```sh
+   cdn=https://tuf-repo-cdn.sigstore.dev
+   sv=$(curl -s $cdn/timestamp.json | jq -r '.signed.meta["snapshot.json"].version')
+   tv=$(curl -s $cdn/$sv.snapshot.json | jq -r '.signed.meta["targets.json"].version')
+   curl -s $cdn/$tv.targets.json | jq -r '.signed.targets["trusted_root.json"].hashes.sha256'
+   sha256sum trusted_root.json
+   ```
+
+3. Replace the file, update `PublicGoodTrustRootSHA256` in
+   `internal/bundle/verify/trust.go` and the table in the directory's README
+   (TUF versions, hash, contents), and run the verifier tests: the real-proof test
+   must still verify. A hash that does not match the constant is refused at run
+   time with `ErrTrustConfig`.
+
+When to refresh: when Sigstore rotates a certificate authority, log, or
+timestamp authority, and in any case before the TUF root it was taken from
+expires (root v16 expires 2027-04-22). The two failure directions differ. A
+root that is too old fails closed for new Sigstore instances, so new proofs stop
+verifying. But a key withdrawn upstream stays trusted here until the next
+refresh, so treat a Sigstore key-compromise announcement as a trigger to refresh
+at once, and let operators who need faster control pin their own `trustRoot`
+object (and rotate it themselves). The embedded root is trusted for the
+public-good instance only; it says nothing about which identities are allowed.
+That is always the rule's exact issuer and identity.
+
+### Rotating a publisher
+
+A source has exactly one publisher rule, so there is no overlap window. Changing
+the rule changes its revision, which makes earlier receipts fail a recheck and
+makes every pinned digest unresolved until a proof that satisfies the **new** rule
+exists. Rotate in this order:
+
+1. **Re-sign first.** For every digest that profiles still pin, attach a new
+   signature and provenance with the new key (or identity). Referrers are
+   additive: the old proofs stay in the registry and are simply never selected,
+   because the rule decides the signer. The provenance must be re-issued too,
+   since both proofs have to come from the same signer.
+2. Check each digest against the new rule (the verifier tests show the shape: the
+   same manifest verifies under the new key or identity and fails under the old).
+3. **Switch the central rule** (new `keyFingerprint` and key Secret, or new
+   `identity` and `provenance.builder`) in the sources ConfigMap.
+4. Retire the old key or workflow identity once nothing pins an unsigned digest.
+
+The same order applies to a keyless identity change such as renaming the release
+workflow or moving it to another branch (`identity` and `provenance.builder` both
+change), and to a source repository move (`provenance.sourceRepository`).
+Pointing the source at a mirror is not a rotation: `repository` is only a
+location, and it does not change the rule revision.
+
+Revoking a publisher in an emergency is the same edit without step 1: change or
+remove the rule, and affected resolution becomes unavailable. Policies that are
+already applied stay in place and are reported as stale, never silently
+withdrawn (see the targeting design); removing enforcement is an explicit
+administrator action.
+
+### What has and has not been verified
+
+Verified: the public-key flow end to end with the pinned Cosign v3.1.3 CLI
+(real signatures and provenance against a disposable registry, accepted by the Go
+verifier, and the rotated-key and swapped-root cases); the embedded root's hash
+against the live signed TUF targets metadata (checked independently on
+2026-11-11, targets v14); and real Cosign v3 output from GitHub Actions
+(`ghcr.io/backend-bunny/konstapel:0.1.0`) accepted offline against the embedded
+root, including after its leaf certificates expired.
+
+Not verified: a keyless proof made by the Cosign CLI against an isolated
+Fulcio, Rekor and timestamp authority (the keyless tests use sigstore-go's
+virtual Sigstore instead, and the real CI proof covers the public instance), the
+rotation steps end to end (only their building blocks are tested), and anything
+that runs in the controller. Because of the first item, task 3.5 is not ticked.
 
 ## Create and package a bundle
 
