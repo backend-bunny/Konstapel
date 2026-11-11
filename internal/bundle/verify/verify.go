@@ -3,8 +3,12 @@
 // exactly that bundle's OCI manifest digest. It verifies offline with
 // sigstore-go: trust comes only from the rule and the objects it references
 // (a public key, or a trusted root for keyless signing), never from the
-// fetched artifact or proof. It is a library only; nothing in the controller
-// calls it yet. See docs/policy-bundles.md, "Signature verification".
+// fetched artifact or proof. CheckProvenance applies the bundle provenance
+// policy to the verified attestation, Accept combines both with the content
+// checks into a receipt, and Recheck repeats them later under current trust.
+// It is a library only; nothing in the controller calls it yet. See
+// docs/policy-bundles.md, "Signature verification" and "Provenance
+// verification".
 package verify
 
 import (
@@ -144,7 +148,7 @@ type Proofs struct {
 // so both proofs are judged against one snapshot of the rule and its objects:
 // a signature and an attestation can never be accepted under different rules,
 // keys or roots. Provenance content (builder, source, version) is not checked
-// here; a later stage reads Provenance.Statement.
+// here; CheckProvenance (or Accept) reads Provenance.Statement.
 func (v *Verifier) VerifyProofs(ctx context.Context, src bundle.BundleSource, res *registry.Result) (*Proofs, error) {
 	t, err := v.loadTrust(ctx, src.Publisher)
 	if err != nil {

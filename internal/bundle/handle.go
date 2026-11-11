@@ -16,8 +16,10 @@ import (
 
 // HandleVersion versions the serialized resolved-content handle and receipt.
 // It is independent of targeting.ContractVersion: nothing here changes the
-// enforcement revision algorithm.
-const HandleVersion = 1
+// enforcement revision algorithm. Version 2 records each proof's manifest,
+// bundle and statement digests and the full provenance claims; nothing ever
+// persisted version 1, so it is not accepted.
+const HandleVersion = 2
 
 const (
 	// PredicateSLSAProvenanceV1 is the only accepted provenance predicate.
@@ -99,12 +101,35 @@ type Signer struct {
 	KeyFingerprint string `json:"keyFingerprint,omitempty"`
 }
 
-// Provenance records the attested origin that was checked against the descriptor.
+// Provenance records the attested origin that was checked against the
+// descriptor and the publisher rule.
 type Provenance struct {
 	PredicateType string `json:"predicateType"`
+	BuildType     string `json:"buildType"`
 	Repository    string `json:"repository"`
 	Revision      string `json:"revision"`
 	Builder       string `json:"builder"`
+	// Content is the attested canonical inventory digest (Digests.Content).
+	Content string `json:"content"`
+	// Workflow is the release pipeline revision, recorded separately from the
+	// content source; it never stands in for Revision.
+	Workflow WorkflowRef `json:"workflow"`
+}
+
+// WorkflowRef identifies the pipeline definition that ran a release.
+type WorkflowRef struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	Ref        string `json:"ref,omitempty"`
+	Commit     string `json:"commit"`
+}
+
+// ProofDigests identifies one retained proof: its referrer manifest, its
+// Sigstore bundle layer and the signed in-toto statement inside it.
+type ProofDigests struct {
+	Manifest  string `json:"manifest"`
+	Bundle    string `json:"bundle"`
+	Statement string `json:"statement"`
 }
 
 // Receipt records one successful verification of one subject. It is evidence
@@ -122,8 +147,11 @@ type Receipt struct {
 	// RetrievedFrom is where the bytes came from. A hostname is a retrieval
 	// location, not publisher identity, and a mirror changes only this field.
 	RetrievedFrom string `json:"retrievedFrom"`
-	// SourceRule and TrustRevision name the central configuration revisions
-	// the verification ran under; a change invalidates the receipt.
+	// SourceRule is the revision of the central publisher rule the
+	// verification ran under (sha256 of its canonical form); TrustRevision
+	// is the revision of the trust input (sha256 of the trusted root bytes,
+	// or the public key fingerprint) and TrustRoot names where that input
+	// came from. A change to any of them invalidates the receipt.
 	SourceRule    string `json:"sourceRule"`
 	TrustRevision string `json:"trustRevision"`
 	TrustRoot     string `json:"trustRoot"`
@@ -131,8 +159,8 @@ type Receipt struct {
 	// Proofs are digests of the retained signature and attestation, so the
 	// check can be repeated locally.
 	Proofs struct {
-		Signature   string `json:"signature"`
-		Attestation string `json:"attestation"`
+		Signature   ProofDigests `json:"signature"`
+		Attestation ProofDigests `json:"attestation"`
 	} `json:"proofs"`
 	Provenance Provenance `json:"provenance"`
 }
@@ -262,6 +290,9 @@ func (r ResolvedContent) Validate() error {
 		if r.Receipt.Provenance.Revision != r.Digests.Revision {
 			fail("provenance revision %q differs from digests.revision %q", r.Receipt.Provenance.Revision, r.Digests.Revision)
 		}
+		if r.Receipt.Provenance.Content != r.Digests.Content {
+			fail("provenance content %q differs from digests.content %q", r.Receipt.Provenance.Content, r.Digests.Content)
+		}
 	}
 	l := r.Lease
 	if l.ID == "" || l.Owner == "" || l.AcquiredAt.IsZero() {
@@ -295,6 +326,9 @@ func (r Receipt) Validate() error {
 	if r.RetrievedFrom == "" || r.SourceRule == "" || r.TrustRevision == "" || r.TrustRoot == "" {
 		fail("receipt must name retrievedFrom, sourceRule, trustRevision and trustRoot")
 	}
+	if !digestPattern.MatchString(r.SourceRule) || !digestPattern.MatchString(r.TrustRevision) {
+		fail("receipt sourceRule and trustRevision must be sha256:<64 hex> revisions")
+	}
 	switch r.Signer.Kind {
 	case SignerKeyless:
 		if r.Signer.Issuer == "" || r.Signer.Identity == "" || r.Signer.KeyFingerprint != "" {
@@ -307,14 +341,26 @@ func (r Receipt) Validate() error {
 	default:
 		fail("signer kind %q is not %q or %q", r.Signer.Kind, SignerKeyless, SignerPublicKey)
 	}
-	if !digestPattern.MatchString(r.Proofs.Signature) || !digestPattern.MatchString(r.Proofs.Attestation) {
-		fail("receipt must retain signature and attestation digests")
+	for _, p := range []ProofDigests{r.Proofs.Signature, r.Proofs.Attestation} {
+		if !digestPattern.MatchString(p.Manifest) || !digestPattern.MatchString(p.Bundle) || !digestPattern.MatchString(p.Statement) {
+			fail("receipt must retain signature and attestation manifest, bundle and statement digests")
+			break
+		}
+	}
+	if r.Proofs.Signature == r.Proofs.Attestation {
+		fail("receipt signature and attestation must be different proofs")
 	}
 	if r.Provenance.PredicateType != PredicateSLSAProvenanceV1 {
 		fail("provenance predicate %q: only %q is accepted", r.Provenance.PredicateType, PredicateSLSAProvenanceV1)
 	}
 	if !strings.HasPrefix(r.Provenance.Repository, "https://") || !revisionPat.MatchString(r.Provenance.Revision) || r.Provenance.Builder == "" {
 		fail("provenance needs an https repository, a full revision and a builder")
+	}
+	if r.Provenance.BuildType == "" || !digestPattern.MatchString(r.Provenance.Content) {
+		fail("provenance needs a build type and a sha256 content digest")
+	}
+	if w := r.Provenance.Workflow; w.Repository == "" || w.Path == "" || !revisionPat.MatchString(w.Commit) {
+		fail("provenance needs the workflow repository, path and full commit")
 	}
 	return errors.Join(errs...)
 }

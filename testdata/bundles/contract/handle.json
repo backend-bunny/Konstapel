@@ -1,5 +1,5 @@
 {
-  "handleVersion": 1,
+  "handleVersion": 2,
   "name": "konstapel-privileged-containers",
   "version": "0.1.0",
   "digests": {
@@ -38,7 +38,7 @@
     "engine": "unknown"
   },
   "receipt": {
-    "version": 1,
+    "version": 2,
     "verifiedAt": "2026-11-10T09:00:00Z",
     "subject": {
       "name": "konstapel-privileged-containers",
@@ -46,23 +46,39 @@
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
     },
     "retrievedFrom": "ghcr.io/backend-bunny/bundles/konstapel-privileged-containers",
-    "sourceRule": "official",
-    "trustRevision": "rev-7",
-    "trustRoot": "sigstore-public-good",
+    "sourceRule": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "trustRevision": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "trustRoot": "embedded:sigstore-public-good",
     "signer": {
       "kind": "keyless",
       "issuer": "https://token.actions.githubusercontent.com",
       "identity": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
     },
     "proofs": {
-      "signature": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-      "attestation": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      "signature": {
+        "manifest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "bundle": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "statement": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "attestation": {
+        "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "bundle": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "statement": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      }
     },
     "provenance": {
       "predicateType": "https://slsa.dev/provenance/v1",
+      "buildType": "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
       "repository": "https://github.com/backend-bunny/Konstapel",
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "builder": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"
+      "builder": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main",
+      "content": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "workflow": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "path": ".github/workflows/bundle-release.yml",
+        "ref": "refs/heads/main",
+        "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
     }
   },
   "lease": {

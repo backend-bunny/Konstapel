@@ -1,0 +1,153 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
+    "externalParameters": {
+      "bundle": {
+        "name": "konstapel-privileged-containers",
+        "version": "0.1.0"
+      },
+      "source": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "commit": "e30d50760b498cbb17012742c7789a414a1e1d6b"
+      }
+    },
+    "internalParameters": {
+      "workflow": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "path": ".github/workflows/bundle-release.yml",
+        "ref": "refs/heads/main",
+        "commit": "591d6fea5e6517bffc906540cec1e94c3def738a"
+      }
+    },
+    "resolvedDependencies": [
+      {
+        "name": "bundle-definition",
+        "uri": "git+https://github.com/backend-bunny/Konstapel@e30d50760b498cbb17012742c7789a414a1e1d6b#bundles/konstapel-privileged-containers/definition.json",
+        "digest": {
+          "sha256": "29f6f901e9818c6186416417122e66aa083e75f352a97e4ed4436b919327eb0b"
+        }
+      },
+      {
+        "name": "bundle-content",
+        "uri": "bundle-content:konstapel-privileged-containers@0.1.0",
+        "digest": {
+          "sha256": "791b6e4a006101c5dd676e3c005bd4452d14892554d7c7f336171eace33457c8"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/chainsaw-test.yaml",
+        "digest": {
+          "sha256": "136e1c4b98da423a834fa319a3f1d5528c5b16ea7b3d16bf0606f83287ea58f9"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/ephemeral-rbac.yaml",
+        "digest": {
+          "sha256": "c30b4ff1ea908fdab199863715c755d4bb90fcf082f0f07ec0ff9800dd7d4fe6"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-bad.yaml",
+        "digest": {
+          "sha256": "6b2438745d86020967e81b2a1e6a4a89d088ce212309d63bdd23ade1554b3e9a"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-good.yaml",
+        "digest": {
+          "sha256": "7c2a72511aff660799caca6d1029671fe568671c97d82d8d9247bb0e5e817917"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-bad.yaml",
+        "digest": {
+          "sha256": "e4ff2eea66681d9034756b7f80c9147e9a2fed93ab2cae46541f5974e6c1d723"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-good.yaml",
+        "digest": {
+          "sha256": "c1422826802552cb30842c8cb765d20c61d3e9c9b5003d19d0fa0beab0026078"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/policy-ready.yaml",
+        "digest": {
+          "sha256": "51f12242bc2e7f4a06d18b0a80faf12f5cd4b2833a4b0016b9656eaa5b0d9d70"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/kyverno-test.yaml",
+        "digest": {
+          "sha256": "37c23b3c28896a228ca9123673ba3dd94516553b7ac3f32dc696facf9f97da4b"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/resources.yaml",
+        "digest": {
+          "sha256": "0441e9380910694cefddcd474bb86f9c8288ade74700bf301cca7fdb826facbb"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exception-resources.yaml",
+        "digest": {
+          "sha256": "336e28b37d7a6db477e9b572983cf6f473c483c4620ef4598e0bc338cd896291"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exceptions.yaml",
+        "digest": {
+          "sha256": "9731fe76e5cc132bbfd6840c9eccf98a17199981be2e94fcbd07f1ce4d67cab5"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/kyverno-test.yaml",
+        "digest": {
+          "sha256": "370548252e6653026472595f71870e009175b68f761a1997636b208d0d92b999"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/kyverno-test.yaml",
+        "digest": {
+          "sha256": "f9a80e78f7fd92059a57e1e4640298ad5c99eaf65ce3a42624b16b5be2441160"
+        }
+      },
+      {
+        "name": "test",
+        "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/resource.yaml",
+        "digest": {
+          "sha256": "c9b4d86200c140adf569119c10d2b22567c7a40be2b01751ff19a7a0fa650d62"
+        }
+      },
+      {
+        "name": "tool",
+        "uri": "pkg:golang/go@1.27.3"
+      },
+      {
+        "name": "tool",
+        "uri": "pkg:github/sigstore/cosign@v3.1.3"
+      }
+    ]
+  },
+  "runDetails": {
+    "builder": {
+      "id": "https://ci.example.test/konstapel/bundle-release@refs/heads/main"
+    },
+    "metadata": {
+      "invocationId": "test-only"
+    }
+  }
+}

@@ -57,6 +57,32 @@ var (
 	// ErrNoValidProof: candidate proofs of a required kind exist, but none
 	// verifies. The error also matches each candidate's own failure.
 	ErrNoValidProof = errors.New("no proof verifies under the publisher rule")
+
+	// ErrMixedSigner: the signature and the provenance attestation were not
+	// verified under the same signer, trusted root and subject.
+	ErrMixedSigner = errors.New("signature and provenance were not verified under the same publisher")
+	// ErrProvenanceContract: the verified SLSA predicate does not follow the
+	// Konstapel bundle provenance contract (build type, required fields,
+	// exact types, materials, bounds). Provenance in another shape, such as a
+	// generic GitHub Actions workflow build, is refused rather than guessed.
+	ErrProvenanceContract = errors.New("provenance does not follow the Konstapel bundle provenance contract")
+	// ErrProvenanceBuilder: the attested builder is not the rule's builder.
+	ErrProvenanceBuilder = errors.New("provenance builder is not the configured builder")
+	// ErrProvenanceSource: the attested source repository or commit differs
+	// from the rule or from the bundle's own source.
+	ErrProvenanceSource = errors.New("provenance source does not match the rule and the bundle")
+	// ErrProvenanceRelease: the attested bundle name or version differs from
+	// the bundle's descriptor or the requested source name.
+	ErrProvenanceRelease = errors.New("provenance release identity does not match the bundle")
+	// ErrProvenanceMaterial: an attested material contradicts the payload.
+	ErrProvenanceMaterial = errors.New("provenance materials contradict the bundle payload")
+
+	// ErrRecheckBundle: retained recheck material is malformed, oversized, of
+	// an unsupported version, or its bytes do not hash to the digests its
+	// receipt names.
+	ErrRecheckBundle = errors.New("invalid verification recheck material")
+	// ErrContent: the bundle content does not belong to the verified subject.
+	ErrContent = errors.New("bundle content does not match the verified subject")
 )
 
 func fail(sentinel error, format string, a ...any) error {

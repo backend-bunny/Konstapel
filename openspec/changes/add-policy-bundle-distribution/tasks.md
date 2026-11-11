@@ -40,9 +40,9 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 3.2 Implement keyless verification with exact issuer/identity, trusted roots and signing-time evidence; test wrong identities/issuers, invalid or missing proofs, root changes and expired leaf certificates with valid versus invalid authenticated signing times.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 3.3 Verify required SLSA provenance against the OCI subject and configured publisher/builder/source constraints; test wrong digests, mixed unauthorized signer rules, missing attestations, source-revision/version/material mismatches and correct organization-key provenance.
+- [x] 3.3 Verify required SLSA provenance against the OCI subject and configured publisher/builder/source constraints; test wrong digests, mixed unauthorized signer rules, missing attestations, source-revision/version/material mismatches and correct organization-key provenance.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 3.4 Persist bounded verification receipts and the material needed for rechecking under current trust; test reconstruction without accepting a receipt as its own authority and validate that credentials are excluded from the serialized result.
+- [x] 3.4 Persist bounded verification receipts and the material needed for rechecking under current trust; test reconstruction without accepting a receipt as its own authority and validate that credentials are excluded from the serialized result.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 3.5 Document both signing methods, official trust-root maintenance and publisher rotation; verify pinned Cosign CLI output is accepted by the Go verifier for both methods using isolated test roots/keys and no disabled verification checks.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
