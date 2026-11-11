@@ -151,6 +151,13 @@ func ParseDescriptor(data []byte) (*Descriptor, error) {
 	return &d, nil
 }
 
+// ValidPayloadPath reports whether p is a clean relative archive path in a
+// known payload location (content/, tests/, licenses/, LICENSE or NOTICE).
+// bundle.json is the descriptor, not a payload path, and is rejected here.
+// Consumers that materialize an archive outside this package use it so the
+// payload location rules exist once.
+func ValidPayloadPath(p string) error { return validPayloadPath(p) }
+
 // validPayloadPath reports whether p is a clean relative archive path in a
 // known payload location.
 func validPayloadPath(p string) error {

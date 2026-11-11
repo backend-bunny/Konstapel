@@ -49,7 +49,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 ## 4. Safe materialization and bounded caching
 
-- [ ] 4.1 Implement isolated extraction and file-inventory checks; test traversal, symlinks/hardlinks, special files, duplicate normalized paths, truncated blobs and decompression limits, proving existing verified entries and unrelated files stay unchanged.
+- [x] 4.1 Implement isolated extraction and file-inventory checks; test traversal, symlinks/hardlinks, special files, duplicate normalized paths, truncated blobs and decompression limits, proving existing verified entries and unrelated files stay unchanged.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 4.2 Implement atomic digest-cache promotion, capacity reservation and configurable limits; test concurrent staging, disk exhaustion, interruption and recovery within the documented payload/proof/cache defaults.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
