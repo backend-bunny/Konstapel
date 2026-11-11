@@ -225,9 +225,13 @@ A `ComplianceProfile` keeps its existing `spec.bundle` of `name` and `digest`.
 Where a name's bytes come from, and whom to trust for them, is configured once,
 centrally, in a versioned document (`bundle.Sources`) stored under the
 `sources.yaml` key of a ConfigMap in the controller's namespace. Only platform
-administrators write it. Examples that the tests parse are in
-`testdata/bundles/sources/` (an official keyless release, and an organization
-mirror with a registry credential, custom CA and public key).
+administrators write it. The official configuration is checked in as
+[`bundles/official-sources.yaml`](../bundles/official-sources.yaml): the rules for
+every bundle this repository releases, which the release workflow signs for and
+verifies against (see [Release a bundle](#release-a-bundle)) and which an
+operator stores as `sources.yaml` to consume official bundles. An organization
+example that the tests parse, a mirror with a registry credential, custom CA and
+public key, is in `testdata/bundles/sources/organization.yaml`.
 
 ```yaml
 version: 1
@@ -480,6 +484,18 @@ every case. It verifies:
   registry the anonymous read-back fails with `ErrReadBack` (as a private
   package does) while an authenticated read-back succeeds; a wrong password is
   `ErrUnauthorized` and never echoed;
+- release signing with the pinned Cosign CLI in key mode (`internal/bundle/sign`
+  through `publish.Completer`, offline, a fresh test key, outbound HTTP(S) to a
+  closed port) on both the distribution registry, where Cosign maintains the
+  tag schema index itself as on `ghcr.io`, and Zot: publication followed by a
+  signature and a SLSA provenance attestation of the digest; the consumer
+  adapter lists both referrers; `release.VerifyRelease` (what `bundlerelease
+  verify-release` runs) accepts the release anonymously under a test
+  public-key rule with the source and workflow commits recorded apart, and
+  refuses a rule naming another builder; a rerun signs and writes nothing; with
+  only the signature present only the attestation is made; another subject
+  than the record's is refused; and a signed release that anonymous consumers
+  cannot read is not accepted;
 - through `kubeaccess` with an in-memory object reader: anonymous retrieval
   with a ConfigMap CA added to the real system roots; a wrong password in the
   dockerconfigjson Secret is `ErrUnauthorized` and never echoed, and the same
@@ -1007,8 +1023,10 @@ predicate follows this contract. Field names are SLSA provenance v1's; SLSA
 leaves the content of the parameters and dependencies to each build type, and
 `cosign attest --type slsaprovenance1 --predicate <file>` signs whatever
 predicate the publisher supplies, so the content below is Konstapel's own
-contract. The bundle release workflow must produce exactly this (task 6.3);
-an organization publishing with its own key must too.
+contract. The bundle release workflow produces exactly this
+(`publish.BuildProvenance`, see [Release a bundle](#release-a-bundle)); an
+organization publishing with its own key must too, and can generate it with
+`bundlerelease provenance` (see [Signing, trust roots and rotation](#signing-trust-roots-and-rotation)).
 
 ```json
 {
@@ -1127,9 +1145,9 @@ attestation actions or by a `cosign attest` of the generic Actions workflow
 build type (`https://actions.github.io/buildtypes/workflow/v1`, as on the
 application image's real CI proofs in `internal/bundle/verify/testdata/ghcr`)
 records the workflow and its trigger commit, not the bundle, its source commit
-or its content, and fails with `ErrProvenanceContract`. No bundle published
-today carries conforming provenance; until the release workflow produces it
-(6.3), only publishers that attest the contract themselves can be accepted.
+or its content, and fails with `ErrProvenanceContract`. Official bundles get
+conforming provenance from the bundle release workflow; no official bundle has
+been released with it yet (the workflow has not been dispatched).
 
 ### Receipts and recheck
 
@@ -1197,7 +1215,8 @@ certificate expired still verifies while the root still trusts it.
   for both methods (3.5).
 - Persisting `RecheckBundle`s, the content cache and leases, and invalidating
   on configuration changes (group 4); controller wiring (group 5).
-- A release workflow that produces conforming provenance (6.3).
+- Provenance from a real run of the release workflow (it is implemented, but
+  has not been dispatched; see [Release a bundle](#release-a-bundle)).
 
 ### What has and has not been verified
 
@@ -1220,9 +1239,16 @@ an explicit transport):
   expiry, and the absence of planted registry credentials from the receipt and
   recheck material after an authenticated fetch.
 
-Not verified: provenance produced by the release workflow (it produces none
-yet), keyless provenance made by the Cosign CLI, and use from a running
-controller.
+Also verified: the release tool's own generator output (`publish.BuildProvenance`
+through `bundlerelease provenance`), signed by the pinned Cosign CLI with a
+test key for a release that packages an older source commit (e30d507) from a
+newer workflow revision (834c259), is accepted with both commits recorded apart
+(`testdata/release/README.md`), and generator output for a confused source and
+workflow commit, another builder, other tests and tampered records is refused.
+
+Not verified: provenance from a real run of the release workflow (it has not
+been dispatched), keyless provenance made by the Cosign CLI, and use from a
+running controller.
 
 ## Signing, trust roots and rotation
 
@@ -1230,9 +1256,9 @@ A runbook for the two publisher rules, for maintaining the embedded official
 trust root, and for rotating a publisher. The verifier it relies on is described
 in [Signature verification](#signature-verification) and
 [Provenance verification](#provenance-verification). Nothing here is performed by
-the controller yet, and the release workflow does not sign yet (task 6.3): the
-commands below are what an organization runs by hand today and what 6.3 will
-automate for official releases.
+the controller yet. Official releases are signed by the bundle release workflow
+(see [Release a bundle](#release-a-bundle)); the commands below are what an
+organization runs by hand.
 
 ### The two signing methods
 
@@ -1270,13 +1296,39 @@ requires nor claims transparency evidence in this mode. See
 [the private registry guide](#private-registry-setup) for the Secret, the rule
 and the Role that lets the controller read the key.
 
-**Keyless.** Official releases are signed by the dedicated GitHub workflow with
-its OIDC identity. For reference, that is `cosign sign --yes "$ref"` and
-`cosign attest --yes --type slsaprovenance1 --predicate predicate.json "$ref"`
-in a job with `id-token: write`; the rule fixes the OIDC issuer
-(`https://token.actions.githubusercontent.com`) and the exact workflow identity,
-for example the one in `testdata/bundles/sources/official.yaml`. This is not
-run by anything in this repository yet (6.3 adds the signing step).
+**Generating the predicate.** `bundlerelease provenance` writes the
+conforming predicate for a frozen package (`scripts/bundles/package.sh`, then
+`bundlerelease freeze`), with the builder taken from the publisher rule and the
+pipeline that ran recorded separately from the source commit:
+
+```sh
+devbox run -- go run ./cmd/bundlerelease provenance -package /path/to/bundle \
+  -sources /path/to/sources.yaml -out predicate.json \
+  -workflow-repository https://git.example.com/acme/policies \
+  -workflow-path ci/release.yml -workflow-ref refs/heads/main -workflow-commit <40 hex>
+```
+
+`bundlerelease publish -signing key -key /abs/cosign.key -registry <prefix>`
+(password in `COSIGN_PASSWORD`, registry credential in
+`BUNDLE_REGISTRY_USERNAME`/`BUNDLE_REGISTRY_PASSWORD`) does the publication,
+signature and attestation in one step for a repository that follows this
+repository's release layout, and `bundlerelease verify-release -sources
+<file> -public-key-file cosign.pub` checks the result as a consumer would.
+
+**Keyless.** Official releases are signed by the `publish` job of the bundle
+release workflow, the only job with `id-token: write`, as the workflow's own
+OIDC identity
+`https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main`
+(issuer `https://token.actions.githubusercontent.com`), the identity and builder
+that `bundles/official-sources.yaml` fixes. `bundlerelease` runs exactly
+`cosign sign --yes <repository>@sha256:<digest>` and `cosign attest --yes --type
+slsaprovenance1 --predicate <file> <repository>@sha256:<digest>`, the invocation
+the application image's verified CI proofs were made with, with Cosign's
+default public-good signing configuration (Fulcio, Rekor and its timestamping).
+Before it signs, it checks that the run's identity
+(`$GITHUB_SERVER_URL/$GITHUB_WORKFLOW_REF`) equals the rule's identity and the
+rule's builder, so a run that could only produce proofs the rule rejects
+refuses to sign.
 
 ### Maintaining the official trust root
 
@@ -1437,17 +1489,31 @@ never cancelled. The workflow has three jobs:
    (never forced) or verifies that the existing tag marks exactly that commit.
    A tag at any other commit, or a ref blocking the `bundle/<name>/` namespace,
    fails the run.
-3. **publish** (`contents: read`, `packages: write`, the only job that may
-   write to the registry) runs after the tag job, so a registry version is only
-   ever published for a version whose Git tag marks the source commit. It
-   downloads the artifact, re-verifies it, requires the release tag at the
-   source commit, and runs `cmd/bundlerelease publish`: write-once publication
-   to `ghcr.io/backend-bunny/bundles/<name>:<version>` followed by an
-   anonymous read-back (below). It writes a bounded publication record of the
-   run (`publication.json`: outcome, digests, pushed and existing pieces,
-   read-back, missing proofs, and the workflow repository, ref, commit, run and
-   attempt, recorded separately from the source commit) to the step summary
-   and the artifact `bundle-<name>-<version>-publication-<attempt>`.
+3. **publish** (`contents: read`, `packages: write`, `id-token: write`; the
+   only job that may write to the registry or request an OIDC token) runs after
+   the tag job, so a registry version is only ever published for a version
+   whose Git tag marks the source commit. It downloads the artifact,
+   re-verifies it, requires the release tag at the source commit, and runs
+   `cmd/bundlerelease publish -signing keyless`: write-once publication to
+   `ghcr.io/backend-bunny/bundles/<name>:<version>`, an anonymous read-back
+   (below), then [signing](#signing-and-provenance-of-the-published-digest) of
+   exactly the published digest for the proofs still missing. It writes a
+   bounded record of the run (`publication.json`: outcome, digests, pushed and
+   existing pieces, read-back, missing and added proofs, and the workflow
+   repository, ref, commit, run and attempt, recorded separately from the
+   source commit) and the publication record in effect (`record.json`). A
+   separate step then runs `cmd/bundlerelease verify-release` on the published
+   digest, with no credential in its environment; only it reports
+   `status=complete`. Both write to the step summary and to the artifact
+   `bundle-<name>-<version>-publication-<attempt>` (`verification.json` holds
+   the receipt).
+
+   Signing happens in this job because proofs are registry writes too: a
+   separate signing job would also need `packages: write` and would leave an
+   unsigned publication reported between jobs. GitHub exposes the OIDC request
+   variables to every step of a job with `id-token: write`; besides the tool,
+   the only steps in this job are the pinned first-party checkout,
+   upload/download-artifact actions and the repository's own setup action.
 
 The same checks run locally against any full-history checkout:
 
@@ -1456,8 +1522,75 @@ devbox run -- go run ./cmd/bundlerelease verify -name <name> -commit <sha>
 ```
 
 `cmd/bundlerelease` is a build tool; it is not part of the controller image,
-and the packages it uses for publication (`internal/bundle/publish`,
-`internal/bundle/registry`) are not linked into the shipped binaries.
+and the packages it uses for publication, signing and release verification
+(`internal/bundle/publish`, `internal/bundle/sign`, `internal/bundle/release`,
+`internal/bundle/registry`, `internal/bundle/verify`) are not linked into the
+shipped binaries. `internal/bundle/sign` is the only code that executes Cosign.
+
+### Signing and provenance of the published digest
+
+After the anonymous read-back, `publish` hands the subject (repository,
+digest, size and the publication record in effect) to `publish.Completer`
+with the proof kinds the consumer adapter reported missing:
+
+1. **Rule first.** The publisher rule for the bundle is read from
+   `bundles/official-sources.yaml` in the workflow's main checkout, never from
+   the packaged source or the artifact. Signing is refused unless the rule
+   names the repository being published, allows the record's source
+   repository, and, for keyless, its issuer is GitHub's and its identity is
+   both this run's certificate identity (`$GITHUB_SERVER_URL/$GITHUB_WORKFLOW_REF`)
+   and its provenance builder (`ErrSigningRule`).
+2. **The subject is re-read.** The completer fetches the digest anonymously
+   through the consumer's adapter and requires the manifest and layer to be
+   exactly the bytes the publication record is bound to; another digest, other
+   bytes or an unbound record is `ErrProofSubject`, and nothing is signed.
+3. **Only missing kinds.** Kinds the adapter now finds are skipped, so a rerun
+   never makes a second signature or attestation.
+4. **Provenance** follows [Bundle provenance v1](#bundle-provenance-v1) and is
+   built from the record alone (`publish.BuildProvenance`): bundle name and
+   version, source repository and commit, the definition digest read from Git
+   at the source commit, the content digest, the fixtures `freeze` ran as
+   `test` materials, and the record's tools plus the Cosign version as `tool`
+   materials. The workflow repository, path, ref and commit (`GITHUB_SHA`, the
+   revision that runs, which a retry may make newer than the source commit) go
+   to `internalParameters.workflow` and the run to `runDetails.metadata`;
+   `runDetails.builder.id` is the rule's builder.
+5. **Signature, then attestation, by digest.** `cosign sign` and `cosign attest
+   --type slsaprovenance1` run on `<repository>@sha256:<digest>`, never a tag
+   (see [Signing, trust roots and rotation](#signing-trust-roots-and-rotation)
+   for the exact invocations). Cosign is executed without a shell; it inherits
+   only an allowlist of environment variables (the OIDC request variables for
+   keyless, `COSIGN_PASSWORD` for key mode, proxy and certificate settings),
+   gets the registry token only through a private temporary Docker config
+   removed after each call, and its output is bounded and redacted.
+
+`publish` then reads back again and reports the added proofs, but never
+`complete`: `bundlerelease verify-release` does.
+
+### Verifying a release
+
+`verify-release` verifies a published digest exactly as a consumer of the
+official source would, so a maintainer can run the same check by hand against
+any published digest:
+
+```sh
+devbox run -- go run ./cmd/bundlerelease verify-release -name <name> -digest sha256:<hex>
+# optionally: -record publication-record.json -out verification.json
+```
+
+It selects the rule for `<name>` from `bundles/official-sources.yaml` (or
+`-sources`; `-public-key-file` and `-trust-root-file` supply what a non-official
+rule references), retrieves the digest **anonymously** with
+`registry.Client.Fetch` (a source requiring a credential is refused), and runs
+`Verifier.Accept`: the signature and provenance under that one rule with the
+embedded Sigstore public-good root, the layer against the manifest, the
+payload against its inventory, `CheckProvenance` against the unpacked
+descriptor, then `bundle.ValidateContent`. With `-record` the provenance must
+also attest exactly that record's source, definition, content and tests
+(`ErrReleaseRecord`). It prints the digests, signer, signing time, trusted root
+and its revision, rule revision, source and workflow commits, builder and proof
+digests, and `status=complete`; any failure prints `status=incomplete:
+verification failed` and fails.
 
 ### Freezing: tests and the publication record
 
@@ -1531,10 +1664,14 @@ referrer listing must include the record. A registry that has not yet made a
 push visible is retried with backoff (six attempts by default); other bytes,
 an integrity failure or a refused anonymous read fail at once. The result lists
 the required proofs (`signature`, `provenance`) that the consumer adapter did
-not find. A publication is **complete** only when read-back verified and no
-proof is missing; nothing in this workflow can make it complete yet, so the
-publish step passes `-defer-proofs` and reports `status=incomplete: missing
-signature,provenance`. A read-back failure fails the step.
+not find; the [signer](#signing-and-provenance-of-the-published-digest) adds
+exactly those and the subject is read back again. `publish.Publish` sets
+`Complete` when read-back verified and no proof is missing, but the command
+reports that only as `proofs attached; unverified until verify-release passes`:
+a release is **complete** only when `verify-release` accepts it. Missing proofs
+without `-signing` fail the command (`-defer-proofs`, for publishers who sign
+separately, makes it succeed as `incomplete`). A read-back failure fails the
+step.
 
 Nothing is ever deleted, re-uploaded or replaced: existing blobs and manifests
 are left as they are, and the only tag ever moved is the referrers tag schema
@@ -1594,7 +1731,8 @@ are the run's artifact (14 days) and, after that, the reviewed source commit.
 | blobs and manifest, no record or tag | pushes the record and the tag: `created` |
 | record manifest stored but not in the tag schema listing | pushes it again, identical, to repair the listing, then the tag |
 | tag at the frozen digest, record missing | adds the record: `completed` |
-| tag at the frozen digest, everything present, proofs missing | writes nothing; reports the missing proofs (a later signer adds only those) |
+| tag at the frozen digest, everything present, proofs missing | writes nothing to the subject; signs and attests only the missing kinds (a signature from a run that failed before attesting is kept, and only the attestation is added) |
+| everything present, both proofs present | writes and signs nothing; `verify-release` decides completeness |
 | tag at other bytes with other content | `ErrConflict`, nothing written |
 | tag at the same release repackaged by other tools, with its record | adopts the remote bytes: `already-published`, `recovered` |
 | the same without a record bound to it | `ErrFrozenInputs`, nothing written |
@@ -1625,32 +1763,74 @@ bundle name:
    - under **Danger Zone → Change visibility**, makes the package **Public**.
      GitHub does not let a public package become private again.
 3. Re-runs the failed `publish` job (Re-run failed jobs). The subject is
-   already there, so the run writes nothing, and the anonymous read-back now
-   passes.
+   already there, so the run writes nothing to it; the anonymous read-back now
+   passes, the job signs and attests the digest (the first run stopped before
+   signing) and `verify-release` reports the release complete.
+
+Before the first release of a new bundle name, a maintainer also adds its rule
+to `bundles/official-sources.yaml` in a reviewed pull request (a test requires
+an entry for every `bundles/<name>/`); without it the publish job refuses to
+sign. No other owner step is needed for signing: `id-token: write` is granted
+by the workflow itself, keyless signing needs no secret, and the proofs are
+pushed with the same job token and package Write role as the bundle.
 
 Never delete a package version or tag to "fix" a run: versions are write-once
 and consumers pin digests.
 
 ### What has and has not been verified
 
-Verified locally: every safeguard above against an in-process registry with
-fault injection (failed, dropped, throttled and hung requests; partial states;
-concurrent and moved tags; eventual and mismatching read-back; private
-packages; echoed credentials; racing publishers) in both referrer listing
-modes, and the happy path, idempotent rerun, conflict refusal, proof
+Verified locally: every publication safeguard above against an in-process
+registry with fault injection (failed, dropped, throttled and hung requests;
+partial states; concurrent and moved tags; eventual and mismatching read-back;
+private packages; echoed credentials; racing publishers) in both referrer
+listing modes, and the happy path, idempotent rerun, conflict refusal, proof
 completion, recovery through a fault-injecting TLS proxy and the anonymous
 read-back failure against the real registries of the
 [compatibility suite](#real-registry-compatibility). The real `kyverno test`
 runs the official bundle's fixtures against the frozen layer.
 
-Not verified: the workflow itself on GitHub (it has not been dispatched), the
-`ghcr.io` package creation, permissions and visibility steps above, artifact
-download across re-run attempts, and any write to `ghcr.io`.
+Signing and release verification, verified locally:
 
-**Not implemented yet.** Signing and SLSA provenance of the published digest
-(task 6.3; it plugs into `publish.ProofCompleter`, which receives the subject
-and the record in effect and may only add referrers to that digest), release
-notes and summaries (6.4), organization publication and mirroring (6.5), and
-live acceptance evidence for official compatibility claims. A published bundle
-is therefore never complete and not consumable under the official publisher
-rule until 6.3 lands.
+- `publish.Completer` against the in-process registry: only missing kinds,
+  signature before attestation, by digest; a rerun after a failed attestation
+  adds only the attestation; nothing is signed twice; another digest, another
+  repository's bytes, a tampered record, a wrong size, a tag and a repository
+  with a tag are refused before anything is signed.
+- The real Cosign CLI in key mode against both real registries (see
+  [Real-registry compatibility](#real-registry-compatibility)), followed by
+  `release.VerifyRelease`: publish, sign, attest, anonymous verification under
+  a test rule, recovery of a missing attestation, refusal of another subject,
+  and refusal of a release anonymous consumers cannot read.
+- The provenance generator's output signed by Cosign and accepted by the
+  verifier, with an older source commit and a newer workflow commit recorded
+  apart, and refused for wrong builders, tests, records and a confused source
+  (`internal/bundle/verify/testdata/release`).
+- The Cosign wrapper with a fake executable: exact argv (digest only, fixed
+  flags, key reference never key material), the environment allowlist (no
+  `COSIGN_REPOSITORY`, `GITHUB_TOKEN` or registry token; OIDC variables only
+  for keyless, the key password only for key mode), the temporary Docker
+  config (mode 0600, removed), redaction of tokens and passwords from errors
+  and logs, timeouts, and refusals before anything runs.
+- Keyless argument construction, the run identity derived from GitHub's
+  environment, the pre-signing rule check, the equality of
+  `bundles/official-sources.yaml` with the workflow's identity and builder,
+  and that `verify-release`'s check refuses real keyless Cosign proofs made by
+  another workflow of this repository (`publish.yml`) under the official rule.
+- The workflow's structure (permissions per job, `id-token` only on the
+  publish job, step order, no secrets on command lines, independence from the
+  application release workflows).
+
+Not verified, because only a real GitHub run can: keyless signing itself (the
+OIDC token exchange, a Fulcio certificate whose identity is the workflow on
+`main`, Rekor and timestamp evidence from the public-good instance) and
+`verify-release` accepting those proofs with the embedded root; the workflow on
+GitHub (it has not been dispatched); the `ghcr.io` package creation,
+permissions and visibility steps above; Cosign's writes to `ghcr.io` with the
+job token; artifact download across re-run attempts; and any write to
+`ghcr.io`. Keyless proofs made by this repository's other workflow with the
+same Cosign version verify offline (`internal/bundle/verify/testdata/ghcr`),
+which is the closest local evidence.
+
+**Not implemented yet.** Release notes and summaries (6.4), organization
+publication and mirroring (6.5), and live acceptance evidence for official
+compatibility claims. No official bundle has been released yet.

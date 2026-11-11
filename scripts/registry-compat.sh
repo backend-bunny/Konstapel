@@ -8,7 +8,10 @@
 # throwaway CA. Besides retrieval it runs the write-once publication cases of
 # internal/bundle/publish (happy path, idempotent rerun, conflict, proof
 # completion, recovery through a fault-injecting proxy, anonymous read-back
-# failure).
+# failure), and release signing and verification: the pinned Cosign CLI in
+# key mode (offline, test key) signs and attests the published digest for only
+# the missing proof kinds, and bundlerelease's verify-release check accepts it
+# anonymously under a test publisher rule.
 # Usage: scripts/registry-compat.sh OUTPUT_DIR
 # The Go test creates the CA, certificates, random credentials and containers
 # (loopback ports only) and removes them itself; this script additionally removes

@@ -2,13 +2,14 @@ name: bundle-release
 # Releases one policy bundle independently of the application, image and
 # charts: validate a reviewed main commit, package exactly that commit into a
 # frozen OCI layout, run its policy fixtures against the frozen bytes and
-# record them, create or verify its bundle/<name>/vX.Y.Z tag, then publish the
+# record them, create or verify its bundle/<name>/vX.Y.Z tag, publish the
 # frozen bytes write-once to the bundle registry and read them back
-# anonymously. The version comes from bundles/<name>/definition.json at that
-# commit. This workflow never calls the image or chart publishers and never
-# reads the application release automation's state. Signatures, provenance
-# and release notes are not implemented yet: a publication stays incomplete
-# until they are (docs/policy-bundles.md#release-a-bundle).
+# anonymously, sign and attest exactly that digest with this workflow's OIDC
+# identity, and verify the result anonymously under the checked-in official
+# publisher rule (bundles/official-sources.yaml) before reporting it complete.
+# The version comes from bundles/<name>/definition.json at that commit. This
+# workflow never calls the image or chart publishers and never reads the
+# application release automation's state (docs/policy-bundles.md#release-a-bundle).
 on:
   workflow_dispatch:
     inputs:
@@ -103,16 +104,23 @@ jobs:
           | tee -a "$GITHUB_STEP_SUMMARY"
   publish:
     # After the tag job: a registry version is only ever published for a
-    # version whose Git tag marks the source commit.
+    # version whose Git tag marks the source commit. Signing happens in this
+    # job because its proofs are registry writes too: a separate signing job
+    # would need packages: write as well and leave an unsigned publication
+    # reported between jobs.
     needs: [package, tag]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
-      # Only to push the frozen bundle; nothing else in this workflow writes
-      # to the registry. No OIDC or signing permissions until signing exists.
+      # Only to push the frozen bundle and its proofs; nothing else in this
+      # workflow writes to the registry.
       packages: write
+      # Only to sign the published digest keylessly as this workflow on main,
+      # the identity bundles/official-sources.yaml requires. No other job
+      # can request an OIDC token.
+      id-token: write
     env:
       BUNDLE: ${{ inputs.bundle }}
       SOURCE_COMMIT: ${{ inputs.commit }}
@@ -120,7 +128,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history and tags: ancestry and the release tag the tag job made.
+          # Full history and tags: ancestry and the release tag the tag job
+          # made. The publisher rule is read from this main checkout, never
+          # from the packaged source or the artifact.
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-tools
@@ -133,10 +143,13 @@ jobs:
         run: >-
           devbox run -- go run -mod=readonly ./cmd/bundlerelease verify
           -name "$BUNDLE" -commit "$SOURCE_COMMIT" -package "$RUNNER_TEMP/bundle"
-      - name: Publish write-once and read back anonymously
-        # The token reaches the tool only through this step's environment.
-        # -defer-proofs: signatures and provenance are added by a later
-        # step that does not exist yet, so the run reports incomplete.
+      - name: Publish write-once, read back anonymously, then sign and attest the digest
+        id: publish
+        # The registry token reaches the tool only through this step's
+        # environment and Cosign only through a private temporary Docker
+        # config. Proofs are made over the published digest, never a tag,
+        # and only for the kinds still missing. This step never reports the
+        # release complete.
         env:
           BUNDLE_REGISTRY_USERNAME: ${{ github.actor }}
           BUNDLE_REGISTRY_PASSWORD: ${{ github.token }}
@@ -145,8 +158,20 @@ jobs:
           devbox run -- go run -mod=readonly ./cmd/bundlerelease publish \
             -name "$BUNDLE" -commit "$SOURCE_COMMIT" -version "$BUNDLE_VERSION" \
             -package "$RUNNER_TEMP/bundle" -out "$RUNNER_TEMP/publication/publication.json" \
-            -defer-proofs | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Retain the publication record
+            -record-out "$RUNNER_TEMP/publication/record.json" \
+            -signing keyless | tee -a "$GITHUB_STEP_SUMMARY" "$GITHUB_OUTPUT"
+      - name: Verify the release as a consumer
+        # Anonymous retrieval by digest through the consumer's adapter, the
+        # signature and provenance under the official publisher rule and the
+        # embedded Sigstore root, then the content. Only this step reports
+        # the release complete.
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: >-
+          devbox run -- go run -mod=readonly ./cmd/bundlerelease verify-release
+          -name "$BUNDLE" -digest "$DIGEST" -record "$RUNNER_TEMP/publication/record.json"
+          -out "$RUNNER_TEMP/publication/verification.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Retain the publication and verification records
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

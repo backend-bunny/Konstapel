@@ -23,8 +23,23 @@ func loadExample(t *testing.T, name string) Sources {
 	return c
 }
 
+// loadOfficial loads the checked-in official source configuration, which the
+// release workflow signs and verifies against.
+func loadOfficial(t *testing.T) Sources {
+	t.Helper()
+	raw, err := os.ReadFile("../../bundles/official-sources.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ParseSources(raw)
+	if err != nil {
+		t.Fatalf("official-sources.yaml: %v", err)
+	}
+	return c
+}
+
 func TestExampleSourcesAreValid(t *testing.T) {
-	off := loadExample(t, "official.yaml")
+	off := loadOfficial(t)
 	if len(off.Sources) != 1 || off.Sources[0].Publisher.Type != SignerKeyless || off.Sources[0].CredentialSecret != nil {
 		t.Fatalf("official example: %+v", off)
 	}
@@ -157,7 +172,7 @@ func TestSelectIsExactAndHasNoFallback(t *testing.T) {
 }
 
 func TestPayloadNameMustMatchTheSource(t *testing.T) {
-	c := loadExample(t, "official.yaml")
+	c := loadOfficial(t)
 	s, _ := c.Select("konstapel-privileged-containers")
 	if err := s.CheckPayload(&Descriptor{Name: "konstapel-privileged-containers"}); err != nil {
 		t.Fatal(err)
@@ -168,7 +183,7 @@ func TestPayloadNameMustMatchTheSource(t *testing.T) {
 }
 
 func TestProvenanceMustMatchThePublisherRule(t *testing.T) {
-	c := loadExample(t, "official.yaml")
+	c := loadOfficial(t)
 	s := c.Sources[0]
 	ok := Provenance{Repository: s.Publisher.Provenance.SourceRepository, Builder: s.Publisher.Provenance.Builder}
 	if err := s.CheckPublisher(ok); err != nil {

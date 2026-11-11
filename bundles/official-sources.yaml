@@ -1,0 +1,24 @@
+# Official central bundle source configuration: the publisher rules for the
+# bundles this repository releases (docs/policy-bundles.md, "Central source
+# configuration"). It is the document an operator stores under the
+# sources.yaml key of the controller's sources ConfigMap to consume official
+# bundles, and the rule the bundle-release workflow signs for and verifies
+# against (bundlerelease verify-release) as it is on main, never a rule taken
+# from the artifact. Every bundles/<name>/definition.json needs an entry here
+# before it can be released; a test keeps the identity and builder equal to the
+# release workflow's identity on main. One entry per bundle name; the
+# profile's pinned digest, never a tag, selects the content. No credentials or
+# keys live here.
+version: 1
+sources:
+  # Anonymous pull, keyless signing by the dedicated bundle-release workflow
+  # on main, using the built-in Sigstore public-good root.
+  - name: konstapel-privileged-containers
+    repository: ghcr.io/backend-bunny/bundles/konstapel-privileged-containers
+    publisher:
+      type: keyless
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
+      provenance:
+        sourceRepository: https://github.com/backend-bunny/Konstapel
+        builder: https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main

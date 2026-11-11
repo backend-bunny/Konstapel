@@ -28,6 +28,8 @@ type workflow struct {
 		Needs       any               `yaml:"needs"`
 		Permissions map[string]string `yaml:"permissions"`
 		Steps       []struct {
+			ID   string            `yaml:"id"`
+			If   string            `yaml:"if"`
 			Name string            `yaml:"name"`
 			Uses string            `yaml:"uses"`
 			Run  string            `yaml:"run"`
@@ -80,14 +82,16 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	}
 
 	// No coupling to other workflows or to application release state, and
-	// no signing or attestation yet (task 6.3). The registry is named only
-	// by cmd/bundlerelease's default, never in the workflow.
+	// no attestation actions or permissions: proofs are made only by
+	// cmd/bundlerelease (Cosign, by digest). The registry is named only by
+	// cmd/bundlerelease's default, never in the workflow.
 	for _, banned := range []string{
 		"workflow_call", "workflow_run", "release-please", "release_created", "tag_name",
 		"publish.yml", "image.yml", "charts.yml", "test.yml", "gh workflow", "gh release",
 		"check-version", "Chart.yaml", "charts/", "image:build", "image:test",
-		"cosign", "oras", "docker", "helm", "attest", "ghcr.io", "id-token", "-registry",
-		"secrets.",
+		"cosign", "oras", "docker", "helm", "ghcr.io", "-registry", "secrets.",
+		"attestations", "attest-build-provenance", "gh attestation", "-defer-proofs",
+		"--key", "-key ", "COSIGN_", "SIGSTORE_", "ACTIONS_ID_TOKEN",
 	} {
 		if strings.Contains(raw, banned) {
 			t.Errorf("workflow references %q", banned)
@@ -98,7 +102,8 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	}
 
 	// Least privilege: read-only by default; the tag job may write only
-	// repository contents and the publish job only packages.
+	// repository contents; the publish job alone may write packages and
+	// request an OIDC token (to sign as this workflow).
 	if len(w.Permissions) != 1 || w.Permissions["contents"] != "read" {
 		t.Errorf("workflow permissions = %v, want contents: read", w.Permissions)
 	}
@@ -108,8 +113,11 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	wantPerms := map[string]map[string]string{
 		"package": {"contents": "read"},
 		"tag":     {"contents": "write"},
-		"publish": {"contents": "read", "packages": "write"},
+		"publish": {"contents": "read", "id-token": "write", "packages": "write"},
 	}
+	// Words that must never appear in a run script: secrets reach tools only
+	// through a step's env block, never through a command line.
+	secretWords := regexp.MustCompile(`(?i)password|token|secret|credential|--key|-key\b`)
 	for name, job := range w.Jobs {
 		if job.Uses != "" {
 			t.Errorf("job %s calls reusable workflow %s", name, job.Uses)
@@ -130,9 +138,12 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 			if strings.Contains(step.Run, "${{") {
 				t.Errorf("job %s interpolates an expression into run: %q", name, step.Run)
 			}
+			if secretWords.MatchString(step.Run) {
+				t.Errorf("job %s step %q mentions a secret on its command line: %q", name, step.Name, step.Run)
+			}
 			// The registry token reaches only the publish step, by env.
 			for k, v := range step.Env {
-				if strings.Contains(v, "github.token") && (name != "publish" || k != "BUNDLE_REGISTRY_PASSWORD") {
+				if strings.Contains(v, "github.token") && (name != "publish" || step.ID != "publish" || k != "BUNDLE_REGISTRY_PASSWORD") {
 					t.Errorf("job %s step env %s carries the token", name, k)
 				}
 			}
@@ -153,6 +164,9 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	if strings.Count(raw, "github.token") != 1 {
 		t.Errorf("the token appears %d times, want once (the publish step)", strings.Count(raw, "github.token"))
 	}
+	if strings.Count(raw, "id-token") != 1 {
+		t.Errorf("id-token appears %d times, want once (the publish job's permission)", strings.Count(raw, "id-token"))
+	}
 	if needs, _ := w.Jobs["tag"].Needs.(string); needs != "package" {
 		t.Errorf("tag job needs = %v, want package (tag only after the source packages)", w.Jobs["tag"].Needs)
 	}
@@ -161,24 +175,49 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 	}
 
 	// Order within jobs: freeze (fixtures on the frozen bytes) before the
-	// verified package is retained; re-verify before publishing; publication
-	// is explicitly incomplete until proofs exist.
+	// verified package is retained; re-verify before publishing; publish
+	// (write-once, anonymous read-back, then signing and attesting the
+	// digest) before verify-release, which alone may report completion,
+	// before the records are retained.
 	order := func(job string, want ...string) {
 		t.Helper()
-		i := 0
+		var got []string
 		for _, step := range w.Jobs[job].Steps {
-			if i < len(want) && strings.Contains(step.Run+step.Uses, want[i]) {
-				i++
+			for _, x := range want {
+				// x as a whole word: "bundlerelease verify" is not "verify-release".
+				if regexp.MustCompile(regexp.QuoteMeta(x) + `([^-A-Za-z0-9]|$)`).MatchString(step.Run + step.Uses) {
+					got = append(got, x)
+					break
+				}
 			}
 		}
-		if i != len(want) {
-			t.Errorf("job %s steps are not in the order %q", job, want)
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("job %s steps run %q, want exactly %q in that order", job, got, want)
 		}
 	}
-	order("package", "bundlerelease verify", "package.sh", "bundlerelease freeze", "bundlerelease verify", "upload-artifact")
-	order("publish", "download-artifact", "bundlerelease verify", "bundlerelease publish", "upload-artifact")
-	if !strings.Contains(raw, "-defer-proofs") {
-		t.Error("publish must state that proofs are deferred until signing exists")
+	order("package", "bundlerelease verify", "package.sh", "bundlerelease freeze", "bundlerelease verify", "actions/upload-artifact")
+	order("publish", "actions/download-artifact", "bundlerelease verify", "bundlerelease publish", "bundlerelease verify-release", "actions/upload-artifact")
+	var pub, ver int = -1, -1
+	for i, step := range w.Jobs["publish"].Steps {
+		switch {
+		case strings.Contains(step.Run, "bundlerelease publish"):
+			pub = i
+			if step.ID != "publish" || !strings.Contains(step.Run, "-signing keyless") || !strings.Contains(step.Run, "-record-out") {
+				t.Errorf("the publish step must sign keylessly and keep the record in effect: %q", step.Run)
+			}
+		case strings.Contains(step.Run, "bundlerelease verify-release"):
+			ver = i
+			if len(step.Env) != 1 || step.Env["DIGEST"] != "${{ steps.publish.outputs.digest }}" {
+				t.Errorf("verify-release must verify exactly the published digest and get nothing else: env %v", step.Env)
+			}
+			if !strings.Contains(step.Run, `-record "$RUNNER_TEMP/publication/record.json"`) || strings.Contains(step.Run, "-sources") ||
+				strings.Contains(step.Run, "-public-key-file") || strings.Contains(step.Run, "-trust-root-file") {
+				t.Errorf("verify-release must use the checked-in official rule and the embedded root, against the record in effect: %q", step.Run)
+			}
+		}
+	}
+	if pub < 0 || ver != pub+1 {
+		t.Errorf("verify-release (step %d) must directly follow publish and signing (step %d)", ver, pub)
 	}
 
 	// Releases of one bundle are serialized and never cancelled midway.
