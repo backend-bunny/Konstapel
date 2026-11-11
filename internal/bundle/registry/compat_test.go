@@ -131,14 +131,26 @@ const zotConfig = `{"distSpecVersion":"1.1.0","storage":{"rootDirectory":"/var/l
 
 // startZot runs a registry that serves the OCI 1.1 referrers API (anonymous, TLS).
 func startZot(t *testing.T, image, run string, p pki) regInstance {
-	return startRegistryWith(t, image, run, p, "", true)
+	return startRegistryWith(t, image, run, p, "", zotConfig)
+}
+
+// startZotPublisher runs a Zot that requires htpasswd authentication for
+// writes but lets anyone read, the access model of a public ghcr.io package
+// written by a workflow token. user may read and create; nobody may delete.
+func startZotPublisher(t *testing.T, image, run string, p pki, user, htpasswd string) regInstance {
+	cfg := `{"distSpecVersion":"1.1.0","storage":{"rootDirectory":"/var/lib/zot"},"http":{"address":"0.0.0.0","port":"5000",` +
+		`"tls":{"cert":"/certs/server.crt","key":"/certs/server.key"},"auth":{"htpasswd":{"path":"/certs/htpasswd"}},` +
+		`"accessControl":{"repositories":{"**":{"anonymousPolicy":["read"],"policies":[{"users":["` + user + `"],"actions":["read","create","update"]}]}}}},` +
+		`"log":{"level":"error"}}`
+	return startRegistryWith(t, image, run, p, htpasswd, cfg)
 }
 
 func startRegistry(t *testing.T, image, run string, p pki, htpasswd string) regInstance {
-	return startRegistryWith(t, image, run, p, htpasswd, false)
+	return startRegistryWith(t, image, run, p, htpasswd, "")
 }
 
-func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, zot bool) regInstance {
+func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, zotCfg string) regInstance {
+	zot := zotCfg != ""
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o755); err != nil {
@@ -149,7 +161,7 @@ func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, 
 		files["htpasswd"] = []byte(htpasswd)
 	}
 	if zot {
-		files["config.json"] = []byte(zotConfig)
+		files["config.json"] = []byte(zotCfg)
 	}
 	for n, b := range files {
 		if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
@@ -162,7 +174,7 @@ func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, 
 	if !zot {
 		args = append(args, "-e", "REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt", "-e", "REGISTRY_HTTP_TLS_KEY=/certs/server.key")
 	}
-	if htpasswd != "" {
+	if htpasswd != "" && !zot {
 		args = append(args, "-e", "REGISTRY_AUTH=htpasswd", "-e", "REGISTRY_AUTH_HTPASSWD_REALM=konstapel-test",
 			"-e", "REGISTRY_AUTH_HTPASSWD_PATH=/certs/htpasswd")
 	}
@@ -326,8 +338,11 @@ type CompatEnv struct {
 	// with CA CAPEM, and an anonymous registry with an unrelated CA
 	// OtherCAPEM.
 	Anon, Authd, Other string
-	CAPEM, OtherCAPEM  []byte
-	User, Pass         string
+	// API is the anonymous Zot (referrers API); APIAuthd a Zot that requires
+	// User/Pass for writes and allows anonymous reads. Both use CAPEM.
+	API, APIAuthd     string
+	CAPEM, OtherCAPEM []byte
+	User, Pass        string
 	// Record adds a case to the evidence; CheckFetched asserts a complete
 	// tag-schema retrieval of the published bundle.
 	Record       func(name string, err error, detail string)
@@ -363,6 +378,7 @@ func TestRegistryCompat(t *testing.T) {
 		t.Fatal("KONSTAPEL_REGISTRY_API_IMAGE is required (run through scripts/registry-compat.sh)")
 	}
 	api := startZot(t, apiImage, run, p)
+	apiAuthd := startZotPublisher(t, apiImage, run, p, user, user+":"+string(hash)+"\n")
 	// A registry with its own, unrelated CA: trust configured for one
 	// registry must not extend to it.
 	otherPKI := newPKI(t)
@@ -552,6 +568,7 @@ func TestRegistryCompat(t *testing.T) {
 
 	env := CompatEnv{
 		Ctx: ctx, Pinned: pinned, Anon: anon.host, Authd: authd.host, Other: other.host,
+		API: api.host, APIAuthd: apiAuthd.host,
 		CAPEM: p.caPEM, OtherCAPEM: otherPKI.caPEM, User: user, Pass: pass,
 		Record: record, CheckFetched: checkFetched,
 	}
@@ -607,6 +624,7 @@ func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []co
 		"orasGo": orasVersion, "go": runtime.Version(),
 		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md): listed through the OCI referrers tag schema on registryImage (no referrers API) and through the referrers API on apiRegistryImage",
 		"authentication": "anonymous and htpasswd (basic), directly and through kubeaccess (dockerconfigjson Secret, rotation, CA ConfigMap); bearer-token service not covered",
+		"publication":    "internal/bundle/publish write-once publication: anonymous-write distribution registry (tag schema) and Zot with htpasswd writes and anonymous reads (referrers API); recovery through a fault-injecting TLS proxy; anonymous read-back failure against the htpasswd distribution registry",
 		"tls":            "throwaway CAs (a second, unrelated one for the per-source trust case), verification always on", "cases": records,
 	}
 	b, err := json.MarshalIndent(ev, "", "  ")

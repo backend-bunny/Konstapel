@@ -20,7 +20,9 @@ fresh start, so the initial changelog excludes work from the previous codebase.
 
 Policy bundles are released separately, with their own versions and
 `bundle/<name>/vX.Y.Z` tags, by a dispatched workflow that does not involve
-release-please, `VERSION`, the image or the charts; see
+release-please, `VERSION`, the image or the charts, and published write-once
+to `ghcr.io/backend-bunny/bundles/<name>` (one-time package visibility steps
+for owners, retries and conflicts included); see
 [Release a bundle](policy-bundles.md#release-a-bundle).
 
 ## Commit conventions

@@ -12,6 +12,8 @@ package release
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,6 +97,9 @@ type Release struct {
 	Version string
 	Commit  string
 	Tag     string
+	// DefinitionSHA256 is the SHA-256 (hex) of bundles/<name>/definition.json
+	// at Commit, exactly as stored in Git.
+	DefinitionSHA256 string
 }
 
 // Result is the outcome of one git invocation.
@@ -224,7 +229,8 @@ func Validate(ctx context.Context, g Git, req Request) (Release, error) {
 	if req.Version != "" && req.Version != def.Version {
 		return Release{}, fmt.Errorf("%s/definition.json at %s declares version %s, but %s was packaged", dir, req.Commit, def.Version, req.Version)
 	}
-	rel := Release{Name: req.Name, Version: def.Version, Commit: req.Commit, Tag: TagName(req.Name, def.Version)}
+	sum := sha256.Sum256([]byte(raw.Stdout))
+	rel := Release{Name: req.Name, Version: def.Version, Commit: req.Commit, Tag: TagName(req.Name, def.Version), DefinitionSHA256: hex.EncodeToString(sum[:])}
 	if _, err := git(ctx, g, "check-ref-format", "refs/tags/"+rel.Tag); err != nil {
 		return Release{}, fmt.Errorf("tag %s is not a valid Git ref: %w", rel.Tag, err)
 	}
@@ -236,6 +242,23 @@ func Validate(ctx context.Context, g Git, req Request) (Release, error) {
 		return Release{}, fmt.Errorf("tag %s already marks %s, not %s; a released version is never moved", rel.Tag, local, rel.Commit)
 	}
 	return rel, nil
+}
+
+// RequireTag checks that the release tag exists in the local repository
+// (fetched from the remote) and marks the source commit. Publication runs
+// only after the tag job has created or verified it, so a registry version
+// can never be published for a version whose Git tag marks another commit.
+func RequireTag(ctx context.Context, g Git, rel Release) error {
+	got, err := resolveCommit(ctx, g, "refs/tags/"+rel.Tag)
+	switch {
+	case err != nil:
+		return err
+	case got == "":
+		return fmt.Errorf("release tag %s does not exist; create it (bundlerelease tag) before publishing", rel.Tag)
+	case got != rel.Commit:
+		return fmt.Errorf("release tag %s marks %s, not %s", rel.Tag, got, rel.Commit)
+	}
+	return nil
 }
 
 // TagState reports what EnsureTag found.

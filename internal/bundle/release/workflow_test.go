@@ -1,6 +1,7 @@
 package release
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ type workflow struct {
 		Needs       any               `yaml:"needs"`
 		Permissions map[string]string `yaml:"permissions"`
 		Steps       []struct {
+			Name string            `yaml:"name"`
 			Uses string            `yaml:"uses"`
 			Run  string            `yaml:"run"`
 			With map[string]any    `yaml:"with"`
@@ -77,12 +79,15 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 		t.Fatalf("inputs = %v, want bundle and commit", names)
 	}
 
-	// No coupling to other workflows or to application release state.
+	// No coupling to other workflows or to application release state, and
+	// no signing or attestation yet (task 6.3). The registry is named only
+	// by cmd/bundlerelease's default, never in the workflow.
 	for _, banned := range []string{
 		"workflow_call", "workflow_run", "release-please", "release_created", "tag_name",
 		"publish.yml", "image.yml", "charts.yml", "test.yml", "gh workflow", "gh release",
 		"check-version", "Chart.yaml", "charts/", "image:build", "image:test",
-		"cosign", "oras", "docker", "helm", "attest", "ghcr.io",
+		"cosign", "oras", "docker", "helm", "attest", "ghcr.io", "id-token", "-registry",
+		"secrets.",
 	} {
 		if strings.Contains(raw, banned) {
 			t.Errorf("workflow references %q", banned)
@@ -92,13 +97,18 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 		t.Error("workflow references the application VERSION file")
 	}
 
-	// Least privilege: read-only by default; only the tag job may write, and
-	// only repository contents (no packages, OIDC or attestations yet).
+	// Least privilege: read-only by default; the tag job may write only
+	// repository contents and the publish job only packages.
 	if len(w.Permissions) != 1 || w.Permissions["contents"] != "read" {
 		t.Errorf("workflow permissions = %v, want contents: read", w.Permissions)
 	}
-	if len(w.Jobs) != 2 {
-		t.Fatalf("jobs = %d, want package and tag", len(w.Jobs))
+	if len(w.Jobs) != 3 {
+		t.Fatalf("jobs = %d, want package, tag and publish", len(w.Jobs))
+	}
+	wantPerms := map[string]map[string]string{
+		"package": {"contents": "read"},
+		"tag":     {"contents": "write"},
+		"publish": {"contents": "read", "packages": "write"},
 	}
 	for name, job := range w.Jobs {
 		if job.Uses != "" {
@@ -107,11 +117,11 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 		if job.If != "github.ref == 'refs/heads/main'" {
 			t.Errorf("job %s if = %q, want dispatch on main only", name, job.If)
 		}
-		want := map[string]string{"contents": "read"}
-		if name == "tag" {
-			want = map[string]string{"contents": "write"}
+		want, ok := wantPerms[name]
+		if !ok {
+			t.Errorf("unexpected job %s", name)
 		}
-		if len(job.Permissions) != len(want) || job.Permissions["contents"] != want["contents"] {
+		if fmt.Sprint(job.Permissions) != fmt.Sprint(want) {
 			t.Errorf("job %s permissions = %v, want %v", name, job.Permissions, want)
 		}
 		for _, step := range job.Steps {
@@ -119,6 +129,12 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 			// expression interpolation into shell.
 			if strings.Contains(step.Run, "${{") {
 				t.Errorf("job %s interpolates an expression into run: %q", name, step.Run)
+			}
+			// The registry token reaches only the publish step, by env.
+			for k, v := range step.Env {
+				if strings.Contains(v, "github.token") && (name != "publish" || k != "BUNDLE_REGISTRY_PASSWORD") {
+					t.Errorf("job %s step env %s carries the token", name, k)
+				}
 			}
 			if strings.HasPrefix(step.Uses, "actions/checkout@") {
 				persist := step.With["persist-credentials"]
@@ -134,8 +150,35 @@ func TestBundleReleaseWorkflowIsIndependent(t *testing.T) {
 			}
 		}
 	}
+	if strings.Count(raw, "github.token") != 1 {
+		t.Errorf("the token appears %d times, want once (the publish step)", strings.Count(raw, "github.token"))
+	}
 	if needs, _ := w.Jobs["tag"].Needs.(string); needs != "package" {
 		t.Errorf("tag job needs = %v, want package (tag only after the source packages)", w.Jobs["tag"].Needs)
+	}
+	if fmt.Sprint(w.Jobs["publish"].Needs) != "[package tag]" {
+		t.Errorf("publish job needs = %v, want [package tag] (publish only a tagged, frozen package)", w.Jobs["publish"].Needs)
+	}
+
+	// Order within jobs: freeze (fixtures on the frozen bytes) before the
+	// verified package is retained; re-verify before publishing; publication
+	// is explicitly incomplete until proofs exist.
+	order := func(job string, want ...string) {
+		t.Helper()
+		i := 0
+		for _, step := range w.Jobs[job].Steps {
+			if i < len(want) && strings.Contains(step.Run+step.Uses, want[i]) {
+				i++
+			}
+		}
+		if i != len(want) {
+			t.Errorf("job %s steps are not in the order %q", job, want)
+		}
+	}
+	order("package", "bundlerelease verify", "package.sh", "bundlerelease freeze", "bundlerelease verify", "upload-artifact")
+	order("publish", "download-artifact", "bundlerelease verify", "bundlerelease publish", "upload-artifact")
+	if !strings.Contains(raw, "-defer-proofs") {
+		t.Error("publish must state that proofs are deferred until signing exists")
 	}
 
 	// Releases of one bundle are serialized and never cancelled midway.

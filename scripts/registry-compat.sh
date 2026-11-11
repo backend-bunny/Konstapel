@@ -3,7 +3,12 @@
 # instances of two pinned OCI registries (runtime.env): KONSTAPEL_REGISTRY_IMAGE
 # (no referrers API: exercises the tag-schema fallback), one anonymous and one
 # htpasswd-authenticated instance, and KONSTAPEL_REGISTRY_API_IMAGE (serves the
-# OCI 1.1 referrers API), all over TLS with a throwaway CA.
+# OCI 1.1 referrers API) anonymous and, as a write-authenticated publisher
+# target with anonymous reads, htpasswd-protected, all over TLS with a
+# throwaway CA. Besides retrieval it runs the write-once publication cases of
+# internal/bundle/publish (happy path, idempotent rerun, conflict, proof
+# completion, recovery through a fault-injecting proxy, anonymous read-back
+# failure).
 # Usage: scripts/registry-compat.sh OUTPUT_DIR
 # The Go test creates the CA, certificates, random credentials and containers
 # (loopback ports only) and removes them itself; this script additionally removes

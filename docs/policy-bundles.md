@@ -7,10 +7,12 @@ resolves it centrally and verifies it before use.
 
 > **Status.** This page documents the payload contract implemented in
 > [`internal/bundle`](../internal/bundle) and how to build a bundle locally.
-> Publishing a release, signing, and runtime resolution by the controller are
-> tracked in the `add-policy-bundle-distribution` OpenSpec change and are **not
-> available yet**: no official bundle has been released, and a locally built
-> bundle cannot yet be consumed by a profile. Until those land, the only
+> The release workflow can publish a bundle write-once to the registry, but
+> signing, provenance and runtime resolution by the controller are tracked in
+> the `add-policy-bundle-distribution` OpenSpec change and are **not available
+> yet**: no official bundle has been released (a published bundle stays
+> incomplete until it is signed), and a locally built bundle cannot yet be
+> consumed by a profile. Until those land, the only
 > supported way to deliver policies is the existing prototype workflow in
 > [development](development.md). This page gains release and mirroring
 > instructions as each group lands.
@@ -106,7 +108,7 @@ shape, the descriptor and every inventoried file.
 regular files in valid payload locations, rejects duplicates, and enforces file
 count and size limits before the descriptor and inventory are verified.
 
-`bundles:package` (below) drives this; registry publication is not available yet (see [Release a bundle](#release-a-bundle)).
+`bundles:package` (below) drives this; the release workflow freezes and publishes the result (see [Release a bundle](#release-a-bundle)).
 
 ## Bundle definitions
 
@@ -438,7 +440,7 @@ disposable, test-owned containers of two digest-pinned registries from
 | Instance | Image | Referrers listing |
 | --- | --- | --- |
 | anonymous and htpasswd-protected, plus an anonymous one with another CA | `KONSTAPEL_REGISTRY_IMAGE` (distribution registry 3.1.2) | no `/referrers/` API (404): tag schema |
-| anonymous | `KONSTAPEL_REGISTRY_API_IMAGE` (Zot v2.1.23) | OCI 1.1 referrers API |
+| anonymous, and one requiring htpasswd credentials to write but allowing anonymous reads (a public `ghcr.io` package's access model) | `KONSTAPEL_REGISTRY_API_IMAGE` (Zot v2.1.23) | OCI 1.1 referrers API |
 
 Random credentials are generated per run. The Go test starts and removes its
 containers itself; the script also removes anything still carrying the run's
@@ -464,6 +466,20 @@ every case. It verifies:
 - a bundle with no referrers reports `none`, zero proofs and
   `ErrMissingProofs` from `RequireProofs`;
 - an unknown digest is `ErrNotFound`;
+- write-once publication (`internal/bundle/publish`, see
+  [Release a bundle](#release-a-bundle)) to the anonymous distribution
+  registry (the publisher maintains the tag schema index) and to the
+  write-authenticated Zot: the first run creates with the version tag as the
+  last write and no deletes, reads back anonymously and reports both proofs
+  missing; a rerun writes nothing; other bytes under the version are refused
+  without a write; a proof step adds the signature and provenance without any
+  write to the subject, after which the consumer adapter finds both proofs and
+  skips the record; through a fault-injecting TLS proxy in front of each, a
+  failed manifest push and then a failed tag push are each completed by the
+  next run with only the missing pieces; against the htpasswd distribution
+  registry the anonymous read-back fails with `ErrReadBack` (as a private
+  package does) while an authenticated read-back succeeds; a wrong password is
+  `ErrUnauthorized` and never echoed;
 - through `kubeaccess` with an in-memory object reader: anonymous retrieval
   with a ConfigMap CA added to the real system roots; a wrong password in the
   dockerconfigjson Secret is `ErrUnauthorized` and never echoed, and the same
@@ -1402,22 +1418,36 @@ publishers.
 
 To release, dispatch the `bundle-release` workflow on `main` (Actions → bundle-release → Run workflow, or
 `gh workflow run bundle-release.yml --ref main -f bundle=<name> -f commit=<sha>`).
-Runs for the same bundle are serialized and never cancelled. The workflow:
+Runs for the same bundle are serialized (one concurrency group per bundle) and
+never cancelled. The workflow has three jobs:
 
-1. validates the request with `cmd/bundlerelease verify` (read-only token): the
-   name is a DNS label with a `bundles/<name>/definition.json` at that commit
-   whose `name` matches the directory, the commit is on reviewed `main`
-   history, the version is valid, and any fetched tag for that version marks
-   the same commit;
-2. packages exactly that commit with `scripts/bundles/package.sh` from a
-   detached worktree, re-verifies the frozen OCI layout and `package.json`
-   against the request, and uploads it as the workflow artifact
-   `bundle-<name>-<version>`;
-3. in a separate job, the only one with `contents: write`, re-validates and
-   runs `cmd/bundlerelease tag`: it pushes the tag when absent (never forced)
-   or verifies that the existing tag marks exactly that commit. A tag at any
-   other commit, or a ref blocking the `bundle/<name>/` namespace, fails the
-   run. Rerunning a successful release is therefore harmless.
+1. **package** (`contents: read`) validates the request with
+   `cmd/bundlerelease verify`: the name is a DNS label with a
+   `bundles/<name>/definition.json` at that commit whose `name` matches the
+   directory, the commit is on reviewed `main` history, the version is valid,
+   and any fetched tag for that version marks the same commit. It packages
+   exactly that commit with `scripts/bundles/package.sh` from a detached
+   worktree, then **freezes** it (`bundlerelease freeze`, below): the bundle's
+   declarative policy fixtures run against the unpacked frozen layer and a
+   publication record bound to those bytes is written next to the layout. It
+   re-verifies the layout, `package.json` and the record against the request
+   and uploads them as the workflow artifact `bundle-<name>-<version>`.
+2. **tag** (`contents: write`, the only job that may write to the repository)
+   re-validates and runs `cmd/bundlerelease tag`: it pushes the tag when absent
+   (never forced) or verifies that the existing tag marks exactly that commit.
+   A tag at any other commit, or a ref blocking the `bundle/<name>/` namespace,
+   fails the run.
+3. **publish** (`contents: read`, `packages: write`, the only job that may
+   write to the registry) runs after the tag job, so a registry version is only
+   ever published for a version whose Git tag marks the source commit. It
+   downloads the artifact, re-verifies it, requires the release tag at the
+   source commit, and runs `cmd/bundlerelease publish`: write-once publication
+   to `ghcr.io/backend-bunny/bundles/<name>:<version>` followed by an
+   anonymous read-back (below). It writes a bounded publication record of the
+   run (`publication.json`: outcome, digests, pushed and existing pieces,
+   read-back, missing proofs, and the workflow repository, ref, commit, run and
+   attempt, recorded separately from the source commit) to the step summary
+   and the artifact `bundle-<name>-<version>-publication-<attempt>`.
 
 The same checks run locally against any full-history checkout:
 
@@ -1425,15 +1455,202 @@ The same checks run locally against any full-history checkout:
 devbox run -- go run ./cmd/bundlerelease verify -name <name> -commit <sha>
 ```
 
-`cmd/bundlerelease` is a build tool; it is not part of the controller image.
+`cmd/bundlerelease` is a build tool; it is not part of the controller image,
+and the packages it uses for publication (`internal/bundle/publish`,
+`internal/bundle/registry`) are not linked into the shipped binaries.
 
-**Not implemented yet.** The workflow does not push to
-`ghcr.io/backend-bunny/bundles/<name>`, sign or attest anything (its provenance
-must follow [Bundle provenance v1](#bundle-provenance-v1)), run the
-policy fixtures against the frozen bytes, or write release notes. A bundle tag
-therefore means "this version is this reviewed commit", not "this version is
-published". The uploaded artifact is retained for 14 days and is not yet a
-durable publication record. Write-once publication with recoverable frozen
-inputs, OIDC signing and provenance, and release notes/summaries extend the
-`package` job's frozen layout in later work (tasks 6.2 to 6.4 of
-`add-policy-bundle-distribution`).
+### Freezing: tests and the publication record
+
+`bundlerelease freeze` (`publish.Freeze`) verifies the layout end to end
+(`bundle.VerifyLayout`: blob digests and sizes, manifest shape, descriptor and
+every inventoried file; packaging already ran `ValidateContent`), unpacks the
+**frozen layer** into a temporary directory, and runs `kyverno test
+--require-tests` (the pinned Devbox CLI) in every payload directory that holds
+a `kyverno-test.yaml` with role `test`. Each run must report at least one
+passed and zero failed tests; a bundle without such fixtures is refused. Only
+then does it write `publication-record.json`, which is never replaced:
+
+```json
+{"format":"konstapel.policy.bundle.publication/v1","name":"konstapel-privileged-containers","version":"0.1.0",
+ "source":{"repository":"https://github.com/backend-bunny/Konstapel","commit":"<40 hex>"},
+ "definition":{"path":"bundles/konstapel-privileged-containers/definition.json","sha256":"<hex>"},
+ "manifestDigest":"sha256:…","layerDigest":"sha256:…","contentDigest":"sha256:…",
+ "tools":[{"name":"go","version":"go1.27.3"},{"name":"kyverno","version":"v1.19.2"}],
+ "tests":{"runner":"kyverno test --require-tests","result":"passed",
+          "files":[{"path":"content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/kyverno-test.yaml","sha256":"<hex>"}]}}
+```
+
+The record holds only frozen facts (no run identifiers), in one canonical
+serialization, so identical frozen inputs always give byte-identical records.
+`contentDigest` is `Descriptor.ContentDigest()`, the provenance contract's
+`bundle-content` material; the definition digest is read from Git at the source
+commit; the test files are the provenance `test` materials. Loading a frozen
+bundle (`publish.Load`) refuses a missing, non-canonical or unbound record: the
+name, version, source, all three digests and each test file (present, role
+`test`, same sha256) must match the verified bytes.
+
+The Chainsaw tests in the payload need a cluster and are **not** run here. The
+fixtures establish that the packaged policy evaluates its declarative cases;
+they are not live acceptance evidence. An official compatibility claim also
+needs the owning content's live acceptance evidence for these exact source and
+variant inputs, which this workflow does not produce or claim.
+
+### Write-once publication
+
+`publish.Publish` pushes with ORAS Go through the same transport, TLS,
+credential scope, redirect rules and redaction as the consumer's adapter
+(`registry.Client.Open`). The writer's source always references a credential,
+so it never writes anonymously; the token reaches the tool only through the
+publish step's environment (`BUNDLE_REGISTRY_USERNAME`,
+`BUNDLE_REGISTRY_PASSWORD`), is removed from the environment once read, never
+appears on a command line, and is redacted from every error, including one a
+registry echoes back. Within a process, publishers of one repository and tag
+are serialized; across runs, the workflow's concurrency group serializes them.
+
+Order, checked by the tests against every request sent:
+
+1. the empty config blob and the layer blob, each only if `HEAD` does not find
+   it;
+2. the bundle manifest **by digest**, only if absent;
+3. the publication record as an OCI referrer of the manifest (artifact type
+   `application/vnd.konstapel.policy.bundle.publication.v1+json`, empty
+   config, one layer holding the record, `subject` = the manifest), unless a
+   valid record bound to the subject is already listed. On registries without
+   the referrers API (such as `ghcr.io`) the publisher also maintains the
+   `sha256-<hex>` referrers tag schema index, adding its entry; a superseded
+   index is kept, never deleted;
+4. **last**, the version tag, after re-reading it immediately before the push.
+
+A tag therefore never names a subject that lacks a blob or its record. The
+version tag means "this version is these bytes" and is written once; it does
+not mean "complete". Then the tag is read again with the writer's credential
+and must name the frozen digest, and the publication is read back
+**anonymously**: the tag, then `registry.Client.Fetch` by digest (the consumer
+adapter), whose manifest and layer must equal the frozen bytes and whose
+referrer listing must include the record. A registry that has not yet made a
+push visible is retried with backoff (six attempts by default); other bytes,
+an integrity failure or a refused anonymous read fail at once. The result lists
+the required proofs (`signature`, `provenance`) that the consumer adapter did
+not find. A publication is **complete** only when read-back verified and no
+proof is missing; nothing in this workflow can make it complete yet, so the
+publish step passes `-defer-proofs` and reports `status=incomplete: missing
+signature,provenance`. A read-back failure fails the step.
+
+Nothing is ever deleted, re-uploaded or replaced: existing blobs and manifests
+are left as they are, and the only tag ever moved is the referrers tag schema
+index, which the OCI distribution specification defines as a client-maintained
+listing (entries are only added). The one exception to "never push an existing
+manifest again" is a record manifest that exists but is missing from that
+listing (an index update that failed after the manifest was stored): it is
+pushed again, byte-identical under the same digest, so the listing includes it
+(`relisted`).
+
+**Conflicts.** A version tag that names other bytes is compared before anything
+is written. Different content (another descriptor: version, source commit,
+policies or file inventory) is `ErrConflict`: nothing is written and the tag is
+never moved or deleted. A tag created by another publisher between the first
+check and the push is caught by the re-check (identical bytes are accepted,
+others are `ErrConflict` without a write). A tag moved by someone else right
+after this run pushed it is reported as `ErrConflict` and is not moved back:
+resolve that by hand. OCI registries offer no conditional tag update, so this
+last window can only be detected, not prevented; the per-bundle concurrency
+group and the `packages: write` permission held only by this job keep other
+writers out.
+
+**Errors.** `ErrConflict` (other bytes under the version), `ErrIncompleteRemote`
+(a registry request or the proof step failed; rerun with the same frozen
+inputs; wraps the registry's class, a timeout or a cancellation),
+`ErrReadBack` (the remote does not read back as frozen, or not anonymously; not
+complete) and `ErrFrozenInputs` (the frozen layout or record is invalid or
+unbound, or recovery cannot establish the original inputs). The outcome of a
+successful run is `created` (this run wrote the version tag), `completed` (the
+tag already named the subject and only missing pieces or proofs were added) or
+`already-published` (nothing was written).
+
+### Retries and partial publication
+
+Where the frozen inputs live: the frozen bytes are content-addressed, so once a
+subject is in the registry the registry itself is their durable copy, and the
+publication record referrer keeps the facts (source, definition, content
+digest, tools, tests) that a later run needs to attest or recover exactly those
+bytes. Until the version tag exists, nothing is published; the frozen inputs
+are the run's artifact (14 days) and, after that, the reviewed source commit.
+
+- **Re-run failed jobs** of the same run reuses that run's artifact, so it
+  pushes exactly the same bytes, and runs the original workflow revision.
+- **A new dispatch** for the same version packages the same commit again.
+  Packaging is deterministic, so with the same tools the digest is the same and
+  the run continues where the last one stopped. If a toolchain change produced
+  different bytes for the same content (identical descriptor and inventory) and
+  the tag already names the original subject, the original bytes and their
+  record are adopted from the registry (`recovered`) and nothing local is
+  pushed. Without a bound record, the original inputs cannot be established and
+  the run fails with `ErrFrozenInputs` rather than replacing anything.
+
+| Found in the registry | A run |
+| --- | --- |
+| nothing | pushes everything, tag last: `created` |
+| some blobs (an upload failed or the connection dropped) | pushes only the missing blobs, then the manifest, record and tag: `created` |
+| blobs and manifest, no record or tag | pushes the record and the tag: `created` |
+| record manifest stored but not in the tag schema listing | pushes it again, identical, to repair the listing, then the tag |
+| tag at the frozen digest, record missing | adds the record: `completed` |
+| tag at the frozen digest, everything present, proofs missing | writes nothing; reports the missing proofs (a later signer adds only those) |
+| tag at other bytes with other content | `ErrConflict`, nothing written |
+| tag at the same release repackaged by other tools, with its record | adopts the remote bytes: `already-published`, `recovered` |
+| the same without a record bound to it | `ErrFrozenInputs`, nothing written |
+| anonymous read-back refused or mismatching | `ErrReadBack`; the run fails and is not complete |
+
+An untagged manifest left by an earlier failed run of different bytes (only
+possible with a toolchain change after the artifact expired) was never
+published; it stays in the registry untagged and is not deleted.
+
+### One-time owner steps on `ghcr.io`
+
+The workflow can push a package with its job token, but it cannot change a
+package's visibility or access, and there is no way to create the package
+before its first push. The first push to `ghcr.io/backend-bunny/bundles/<name>`
+creates the package with the organization's default visibility, which is
+private; a private package refuses the anonymous read-back, so **the first
+release run of every new bundle name fails at read-back by design** and is not
+reported complete. An organization owner (or package admin) then, once per
+bundle name:
+
+1. Checks that the organization allows public packages (Organization settings
+   → Packages → package creation: public).
+2. Opens the package (organization → Packages → `bundles/<name>`) → Package
+   settings:
+   - under **Manage Actions access**, makes sure `backend-bunny/Konstapel` is
+     listed with the **Write** role (needed for later runs to push new
+     versions or proofs), and connects the repository if it is not linked;
+   - under **Danger Zone → Change visibility**, makes the package **Public**.
+     GitHub does not let a public package become private again.
+3. Re-runs the failed `publish` job (Re-run failed jobs). The subject is
+   already there, so the run writes nothing, and the anonymous read-back now
+   passes.
+
+Never delete a package version or tag to "fix" a run: versions are write-once
+and consumers pin digests.
+
+### What has and has not been verified
+
+Verified locally: every safeguard above against an in-process registry with
+fault injection (failed, dropped, throttled and hung requests; partial states;
+concurrent and moved tags; eventual and mismatching read-back; private
+packages; echoed credentials; racing publishers) in both referrer listing
+modes, and the happy path, idempotent rerun, conflict refusal, proof
+completion, recovery through a fault-injecting TLS proxy and the anonymous
+read-back failure against the real registries of the
+[compatibility suite](#real-registry-compatibility). The real `kyverno test`
+runs the official bundle's fixtures against the frozen layer.
+
+Not verified: the workflow itself on GitHub (it has not been dispatched), the
+`ghcr.io` package creation, permissions and visibility steps above, artifact
+download across re-run attempts, and any write to `ghcr.io`.
+
+**Not implemented yet.** Signing and SLSA provenance of the published digest
+(task 6.3; it plugs into `publish.ProofCompleter`, which receives the subject
+and the record in effect and may only add referrers to that digest), release
+notes and summaries (6.4), organization publication and mirroring (6.5), and
+live acceptance evidence for official compatibility claims. A published bundle
+is therefore never complete and not consumable under the official publisher
+rule until 6.3 lands.
