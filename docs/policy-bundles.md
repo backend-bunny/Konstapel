@@ -203,11 +203,16 @@ Rendered engine-policy hashes are recorded per policy by the renderer
   reported separately, starts `unknown`, and neither implies the other.
 - **Receipt.** Records the verified subject (name, version, manifest digest),
   where it was retrieved from (a location, not publisher identity), the source
-  rule and trust configuration revisions, the signer (keyless issuer and
-  identity, or a public-key fingerprint), the SLSA provenance v1 claims checked
-  against the descriptor, and digests of the retained signature and attestation.
-  It is evidence that verification happened under named trust inputs, not a
-  standing authorization: a change to those inputs invalidates it.
+  rule and trust input revisions, the signer (keyless issuer and identity, or a
+  public-key fingerprint), the SLSA provenance v1 claims checked against the
+  descriptor (build type, source repository and revision, builder, content
+  digest, workflow revision), and the manifest, bundle and statement digests of
+  the retained signature and attestation. It is evidence that verification
+  happened under named trust inputs, not a standing authorization: a change to
+  those inputs invalidates it, and it is only ever compared against a fresh
+  verification ([receipts and recheck](#receipts-and-recheck)). Version 2 of
+  the handle and receipt introduced the per-proof digests and the full
+  provenance claims; version 1 was never persisted and is not accepted.
 - **Lease.** An explicit pin on the cache entry by a holder (`profile`,
   `applied` or `assessment`), released when that holder finishes or advances.
 - The handle carries no credentials and no payload bytes.
@@ -924,13 +929,11 @@ and materials on the already verified statement without verifying again.
 
 ### Not done yet
 
-- SLSA provenance policy (builder, source, revision, bundle version, materials
-  against the descriptor and `publisher.provenance`): task 3.3. Today a
-  provenance proof is only verified as signed, for the subject, with the SLSA
-  v1 predicate type, under the publisher rule.
-- Bounded receipts and recheck material (3.4); signing and trust-root
-  maintenance documentation, publisher rotation and CLI-output interoperability
-  for both methods (3.5); caching and controller wiring.
+- The provenance policy, receipts and recheck are described in
+  [Provenance verification](#provenance-verification).
+- Signing and trust-root maintenance documentation, publisher rotation and
+  CLI-output interoperability for both methods (3.5); caching and controller
+  wiring.
 - Public-key rules accept one ECDSA P-256 key; keyless certificates whose only
   identity is an otherName SAN are not accepted.
 
@@ -962,6 +965,247 @@ fails the run):
 Not verified: a keyless proof made by the Cosign CLI with an isolated Fulcio
 and Rekor (3.5), a private Sigstore deployment's real trusted root, and use
 from a running controller.
+
+## Provenance verification
+
+[`internal/bundle/verify`](../internal/bundle/verify) also applies the
+provenance policy and produces receipts and recheck material. Like the
+signature verifier it is **not wired into the controller** and is not linked
+into the shipped binaries.
+
+`Verifier.Accept(ctx, source, result)` is the whole acceptance check of one
+retrieved subject: `VerifyProofs` (signature and SLSA provenance under the
+publisher rule, one trust snapshot), the layer against the pinned manifest and
+the payload against its own inventory (`ErrContent`), then
+`CheckProvenance(source, descriptor, pinned, proofs)`. It returns the verified
+claims (`VerifiedProvenance`), a `bundle.Receipt` and a `RecheckBundle`.
+`CheckProvenance` reads only the statement `VerifyProofs` already verified; it
+never parses unverified bytes.
+
+### Bundle provenance v1
+
+The provenance attestation must be an in-toto statement for exactly the pinned
+manifest digest, with predicate type `https://slsa.dev/provenance/v1`, whose
+predicate follows this contract. Field names are SLSA provenance v1's; SLSA
+leaves the content of the parameters and dependencies to each build type, and
+`cosign attest --type slsaprovenance1 --predicate <file>` signs whatever
+predicate the publisher supplies, so the content below is Konstapel's own
+contract. The bundle release workflow must produce exactly this (task 6.3);
+an organization publishing with its own key must too.
+
+```json
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
+    "externalParameters": {
+      "bundle": {"name": "konstapel-privileged-containers", "version": "0.1.0"},
+      "source": {"repository": "https://github.com/backend-bunny/Konstapel", "commit": "e30d50760b498cbb17012742c7789a414a1e1d6b"}
+    },
+    "internalParameters": {
+      "workflow": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "path": ".github/workflows/bundle-release.yml",
+        "ref": "refs/heads/main",
+        "commit": "591d6fea5e6517bffc906540cec1e94c3def738a"
+      }
+    },
+    "resolvedDependencies": [
+      {"name": "source", "uri": "git+https://github.com/backend-bunny/Konstapel",
+       "digest": {"gitCommit": "e30d50760b498cbb17012742c7789a414a1e1d6b"}},
+      {"name": "bundle-definition",
+       "uri": "git+https://github.com/backend-bunny/Konstapel@e30d50760b498cbb17012742c7789a414a1e1d6b#bundles/konstapel-privileged-containers/definition.json",
+       "digest": {"sha256": "29f6f901e9818c6186416417122e66aa083e75f352a97e4ed4436b919327eb0b"}},
+      {"name": "bundle-content", "uri": "bundle-content:konstapel-privileged-containers@0.1.0",
+       "digest": {"sha256": "791b6e4a006101c5dd676e3c005bd4452d14892554d7c7f336171eace33457c8"}},
+      {"name": "test", "uri": "bundle-file:content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/kyverno-test.yaml",
+       "digest": {"sha256": "f9a80e78f7fd92059a57e1e4640298ad5c99eaf65ce3a42624b16b5be2441160"}},
+      {"name": "tool", "uri": "pkg:golang/go@1.27.3"},
+      {"name": "tool", "uri": "pkg:github/sigstore/cosign@v3.1.3"}
+    ]
+  },
+  "runDetails": {
+    "builder": {"id": "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main"},
+    "metadata": {"invocationId": "https://github.com/backend-bunny/Konstapel/actions/runs/<run>/attempts/<n>"}
+  }
+}
+```
+
+(The digests are those of the official bundle built from `e30d507`; the full
+conforming predicate is
+`internal/bundle/verify/testdata/provenance/valid.predicate.json`.)
+
+| Field | Meaning |
+| --- | --- |
+| `buildDefinition.buildType` | exactly the URI above |
+| `externalParameters.bundle` | the requested release: bundle `name` and SemVer `version` |
+| `externalParameters.source` | the requested content source: `repository` (https URL) and full 40-character `commit` |
+| `internalParameters.workflow` | the pipeline that ran: `repository`, `path`, full `commit`, optional `ref`. Recorded separately from the content source: a retry from a newer workflow revision packaging an older source commit stays distinguishable. It is never used in place of the source commit. |
+| `resolvedDependencies` `source` | exactly one: `git+<repository>`, digest exactly `{"gitCommit": <commit>}` |
+| `resolvedDependencies` `bundle-definition` | exactly one: `git+<repository>@<commit>#bundles/<name>/definition.json`, digest exactly `{"sha256": …}` of that file |
+| `resolvedDependencies` `bundle-content` | exactly one: `bundle-content:<name>@<version>`, digest exactly `{"sha256": …}` of the payload's canonical inventory (`Descriptor.ContentDigest()`, the handle's `digests.content`) |
+| `resolvedDependencies` `test` | zero or more payload test files the release ran: `bundle-file:<archive path>`, digest exactly `{"sha256": …}` |
+| `resolvedDependencies` `tool` | at least one build tool, `uri` free-form (a purl is recommended), optional `{"sha256": …}` |
+| `runDetails.builder.id` | the builder identity; optional `version` (object of strings) |
+| `runDetails.metadata` | optional `invocationId`, `startedOn`, `finishedOn` (RFC 3339) |
+
+Parsing is strict: the predicate is at most 1 MiB of valid UTF-8 JSON without
+duplicate keys; every object has exactly the fields above with exact-case names
+(no unknown fields, no `byproducts`); every value has its exact JSON type, with
+no null, number-for-string or other coercion; strings are non-empty, at most
+2048 bytes and free of control characters; there are at most 1024
+`resolvedDependencies`, each with a `name` and `uri` and no other field but
+`digest`, never repeated; unknown material names are refused. A violation is
+`ErrProvenanceContract`.
+
+**Why the content digest is the checkable material.** The consumer can only
+check a material against what it holds. `bundle-content` binds the attestation
+to the canonical file inventory (sorted path, role, size and sha256 of every
+payload file), which the verifier recomputes from the descriptor after checking
+every file against the unpacked payload. It is independent of tar/gzip
+packaging, the builder knows it before the archive exists, and it is already
+the handle's `content` identity. The bundle definition is not shipped in the
+payload, so its digest is recorded, with its URI required to name the attested
+repository, commit and bundle; the release workflow is where it is checked.
+
+### What is checked
+
+In addition to everything in [Signature verification](#signature-verification):
+
+- **Same publisher for both proofs.** `VerifyProofs` verifies the signature
+  and the attestation under one rule and one snapshot of its key or root, so a
+  signature by key A cannot be combined with provenance by key B, an identity X
+  signature with an identity Y attestation, or public-key proofs with a keyless
+  rule. `CheckProvenance` checks it again: both proofs must report the same
+  signer, trusted root and subject, and be a signature and a provenance
+  attestation (`ErrMixedSigner`). Missing either proof is
+  `registry.ErrMissingProofs`.
+- **Subject.** Both statements name exactly the pinned manifest digest
+  (`ErrSubject`, already enforced by the signature verifier).
+- **Builder.** `runDetails.builder.id` equals `publisher.provenance.builder`
+  exactly (`ErrProvenanceBuilder`).
+- **Source.** The attested repository equals `publisher.provenance.sourceRepository`
+  exactly, and the descriptor's `source.repository` must equal it too. No
+  normalization is applied: a trailing `.git` or `/`, another case or a
+  `git+` prefix in the rule are different repositories. The `source` material
+  is `git+` plus that repository and records the same commit as
+  `externalParameters.source.commit`, and that commit equals the descriptor's
+  `source.revision` (`ErrProvenanceSource`). The workflow commit is never
+  consulted: provenance whose only matching commit is the workflow revision
+  fails.
+- **Release identity.** The descriptor's name equals the source's name (the
+  profile's bundle name), and the attested name and version equal the
+  descriptor's (`ErrProvenanceRelease`).
+- **Materials.** The `bundle-content` digest equals the payload's content
+  digest and its URI names this bundle and version; the `bundle-definition` URI
+  names this repository, commit and bundle; every `test` material is a payload
+  file with role `test` and the same sha256 (`ErrProvenanceMaterial`).
+
+The result, `VerifiedProvenance`, carries the builder, build type, source
+repository and revision, bundle name and version, content digest, definition,
+test and tool materials, workflow and invocation ID: public identifiers and
+digests only.
+
+**Limit: generic GitHub provenance is refused.** Provenance written by GitHub's
+attestation actions or by a `cosign attest` of the generic Actions workflow
+build type (`https://actions.github.io/buildtypes/workflow/v1`, as on the
+application image's real CI proofs in `internal/bundle/verify/testdata/ghcr`)
+records the workflow and its trigger commit, not the bundle, its source commit
+or its content, and fails with `ErrProvenanceContract`. No bundle published
+today carries conforming provenance; until the release workflow produces it
+(6.3), only publishers that attest the contract themselves can be accepted.
+
+### Receipts and recheck
+
+`Accept` builds the receipt from the verification results only:
+
+| Receipt field | Value |
+| --- | --- |
+| `subject` | descriptor name and version, pinned manifest digest |
+| `retrievedFrom` | the retrieval's repository (a location only) |
+| `sourceRule` | `RuleRevision(source)` (below) |
+| `trustRevision` | keyless: sha256 of the trusted root bytes used; public key: the key fingerprint |
+| `trustRoot` | keyless: where the root came from (`embedded:sigstore-public-good` or `ConfigMap/<name>[<key>]`); public key: `Secret/<name>[<key>]` or `ConfigMap/…` |
+| `signer` | the verified signer |
+| `proofs.signature`, `proofs.attestation` | referrer manifest, Sigstore bundle and signed statement digests |
+| `provenance` | predicate type, build type, repository, revision, builder, content digest, workflow |
+| `verifiedAt` | the verifier's injectable clock |
+
+**Rule revision.** `RuleRevision` is `sha256:` plus the SHA-256 of the JSON
+encoding of, in this order, `domain` (`konstapel.bundle.source-rule/v1`), the
+source `name`, and the publisher's `type`, `issuer`, `identity`, `trustRoot`
+and `publicKey` references (`<Kind>/<name>[<key>]` with the default data key
+filled in, empty when absent), `keyFingerprint` (with its `sha256:` prefix,
+empty for keyless), `sourceRepository` and `builder`. The repository (a mirror
+changes only the retrieval location), `credentialSecret` and `ca` (transport
+only) are excluded, so a mirror or credential rotation does not change it.
+
+**Recheck material.** `RecheckBundle` (version 1) holds the receipt, the
+subject manifest and, for the signature and the attestation, the referrer
+manifest and Sigstore bundle exactly as retrieved (the bundle contains the
+signed statement). It holds no credentials and no payload; the bundle layer is
+cached separately by digest (group 4). Bounds: at most 64 KiB per retained
+manifest, 4 MiB per Sigstore bundle, and 16 MiB for the whole serialized
+material (the registry adapter's metadata budget). `Encode` is deterministic;
+`DecodeRecheckBundle` rejects oversized input, invalid UTF-8, duplicate,
+unknown or case-variant keys, trailing data, any version but 1, and anything
+that is not byte-for-byte the canonical encoding. `Check` (run on decode and
+before every recheck) requires every retained byte to hash to the digest the
+receipt names (subject manifest, referrer manifests, bundles, statements), each
+referrer to name the subject and exactly its retained bundle, and a valid
+receipt (`ErrRecheckBundle`).
+
+**Recheck under current trust.** `Verifier.Recheck(ctx, source, material,
+layer)` takes the source rule as configured **now** and the cached layer. The
+receipt is never authority: the subject digest comes from the retained
+manifest bytes, the layer must be the one that manifest names, and the
+signature, attestation, signer, trust and provenance are verified again from
+scratch by `Accept` with the current rule and the objects it references now.
+Only then is the fresh receipt compared with the stored one:
+
+| Outcome | Meaning |
+| --- | --- |
+| `valid` | verifies under current trust with exactly the stored claims (time and location aside) |
+| `changed` | verifies, but `Differences` names receipt fields that differ (an edited receipt, a moved key reference, a changed root); use `Current` |
+| `invalid` | does not satisfy current trust (`Reason`): another key, identity, builder or source repository required, root replaced or its authority no longer valid at the signing time, source removed (`RecheckSource`) |
+| error | the current trust input is unreadable or inconsistent (`ErrTrustConfig`), the material is malformed or fails its digests (`ErrRecheckBundle`), or the layer is not the subject's (`ErrContent`) |
+
+Time: the verifier's clock only stamps the new receipt and bounds signing
+times in the future; certificate validity is judged at the authenticated
+signing times in the retained evidence, so a recheck long after a short-lived
+certificate expired still verifies while the root still trusts it.
+
+### Not done yet
+
+- Signing and trust-root maintenance documentation and CLI interoperability
+  for both methods (3.5).
+- Persisting `RecheckBundle`s, the content cache and leases, and invalidating
+  on configuration changes (group 4); controller wiring (group 5).
+- A release workflow that produces conforming provenance (6.3).
+
+### What has and has not been verified
+
+Verified by unit tests without network access (verification makes no request;
+the credential test's fetch goes to an in-process loopback registry through
+an explicit transport):
+
+- Real `cosign attest --key` output of the pinned Cosign v3.1.3 for the real
+  official bundle (`testdata/provenance/README.md`): conforming organization-key
+  provenance is accepted; wrong builder, source repository, source commit,
+  version and name, the workflow revision attested as the source, forged
+  content and test digests, missing materials, provenance for another digest,
+  missing proofs, and mixed keys are rejected.
+- Contract strictness with runtime-signed predicates; the real GitHub CI
+  provenance is refused with `ErrProvenanceContract`; keyless mixed identities.
+- Receipt fields, rule revision stability, recheck encoding and integrity,
+  forged receipts, evidence that does not verify behind a consistent receipt,
+  changed rules, removed sources, unreadable trust inputs, keyless root swaps,
+  an authority that expired before the signing time and rechecks after leaf
+  expiry, and the absence of planted registry credentials from the receipt and
+  recheck material after an authenticated fetch.
+
+Not verified: provenance produced by the release workflow (it produces none
+yet), keyless provenance made by the Cosign CLI, and use from a running
+controller.
 
 ## Create and package a bundle
 
@@ -1040,7 +1284,8 @@ devbox run -- go run ./cmd/bundlerelease verify -name <name> -commit <sha>
 `cmd/bundlerelease` is a build tool; it is not part of the controller image.
 
 **Not implemented yet.** The workflow does not push to
-`ghcr.io/backend-bunny/bundles/<name>`, sign or attest anything, run the
+`ghcr.io/backend-bunny/bundles/<name>`, sign or attest anything (its provenance
+must follow [Bundle provenance v1](#bundle-provenance-v1)), run the
 policy fixtures against the frozen bytes, or write release notes. A bundle tag
 therefore means "this version is this reviewed commit", not "this version is
 published". The uploaded artifact is retained for 14 days and is not yet a

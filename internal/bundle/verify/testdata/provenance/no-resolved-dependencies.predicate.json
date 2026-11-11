@@ -1,0 +1,32 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
+    "externalParameters": {
+      "bundle": {
+        "name": "konstapel-privileged-containers",
+        "version": "0.1.0"
+      },
+      "source": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "commit": "e30d50760b498cbb17012742c7789a414a1e1d6b"
+      }
+    },
+    "internalParameters": {
+      "workflow": {
+        "repository": "https://github.com/backend-bunny/Konstapel",
+        "path": ".github/workflows/bundle-release.yml",
+        "ref": "refs/heads/main",
+        "commit": "591d6fea5e6517bffc906540cec1e94c3def738a"
+      }
+    },
+    "resolvedDependencies": []
+  },
+  "runDetails": {
+    "builder": {
+      "id": "https://ci.example.test/konstapel/bundle-release@refs/heads/main"
+    },
+    "metadata": {
+      "invocationId": "test-only"
+    }
+  }
+}

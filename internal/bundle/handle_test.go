@@ -22,12 +22,18 @@ func sampleHandle() ResolvedContent {
 	r.VerifiedAt = time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	r.Subject.Name, r.Subject.Version, r.Subject.Digest = "konstapel-privileged-containers", "0.1.0", d("4")
 	r.RetrievedFrom = "ghcr.io/backend-bunny/bundles/konstapel-privileged-containers"
-	r.SourceRule, r.TrustRevision, r.TrustRoot = "official", "rev-7", "sigstore-public-good"
+	r.SourceRule, r.TrustRevision, r.TrustRoot = d("c"), d("d"), "embedded:sigstore-public-good"
 	r.Signer = Signer{Kind: SignerKeyless, Issuer: "https://token.actions.githubusercontent.com",
 		Identity: "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"}
-	r.Proofs.Signature, r.Proofs.Attestation = d("5"), d("6")
-	r.Provenance = Provenance{PredicateType: PredicateSLSAProvenanceV1, Repository: "https://github.com/backend-bunny/Konstapel",
-		Revision: strings.Repeat("a", 40), Builder: "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main"}
+	r.Proofs.Signature = ProofDigests{Manifest: d("5"), Bundle: d("e"), Statement: d("f")}
+	r.Proofs.Attestation = ProofDigests{Manifest: d("6"), Bundle: d("8"), Statement: d("9")}
+	r.Provenance = Provenance{PredicateType: PredicateSLSAProvenanceV1,
+		BuildType:  "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
+		Repository: "https://github.com/backend-bunny/Konstapel",
+		Revision:   strings.Repeat("a", 40), Builder: "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle.yml@refs/heads/main",
+		Content: d("2"),
+		Workflow: WorkflowRef{Repository: "https://github.com/backend-bunny/Konstapel", Path: ".github/workflows/bundle-release.yml",
+			Ref: "refs/heads/main", Commit: strings.Repeat("b", 40)}}
 	return ResolvedContent{
 		HandleVersion: HandleVersion, Name: "konstapel-privileged-containers", Version: "0.1.0",
 		Digests: Digests{Revision: strings.Repeat("a", 40), Content: d("2"), Archive: d("3"), OCI: d("4")},
@@ -89,7 +95,8 @@ func TestHandleValidationRejections(t *testing.T) {
 		mutate func(*ResolvedContent)
 		want   string
 	}{
-		"version":               {func(h *ResolvedContent) { h.HandleVersion = 2 }, "handleVersion"},
+		"version":               {func(h *ResolvedContent) { h.HandleVersion = 1 }, "handleVersion"},
+		"receipt version 1":     {func(h *ResolvedContent) { h.Receipt.Version = 1 }, "receipt version"},
 		"bad digest":            {func(h *ResolvedContent) { h.Digests.Content = "md5:1" }, "digests.content"},
 		"archive equals oci":    {func(h *ResolvedContent) { h.Digests.Archive = h.Digests.OCI }, "different objects"},
 		"rendered malformed":    {func(h *ResolvedContent) { h.Policies[0].Rendered = "x" }, "rendered"},
@@ -98,12 +105,18 @@ func TestHandleValidationRejections(t *testing.T) {
 		"receipt other subject": {func(h *ResolvedContent) { h.Receipt.Subject.Digest = d("9") }, "is not this bundle"},
 		"receipt other version": {func(h *ResolvedContent) { h.Receipt.Subject.Version = "9.9.9" }, "is not this bundle"},
 		"provenance revision":   {func(h *ResolvedContent) { h.Receipt.Provenance.Revision = strings.Repeat("b", 40) }, "provenance revision"},
+		"provenance content":    {func(h *ResolvedContent) { h.Receipt.Provenance.Content = d("9") }, "provenance content"},
+		"no workflow commit":    {func(h *ResolvedContent) { h.Receipt.Provenance.Workflow.Commit = "" }, "workflow"},
+		"no build type":         {func(h *ResolvedContent) { h.Receipt.Provenance.BuildType = "" }, "build type"},
+		"rule not a revision":   {func(h *ResolvedContent) { h.Receipt.SourceRule = "official" }, "sourceRule and trustRevision"},
+		"same proof twice":      {func(h *ResolvedContent) { h.Receipt.Proofs.Attestation = h.Receipt.Proofs.Signature }, "different proofs"},
 		"keyless without id":    {func(h *ResolvedContent) { h.Receipt.Signer.Identity = "" }, "keyless signer"},
 		"key and identity": {func(h *ResolvedContent) {
 			h.Receipt.Signer = Signer{Kind: SignerPublicKey, KeyFingerprint: "ab", Identity: "x"}
 		}, "public-key signer"},
 		"unknown signer":         {func(h *ResolvedContent) { h.Receipt.Signer.Kind = "none" }, "signer kind"},
-		"no proofs":              {func(h *ResolvedContent) { h.Receipt.Proofs.Attestation = "" }, "signature and attestation"},
+		"no proofs":              {func(h *ResolvedContent) { h.Receipt.Proofs.Attestation = ProofDigests{} }, "signature and attestation"},
+		"no statement digest":    {func(h *ResolvedContent) { h.Receipt.Proofs.Signature.Statement = "" }, "statement digests"},
 		"archive-hash predicate": {func(h *ResolvedContent) { h.Receipt.Provenance.PredicateType = "https://example.com/hash" }, "only"},
 		"no trust revision":      {func(h *ResolvedContent) { h.Receipt.TrustRevision = "" }, "trustRevision"},
 		"lease other entry":      {func(h *ResolvedContent) { h.Lease.Digest = d("9") }, "lease pins"},
@@ -123,7 +136,7 @@ func TestHandleValidationRejections(t *testing.T) {
 	raw, _ := json.Marshal(sampleHandle())
 	for name, in := range map[string]string{
 		"unknown field": strings.Replace(string(raw), `{"handleVersion"`, `{"extra":1,"handleVersion"`, 1),
-		"repeated key":  strings.Replace(string(raw), `{"handleVersion":1`, `{"handleVersion":1,"handleVersion":1`, 1),
+		"repeated key":  strings.Replace(string(raw), `{"handleVersion":2`, `{"handleVersion":2,"handleVersion":2`, 1),
 		"trailing":      string(raw) + "{}",
 	} {
 		if _, err := ParseHandle([]byte(in)); err == nil {
@@ -140,6 +153,7 @@ func TestNewHandleFromArchive(t *testing.T) {
 	receipt := s.Receipt
 	receipt.Subject.Name, receipt.Subject.Version, receipt.Subject.Digest = a.Descriptor.Name, a.Descriptor.Version, a.ManifestDigest
 	receipt.Provenance.Revision = a.Descriptor.Source.Revision
+	receipt.Provenance.Content = a.Descriptor.ContentDigest()
 	lease := s.Lease
 	lease.Digest = a.ManifestDigest
 	h := NewHandle(a, s.Compatibility.Content, receipt, lease)
@@ -193,12 +207,12 @@ func TestHandleKeepsTheTargetingRevisionUnchanged(t *testing.T) {
 		"mirror": func(h *ResolvedContent) { h.Receipt.RetrievedFrom = "registry.internal/mirror/bundles/x" },
 		"reverified": func(h *ResolvedContent) {
 			h.Receipt.VerifiedAt = h.Receipt.VerifiedAt.Add(time.Hour)
-			h.Receipt.TrustRevision = "rev-8"
+			h.Receipt.TrustRevision = d("1")
 		},
 		"lease":       func(h *ResolvedContent) { h.Lease.ID = "lease-2"; h.Lease.Holder = HolderApplied },
 		"engine":      func(h *ResolvedContent) { h.Compatibility.Engine = EngineReady },
 		"rendered":    func(h *ResolvedContent) { h.Policies[0].Rendered = d("8") },
-		"other proof": func(h *ResolvedContent) { h.Receipt.Proofs.Signature = d("a") },
+		"other proof": func(h *ResolvedContent) { h.Receipt.Proofs.Signature.Manifest = d("a") },
 	} {
 		c := sampleHandle()
 		c.Policies = append([]PolicyInfo(nil), c.Policies...)
