@@ -29,7 +29,9 @@ var SupportedOSCAL = []string{"1.1.3", "1.2.3"}
 // rules change, so acceptances recorded under the old rules are not reused.
 const compatRules = "konstapel.compatibility/v1"
 
-// supportedOS is the only workload OS the initial provider path evaluates.
+// supportedOS is the only workload OS Konstapel supports. The descriptor
+// schema also recognizes windows only so that content naming it is reported
+// Incompatible here, never adopted.
 const supportedOS = "linux"
 
 var (
@@ -53,9 +55,9 @@ var (
 //     pre-release and every lower release (0.1.x), but not the release it
 //     precedes (0.2.0): a pre-release is older than its release.
 //   - every declared OSCAL version is in SupportedOSCAL.
-//   - scope.os is exactly linux: the initial provider path evaluates only
-//     namespaced Linux workloads, so content that claims another OS (alone
-//     or besides linux) makes a claim Konstapel cannot honour.
+//   - scope.os is exactly linux: Konstapel supports only namespaced Linux
+//     workloads, so content that claims another OS (alone or besides linux)
+//     makes a claim Konstapel cannot honour.
 //
 // Whether each policy is a supported namespaced ValidatingPolicy is reported
 // per policy by the content source (targeting.PolicyScopeOf), not here, so

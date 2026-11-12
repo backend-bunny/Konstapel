@@ -75,10 +75,47 @@ type Publisher struct {
 }
 
 // ProvenanceRule fixes the source repository and builder the SLSA provenance
-// must name. Both are exact: no wildcards or patterns.
+// must name. Both are exact: no wildcards or patterns. Provenance is required
+// for every publisher. The builder also selects the build record the
+// provenance must carry (docs/policy-bundles.md, "Bundle provenance v1"): a
+// GitHub Actions workflow builder (GitHubWorkflowBuilder) requires the
+// workflow record, whose repository, path and ref must be the builder's; any
+// other builder requires the builder record (its own revision) and refuses a
+// workflow record.
 type ProvenanceRule struct {
 	SourceRepository string `json:"sourceRepository"`
 	Builder          string `json:"builder"`
+}
+
+// GitHubActionsIssuer is the OIDC issuer of GitHub Actions tokens. A keyless
+// rule with this issuer is a GitHub publisher: its builder must be a GitHub
+// Actions workflow builder, so its provenance carries the workflow record.
+const GitHubActionsIssuer = "https://token.actions.githubusercontent.com"
+
+// GitHubWorkflow is a GitHub Actions workflow named by a builder ID.
+type GitHubWorkflow struct {
+	// Repository is https://github.com/<owner>/<repo>.
+	Repository string
+	// Path is .github/workflows/<file>.
+	Path string
+	// Ref is the fully qualified ref the workflow ran from.
+	Ref string
+}
+
+var (
+	githubWorkflowBuilder = regexp.MustCompile(`^(https://github\.com/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)/(\.github/workflows/[A-Za-z0-9._-]+\.ya?ml)@(refs/[\x21-\x7e]+)$`)
+)
+
+// GitHubWorkflowBuilder reports whether a provenance builder ID names a
+// GitHub Actions workflow on github.com, in the form of the workflow's keyless
+// certificate identity: https://github.com/<owner>/<repo>/.github/workflows/
+// <file>@<ref>. Only such a builder requires (and allows) the workflow record.
+func GitHubWorkflowBuilder(id string) (GitHubWorkflow, bool) {
+	m := githubWorkflowBuilder.FindStringSubmatch(id)
+	if m == nil || strings.Contains(m[1], "/../") || strings.HasSuffix(m[1], "/..") || strings.HasSuffix(m[1], "/.") {
+		return GitHubWorkflow{}, false
+	}
+	return GitHubWorkflow{Repository: m[1], Path: m[2], Ref: m[3]}, true
 }
 
 // BundleSource maps one bundle name to one exact OCI repository and its trust.
@@ -239,8 +276,16 @@ func (p Publisher) Validate() error {
 		if err := httpsURL("publisher.issuer", p.Issuer); err != nil {
 			errs = append(errs, err)
 		}
+		if err := noWildcards("publisher.issuer", p.Issuer); err != nil {
+			errs = append(errs, err)
+		}
 		if err := noWildcards("publisher.identity", p.Identity); err != nil {
 			errs = append(errs, err)
+		}
+		// A GitHub publisher's provenance must carry the workflow record, so
+		// its builder must be a GitHub Actions workflow.
+		if _, ok := GitHubWorkflowBuilder(p.Provenance.Builder); p.Issuer == GitHubActionsIssuer && !ok {
+			fail("publisher.provenance.builder %q: a keyless rule with issuer %s needs a GitHub Actions workflow builder (https://github.com/<owner>/<repo>/.github/workflows/<file>@<ref>)", p.Provenance.Builder, GitHubActionsIssuer)
 		}
 		if p.PublicKey != nil || p.KeyFingerprint != "" {
 			fail("a keyless publisher must not set publicKey or keyFingerprint")

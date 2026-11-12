@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Regenerate the provenance-policy fixtures in this directory with the pinned
 # Cosign CLI (devbox.json) against a disposable local registry.
-#   devbox run -- internal/bundle/verify/testdata/provenance/generate.sh LAYOUT WORKFLOW_COMMIT OUT_DIR
+#   devbox run -- internal/bundle/verify/testdata/provenance/generate.sh LAYOUT BUILDER_REVISION OUT_DIR
 # LAYOUT is a frozen bundle OCI layout from scripts/bundles/package.sh;
-# WORKFLOW_COMMIT is the (newer) workflow revision recorded separately from the
-# layout's source commit. OUT_DIR must not exist; review its contents and copy
-# them here by hand (everything except *.key).
+# BUILDER_REVISION is the organization builder's own revision (a full commit
+# here, newer than the source), recorded separately from the layout's source
+# commit. OUT_DIR must not exist; review its contents and copy them here by
+# hand (everything except *.key).
 #
 # Same isolation as ../cosign/generate.sh: fresh ECDSA P-256 test key pairs
 # with an empty password, a registry container on a loopback port labelled
@@ -15,10 +16,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../../../.."
 source scripts/runtime.env
-layout=${1:?usage: generate.sh LAYOUT WORKFLOW_COMMIT OUT_DIR}
-workflow_commit=${2:?usage: generate.sh LAYOUT WORKFLOW_COMMIT OUT_DIR}
-out=${3:?usage: generate.sh LAYOUT WORKFLOW_COMMIT OUT_DIR}
-[[ $workflow_commit =~ ^[0-9a-f]{40}$ ]] || { echo "workflow commit must be a full SHA" >&2; exit 1; }
+layout=${1:?usage: generate.sh LAYOUT BUILDER_REVISION OUT_DIR}
+builder_revision=${2:?usage: generate.sh LAYOUT BUILDER_REVISION OUT_DIR}
+out=${3:?usage: generate.sh LAYOUT BUILDER_REVISION OUT_DIR}
+[[ $builder_revision =~ ^[0-9a-f]{40}$ ]] || { echo "builder revision must be a full SHA" >&2; exit 1; }
 [[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -75,16 +76,19 @@ content=$(jq -cj '[.files | sort_by(.path)[] | {path, role, size, sha256}]' "$de
 definition=$(git show "$src_commit:bundles/$name/definition.json" | sha256sum | cut -d' ' -f1)
 go_version=$(jq -r .tools.go "$layout/package.json")
 rm -rf "$work"
+# An organization builder that is not a GitHub Actions workflow: its
+# provenance carries the builder record (internalParameters.builder), never a
+# workflow record.
 builder=https://ci.example.test/konstapel/bundle-release@refs/heads/main
 
 jq -n --arg name "$name" --arg version "$version" --arg repo "$src_repo" --arg commit "$src_commit" \
-  --arg content "$content" --arg definition "$definition" --arg wf "$workflow_commit" --arg builder "$builder" \
+  --arg content "$content" --arg definition "$definition" --arg rev "$builder_revision" --arg builder "$builder" \
   --arg go "${go_version#go}" --argjson tests "$(jq -c '[.files[] | select(.role == "test") | {name: "test", uri: ("bundle-file:" + .path), digest: {sha256: .sha256}}]' <(tar -xzOf "$out/subject-layer.tar.gz" bundle.json))" '
 {
   buildDefinition: {
     buildType: "https://github.com/backend-bunny/Konstapel/blob/main/docs/policy-bundles.md#bundle-provenance-v1",
     externalParameters: {bundle: {name: $name, version: $version}, source: {repository: $repo, commit: $commit}},
-    internalParameters: {workflow: {repository: "https://github.com/backend-bunny/Konstapel", path: ".github/workflows/bundle-release.yml", ref: "refs/heads/main", commit: $wf}},
+    internalParameters: {builder: {revision: $rev}},
     resolvedDependencies: ([
       {name: "source", uri: ("git+" + $repo), digest: {gitCommit: $commit}},
       {name: "bundle-definition", uri: ("git+" + $repo + "@" + $commit + "#bundles/" + $name + "/definition.json"), digest: {sha256: $definition}},
@@ -98,13 +102,15 @@ jq -n --arg name "$name" --arg version "$version" --arg repo "$src_repo" --arg c
 }' > "$out/valid.predicate.json"
 
 # Negative predicates: one contract violation each. dispatch-as-source attests
-# the workflow commit as the content source.
+# the builder revision as the content source; workflow-record carries a GitHub
+# workflow record instead of the builder record.
 neg() { jq "$2" "$out/valid.predicate.json" > "$out/$1.predicate.json"; }
 srcdep='.buildDefinition.resolvedDependencies |= map(if .name == "source" then '
 neg wrong-builder '.runDetails.builder.id = "https://ci.example.test/other-builder@refs/heads/main"'
 neg wrong-source-repo '.buildDefinition.externalParameters.source.repository = "https://github.com/example-fork/Konstapel" | '"$srcdep"'.uri = "git+https://github.com/example-fork/Konstapel" else . end)'
 neg wrong-source-commit '.buildDefinition.externalParameters.source.commit = "0123456789abcdef0123456789abcdef01234567" | '"$srcdep"'.digest.gitCommit = "0123456789abcdef0123456789abcdef01234567" else . end)'
-jq --arg wf "$workflow_commit" '.buildDefinition.externalParameters.source.commit = $wf | '"$srcdep"'.digest.gitCommit = $wf else . end)' "$out/valid.predicate.json" > "$out/dispatch-as-source.predicate.json"
+jq --arg rev "$builder_revision" '.buildDefinition.externalParameters.source.commit = $rev | '"$srcdep"'.digest.gitCommit = $rev else . end)' "$out/valid.predicate.json" > "$out/dispatch-as-source.predicate.json"
+jq --arg rev "$builder_revision" '.buildDefinition.internalParameters = {workflow: {repository: "https://github.com/backend-bunny/Konstapel", path: ".github/workflows/bundle-release.yml", ref: "refs/heads/main", commit: $rev}}' "$out/valid.predicate.json" > "$out/workflow-record.predicate.json"
 neg wrong-version '.buildDefinition.externalParameters.bundle.version = "0.1.1"'
 neg wrong-name '.buildDefinition.externalParameters.bundle.name = "konstapel-other-bundle"'
 neg forged-content '.buildDefinition.resolvedDependencies |= map(if .name == "bundle-content" then .digest.sha256 = ("0" * 64) else . end)'
@@ -149,14 +155,14 @@ save "$subject" sign-other
 attest org valid "$subject" prov-valid
 attest other valid "$subject" prov-valid-other
 attest org valid "$other" prov-other-subject
-for n in wrong-builder wrong-source-repo wrong-source-commit dispatch-as-source wrong-version wrong-name \
+for n in wrong-builder wrong-source-repo wrong-source-commit dispatch-as-source workflow-record wrong-version wrong-name \
   forged-content forged-test no-resolved-dependencies no-source-material; do
   attest org "$n" "$subject" "prov-$n"
 done
 
 keyid() { sed '/-----/d' "$out/$1.pub" | base64 -d | sha256sum | cut -d' ' -f1; }
-printf 'subject %s\nother-subject %s\nworkflow %s\norg sha256:%s\nother sha256:%s\nbuilder %s\n' \
-  "$subject" "$other" "$workflow_commit" "$(keyid org)" "$(keyid other)" "$builder" > "$out/facts.txt"
+printf 'subject %s\nother-subject %s\nbuilder-revision %s\norg sha256:%s\nother sha256:%s\nbuilder %s\n' \
+  "$subject" "$other" "$builder_revision" "$(keyid org)" "$(keyid other)" "$builder" > "$out/facts.txt"
 rm -rf "$out/.home" "$out/.tuf-unused"
 cleanup
 [[ -z $(docker ps -aq --filter "label=konstapel.test=$run") ]] || { echo "registry container for $run not removed" >&2; exit 1; }

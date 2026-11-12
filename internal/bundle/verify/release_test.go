@@ -64,15 +64,14 @@ func loadRelease(t *testing.T) releaseFixtures {
 	return f
 }
 
+// input is the generator input of a run of the GitHub Actions workflow
+// builder at the fixtures' workflow commit.
 func (f releaseFixtures) input(builder string) publish.ProvenanceInput {
-	return publish.ProvenanceInput{
-		Builder: builder,
-		Workflow: publish.Workflow{
-			Repository: "https://github.com/backend-bunny/Konstapel", Path: ".github/workflows/bundle-release.yml",
-			Ref: "refs/heads/main", Commit: f.facts["workflow"],
-		},
-		SigningTools: []publish.Tool{{Name: "cosign", Version: f.facts["cosign"]}},
+	in := publish.ProvenanceInput{Builder: builder, SigningTools: []publish.Tool{{Name: "cosign", Version: f.facts["cosign"]}}}
+	if gh, ok := bundle.GitHubWorkflowBuilder(builder); ok {
+		in.Workflow = publish.Workflow{Repository: gh.Repository, Path: gh.Path, Ref: gh.Ref, Commit: f.facts["workflow"]}
 	}
+	return in
 }
 
 func (f releaseFixtures) result(proofs ...registry.Proof) *registry.Result {
@@ -140,10 +139,13 @@ func TestReleaseGeneratorOutputPassesTheVerifier(t *testing.T) {
 		t.Fatalf("tools %v", tools)
 	}
 
-	// Real Cosign output of the generator with another builder.
-	gen, _ = publish.BuildProvenance(f.record, f.input(f.facts["other-builder"]))
-	if !bytes.Equal(gen, readFixture(t, "release", "wrong-builder.predicate.json")) {
-		t.Fatal("wrong-builder fixture is not the generator's output")
+	// Real Cosign output of an earlier generator with another builder (and
+	// the workflow record of the rule's workflow, which the generator now
+	// refuses to write for that builder).
+	in := f.input(f.facts["builder"])
+	in.Builder = f.facts["other-builder"]
+	if _, err := publish.BuildProvenance(f.record, in); err == nil {
+		t.Fatal("the generator recorded a workflow that is not the builder's")
 	}
 	_, err = v.Accept(context.Background(), f.src, f.result(f.proof("sign", registry.ProofSignature), f.proof("prov-wrong-builder", registry.ProofProvenance)))
 	wantErr(t, err, ErrProvenanceBuilder)
@@ -200,6 +202,56 @@ func TestReleaseGeneratorNegatives(t *testing.T) {
 			_, err = v.Accept(context.Background(), src, f.result(sig, prov))
 			wantErr(t, err, nonNil(c.want)...)
 		})
+	}
+
+	// An organization builder that is not a GitHub Actions workflow: the
+	// generator writes the builder record, and the verifier accepts it only
+	// under a rule naming exactly that builder.
+	const orgBuilder = "https://ci.acme.example/pipelines/policy-release"
+	orgSrc := src
+	orgSrc.Publisher.Provenance.Builder = orgBuilder
+	orgInput := func(builder, revision string) publish.ProvenanceInput {
+		return publish.ProvenanceInput{Builder: builder, BuilderRevision: revision, SigningTools: []publish.Tool{{Name: "cosign", Version: f.facts["cosign"]}}}
+	}
+	revision := "pipeline-definition@" + f.facts["workflow"]
+	for _, c := range []struct {
+		name string
+		src  bundle.BundleSource
+		rec  publish.Record
+		in   publish.ProvenanceInput
+		want error
+	}{
+		{"organization builder record (control)", orgSrc, f.record, orgInput(orgBuilder, revision), nil},
+		{"organization builder, another builder attested", orgSrc, f.record, orgInput("https://ci.acme.example/pipelines/other", revision), ErrProvenanceBuilder},
+		{"organization builder record under a GitHub workflow rule", src, f.record, orgInput(orgBuilder, revision), ErrProvenanceBuilder},
+		{"organization builder, another source repository", orgSrc,
+			tamper(func(r *publish.Record) { r.Source.Repository = "https://github.com/example-fork/Konstapel" }), orgInput(orgBuilder, revision), ErrProvenanceSource},
+		{"organization builder revision attested as the source", orgSrc,
+			tamper(func(r *publish.Record) { r.Source.Commit = f.facts["workflow"] }), orgInput(orgBuilder, f.facts["workflow"]), ErrProvenanceSource},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pred, err := publish.BuildProvenance(c.rec, c.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(pred, []byte(`"internalParameters":{"builder":{"revision":`)) || bytes.Contains(pred, []byte(`"workflow"`)) {
+				t.Fatalf("not the builder record: %s", pred)
+			}
+			prov := referrerProof(t, registry.ProofProvenance, subject, keyBundle(t, priv, provenanceStatement(t, subject, pred), ""))
+			acc, err := v.Accept(context.Background(), c.src, f.result(sig, prov))
+			wantErr(t, err, nonNil(c.want)...)
+			if err == nil && (acc.Provenance.BuilderRevision != c.in.BuilderRevision || acc.Receipt.Provenance.BuilderRevision != c.in.BuilderRevision ||
+				acc.Receipt.Provenance.Workflow != (bundle.WorkflowRef{}) || acc.Provenance.SourceRevision != f.record.Source.Commit) {
+				t.Fatalf("provenance %+v, receipt %+v", acc.Provenance, acc.Receipt.Provenance)
+			}
+		})
+	}
+	// The generator refuses to mix the records.
+	if _, err := publish.BuildProvenance(f.record, publish.ProvenanceInput{Builder: orgBuilder, Workflow: f.input(f.facts["builder"]).Workflow}); err == nil {
+		t.Fatal("the generator wrote a workflow record for an organization builder")
+	}
+	if _, err := publish.BuildProvenance(f.record, orgInput(orgBuilder, "")); err == nil {
+		t.Fatal("the generator wrote no build record for an organization builder")
 	}
 }
 

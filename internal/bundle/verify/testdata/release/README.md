@@ -45,3 +45,9 @@ file and the predicate inside the signed statement, then accepts the subject
 with `Verifier.Accept` (`VerifyProofs` and `CheckProvenance`), and requires the
 attested source commit (e30d507) and workflow commit (834c259) to be recorded
 apart. The key is test-only and its private half was deleted.
+
+`wrong-builder.predicate.json` was written by the generator before it required
+a GitHub Actions workflow builder's workflow record to name that workflow: it
+records `bundle-release.yml` under the builder `other.yml`. The generator now
+refuses that input; the signed fixture is kept as real Cosign output the
+verifier must refuse (`ErrProvenanceBuilder`).

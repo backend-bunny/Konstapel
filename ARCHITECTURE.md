@@ -122,8 +122,9 @@ missing Trivy installation must not disable Kyverno-only operation.
 The Trivy adapter reads namespaced VulnerabilityReport evidence for regular and
 init containers in Linux workloads. It does not create scan jobs, delete reports
 to trigger rescans, or acquire image-registry credentials. Assessment requests
-collect evidence; Trivy owns scanning and rescans. Node/control-plane scanning,
-Windows support, and vulnerability admission blocking are deferred.
+collect evidence; Trivy owns scanning and rescans. Node/control-plane scanning
+and vulnerability admission blocking are deferred. Windows workloads are out of
+scope; Konstapel supports Linux workloads only.
 
 Two checks remain independent:
 

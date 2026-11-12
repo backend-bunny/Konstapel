@@ -58,7 +58,7 @@ func TestAcceptBuildsReceipt(t *testing.T) {
 		t.Fatalf("proofs %+v", rc.Proofs)
 	case rc.Provenance != bundle.Provenance{PredicateType: bundle.PredicateSLSAProvenanceV1, BuildType: ProvenanceBuildType,
 		Repository: provSourceRepo, Revision: provSourceCommit, Builder: provBuilder, Content: f.desc.ContentDigest(),
-		Workflow: bundle.WorkflowRef{Repository: provSourceRepo, Path: ".github/workflows/bundle-release.yml", Ref: "refs/heads/main", Commit: f.workflow}}:
+		BuilderRevision: f.builderRevision}:
 		t.Fatalf("provenance %+v", rc.Provenance)
 	}
 	// The receipt fills a valid resolved-content handle for this subject.
@@ -248,7 +248,7 @@ func TestRecheckUnderCurrentTrust(t *testing.T) {
 		"forged builder":         {edited(func(r *bundle.Receipt) { r.Provenance.Builder = "https://ci.example.test/other" }), []string{"provenance"}},
 		"forged trust revision":  {edited(func(r *bundle.Receipt) { r.TrustRevision = "sha256:" + strings.Repeat("e", 64) }), []string{"trustRevision"}},
 		"forged rule revision":   {edited(func(r *bundle.Receipt) { r.SourceRule = "sha256:" + strings.Repeat("e", 64) }), []string{"sourceRule"}},
-		"forged source revision": {edited(func(r *bundle.Receipt) { r.Provenance.Revision = f.workflow }), []string{"provenance"}},
+		"forged source revision": {edited(func(r *bundle.Receipt) { r.Provenance.Revision = f.builderRevision }), []string{"provenance"}},
 		"forged version":         {edited(func(r *bundle.Receipt) { r.Subject.Version = "9.9.9" }), []string{"subject"}},
 	} {
 		t.Run(name, func(t *testing.T) {

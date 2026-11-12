@@ -100,7 +100,11 @@ func TestDescriptorRejections(t *testing.T) {
 		"oscal not inventoried":   {func(d *Descriptor) { d.OSCAL[0].Path = "content/other.json" }, "not in the file inventory"},
 		"oscal bad version":       {func(d *Descriptor) { d.OSCAL[0].Version = "2.0.0" }, "OSCAL 1.x.y"},
 		"no component definition": {func(d *Descriptor) { d.OSCAL = []OSCALDocument{{Path: "content/provenance.json", Version: "1.1.3"}} }, "component-definition entry point"},
-		"unsupported OS":          {func(d *Descriptor) { d.Scope.OS = []string{"plan9"} }, "not supported"},
+		"unsupported OS":          {func(d *Descriptor) { d.Scope.OS = []string{"plan9"} }, "not a recognized"},
+		"repeated OS":             {func(d *Descriptor) { d.Scope.OS = []string{"linux", "linux"} }, "repeats"},
+		"repeated windows":        {func(d *Descriptor) { d.Scope.OS = []string{"windows", "windows"} }, "repeats"},
+		"unspecified OS":          {func(d *Descriptor) { d.Scope.OS = nil }, "must not be empty"},
+		"OS case variant":         {func(d *Descriptor) { d.Scope.OS = []string{"Linux"} }, "not a recognized"},
 		"unexpected path":         {func(d *Descriptor) { d.Files[0].Path = "scripts/run.sh" }, "outside content/"},
 	}
 	for name, tc := range cases {

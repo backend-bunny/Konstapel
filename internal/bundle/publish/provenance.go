@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/backend-bunny/Konstapel/internal/bundle"
 )
 
 // The Konstapel bundle provenance contract (docs/policy-bundles.md, "Bundle
@@ -33,11 +35,14 @@ var (
 	uriText      = regexp.MustCompile(`^[\x21-\x7e]+$`)
 )
 
-// Workflow is the pipeline revision that ran a release: the repository and
-// path of the workflow definition, the ref it ran from and its commit. It is
-// recorded in internalParameters.workflow, separately from the content
-// source, so a retry from a newer workflow revision that packages an older
-// source commit stays distinguishable. It never stands in for the source.
+// Workflow is the GitHub Actions workflow revision that ran a release: the
+// repository and path of the workflow definition, the ref it ran from and its
+// commit. It is recorded in internalParameters.workflow, separately from the
+// content source, so a retry from a newer workflow revision that packages an
+// older source commit stays distinguishable. It never stands in for the
+// source. Only a GitHub Actions workflow builder records it
+// (bundle.GitHubWorkflowBuilder), and its repository, path and ref must be
+// the builder's.
 type Workflow struct {
 	Repository string `json:"repository"`
 	Path       string `json:"path"`
@@ -51,8 +56,13 @@ type ProvenanceInput struct {
 	// central publisher rule names (for official releases, the release
 	// workflow identity, which is also the keyless certificate identity).
 	Builder string
-	// Workflow is the run's pipeline revision.
-	Workflow Workflow
+	// Exactly one build record, chosen by the builder: Workflow, the run's
+	// GitHub Actions workflow revision, for a GitHub Actions workflow
+	// builder; BuilderRevision, the revision of the organization's own
+	// builder (for example its pipeline definition's commit), for any other
+	// builder. Both are recorded apart from the source commit.
+	Workflow        Workflow
+	BuilderRevision string
 	// InvocationID optionally identifies the run (runDetails.metadata).
 	InvocationID string
 	// SigningTools are recorded as tool materials after the record's tools
@@ -124,7 +134,10 @@ func BuildProvenance(rec Record, in ProvenanceInput) ([]byte, error) {
 				} `json:"source"`
 			} `json:"externalParameters"`
 			InternalParameters struct {
-				Workflow Workflow `json:"workflow"`
+				Workflow *Workflow `json:"workflow,omitempty"`
+				Builder  *struct {
+					Revision string `json:"revision"`
+				} `json:"builder,omitempty"`
 			} `json:"internalParameters"`
 			ResolvedDependencies []dep `json:"resolvedDependencies"`
 		} `json:"buildDefinition"`
@@ -139,7 +152,14 @@ func BuildProvenance(rec Record, in ProvenanceInput) ([]byte, error) {
 	bd.BuildType = ProvenanceBuildType
 	bd.ExternalParameters.Bundle.Name, bd.ExternalParameters.Bundle.Version = rec.Name, rec.Version
 	bd.ExternalParameters.Source.Repository, bd.ExternalParameters.Source.Commit = rec.Source.Repository, rec.Source.Commit
-	bd.InternalParameters.Workflow = in.Workflow
+	if in.BuilderRevision != "" {
+		bd.InternalParameters.Builder = &struct {
+			Revision string `json:"revision"`
+		}{in.BuilderRevision}
+	} else {
+		w := in.Workflow
+		bd.InternalParameters.Workflow = &w
+	}
 	bd.ResolvedDependencies = deps
 	p.RunDetails.Builder.ID = in.Builder
 	if in.InvocationID != "" {
@@ -163,16 +183,29 @@ func (in ProvenanceInput) validate() error {
 		}
 	}
 	httpsText("builder", in.Builder)
+	gh, github := bundle.GitHubWorkflowBuilder(in.Builder)
 	w := in.Workflow
-	httpsText("workflow repository", w.Repository)
-	if !workflowPath.MatchString(w.Path) || strings.Contains("/"+w.Path+"/", "/../") || strings.Contains("/"+w.Path+"/", "/./") {
-		fail("workflow path %q must be a relative path inside the repository", w.Path)
-	}
-	if !commitHex.MatchString(w.Commit) {
-		fail("workflow commit %q must be a full 40-character SHA", w.Commit)
-	}
-	if w.Ref != "" && !printable.MatchString(w.Ref) {
-		fail("workflow ref %q is not printable", w.Ref)
+	switch {
+	case !github && w != (Workflow{}):
+		fail("builder %q is not a GitHub Actions workflow: record its own revision (builder revision), not a workflow", in.Builder)
+	case !github && (in.BuilderRevision == "" || !printable.MatchString(in.BuilderRevision)):
+		fail("builder %q is not a GitHub Actions workflow: its provenance needs a printable builder revision", in.Builder)
+	case github && in.BuilderRevision != "":
+		fail("builder %q is a GitHub Actions workflow: record the workflow run, not a builder revision", in.Builder)
+	case github:
+		httpsText("workflow repository", w.Repository)
+		if !workflowPath.MatchString(w.Path) || strings.Contains("/"+w.Path+"/", "/../") || strings.Contains("/"+w.Path+"/", "/./") {
+			fail("workflow path %q must be a relative path inside the repository", w.Path)
+		}
+		if !commitHex.MatchString(w.Commit) {
+			fail("workflow commit %q must be a full 40-character SHA", w.Commit)
+		}
+		if w.Ref != "" && !printable.MatchString(w.Ref) {
+			fail("workflow ref %q is not printable", w.Ref)
+		}
+		if w.Repository != gh.Repository || w.Path != gh.Path || w.Ref != gh.Ref {
+			fail("workflow %s %s@%s is not the builder's %s %s@%s", w.Repository, w.Path, w.Ref, gh.Repository, gh.Path, gh.Ref)
+		}
 	}
 	if in.InvocationID != "" && !printable.MatchString(in.InvocationID) {
 		fail("invocation ID %q is not printable", in.InvocationID)

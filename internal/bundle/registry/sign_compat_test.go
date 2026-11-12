@@ -41,7 +41,14 @@ import (
 
 func init() { registry.CompatCases = append(registry.CompatCases, signCompat) }
 
-const compatBuilder = "https://ci.example.test/konstapel/bundle-release@refs/heads/main"
+// compatBuilder is an organization builder that is not a GitHub Actions
+// workflow: its provenance carries the builder record. compatGitHubBuilder
+// is a GitHub Actions workflow builder signing with an organization key: its
+// provenance carries the workflow record.
+const (
+	compatBuilder       = "https://ci.example.test/konstapel/bundle-release@refs/heads/main"
+	compatGitHubBuilder = "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main"
+)
 
 // countingSigner records which proofs the real signer was asked to make.
 type countingSigner struct {
@@ -114,16 +121,20 @@ func signCompat(t *testing.T, env registry.CompatEnv) {
 	frozenA := compatFrozen(t, strings.Repeat("e", 40))
 	frozenB := compatFrozen(t, strings.Repeat("f", 40))
 	creds := registry.Credential{Username: env.User, Password: env.Pass}
-	// A newer workflow revision than the source commit.
+	// The organization builder's own revision, newer than the source commit.
+	builderRevision := "pipeline@" + strings.Repeat("1", 40)
+	orgInput := publish.ProvenanceInput{Builder: compatBuilder, BuilderRevision: builderRevision, InvocationID: "compat"}
+	// A GitHub Actions workflow revision newer than the source commit.
 	workflow := publish.Workflow{Repository: "https://github.com/backend-bunny/Konstapel", Path: ".github/workflows/bundle-release.yml", Ref: "refs/heads/main", Commit: strings.Repeat("1", 40)}
 
-	rule := func(repo string) bundle.BundleSource {
+	ruleFor := func(repo, builder string) bundle.BundleSource {
 		return bundle.BundleSource{Name: frozenA.Record.Name, Repository: repo, Publisher: bundle.Publisher{
 			Type: bundle.SignerPublicKey, PublicKey: &bundle.ObjectRef{Kind: bundle.KindSecret, Name: "release-key"}, KeyFingerprint: fingerprint,
-			Provenance: bundle.ProvenanceRule{SourceRepository: frozenA.Record.Source.Repository, Builder: compatBuilder},
+			Provenance: bundle.ProvenanceRule{SourceRepository: frozenA.Record.Source.Repository, Builder: builder},
 		}}
 	}
-	setup := func(host string, authRead bool) (publish.Target, *countingSigner, *recorder) {
+	rule := func(repo string) bundle.BundleSource { return ruleFor(repo, compatBuilder) }
+	setupWith := func(host string, authRead bool, in publish.ProvenanceInput) (publish.Target, *countingSigner, *recorder) {
 		rec := &recorder{base: &http.Transport{TLSClientConfig: tlsConfig(pool)}}
 		w, err := registry.NewClient(registry.Options{Transport: rec, Credentials: hostCred{host: creds}})
 		if err != nil {
@@ -143,8 +154,11 @@ func signCompat(t *testing.T, env registry.CompatEnv) {
 		}}
 		tgt := publish.Target{Writer: w, Reader: r, ReadBackDelay: 200 * time.Millisecond, AuthenticatedReadBack: authRead,
 			Proofs: &publish.Completer{Signer: cs, Reader: r, AuthenticatedRead: authRead,
-				Provenance: publish.ProvenanceInput{Builder: compatBuilder, Workflow: workflow, InvocationID: "compat"}}}
+				Provenance: in}}
 		return tgt, cs, rec
+	}
+	setup := func(host string, authRead bool) (publish.Target, *countingSigner, *recorder) {
+		return setupWith(host, authRead, orgInput)
 	}
 	record := func(name string, ok bool, err error, detail string) {
 		if !ok && err == nil {
@@ -181,18 +195,26 @@ func signCompat(t *testing.T, env registry.CompatEnv) {
 				err, fmt.Sprintf("referrers via %s", got.ReferrersSource))
 
 			acc, _, err := release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(tgt.Repository), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport, Record: &frozenA.Record})
-			ok := err == nil && acc.Receipt.Provenance.Revision == frozenA.Record.Source.Commit && acc.Receipt.Provenance.Workflow.Commit == workflow.Commit &&
-				acc.Receipt.Signer.KeyFingerprint == fingerprint
+			ok := err == nil && acc.Receipt.Provenance.Revision == frozenA.Record.Source.Commit && acc.Receipt.Provenance.BuilderRevision == builderRevision &&
+				acc.Receipt.Provenance.Workflow == (bundle.WorkflowRef{}) && acc.Receipt.Signer.KeyFingerprint == fingerprint
 			detail := ""
 			if acc != nil {
-				detail = fmt.Sprintf("signer %s, source %s, workflow %s", acc.Receipt.Signer.KeyFingerprint, acc.Receipt.Provenance.Revision, acc.Receipt.Provenance.Workflow.Commit)
+				detail = fmt.Sprintf("signer %s, source %s, builder revision %s", acc.Receipt.Signer.KeyFingerprint, acc.Receipt.Provenance.Revision, acc.Receipt.Provenance.BuilderRevision)
 			}
-			record(t.Name()+": verify-release passes anonymously under the test rule", ok, err, detail)
+			record(t.Name()+": verify-release passes anonymously under the organization-key rule (builder record)", ok, err, detail)
 
 			other := rule(tgt.Repository)
 			other.Publisher.Provenance.Builder = "https://ci.example.test/other@refs/heads/main"
 			_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: other, Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
 			record(t.Name()+": verify-release refuses a rule naming another builder", errors.Is(err, verify.ErrProvenanceBuilder), err, "")
+			_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: ruleFor(tgt.Repository, compatGitHubBuilder), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
+			record(t.Name()+": verify-release refuses a GitHub workflow builder rule for builder-record provenance", errors.Is(err, verify.ErrProvenanceBuilder), err, "")
+			other = rule(tgt.Repository)
+			other.Publisher.Provenance.SourceRepository = "https://github.com/example-fork/Konstapel"
+			_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: other, Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
+			record(t.Name()+": verify-release refuses a rule naming another source repository", errors.Is(err, verify.ErrProvenanceSource), err, "")
+			_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(tgt.Repository), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport, Record: &frozenB.Record})
+			record(t.Name()+": verify-release refuses a record of another subject", errors.Is(err, release.ErrReleaseRecord), err, "")
 
 			n := rec.len()
 			res, err = publish.Publish(ctx, frozenA, tgt)
@@ -200,6 +222,26 @@ func signCompat(t *testing.T, env registry.CompatEnv) {
 				err == nil && res.Outcome == publish.AlreadyPublished && cs.take() == "" && len(rec.writesSince(n)) == 0, err, "")
 		})
 	}
+
+	t.Run("sign: GitHub workflow builder with an organization key", func(t *testing.T) {
+		tgt, cs, _ := setupWith(env.Anon, false, publish.ProvenanceInput{Builder: compatGitHubBuilder, Workflow: workflow, InvocationID: "compat"})
+		tgt.Repository = env.Anon + "/bundles/sign-github-builder"
+		res, err := publish.Publish(ctx, frozenA, tgt)
+		record(t.Name()+": publish, then Cosign signs and attests the workflow record",
+			err == nil && res.Complete && cs.take() == "sign,attest", err, fmt.Sprintf("added %v", res.ProofsAdded))
+		acc, _, err := release.VerifyRelease(ctx, release.ReleaseCheck{Source: ruleFor(tgt.Repository, compatGitHubBuilder), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport, Record: &frozenA.Record})
+		record(t.Name()+": verify-release accepts the workflow record of the rule's workflow builder",
+			err == nil && acc.Receipt.Provenance.Workflow.Commit == workflow.Commit && acc.Receipt.Provenance.BuilderRevision == "", err, "")
+		_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(tgt.Repository), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
+		record(t.Name()+": an organization builder rule refuses it", errors.Is(err, verify.ErrProvenanceBuilder), err, "")
+
+		// A run whose workflow is not the builder's never signs.
+		bad, cs2, _ := setupWith(env.Anon, false, publish.ProvenanceInput{Builder: compatBuilder, Workflow: workflow, InvocationID: "compat"})
+		bad.Repository = env.Anon + "/bundles/sign-mismatched-record"
+		res, err = publish.Publish(ctx, frozenA, bad)
+		record(t.Name()+": a workflow record for an organization builder is refused before signing",
+			err != nil && !res.Complete && cs2.take() == "", err, "")
+	})
 
 	t.Run("sign: recovery signs only the missing kind", func(t *testing.T) {
 		tgt, cs, rec := setup(env.Anon, false)

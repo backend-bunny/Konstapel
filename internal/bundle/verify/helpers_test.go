@@ -165,7 +165,13 @@ func keySource(name, fingerprint string) bundle.BundleSource {
 	}
 }
 
+// keylessSource is a keyless rule. A GitHub Actions issuer's rule needs a
+// GitHub Actions workflow builder: the identity, as on official rules.
 func keylessSource(issuer, identity string, rootRef *bundle.ObjectRef) bundle.BundleSource {
+	prov := testProvenance
+	if issuer == bundle.GitHubActionsIssuer {
+		prov.Builder = identity
+	}
 	return bundle.BundleSource{
 		Name:       "konstapel-privileged-containers",
 		Repository: "registry.example.test/fixtures/konstapel-privileged-containers",
@@ -174,7 +180,7 @@ func keylessSource(issuer, identity string, rootRef *bundle.ObjectRef) bundle.Bu
 			Issuer:     issuer,
 			Identity:   identity,
 			TrustRoot:  rootRef,
-			Provenance: testProvenance,
+			Provenance: prov,
 		},
 	}
 }

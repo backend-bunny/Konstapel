@@ -111,9 +111,12 @@ type Provenance struct {
 	Builder       string `json:"builder"`
 	// Content is the attested canonical inventory digest (Digests.Content).
 	Content string `json:"content"`
-	// Workflow is the release pipeline revision, recorded separately from the
-	// content source; it never stands in for Revision.
-	Workflow WorkflowRef `json:"workflow"`
+	// Exactly one build record is set, recorded separately from the content
+	// source; neither ever stands in for Revision. Workflow is the GitHub
+	// Actions workflow revision of a workflow builder; BuilderRevision is
+	// the revision any other builder recorded for itself.
+	Workflow        WorkflowRef `json:"workflow,omitzero"`
+	BuilderRevision string      `json:"builderRevision,omitempty"`
 }
 
 // WorkflowRef identifies the pipeline definition that ran a release.
@@ -359,7 +362,12 @@ func (r Receipt) Validate() error {
 	if r.Provenance.BuildType == "" || !digestPattern.MatchString(r.Provenance.Content) {
 		fail("provenance needs a build type and a sha256 content digest")
 	}
-	if w := r.Provenance.Workflow; w.Repository == "" || w.Path == "" || !revisionPat.MatchString(w.Commit) {
+	switch w := r.Provenance.Workflow; {
+	case w != (WorkflowRef{}) && r.Provenance.BuilderRevision != "":
+		fail("provenance must record a workflow or a builder revision, not both")
+	case w == (WorkflowRef{}) && r.Provenance.BuilderRevision == "":
+		fail("provenance needs a workflow or a builder revision")
+	case w != (WorkflowRef{}) && (w.Repository == "" || w.Path == "" || !revisionPat.MatchString(w.Commit)):
 		fail("provenance needs the workflow repository, path and full commit")
 	}
 	return errors.Join(errs...)

@@ -90,6 +90,28 @@ func TestHandleSerializationFixtures(t *testing.T) {
 	}
 }
 
+// An organization builder's receipt records its builder revision instead of a
+// workflow, and round-trips without a workflow field.
+func TestHandleBuilderRevisionReceipt(t *testing.T) {
+	h := sampleHandle()
+	h.Receipt.Provenance.Workflow = WorkflowRef{}
+	h.Receipt.Provenance.BuilderRevision = "pipeline@" + strings.Repeat("c", 40)
+	if err := h.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"workflow"`) || !strings.Contains(string(raw), `"builderRevision":"pipeline@`) {
+		t.Fatalf("serialized provenance: %s", raw)
+	}
+	back, err := ParseHandle(raw)
+	if err != nil || back.Receipt.Provenance != h.Receipt.Provenance {
+		t.Fatalf("%v %+v", err, back)
+	}
+}
+
 func TestHandleValidationRejections(t *testing.T) {
 	cases := map[string]struct {
 		mutate func(*ResolvedContent)
@@ -107,6 +129,8 @@ func TestHandleValidationRejections(t *testing.T) {
 		"provenance revision":   {func(h *ResolvedContent) { h.Receipt.Provenance.Revision = strings.Repeat("b", 40) }, "provenance revision"},
 		"provenance content":    {func(h *ResolvedContent) { h.Receipt.Provenance.Content = d("9") }, "provenance content"},
 		"no workflow commit":    {func(h *ResolvedContent) { h.Receipt.Provenance.Workflow.Commit = "" }, "workflow"},
+		"no build record":       {func(h *ResolvedContent) { h.Receipt.Provenance.Workflow = WorkflowRef{} }, "workflow or a builder revision"},
+		"both build records":    {func(h *ResolvedContent) { h.Receipt.Provenance.BuilderRevision = "r1" }, "not both"},
 		"no build type":         {func(h *ResolvedContent) { h.Receipt.Provenance.BuildType = "" }, "build type"},
 		"rule not a revision":   {func(h *ResolvedContent) { h.Receipt.SourceRule = "official" }, "sourceRule and trustRevision"},
 		"same proof twice":      {func(h *ResolvedContent) { h.Receipt.Proofs.Attestation = h.Receipt.Proofs.Signature }, "different proofs"},

@@ -150,6 +150,36 @@ func TestSourcesRejections(t *testing.T) {
 		"regex identity": {func(s string) string {
 			return strings.Replace(s, "identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", "identity: ^https://github.com/o/.+$", 1)
 		}, "exact value"},
+		"empty identity": {func(s string) string {
+			return strings.Replace(s, "identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", `identity: ""`, 1)
+		}, "exact value"},
+		"missing identity": {func(s string) string {
+			return strings.Replace(s, "      identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main\n", "", 1)
+		}, "exact value"},
+		"match-anything identity": {func(s string) string {
+			return strings.Replace(s, "identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", `identity: ".*"`, 1)
+		}, "exact value"},
+		"lone wildcard identity": {func(s string) string {
+			return strings.Replace(s, "identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", `identity: "*"`, 1)
+		}, "exact value"},
+		"identity with surrounding space": {func(s string) string {
+			return strings.Replace(s, "identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", `identity: " https://github.com/o/r/.github/workflows/w.yml@refs/heads/main"`, 1)
+		}, "exact value"},
+		"identity pattern field": {func(s string) string {
+			return strings.Replace(s, "      identity: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main\n", "      identityRegexp: https://github.com/o/.*\n", 1)
+		}, "unknown field"},
+		"missing issuer": {func(s string) string {
+			return strings.Replace(s, "      issuer: https://token.actions.githubusercontent.com\n", "", 1)
+		}, "plain https URL"},
+		"wildcard issuer": {func(s string) string {
+			return strings.Replace(s, "issuer: https://token.actions.githubusercontent.com", "issuer: https://*.githubusercontent.com", 1)
+		}, "exact value"},
+		"GitHub publisher with a non-workflow builder": {func(s string) string {
+			return strings.Replace(s, "builder: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", "builder: https://ci.example.test/build@refs/heads/main", 1)
+		}, "GitHub Actions workflow builder"},
+		"GitHub publisher with a builder outside .github/workflows": {func(s string) string {
+			return strings.Replace(s, "builder: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", "builder: https://github.com/o/r/ci/w.yml@refs/heads/main", 1)
+		}, "GitHub Actions workflow builder"},
 		"wildcard builder": {func(s string) string {
 			return strings.Replace(s, "builder: https://github.com/o/r/.github/workflows/w.yml@refs/heads/main", "builder: https://github.com/o/*", 1)
 		}, "exact value"},
@@ -218,6 +248,35 @@ func TestSourcesRejections(t *testing.T) {
 	}
 	if _, err := ParseSources([]byte(baseDoc())); err != nil {
 		t.Fatalf("the base document must be valid: %v", err)
+	}
+}
+
+func TestGitHubWorkflowBuilder(t *testing.T) {
+	gh, ok := GitHubWorkflowBuilder("https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main")
+	if !ok || gh != (GitHubWorkflow{Repository: "https://github.com/backend-bunny/Konstapel", Path: ".github/workflows/bundle-release.yml", Ref: "refs/heads/main"}) {
+		t.Fatalf("%+v %v", gh, ok)
+	}
+	if gh, ok := GitHubWorkflowBuilder("https://github.com/o/r/.github/workflows/w.yaml@refs/tags/v1.2.3"); !ok || gh.Ref != "refs/tags/v1.2.3" {
+		t.Fatalf("%+v %v", gh, ok)
+	}
+	for _, id := range []string{
+		"",
+		"https://ci.example.test/konstapel/bundle-release@refs/heads/main",
+		"https://github.com/o/r/.github/workflows/w.yml",                     // no ref
+		"https://github.com/o/r/.github/workflows/w.yml@main",                // not a qualified ref
+		"https://github.com/o/r/.github/workflows/sub/w.yml@refs/heads/main", // not a workflow file
+		"https://github.com/o/r/ci/w.yml@refs/heads/main",
+		"https://github.com/o/r/.github/workflows/w.sh@refs/heads/main",
+		"http://github.com/o/r/.github/workflows/w.yml@refs/heads/main",
+		"https://github.com.evil.example/o/r/.github/workflows/w.yml@refs/heads/main",
+		"https://github.com/o/../.github/workflows/w.yml@refs/heads/main",
+		"https://github.com/o/r/.github/workflows/w.yml@refs/heads/main ",
+		"https://github.com/o/r/.github/workflows/w.yml@refs/heads/ma in",
+		"https://github.com/o/r/.github/workflows/w.yml@refs/heads/main\n",
+	} {
+		if gh, ok := GitHubWorkflowBuilder(id); ok {
+			t.Errorf("%q parsed as %+v", id, gh)
+		}
 	}
 }
 

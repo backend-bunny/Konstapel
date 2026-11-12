@@ -54,10 +54,12 @@ type Material struct {
 	Digest string
 }
 
-// Workflow is the pipeline definition that ran the release, recorded apart
-// from the content source: a retry from a newer workflow revision packaging an
-// older source commit stays distinguishable. It is never a substitute for the
-// source commit.
+// Workflow is the GitHub Actions workflow that ran the release, recorded
+// apart from the content source: a retry from a newer workflow revision
+// packaging an older source commit stays distinguishable. It is never a
+// substitute for the source commit. Only provenance for a GitHub Actions
+// workflow builder carries it (bundle.GitHubWorkflowBuilder); its repository,
+// path and ref must be the builder's.
 type Workflow struct {
 	Repository string
 	Path       string
@@ -91,9 +93,14 @@ type VerifiedProvenance struct {
 	Tests []Material
 	// Tools are the declared build tools, recorded only.
 	Tools []Material
-	// Workflow is the release pipeline revision, recorded only.
-	Workflow     Workflow
-	InvocationID string
+	// Exactly one build record is set. Workflow is the GitHub Actions
+	// workflow revision of a workflow builder, its repository, path and ref
+	// checked against the builder and its commit recorded. BuilderRevision is
+	// the revision any other builder recorded for itself, recorded only. Both
+	// are kept apart from SourceRevision and never stand in for it.
+	Workflow        Workflow
+	BuilderRevision string
+	InvocationID    string
 }
 
 // predicate is the parsed contract.
@@ -102,6 +109,8 @@ type predicate struct {
 	bundleName, bundleVersion      string
 	sourceRepository, sourceCommit string
 	workflow                       Workflow
+	hasWorkflow                    bool
+	builderRevision                string
 	source, definition, content    *material
 	tests, tools                   []material
 	builder                        string
@@ -152,6 +161,21 @@ func CheckProvenance(src bundle.BundleSource, d *bundle.Descriptor, pinned strin
 	if p.builder != rule.Builder {
 		return nil, fail(ErrProvenanceBuilder, "builder %q is not the configured %q", p.builder, rule.Builder)
 	}
+	// Build record: the builder decides which one is required. A GitHub
+	// Actions workflow builder needs the workflow record of exactly that
+	// workflow; any other builder needs its own builder record, and a
+	// workflow record it could not be checked against is refused.
+	if gh, ok := bundle.GitHubWorkflowBuilder(rule.Builder); ok {
+		switch {
+		case !p.hasWorkflow:
+			return nil, fail(ErrProvenanceBuilder, "builder %q is a GitHub Actions workflow, but the provenance has no internalParameters.workflow record", rule.Builder)
+		case p.workflow.Repository != gh.Repository || p.workflow.Path != gh.Path || p.workflow.Ref != gh.Ref:
+			return nil, fail(ErrProvenanceBuilder, "workflow record %s %s@%s is not the builder's %s %s@%s",
+				p.workflow.Repository, p.workflow.Path, p.workflow.Ref, gh.Repository, gh.Path, gh.Ref)
+		}
+	} else if p.hasWorkflow {
+		return nil, fail(ErrProvenanceBuilder, "builder %q is not a GitHub Actions workflow; its provenance needs internalParameters.builder, not a workflow record", rule.Builder)
+	}
 
 	// Source: the requested release's repository and commit, the source
 	// material, the rule and the descriptor must all agree. The workflow
@@ -199,7 +223,7 @@ func CheckProvenance(src bundle.BundleSource, d *bundle.Descriptor, pinned strin
 		SourceRepository: p.sourceRepository, SourceRevision: p.sourceCommit,
 		BundleName: p.bundleName, BundleVersion: p.bundleVersion, ContentDigest: content,
 		Definition: Material{URI: p.definition.uri, Digest: "sha256:" + p.definition.digest["sha256"]},
-		Workflow:   p.workflow, InvocationID: p.invocationID,
+		Workflow:   p.workflow, BuilderRevision: p.builderRevision, InvocationID: p.invocationID,
 	}
 	for _, t := range p.tests {
 		path := strings.TrimPrefix(t.uri, testURIPrefix)
@@ -377,27 +401,47 @@ func parsePredicate(raw json.RawMessage) (*predicate, error) {
 		return nil, contractErr("externalParameters.source.commit must be a full 40-character lowercase commit")
 	}
 
-	in, err := bd.obj("internalParameters", "buildDefinition", []string{"workflow"}, nil)
+	// internalParameters holds exactly one build record: the GitHub Actions
+	// workflow, or the builder's own revision.
+	in, err := bd.obj("internalParameters", "buildDefinition", nil, []string{"workflow", "builder"})
 	if err != nil {
 		return nil, err
 	}
-	wf, err := in.obj("workflow", "internalParameters", []string{"repository", "path", "commit"}, []string{"ref"})
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range []struct {
-		key string
-		out *string
-	}{{"repository", &p.workflow.Repository}, {"path", &p.workflow.Path}, {"commit", &p.workflow.Commit}} {
-		if *f.out, err = wf.str(f.key, "internalParameters.workflow"); err != nil {
+	_, hasWorkflow := in["workflow"]
+	_, hasBuilder := in["builder"]
+	switch {
+	case hasWorkflow && hasBuilder:
+		return nil, contractErr("internalParameters must hold exactly one of workflow and builder, not both")
+	case !hasWorkflow && !hasBuilder:
+		return nil, contractErr("internalParameters must hold a workflow or a builder record")
+	case hasBuilder:
+		br, err := in.obj("builder", "internalParameters", []string{"revision"}, nil)
+		if err != nil {
 			return nil, err
 		}
-	}
-	if p.workflow.Ref, err = wf.optStr("ref", "internalParameters.workflow"); err != nil {
-		return nil, err
-	}
-	if !commitPattern.MatchString(p.workflow.Commit) {
-		return nil, contractErr("internalParameters.workflow.commit must be a full 40-character lowercase commit")
+		if p.builderRevision, err = br.str("revision", "internalParameters.builder"); err != nil {
+			return nil, err
+		}
+	default:
+		wf, err := in.obj("workflow", "internalParameters", []string{"repository", "path", "commit"}, []string{"ref"})
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range []struct {
+			key string
+			out *string
+		}{{"repository", &p.workflow.Repository}, {"path", &p.workflow.Path}, {"commit", &p.workflow.Commit}} {
+			if *f.out, err = wf.str(f.key, "internalParameters.workflow"); err != nil {
+				return nil, err
+			}
+		}
+		if p.workflow.Ref, err = wf.optStr("ref", "internalParameters.workflow"); err != nil {
+			return nil, err
+		}
+		if !commitPattern.MatchString(p.workflow.Commit) {
+			return nil, contractErr("internalParameters.workflow.commit must be a full 40-character lowercase commit")
+		}
+		p.hasWorkflow = true
 	}
 
 	if err := p.parseMaterials(bd["resolvedDependencies"]); err != nil {

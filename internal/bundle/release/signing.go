@@ -21,7 +21,7 @@ const (
 	OfficialWorkflowPath  = ".github/workflows/bundle-release.yml"
 	OfficialWorkflowRef   = "refs/heads/main"
 	// GitHubIssuer is the OIDC issuer of GitHub Actions tokens.
-	GitHubIssuer = "https://token.actions.githubusercontent.com"
+	GitHubIssuer = bundle.GitHubActionsIssuer
 	// OfficialSourcesFile is the official central source configuration,
 	// relative to the repository root.
 	OfficialSourcesFile = "bundles/official-sources.yaml"
@@ -35,11 +35,13 @@ func OfficialIdentity() string {
 	return OfficialRepositoryURL + "/" + OfficialWorkflowPath + "@" + OfficialWorkflowRef
 }
 
-// Run is the pipeline run that signs: its workflow revision (recorded in
-// provenance apart from the content source), the keyless identity its OIDC
-// token carries, and an invocation ID.
+// Run is the pipeline run that signs: its build record (recorded in
+// provenance apart from the content source: the GitHub Actions workflow
+// revision for a workflow builder, otherwise the builder's own revision), the
+// keyless identity its OIDC token carries, and an invocation ID.
 type Run struct {
-	Workflow publish.Workflow
+	Workflow        publish.Workflow
+	BuilderRevision string
 	// Identity is the certificate identity Fulcio issues for this run's
 	// token (<server>/<GITHUB_WORKFLOW_REF>); empty outside GitHub Actions.
 	Identity     string

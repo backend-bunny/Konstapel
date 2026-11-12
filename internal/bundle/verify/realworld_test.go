@@ -85,6 +85,27 @@ func TestRealCosignV3Proofs(t *testing.T) {
 			wantErr(t, err, c.want)
 		})
 	}
+	// Trusting the public-good root authorizes no publisher by itself: a
+	// keyless rule without an exact issuer and identity is a configuration
+	// error, never a match for every identity the root certifies.
+	for name, edit := range map[string]func(*bundle.Publisher){
+		"empty identity":          func(p *bundle.Publisher) { p.Identity = "" },
+		"wildcard identity":       func(p *bundle.Publisher) { p.Identity = "*" },
+		"match-anything identity": func(p *bundle.Publisher) { p.Identity = ".*" },
+		"identity pattern":        func(p *bundle.Publisher) { p.Identity = "^https://github.com/backend-bunny/.+$" },
+		"identity prefix glob":    func(p *bundle.Publisher) { p.Identity = "https://github.com/backend-bunny/Konstapel/*" },
+		"empty issuer":            func(p *bundle.Publisher) { p.Issuer = "" },
+		"wildcard issuer":         func(p *bundle.Publisher) { p.Issuer = "https://*.githubusercontent.com" },
+		"empty builder":           func(p *bundle.Publisher) { p.Provenance.Builder = "" },
+		"non-workflow builder":    func(p *bundle.Publisher) { p.Provenance.Builder = "https://ci.example.test/x" },
+	} {
+		t.Run("open rule: "+name, func(t *testing.T) {
+			s := src
+			edit(&s.Publisher)
+			_, err := v.VerifyProof(ctx, s, realSubject, registry.ProofSignature, sig)
+			wantErr(t, err, ErrTrustConfig)
+		})
+	}
 	t.Run("an unrelated operator root replaces the public-good root", func(t *testing.T) {
 		r := rootReader(partsOf(t, newVirtualSigstore(t), false).json(t))
 		_, err := newVerifier(t, r, clockAt(now)).VerifyProof(ctx, keylessSource(realIssuer, realIdentity, rootRef), realSubject, registry.ProofSignature, sig)

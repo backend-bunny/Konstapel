@@ -23,11 +23,14 @@ const (
 	provSourceRepo   = "https://github.com/backend-bunny/Konstapel"
 	provSourceCommit = "e30d50760b498cbb17012742c7789a414a1e1d6b"
 	provBuilder      = "https://ci.example.test/konstapel/bundle-release@refs/heads/main"
+	// provGitHubBuilder is a GitHub Actions workflow builder: its provenance
+	// carries the workflow record instead of the builder record.
+	provGitHubBuilder = "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main"
 )
 
 type provFixtures struct {
 	subject, otherSubject string
-	workflow              string
+	builderRevision       string
 	fpOrg, fpOther        string
 	pubOrg, pubOther      []byte
 	manifest, layer       []byte
@@ -57,8 +60,8 @@ func loadProv(t *testing.T) provFixtures {
 			}
 		case "other-subject":
 			f.otherSubject = v
-		case "workflow":
-			f.workflow = v
+		case "builder-revision":
+			f.builderRevision = v
 		case "org":
 			f.fpOrg = v
 		case "other":
@@ -77,14 +80,14 @@ func loadProv(t *testing.T) provFixtures {
 	if f.desc, _, err = bundle.Unpack(f.layer); err != nil {
 		t.Fatal(err)
 	}
-	if f.desc.Source.Revision != provSourceCommit || f.workflow == provSourceCommit {
-		t.Fatalf("fixture source %s workflow %s", f.desc.Source.Revision, f.workflow)
+	if f.desc.Source.Revision != provSourceCommit || f.builderRevision == "" || f.builderRevision == provSourceCommit {
+		t.Fatalf("fixture source %s builder revision %s", f.desc.Source.Revision, f.builderRevision)
 	}
 	for _, n := range []string{"sign-org", "sign-other"} {
 		f.proofs[n] = proofFrom(t, registry.ProofSignature, readFixture(t, "provenance", n+".manifest.json"), readFixture(t, "provenance", n+".bundle.json"))
 	}
 	for _, n := range []string{"valid", "valid-other", "other-subject", "wrong-builder", "wrong-source-repo", "wrong-source-commit",
-		"dispatch-as-source", "wrong-version", "wrong-name", "forged-content", "forged-test", "no-resolved-dependencies", "no-source-material"} {
+		"dispatch-as-source", "workflow-record", "wrong-version", "wrong-name", "forged-content", "forged-test", "no-resolved-dependencies", "no-source-material"} {
 		f.proofs["prov-"+n] = proofFrom(t, registry.ProofProvenance, readFixture(t, "provenance", "prov-"+n+".manifest.json"), readFixture(t, "provenance", "prov-"+n+".bundle.json"))
 	}
 	return f
@@ -127,13 +130,17 @@ func TestProvenanceCosignFixtures(t *testing.T) {
 		{"wrong builder", f.orgSource(), []string{"sign-org", "prov-wrong-builder"}, []error{ErrProvenanceBuilder}},
 		{"wrong source repository", f.orgSource(), []string{"sign-org", "prov-wrong-source-repo"}, []error{ErrProvenanceSource}},
 		{"wrong source commit", f.orgSource(), []string{"sign-org", "prov-wrong-source-commit"}, []error{ErrProvenanceSource}},
-		{"dispatch revision attested as the source", f.orgSource(), []string{"sign-org", "prov-dispatch-as-source"}, []error{ErrProvenanceSource}},
+		{"builder revision attested as the source", f.orgSource(), []string{"sign-org", "prov-dispatch-as-source"}, []error{ErrProvenanceSource}},
+		{"GitHub workflow record for an organization builder", f.orgSource(), []string{"sign-org", "prov-workflow-record"}, []error{ErrProvenanceBuilder}},
+		{"rule names a GitHub workflow builder, provenance has the builder record", with(func(s *bundle.BundleSource) {
+			s.Publisher.Provenance.Builder = "https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main"
+		}), []string{"sign-org", "prov-valid"}, []error{ErrProvenanceBuilder}},
 		{"wrong version", f.orgSource(), []string{"sign-org", "prov-wrong-version"}, []error{ErrProvenanceRelease}},
 		{"wrong bundle name", f.orgSource(), []string{"sign-org", "prov-wrong-name"}, []error{ErrProvenanceRelease}},
 		{"forged content digest", f.orgSource(), []string{"sign-org", "prov-forged-content"}, []error{ErrProvenanceMaterial}},
 		{"forged test material", f.orgSource(), []string{"sign-org", "prov-forged-test"}, []error{ErrProvenanceMaterial}},
 		{"no resolvedDependencies", f.orgSource(), []string{"sign-org", "prov-no-resolved-dependencies"}, []error{ErrProvenanceContract}},
-		{"no source material (workflow revision only)", f.orgSource(), []string{"sign-org", "prov-no-source-material"}, []error{ErrProvenanceContract}},
+		{"no source material (builder revision only)", f.orgSource(), []string{"sign-org", "prov-no-source-material"}, []error{ErrProvenanceContract}},
 		{"provenance for another digest", f.orgSource(), []string{"sign-org", "prov-other-subject"}, []error{ErrNoValidProof, ErrSubject}},
 		{"missing attestation", f.orgSource(), []string{"sign-org"}, []error{registry.ErrMissingProofs}},
 		{"missing signature", f.orgSource(), []string{"prov-valid"}, []error{registry.ErrMissingProofs}},
@@ -165,7 +172,7 @@ func TestProvenanceCosignFixtures(t *testing.T) {
 			p := acc.Provenance
 			if p.Builder != provBuilder || p.SourceRepository != provSourceRepo || p.SourceRevision != provSourceCommit ||
 				p.BundleName != "konstapel-privileged-containers" || p.BundleVersion != "0.1.0" ||
-				p.ContentDigest != f.desc.ContentDigest() || p.Workflow.Commit != f.workflow || p.Workflow.Path != ".github/workflows/bundle-release.yml" ||
+				p.ContentDigest != f.desc.ContentDigest() || p.BuilderRevision != f.builderRevision || p.Workflow != (Workflow{}) ||
 				p.BuildType != ProvenanceBuildType || p.Subject != f.subject {
 				t.Fatalf("provenance %+v", p)
 			}
@@ -333,8 +340,19 @@ func TestProvenanceContract(t *testing.T) {
 	ext := func(p map[string]any, k string) map[string]any {
 		return bd(p)["externalParameters"].(map[string]any)[k].(map[string]any)
 	}
-	wf := func(p map[string]any) map[string]any {
-		return bd(p)["internalParameters"].(map[string]any)["workflow"].(map[string]any)
+	in := func(p map[string]any) map[string]any { return bd(p)["internalParameters"].(map[string]any) }
+	br := func(p map[string]any) map[string]any { return in(p)["builder"].(map[string]any) }
+	// ghWorkflow turns the predicate into one for a GitHub Actions workflow
+	// builder (the rule's builder in the cases that set ghRule).
+	ghWorkflow := func(p map[string]any) {
+		p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = provGitHubBuilder
+		bd(p)["internalParameters"] = map[string]any{"workflow": map[string]any{
+			"repository": provSourceRepo, "path": ".github/workflows/bundle-release.yml", "ref": "refs/heads/main", "commit": f.builderRevision,
+		}}
+	}
+	wf := func(p map[string]any) map[string]any { return in(p)["workflow"].(map[string]any) }
+	gh := func(fn func(p map[string]any)) []byte {
+		return edit(func(p map[string]any) { ghWorkflow(p); fn(p) })
 	}
 	deps := func(p map[string]any) []any { return bd(p)["resolvedDependencies"].([]any) }
 	dep := func(p map[string]any, name string) map[string]any {
@@ -355,49 +373,70 @@ func TestProvenanceContract(t *testing.T) {
 	valid := edit(func(map[string]any) {})
 	raw := func(s string) []byte { return []byte(s) }
 
+	ghRule := src
+	ghRule.Publisher.Provenance.Builder = provGitHubBuilder
 	cases := []struct {
-		name string
-		pred []byte
-		want error
+		name  string
+		pred  []byte
+		want  error
+		ghWfl bool // judged under the GitHub workflow builder rule
 	}{
-		{"valid", valid, nil},
-		{"workflow commit equal to the source commit is allowed", edit(func(p map[string]any) { wf(p)["commit"] = provSourceCommit }), nil},
-		{"workflow ref omitted", edit(func(p map[string]any) { delete(wf(p), "ref") }), nil},
-		{"metadata omitted", edit(func(p map[string]any) { delete(p["runDetails"].(map[string]any), "metadata") }), nil},
+		{"valid", valid, nil, false},
+		{"builder revision equal to the source commit is allowed", edit(func(p map[string]any) { br(p)["revision"] = provSourceCommit }), nil, false},
+		{"builder revision is free-form text", edit(func(p map[string]any) { br(p)["revision"] = "pipeline 2026.11.12-3" }), nil, false},
+		{"empty builder revision", edit(func(p map[string]any) { br(p)["revision"] = "" }), ErrProvenanceContract, false},
+		{"builder revision as a number", edit(func(p map[string]any) { br(p)["revision"] = 7 }), ErrProvenanceContract, false},
+		{"unknown builder record field", edit(func(p map[string]any) { br(p)["workflow"] = "x" }), ErrProvenanceContract, false},
+		{"no build record", edit(func(p map[string]any) { bd(p)["internalParameters"] = map[string]any{} }), ErrProvenanceContract, false},
+		{"both build records", gh(func(p map[string]any) { in(p)["builder"] = map[string]any{"revision": "r"} }), ErrProvenanceContract, true},
+		{"unknown internalParameters field", edit(func(p map[string]any) { in(p)["runner"] = map[string]any{} }), ErrProvenanceContract, false},
+		{"workflow record for an organization builder", gh(func(p map[string]any) {
+			p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = provBuilder
+		}), ErrProvenanceBuilder, false},
+		{"GitHub workflow builder with its workflow record", gh(func(map[string]any) {}), nil, true},
+		{"GitHub workflow builder with a builder record", edit(func(p map[string]any) {
+			p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = provGitHubBuilder
+		}), ErrProvenanceBuilder, true},
+		{"workflow commit equal to the source commit is allowed", gh(func(p map[string]any) { wf(p)["commit"] = provSourceCommit }), nil, true},
+		{"workflow ref omitted", gh(func(p map[string]any) { delete(wf(p), "ref") }), ErrProvenanceBuilder, true},
+		{"workflow of another repository", gh(func(p map[string]any) { wf(p)["repository"] = "https://github.com/example-fork/Konstapel" }), ErrProvenanceBuilder, true},
+		{"workflow at another path", gh(func(p map[string]any) { wf(p)["path"] = ".github/workflows/other.yml" }), ErrProvenanceBuilder, true},
+		{"workflow on another ref", gh(func(p map[string]any) { wf(p)["ref"] = "refs/heads/dev" }), ErrProvenanceBuilder, true},
+		{"short workflow commit", gh(func(p map[string]any) { wf(p)["commit"] = "591d6fe" }), ErrProvenanceContract, true},
+		{"metadata omitted", edit(func(p map[string]any) { delete(p["runDetails"].(map[string]any), "metadata") }), nil, false},
 		{"builder version recorded", edit(func(p map[string]any) {
 			p["runDetails"].(map[string]any)["builder"].(map[string]any)["version"] = map[string]any{"go": "1.27.3"}
-		}), nil},
-		{"tool with a digest", edit(func(p map[string]any) { dep(p, "tool")["digest"] = map[string]any{"sha256": strings.Repeat("a", 64)} }), nil},
-		{"GitHub workflow build type", edit(func(p map[string]any) { bd(p)["buildType"] = "https://actions.github.io/buildtypes/workflow/v1" }), ErrProvenanceContract},
-		{"unknown top-level field", edit(func(p map[string]any) { p["byproducts"] = []any{} }), ErrProvenanceContract},
-		{"unknown runDetails field", edit(func(p map[string]any) { p["runDetails"].(map[string]any)["byproducts"] = []any{} }), ErrProvenanceContract},
-		{"unknown externalParameters field", edit(func(p map[string]any) { bd(p)["externalParameters"].(map[string]any)["trust"] = "me" }), ErrProvenanceContract},
-		{"case-variant key", edit(func(p map[string]any) { ext(p, "source")["Commit"] = strings.Repeat("0", 40) }), ErrProvenanceContract},
+		}), nil, false},
+		{"tool with a digest", edit(func(p map[string]any) { dep(p, "tool")["digest"] = map[string]any{"sha256": strings.Repeat("a", 64)} }), nil, false},
+		{"GitHub workflow build type", edit(func(p map[string]any) { bd(p)["buildType"] = "https://actions.github.io/buildtypes/workflow/v1" }), ErrProvenanceContract, false},
+		{"unknown top-level field", edit(func(p map[string]any) { p["byproducts"] = []any{} }), ErrProvenanceContract, false},
+		{"unknown runDetails field", edit(func(p map[string]any) { p["runDetails"].(map[string]any)["byproducts"] = []any{} }), ErrProvenanceContract, false},
+		{"unknown externalParameters field", edit(func(p map[string]any) { bd(p)["externalParameters"].(map[string]any)["trust"] = "me" }), ErrProvenanceContract, false},
+		{"case-variant key", edit(func(p map[string]any) { ext(p, "source")["Commit"] = strings.Repeat("0", 40) }), ErrProvenanceContract, false},
 		// Refused already by the statement parser; parsePredicate refuses it
 		// too (below).
-		{"duplicate key", bytes.Replace(valid, []byte(`"buildType":`), []byte(`"buildType":"x","buildType":`), 1), ErrStatement},
-		{"version as a number", edit(func(p map[string]any) { ext(p, "bundle")["version"] = 1 }), ErrProvenanceContract},
-		{"builder id null", edit(func(p map[string]any) { p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = nil }), ErrProvenanceContract},
-		{"empty bundle name", edit(func(p map[string]any) { ext(p, "bundle")["name"] = "" }), ErrProvenanceContract},
+		{"duplicate key", bytes.Replace(valid, []byte(`"buildType":`), []byte(`"buildType":"x","buildType":`), 1), ErrStatement, false},
+		{"version as a number", edit(func(p map[string]any) { ext(p, "bundle")["version"] = 1 }), ErrProvenanceContract, false},
+		{"builder id null", edit(func(p map[string]any) { p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = nil }), ErrProvenanceContract, false},
+		{"empty bundle name", edit(func(p map[string]any) { ext(p, "bundle")["name"] = "" }), ErrProvenanceContract, false},
 		{"oversized builder id", edit(func(p map[string]any) {
 			p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = strings.Repeat("x", MaxProvenanceString+1)
-		}), ErrProvenanceContract},
-		{"control character", edit(func(p map[string]any) { ext(p, "bundle")["name"] = "konstapel\n" }), ErrProvenanceContract},
-		{"short source commit", edit(func(p map[string]any) { ext(p, "source")["commit"] = provSourceCommit[:12] }), ErrProvenanceContract},
-		{"no internalParameters", edit(func(p map[string]any) { delete(bd(p), "internalParameters") }), ErrProvenanceContract},
-		{"short workflow commit", edit(func(p map[string]any) { wf(p)["commit"] = "591d6fe" }), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
+		{"control character", edit(func(p map[string]any) { ext(p, "bundle")["name"] = "konstapel\n" }), ErrProvenanceContract, false},
+		{"short source commit", edit(func(p map[string]any) { ext(p, "source")["commit"] = provSourceCommit[:12] }), ErrProvenanceContract, false},
+		{"no internalParameters", edit(func(p map[string]any) { delete(bd(p), "internalParameters") }), ErrProvenanceContract, false},
 		{"bad startedOn", edit(func(p map[string]any) {
 			p["runDetails"].(map[string]any)["metadata"].(map[string]any)["startedOn"] = "yesterday"
-		}), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
 		{"two source materials", edit(func(p map[string]any) {
 			d := map[string]any{"name": "source", "uri": "git+https://github.com/example-fork/Konstapel", "digest": map[string]any{"gitCommit": provSourceCommit}}
 			bd(p)["resolvedDependencies"] = append(deps(p), d)
-		}), ErrProvenanceContract},
-		{"repeated material", edit(func(p map[string]any) { bd(p)["resolvedDependencies"] = append(deps(p), dep(p, "tool")) }), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
+		{"repeated material", edit(func(p map[string]any) { bd(p)["resolvedDependencies"] = append(deps(p), dep(p, "tool")) }), ErrProvenanceContract, false},
 		{"unknown material name", edit(func(p map[string]any) {
 			bd(p)["resolvedDependencies"] = append(deps(p), map[string]any{"name": "cache", "uri": "x", "digest": map[string]any{"sha256": strings.Repeat("a", 64)}})
-		}), ErrProvenanceContract},
-		{"material without a name", edit(func(p map[string]any) { delete(dep(p, "bundle-content"), "name") }), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
+		{"material without a name", edit(func(p map[string]any) { delete(dep(p, "bundle-content"), "name") }), ErrProvenanceContract, false},
 		{"no tool", edit(func(p map[string]any) {
 			var keep []any
 			for _, d := range deps(p) {
@@ -406,57 +445,89 @@ func TestProvenanceContract(t *testing.T) {
 				}
 			}
 			bd(p)["resolvedDependencies"] = keep
-		}), ErrProvenanceContract},
-		{"source digest is sha256", edit(func(p map[string]any) { dep(p, "source")["digest"] = map[string]any{"sha256": strings.Repeat("a", 64)} }), ErrProvenanceContract},
-		{"second digest algorithm", edit(func(p map[string]any) { dep(p, "bundle-content")["digest"].(map[string]any)["sha512"] = "00" }), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
+		{"source digest is sha256", edit(func(p map[string]any) { dep(p, "source")["digest"] = map[string]any{"sha256": strings.Repeat("a", 64)} }), ErrProvenanceContract, false},
+		{"second digest algorithm", edit(func(p map[string]any) { dep(p, "bundle-content")["digest"].(map[string]any)["sha512"] = "00" }), ErrProvenanceContract, false},
 		{"uppercase content digest", edit(func(p map[string]any) {
 			d := dep(p, "bundle-content")["digest"].(map[string]any)
 			d["sha256"] = strings.ToUpper(d["sha256"].(string))
-		}), ErrProvenanceContract},
-		{"test uri without prefix", edit(func(p map[string]any) { dep(p, "test")["uri"] = "tests/x.yaml" }), ErrProvenanceContract},
+		}), ErrProvenanceContract, false},
+		{"test uri without prefix", edit(func(p map[string]any) { dep(p, "test")["uri"] = "tests/x.yaml" }), ErrProvenanceContract, false},
 		{"too many materials", edit(func(p map[string]any) {
 			l := deps(p)
 			for i := 0; i < MaxMaterials; i++ {
 				l = append(l, map[string]any{"name": "tool", "uri": fmt.Sprintf("pkg:generic/t@%d", i)})
 			}
 			bd(p)["resolvedDependencies"] = l
-		}), ErrProvenanceContract},
-		{"test not in the payload", edit(func(p map[string]any) { dep(p, "test")["uri"] = "bundle-file:tests/missing.yaml" }), ErrProvenanceMaterial},
+		}), ErrProvenanceContract, false},
+		{"test not in the payload", edit(func(p map[string]any) { dep(p, "test")["uri"] = "bundle-file:tests/missing.yaml" }), ErrProvenanceMaterial, false},
 		{"test naming a non-test payload file", edit(func(p map[string]any) {
 			d := dep(p, "test")
 			d["uri"], d["digest"] = "bundle-file:LICENSE", map[string]any{"sha256": licenseSHA}
-		}), ErrProvenanceMaterial},
+		}), ErrProvenanceMaterial, false},
 		{"definition of another commit", edit(func(p map[string]any) {
 			d := dep(p, "bundle-definition")
 			d["uri"] = strings.Replace(d["uri"].(string), provSourceCommit, strings.Repeat("0", 40), 1)
-		}), ErrProvenanceMaterial},
+		}), ErrProvenanceMaterial, false},
 		{"content of another version", edit(func(p map[string]any) {
 			dep(p, "bundle-content")["uri"] = "bundle-content:konstapel-privileged-containers@0.0.9"
-		}), ErrProvenanceMaterial},
-		{"source material without git+", edit(func(p map[string]any) { dep(p, "source")["uri"] = provSourceRepo }), ErrProvenanceSource},
+		}), ErrProvenanceMaterial, false},
+		{"source material without git+", edit(func(p map[string]any) { dep(p, "source")["uri"] = provSourceRepo }), ErrProvenanceSource, false},
 		{"source material at another commit", edit(func(p map[string]any) {
 			dep(p, "source")["digest"] = map[string]any{"gitCommit": strings.Repeat("0", 40)}
-		}), ErrProvenanceSource},
-		{"workflow revision is the descriptor's, source is not", edit(func(p map[string]any) {
+		}), ErrProvenanceSource, false},
+		{"builder revision is the descriptor's, source is not", edit(func(p map[string]any) {
+			br(p)["revision"] = provSourceCommit
+			ext(p, "source")["commit"] = f.builderRevision
+			dep(p, "source")["digest"] = map[string]any{"gitCommit": f.builderRevision}
+		}), ErrProvenanceSource, false},
+		{"workflow revision is the descriptor's, source is not", gh(func(p map[string]any) {
 			wf(p)["commit"] = provSourceCommit
-			ext(p, "source")["commit"] = f.workflow
-			dep(p, "source")["digest"] = map[string]any{"gitCommit": f.workflow}
-		}), ErrProvenanceSource},
-		{"not an object", raw(`["buildDefinition"]`), ErrStatement},
+			ext(p, "source")["commit"] = f.builderRevision
+			dep(p, "source")["digest"] = map[string]any{"gitCommit": f.builderRevision}
+		}), ErrProvenanceSource, true},
+		{"not an object", raw(`["buildDefinition"]`), ErrStatement, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			rule := src
+			if tc.ghWfl {
+				rule = ghRule
+			}
 			prov := rawProof(registry.ProofProvenance, keyBundle(t, priv, provenanceStatement(t, f.subject, tc.pred), ""))
-			proofs, err := newVerifier(t, r, nil).VerifyProofs(ctx, src, &registry.Result{Digest: f.subject, Proofs: []registry.Proof{sig, prov}})
+			proofs, err := newVerifier(t, r, nil).VerifyProofs(ctx, rule, &registry.Result{Digest: f.subject, Proofs: []registry.Proof{sig, prov}})
 			if err != nil {
 				wantErr(t, err, tc.want)
 				return
 			}
-			_, err = CheckProvenance(src, f.desc, f.subject, proofs)
+			_, err = CheckProvenance(rule, f.desc, f.subject, proofs)
 			if tc.want == nil {
 				wantErr(t, err)
 			} else {
 				wantErr(t, err, tc.want)
+			}
+		})
+	}
+
+	// The build-record guards report which record is wrong.
+	for _, c := range []struct {
+		name, msg string
+		rule      bundle.BundleSource
+		pred      []byte
+	}{
+		{"neither record", "must hold a workflow or a builder record", src, edit(func(p map[string]any) { bd(p)["internalParameters"] = map[string]any{} })},
+		{"builder record under a GitHub workflow builder", "has no internalParameters.workflow record", ghRule, edit(func(p map[string]any) {
+			p["runDetails"].(map[string]any)["builder"].(map[string]any)["id"] = provGitHubBuilder
+		})},
+	} {
+		t.Run("build record: "+c.name, func(t *testing.T) {
+			prov := rawProof(registry.ProofProvenance, keyBundle(t, priv, provenanceStatement(t, f.subject, c.pred), ""))
+			proofs, err := newVerifier(t, r, nil).VerifyProofs(ctx, c.rule, &registry.Result{Digest: f.subject, Proofs: []registry.Proof{sig, prov}})
+			if err == nil {
+				_, err = CheckProvenance(c.rule, f.desc, f.subject, proofs)
+			}
+			if err == nil || !strings.Contains(err.Error(), c.msg) {
+				t.Fatalf("got %v, want %q", err, c.msg)
 			}
 		})
 	}
@@ -479,7 +550,7 @@ func TestProvenanceContract(t *testing.T) {
 		_, err = CheckProvenance(src, &d, f.subject, proofs)
 		wantErr(t, err, ErrProvenanceSource)
 		d = *f.desc
-		d.Source.Revision = f.workflow
+		d.Source.Revision = f.builderRevision
 		_, err = CheckProvenance(src, &d, f.subject, proofs)
 		wantErr(t, err, ErrProvenanceSource)
 		d = *f.desc

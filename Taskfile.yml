@@ -27,6 +27,7 @@ tasks:
         fi
       - go vet -mod=readonly ./...
       - go vet -mod=readonly -tags live ./internal/targeting/ ./internal/controller/
+      - go vet -mod=readonly -tags registrycompat,publicinterop ./internal/bundle/...
       - scripts/generate.sh --check
       - scripts/charts/check.sh
       - |
