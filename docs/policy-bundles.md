@@ -1818,9 +1818,11 @@ verified with the controller wiring, so task 4.5 is not ticked.
   controller's reporting of stale applied policies (task 4.5 stays unticked
   until it is verified with the controller wiring).
 - Controller wiring (group 5): configuration and Secret/ConfigMap watches
-  feeding `Revisions` and the invalidation calls, the compatibility check,
-  re-acquiring leases from applied ownership after a restart, status
-  conditions, retries, and the chart's cache volume.
+  feeding `Revisions` and the invalidation calls, installing the compatibility
+  check and the content source ([using resolved bundles as a content
+  source](#using-resolved-bundles-as-a-content-source)), re-acquiring leases
+  from applied ownership after a restart, status conditions, retries, and the
+  chart's cache volume.
 
 ### What has and has not been verified
 
@@ -1867,6 +1869,210 @@ power loss (fsync ordering is checked from the operation log, not by cutting
 power), filesystems other than the test host's, keyless trust-root swaps
 through the resolver (the verifier's own tests cover them), and anything in
 the controller.
+
+## Using resolved bundles as a content source
+
+`internal/bundle/content.OCIContent` implements `targeting.ContentSource`, the
+seam the profile, binding and exception-admission code already consume through
+`LocalContent`. It owns no transport, trust or caching: `resolve.Resolver`
+decides whether the pinned digest may be used now, the content cache supplies
+the integrity-checked bytes, and targeting keeps rendering, names and
+revisions. It is not linked into the shipped binaries yet; the controller
+wiring is a later step (see [what is wired next](#what-is-wired-next)).
+
+### Mapping
+
+`Content(ctx, {Name, Digest})` resolves exactly that name and OCI manifest
+digest. A handle or cache entry for any other name or digest is
+`DigestMismatch`: content is never substituted.
+
+| `targeting.Content` field | Value |
+| --- | --- |
+| `Bundle.Name` | the reference's name (the configured source name, equal to the descriptor's `name`) |
+| `Bundle.Digest` | the OCI manifest digest, the only bundle identity `EnforcementRevision` uses; a mirror or credential change cannot alter it |
+| `Bundle.Policies[]` | one entry per descriptor `policies[]` entry, by its logical `name` (what profiles reference), with the scope `targeting.PolicyScopeOf` assigns; `Parameters` stays `false` |
+| `Policies[name].Manifest` | the policy file named by `policies[].path`, read from the verified cache tree and parsed by `targeting.ParsePolicyManifest`, the same parser `LocalContent` uses |
+| `Policies[name].SourceDigest` | `sha256:` and the descriptor's recorded sha256 of that file (the bytes are re-hashed against it on every read) |
+| `Policies[name].ParametersValidated`, `ParameterSchema` | `true`, and the bytes of the policy's `parameterSchema` file (`nil` when it declares none) |
+
+For the official bundle the result equals `LocalContent`'s for the vendored
+copy of the same policy file: same name, parsed manifest, source digest and
+scope. Only `Bundle.Name` and `Bundle.Digest` differ, so profile and binding
+governance (rendered names derived from the revision, owner labels and
+references, exception settings, mode, namespace selector, untouched rules) is
+unchanged; the revision moves only with the manifest digest.
+
+### What is data and what is a policy
+
+Only files that a descriptor `policies[]` entry names, and whose inventory role
+is `policy`, are read as policies. Everything else is data and is never
+returned, rendered or applied: upstream Kyverno and Chainsaw test fixtures
+(the official bundle carries Pods, RBAC and a PolicyException under
+`.chainsaw-test/` and `.kyverno-test*/`), `tests/`, OSCAL documents, schemas,
+licenses, and a `policy`-role file that no `policies[]` entry names. A profile
+naming such a file gets `UnknownPolicy`.
+
+Scope is reported per policy, so one unsupported policy does not reject the
+bundle's others: `Namespaced` for a `policies.kyverno.io/v1` ValidatingPolicy
+whose every matched resource is a known namespaced workload resource,
+`Cluster` for one that matches cluster-scoped or unknown resources, and
+`Unsupported` (`targeting.ScopeUnsupported`) for another API or kind. The
+targeting resolver and the profile reconciler report both non-namespaced scopes
+as `UnsupportedScope`, and the renderer refuses them.
+
+### Compatibility
+
+`content.Compatibility{Controller, Providers}` implements the resolver's
+`Compatible` check (`Check`) and its compatibility revision (`Revision`).
+All rules must hold; each failure is one reason in the verdict:
+
+- `compatibility.provider` is in the installed provider allowlist, by default
+  exactly `konstapel-kyverno/v1`. A bundle names a provider contract, never an
+  executable, and cannot add one.
+- `compatibility.konstapel`, a minimum release, is at most the running
+  controller's version under SemVer 2.0.0 precedence, ignoring build metadata.
+  A pre-release precedes its release: controller `0.2.0-rc.1` accepts
+  minimums up to `0.2.0-rc.1` (and every `0.1.x`) but not `0.2.0`. A
+  controller version that is not SemVer is a configuration error.
+- every declared OSCAL version is supported: `1.1.3` (authored component
+  definitions) and `1.2.3` (the NIST documents).
+- `scope.os` is exactly `linux`: the initial provider path evaluates only
+  namespaced Linux workloads, so a bundle that also or only claims another OS
+  is incompatible.
+
+`Revision` hashes a rules version, the controller version, the sorted and
+deduplicated allowlist and the supported OSCAL versions and OS. It changes when
+the allowlist or controller version changes and not otherwise, which drops
+acceptances recorded under the old contract.
+
+### Parameters
+
+The renderer does not render profile parameters, so `BundlePolicy.Parameters`
+stays `false` for OCI content exactly as for `LocalContent`, and the targeting
+resolver keeps rejecting any non-empty parameters with `InvalidConfiguration`
+rather than dropping them. `content.ValidateParameters(src, policy, raw)`
+checks parameters against the declared contract with
+`bundle.ValidatePolicyParameters`, which has `bundle.ValidateParameters`'
+semantics: a policy without a schema accepts no parameters, otherwise they must
+be a JSON object valid against the schema (duplicate keys are rejected; the
+schema decides whether unknown properties are allowed). It returns `nil` for a
+source with `ParametersValidated == false` (`LocalContent`), whose parameters
+stay governed by the resolver's gate alone. The explicit flag, rather than a
+`nil` schema, keeps "declares no parameters" distinct from "declares no
+contract". The controller uses it to give the rejection a precise reason.
+
+### Errors
+
+Every resolution outcome and every unusable content is a
+`*targeting.ContentError` that `errors.Is(err, targeting.ErrContentUnavailable)`,
+so existing callers report `ContentUnavailable` unchanged, and that carries a
+class for detailed status:
+
+| Class | From |
+| --- | --- |
+| `Config` | `resolve.ErrConfig`: no source configured, or its trust revision unreadable |
+| `ContentUnavailable` | `resolve.ErrContentUnavailable`, or bytes no longer matching their verified digest |
+| `ProofUnavailable` | `resolve.ErrProofUnavailable` |
+| `Untrusted` | `resolve.ErrUntrusted` |
+| `Incompatible` | `resolve.ErrIncompatible`, with the verdict's reasons |
+| `Stale` | `resolve.ErrStale`: retry |
+| `Capacity` | `resolve.ErrCapacity` |
+| `Unresolved` | any other `resolve.ErrUnresolved`, such as a malformed digest |
+| `DigestMismatch` | a handle or entry that is not exactly the pinned name and digest |
+| `Malformed` | a policy path that is not an inventoried `policy` file, or a policy that is not YAML |
+
+`Detail` is bounded (512 bytes) and credential-free by construction: it holds
+the reference, the class sentinel's fixed text and the fixed texts of known
+registry, verification and cache sentinels found in the cause, never a raw
+cause message. `Unwrap` returns only the class sentinel (for example
+`resolve.ErrUntrusted`). A cancelled or expired caller context is returned as
+such and is not `ErrContentUnavailable`; a registry's own timeout is an outage
+(`ContentUnavailable`). Errors that are not resolution outcomes, such as a
+closed cache, are returned unclassified so the reconcile fails and retries.
+
+### Leases and pins
+
+`Content` takes a short-lived `profile` lease (owner `content-read/<n>`),
+reads and parses the files, and releases the lease before returning, on every
+path including errors, cancellation and a panic. The result is a deep copy that
+references no cache file, so callers hold nothing. Content that must stay
+available across reconciles is pinned with `Pin(ctx, ref, holder, owner)` for
+`bundle.HolderProfile` (a desired profile), `HolderApplied` (the last applied
+contribution) or `HolderAssessment` (an active assessment). A pin is resolved
+exactly as `Content` is and fails the same way; `Pin.Handle` is the resolved
+handle with its receipt, and `Pin.Release` is idempotent. Pins live in memory
+only: after a restart none exists and each owner re-establishes its pins from
+its own state. A pin keeps bytes; it never authorizes later use, which every
+`Content` call re-decides.
+
+Each `Content` call re-verifies the cache entry twice (once in the resolver,
+once to read the files), which costs a full layer scan; a memo keyed by the
+handle and guarded by `Resolver.Confirm` is a possible optimization for the
+controller wiring if admission latency needs it.
+
+### What is wired next
+
+The controller wiring, not done here: build the `Resolver`, cache and
+`OCIContent` in the manager and pass `OCIContent` (or a source that routes the
+vendored bundle to `LocalContent`) as `Options.Content`; feed `Revisions`
+from the central ConfigMap and Secret/CA watches with `Compatibility.Revision`;
+map `ContentError` classes and `ValidateParameters` failures to detailed profile
+conditions (task 5.3); pin desired, applied and assessment content and
+re-establish the pins after a restart.
+
+### What has and has not been verified
+
+Unit tests in `internal/bundle/content` (`-race`, repeated, also with
+`-cpu 1`) use the real Cosign organization-key fixtures of the official bundle,
+the real resolver and cache on temporary directories and a fake registry that
+can be taken down. They cover the equality with `LocalContent`, the targeting
+resolver and renderer path (governance unchanged, revision from the manifest
+digest, unchanged by a mirror and credential change and advanced by another
+manifest digest), per-policy scopes, unknown policies, fixtures and unnamed
+`policy`-role files never served, every compatibility rule and the revision,
+incompatibility through the resolver and its recovery, parameters, offline
+reuse after a restart, a wiped cache with the registry down and its recovery,
+a rotated-out key and its restoration, a removed source, every error class
+(planted credentials never appear), context cancellation before and during
+resolution, zero leases after success, failure, cancellation, a panic and
+concurrent calls, and pins for each holder. Crafted bundles (unsupported
+scopes, fixtures, parameter schemas, a second digest) cannot carry real
+signatures, so they are stored in a real cache and served by a stand-in
+resolver that takes real leases. Ten safeguards were removed one at a time to
+confirm a test fails for each. Nothing here runs in a cluster or in the
+controller yet.
+
+### Linking into the controller image
+
+Linking this package into `cmd/konstapel` adds 44 Go modules to the shipped
+image (sigstore-go, rekor, go-tuf, certificate-transparency-go, go-openapi,
+oras-go, go-containerregistry, OpenTelemetry and others) and about 7.3 MiB
+(+8.9%) to the unstripped linux/amd64 controller binary (85,478,075 to
+93,120,541 bytes with the resolver, verifier, registry client, cache and
+adapter reachable), measured with a throwaway command that was not committed.
+
+`scripts/image/go-notices.py` would then fail: `go-licenses save` aborts with
+an unknown license for `github.com/in-toto/in-toto-golang` v0.11.0,
+`github.com/in-toto/attestation` v1.2.0 and
+`github.com/cyberphone/json-canonicalization`
+v0.0.0-20241213102144-19d51d7fe467. Each module ships a root `LICENSE`, but
+that file is the Apache-2.0 standard notice ("Licensed under the Apache
+License, Version 2.0 ...", 559 to 600 bytes), not the license text, and the
+classifier does not identify the notice. It is a classification problem, not a
+missing license. Every other added module is identified (Apache-2.0, MIT,
+BSD-2-Clause or BSD-3-Clause).
+
+The proposed handling, for the wiring change that first links the package: an
+explicit override table in `go-notices.py` keyed by exact module path and
+version, giving the SPDX identifier (`Apache-2.0`), the sha256 of the module's
+own `LICENSE` and the reason. Those modules are passed to `go-licenses` with
+`--ignore`; their `LICENSE` is copied from the checksum-verified module archive
+(`go mod download`) and must match the recorded sha256, the full Apache-2.0 text
+is shipped alongside it, and the bundled-sources entry records the override.
+A version bump or a changed file fails the build until the entry is reviewed,
+and the check for unknown licenses stays in force for every other module. It
+is not implemented here because nothing shipped links these modules yet, so
+the image build could not exercise it.
 
 ## Create and package a bundle
 

@@ -45,6 +45,82 @@ type PolicySource struct {
 	Manifest map[string]any
 	// SourceDigest is the sha256 of the source file bytes.
 	SourceDigest string
+	// ParametersValidated is true when the content source declares a
+	// parameter contract for the policy: ParameterSchema then holds its
+	// schema, and nil means the policy accepts no parameters. Sources that
+	// declare no contract (LocalContent) leave it false; parameters for their
+	// policies are governed by BundlePolicy.Parameters alone, as before.
+	ParametersValidated bool
+	// ParameterSchema is the policy's verified JSON Schema for profile
+	// parameters, when ParametersValidated is true and the policy declares one.
+	ParameterSchema []byte
+}
+
+// ContentErrorClass is a bounded, credential-free classification of why a
+// content source could not serve a pinned reference.
+type ContentErrorClass string
+
+// Content error classes. Every class means ErrContentUnavailable.
+const (
+	// ContentErrorUnresolved: the reference could not be resolved for a
+	// reason not covered by another class (an invalid request, for example).
+	ContentErrorUnresolved ContentErrorClass = "Unresolved"
+	// ContentErrorConfig: no usable source configuration for the bundle name.
+	ContentErrorConfig ContentErrorClass = "Config"
+	// ContentErrorContentUnavailable: the content is not cached and could
+	// not be retrieved.
+	ContentErrorContentUnavailable ContentErrorClass = "ContentUnavailable"
+	// ContentErrorProofUnavailable: the verification evidence is not
+	// retained and could not be retrieved.
+	ContentErrorProofUnavailable ContentErrorClass = "ProofUnavailable"
+	// ContentErrorUntrusted: the content does not satisfy current trust.
+	ContentErrorUntrusted ContentErrorClass = "Untrusted"
+	// ContentErrorIncompatible: the content does not match the running
+	// controller or the installed provider.
+	ContentErrorIncompatible ContentErrorClass = "Incompatible"
+	// ContentErrorStale: the configuration changed during resolution; retry.
+	ContentErrorStale ContentErrorClass = "Stale"
+	// ContentErrorCapacity: pinned content leaves no room in the cache.
+	ContentErrorCapacity ContentErrorClass = "Capacity"
+	// ContentErrorDigestMismatch: what resolved is not exactly the pinned
+	// name and digest. Content is never substituted.
+	ContentErrorDigestMismatch ContentErrorClass = "DigestMismatch"
+	// ContentErrorMalformed: verified content cannot be read as policies.
+	ContentErrorMalformed ContentErrorClass = "Malformed"
+)
+
+// ContentError is an ErrContentUnavailable with a detailed class, so status
+// can explain the failure while every caller that tests
+// errors.Is(err, ErrContentUnavailable) keeps working. Detail is bounded and
+// never contains credentials. Err, when set, is the classification sentinel
+// of the producing package (not the raw cause), for errors.Is.
+type ContentError struct {
+	Class  ContentErrorClass
+	Detail string
+	Err    error
+}
+
+func (e *ContentError) Error() string {
+	if e.Detail == "" {
+		return fmt.Sprintf("%v: %s", ErrContentUnavailable, e.Class)
+	}
+	return fmt.Sprintf("%v: %s: %s", ErrContentUnavailable, e.Class, e.Detail)
+}
+
+// Is makes every ContentError an ErrContentUnavailable.
+func (e *ContentError) Is(target error) bool { return target == ErrContentUnavailable }
+
+// Unwrap returns the classification sentinel, if any.
+func (e *ContentError) Unwrap() error { return e.Err }
+
+// ContentErrorClassOf returns the class of a content error, or "" when err
+// carries none (for example a LocalContent error).
+func ContentErrorClassOf(err error) ContentErrorClass {
+	var ce *ContentError
+	if errors.As(err, &ce) {
+		return ce.Class
+	}
+	return ""
 }
 
 // ScopeFunc reports whether a resource is namespaced. known is false when
@@ -111,8 +187,8 @@ func (l LocalContent) Content(_ context.Context, ref v1alpha1.BundleReference) (
 			return nil, fmt.Errorf("%w: policy %s at %s is not covered by SHA256SUMS", ErrContentUnavailable, name, path)
 		}
 		raw, _ := os.ReadFile(filepath.Join(base, path))
-		var m map[string]any
-		if err := yaml.Unmarshal(raw, &m); err != nil {
+		m, err := ParsePolicyManifest(raw)
+		if err != nil {
 			return nil, fmt.Errorf("%w: policy %s: %v", ErrContentUnavailable, name, err)
 		}
 		s, err := PolicyScopeOf(m, scope)
@@ -123,6 +199,17 @@ func (l LocalContent) Content(_ context.Context, ref v1alpha1.BundleReference) (
 		c.Policies[name] = PolicySource{Manifest: m, SourceDigest: "sha256:" + sum}
 	}
 	return c, nil
+}
+
+// ParsePolicyManifest decodes a policy source file into the document that
+// PolicyScopeOf classifies and Render renders. Every content source uses it,
+// so the same bytes always produce the same manifest.
+func ParsePolicyManifest(raw []byte) (map[string]any, error) {
+	var m map[string]any
+	if err := yaml.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // PolicyScopeOf classifies a source policy: Namespaced only if it is a

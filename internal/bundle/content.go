@@ -355,30 +355,74 @@ func compileParameterSchema(p Policy, payload fs.FS) (*jsonschema.Schema, error)
 	if err != nil {
 		return nil, fmt.Errorf("policy %q parameter schema: %w", p.Name, err)
 	}
+	return compileSchemaBytes(p.ParameterSchema, raw)
+}
+
+// compileSchemaBytes compiles a parameter schema; name labels errors.
+func compileSchemaBytes(name string, raw []byte) (*jsonschema.Schema, error) {
 	if err := noDuplicateJSONKeys(raw); err != nil {
-		return nil, fmt.Errorf("%s: %v", p.ParameterSchema, err)
+		return nil, fmt.Errorf("%s: %v", name, err)
 	}
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %v", p.ParameterSchema, err)
+		return nil, fmt.Errorf("%s: %v", name, err)
 	}
-	if err := noExternalRefs(p.ParameterSchema, doc); err != nil {
+	if err := noExternalRefs(name, doc); err != nil {
 		return nil, err
 	}
 	if m, _ := doc.(map[string]any); m == nil || m["type"] != "object" {
-		return nil, fmt.Errorf("%s: a parameter schema must describe an object", p.ParameterSchema)
+		return nil, fmt.Errorf("%s: a parameter schema must describe an object", name)
 	}
 	c := jsonschema.NewCompiler()
 	c.UseLoader(denyLoader{})
 	const url = "bundle:///parameters.json"
 	if err := c.AddResource(url, doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", p.ParameterSchema, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	s, err := c.Compile(url)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", p.ParameterSchema, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return s, nil
+}
+
+// ValidatePolicyParameters is ValidateParameters for a policy whose schema
+// bytes were already read from verified content: schema is the policy's
+// parameter schema (nil when it declares none) and params the profile's raw
+// JSON parameters (empty or null meaning none). The semantics are exactly
+// ValidateParameters': a policy without a schema accepts no parameters, and
+// with one the parameters must be a JSON object valid against it (the schema
+// decides whether unknown properties are allowed).
+func ValidatePolicyParameters(policy string, schema, params []byte) error {
+	values := map[string]any{}
+	if raw := bytes.TrimSpace(params); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		if err := noDuplicateJSONKeys(raw); err != nil {
+			return fmt.Errorf("policy %q parameters: %w", policy, err)
+		}
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+		if err != nil {
+			return fmt.Errorf("policy %q parameters: %w", policy, err)
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("policy %q parameters must be a JSON object", policy)
+		}
+		values = m
+	}
+	if schema == nil {
+		if len(values) > 0 {
+			return fmt.Errorf("policy %q declares no parameters", policy)
+		}
+		return nil
+	}
+	s, err := compileSchemaBytes("policy "+policy+" parameter schema", schema)
+	if err != nil {
+		return err
+	}
+	if err := s.Validate(values); err != nil {
+		return fmt.Errorf("policy %q parameters: %w", policy, err)
+	}
+	return nil
 }
 
 // ValidateParameters validates a profile's parameters for one bundled policy
