@@ -1,7 +1,9 @@
 // Package bundletest builds OCI bundles whose OSCAL content deliberately
 // differs from the vendored content, for tests that must prove a consumer
 // used a bundle's own catalog and mappings rather than substituting the
-// image's vendored content. Only tests import it.
+// image's vendored content, and signed revisions of the official bundle
+// (signed.go) for upgrade, rollback and publisher-rotation tests. Only tests
+// import it.
 package bundletest
 
 import (
