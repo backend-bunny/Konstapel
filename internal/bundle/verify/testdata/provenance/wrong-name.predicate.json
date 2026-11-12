@@ -12,11 +12,8 @@
       }
     },
     "internalParameters": {
-      "workflow": {
-        "repository": "https://github.com/backend-bunny/Konstapel",
-        "path": ".github/workflows/bundle-release.yml",
-        "ref": "refs/heads/main",
-        "commit": "591d6fea5e6517bffc906540cec1e94c3def738a"
+      "builder": {
+        "revision": "591d6fea5e6517bffc906540cec1e94c3def738a"
       }
     },
     "resolvedDependencies": [

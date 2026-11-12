@@ -11,10 +11,11 @@
 //	bundlerelease publish -name NAME -commit SHA -version V -package DIR -out FILE
 //	                      [-registry PREFIX] [-main REF] [-record-out FILE]
 //	                      [-signing keyless|key [-key REF] [-tlog-upload]] [-sources FILE]
-//	                      [-defer-proofs] [-workflow-* ...]
+//	                      [-defer-proofs] [-workflow-* ... | -builder-revision REV]
 //	bundlerelease verify-release -name NAME -digest sha256:HEX [-sources FILE]
 //	                      [-record FILE] [-public-key-file FILE] [-trust-root-file FILE] [-out FILE]
-//	bundlerelease provenance -package DIR -out FILE [-sources FILE] [-workflow-* ...]
+//	bundlerelease provenance -package DIR -out FILE [-sources FILE]
+//	                      [-workflow-* ... | -builder-revision REV]
 //	bundlerelease mirror -from REPO -to REPO -digest sha256:HEX
 //	bundlerelease release-notes -name NAME -package DIR -verification FILE [-out FILE]
 //	                      [-announce [-repository OWNER/REPO]]
@@ -49,9 +50,11 @@
 // (BUNDLE_REGISTRY_USERNAME, BUNDLE_REGISTRY_PASSWORD), never from a flag, and
 // is never printed. Keyless signing uses GitHub Actions' ambient OIDC
 // credentials, which reach Cosign only through its environment; key mode reads
-// the key password from COSIGN_PASSWORD. Inside GitHub Actions the workflow
-// revision recorded in provenance comes from the run's environment; outside,
-// from the -workflow-* flags.
+// the key password from COSIGN_PASSWORD. The rule's builder decides the build
+// record in provenance: for a GitHub Actions workflow builder the workflow
+// revision, from the run's environment inside GitHub Actions and from the
+// -workflow-* flags outside; for any other builder (an organization's own
+// pipeline signing with its key) -builder-revision, and never a workflow.
 package main
 
 import (
@@ -96,6 +99,7 @@ type options struct {
 	from, to                                                               string
 	tlogUpload                                                             bool
 	wf                                                                     publish.Workflow
+	builderRevision                                                        string
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
@@ -133,6 +137,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.StringVar(&o.wf.Path, "workflow-path", "", "outside GitHub Actions: the pipeline definition's path")
 	fs.StringVar(&o.wf.Ref, "workflow-ref", "", "outside GitHub Actions: the pipeline's ref (optional)")
 	fs.StringVar(&o.wf.Commit, "workflow-commit", "", "outside GitHub Actions: the pipeline's full commit")
+	fs.StringVar(&o.builderRevision, "builder-revision", "", "a builder that is not a GitHub Actions workflow: its own revision recorded in provenance (internalParameters.builder.revision)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -200,11 +205,25 @@ func selectRule(path, name string) (bundle.BundleSource, error) {
 	return srcs.Select(name)
 }
 
-// workflowRun is the run recorded in provenance: inside GitHub Actions it
-// comes from the run's environment and the -workflow-* flags are refused;
-// outside, from those flags.
-func workflowRun(o options) (release.Run, error) {
+// buildRun is the run recorded in provenance. The rule's builder decides the
+// build record: a GitHub Actions workflow builder records the workflow run
+// (inside GitHub Actions from the run's environment, where the -workflow-*
+// flags are refused; outside, from those flags), any other builder its own
+// -builder-revision, and never a workflow.
+func buildRun(o options, builder string) (release.Run, error) {
 	flags := o.wf != (publish.Workflow{})
+	if _, ok := bundle.GitHubWorkflowBuilder(builder); !ok {
+		switch {
+		case flags:
+			return release.Run{}, fmt.Errorf("builder %q is not a GitHub Actions workflow: its provenance records -builder-revision, not -workflow-* flags", builder)
+		case o.builderRevision == "":
+			return release.Run{}, fmt.Errorf("builder %q is not a GitHub Actions workflow: provenance needs -builder-revision (the builder's own revision, for example its pipeline definition's commit)", builder)
+		}
+		return release.Run{BuilderRevision: o.builderRevision}, nil
+	}
+	if o.builderRevision != "" {
+		return release.Run{}, fmt.Errorf("builder %q is a GitHub Actions workflow: its provenance records the workflow run, not -builder-revision", builder)
+	}
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		if flags {
 			return release.Run{}, errors.New("-workflow-* flags are not accepted inside GitHub Actions; the run's environment is recorded")
@@ -238,7 +257,7 @@ func signer(o options, repository string, f *publish.Frozen, reader *registry.Cl
 	if src.Repository != repository {
 		return nil, fmt.Errorf("%w: publishing to %s, but the rule for %s names %s", release.ErrSigningRule, repository, src.Name, src.Repository)
 	}
-	run, err := workflowRun(o)
+	run, err := buildRun(o, src.Publisher.Provenance.Builder)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +271,7 @@ func signer(o options, repository string, f *publish.Frozen, reader *registry.Cl
 	c := &sign.Cosign{Mode: sign.Mode(o.signing), Key: o.key, TlogUpload: o.tlogUpload, RegistryHost: host, Credential: cred, Log: os.Stderr}
 	return &publish.Completer{
 		Signer: c, Reader: reader,
-		Provenance: publish.ProvenanceInput{Builder: src.Publisher.Provenance.Builder, Workflow: run.Workflow, InvocationID: run.InvocationID},
+		Provenance: publish.ProvenanceInput{Builder: src.Publisher.Provenance.Builder, Workflow: run.Workflow, BuilderRevision: run.BuilderRevision, InvocationID: run.InvocationID},
 	}, nil
 }
 
@@ -444,8 +463,8 @@ func verifyRelease(ctx context.Context, o options, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "name=%s\nversion=%s\nrepository=%s\ndigest=%s\nsigner=%s\nsigningTime=%s\ntrustRoot=%s\ntrustRevision=%s\nsourceRule=%s\n",
 		rc.Subject.Name, rc.Subject.Version, src.Repository, rc.Subject.Digest, signer, signingTime, rc.TrustRoot, rc.TrustRevision, rc.SourceRule)
-	fmt.Fprintf(stdout, "sourceRepository=%s\nsourceCommit=%s\nworkflowCommit=%s\nbuilder=%s\ncontent=%s\nsignature=%s\nattestation=%s\nstatus=complete\n",
-		rc.Provenance.Repository, rc.Provenance.Revision, rc.Provenance.Workflow.Commit, rc.Provenance.Builder, rc.Provenance.Content,
+	fmt.Fprintf(stdout, "sourceRepository=%s\nsourceCommit=%s\n%s\nbuilder=%s\ncontent=%s\nsignature=%s\nattestation=%s\nstatus=complete\n",
+		rc.Provenance.Repository, rc.Provenance.Revision, buildRecordLine(rc.Provenance.Workflow.Commit, rc.Provenance.BuilderRevision), rc.Provenance.Builder, rc.Provenance.Content,
 		rc.Proofs.Signature.Manifest, rc.Proofs.Attestation.Manifest)
 	return nil
 }
@@ -464,7 +483,7 @@ func writeProvenance(ctx context.Context, o options, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	run, err := workflowRun(o)
+	run, err := buildRun(o, src.Publisher.Provenance.Builder)
 	if err != nil {
 		return err
 	}
@@ -476,7 +495,7 @@ func writeProvenance(ctx context.Context, o options, stdout io.Writer) error {
 		return err
 	}
 	p, err := publish.BuildProvenance(f.Record, publish.ProvenanceInput{
-		Builder: src.Publisher.Provenance.Builder, Workflow: run.Workflow, InvocationID: run.InvocationID, SigningTools: []publish.Tool{tool},
+		Builder: src.Publisher.Provenance.Builder, Workflow: run.Workflow, BuilderRevision: run.BuilderRevision, InvocationID: run.InvocationID, SigningTools: []publish.Tool{tool},
 	})
 	if err != nil {
 		return err
@@ -484,7 +503,7 @@ func writeProvenance(ctx context.Context, o options, stdout io.Writer) error {
 	if err := writeNewBytes(o.out, p); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "digest=%s\nbuilder=%s\nsourceCommit=%s\nworkflowCommit=%s\n", f.ManifestDigest, src.Publisher.Provenance.Builder, f.Record.Source.Commit, run.Workflow.Commit)
+	fmt.Fprintf(stdout, "digest=%s\nbuilder=%s\nsourceCommit=%s\n%s\n", f.ManifestDigest, src.Publisher.Provenance.Builder, f.Record.Source.Commit, buildRecordLine(run.Workflow.Commit, run.BuilderRevision))
 	return nil
 }
 
@@ -725,4 +744,13 @@ func mirrorBundle(ctx context.Context, o options, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "digest=%s\nproofs=%d\nrepository=%s\n", res.Digest, len(res.Proofs), o.to)
 	return nil
+}
+
+// buildRecordLine prints the provenance build record kept apart from the
+// source commit: a workflow commit, or a builder revision.
+func buildRecordLine(workflowCommit, builderRevision string) string {
+	if builderRevision != "" {
+		return "builderRevision=" + builderRevision
+	}
+	return "workflowCommit=" + workflowCommit
 }

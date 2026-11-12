@@ -209,7 +209,8 @@ func newReceipt(src bundle.BundleSource, retrievedFrom string, d *bundle.Descrip
 	r.Provenance = bundle.Provenance{
 		PredicateType: prov.Statement.PredicateType, BuildType: vp.BuildType,
 		Repository: vp.SourceRepository, Revision: vp.SourceRevision, Builder: vp.Builder, Content: vp.ContentDigest,
-		Workflow: bundle.WorkflowRef{Repository: vp.Workflow.Repository, Path: vp.Workflow.Path, Ref: vp.Workflow.Ref, Commit: vp.Workflow.Commit},
+		Workflow:        bundle.WorkflowRef{Repository: vp.Workflow.Repository, Path: vp.Workflow.Path, Ref: vp.Workflow.Ref, Commit: vp.Workflow.Commit},
+		BuilderRevision: vp.BuilderRevision,
 	}
 	if err := r.Validate(); err != nil {
 		return bundle.Receipt{}, fmt.Errorf("verify: receipt: %w", err)

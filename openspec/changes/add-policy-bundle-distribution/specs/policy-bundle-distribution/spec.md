@@ -131,6 +131,12 @@ teams SHALL NOT supply their own trusted verifier configuration.
 - **THEN** its signature can satisfy the applicable source rule
 - **AND** invalid signatures, a different issuer or identity, or an unconfigured key cannot satisfy that rule
 
+#### Scenario: A trusted root does not authorize every publisher
+
+- **WHEN** a keyless rule trusts the public-good or a configured custom root but its issuer or identity is empty, a wildcard, or a pattern
+- **THEN** the rule is rejected as invalid configuration
+- **AND** no signature verifies under it, whichever identity the root certified
+
 #### Scenario: Validate an expired keyless leaf certificate correctly
 
 - **WHEN** a keyless certificate has expired since a recorded valid signing event
@@ -149,6 +155,18 @@ publication or resolved content.
 
 - **WHEN** an otherwise signed bundle carries provenance for another digest, builder, or source than its configured and declared identity permits
 - **THEN** verification fails before the bundle is used
+
+#### Scenario: Organization-key provenance without a GitHub workflow
+
+- **WHEN** an organization publisher whose configured builder is not a GitHub Actions workflow signs with its key and attests provenance naming that builder, the configured source repository, and the builder's own revision
+- **THEN** the provenance can satisfy the rule without any GitHub workflow record
+- **AND** missing provenance, another subject, builder or source, or a workflow record in place of the builder record fails verification
+
+#### Scenario: GitHub publisher provenance names its workflow
+
+- **WHEN** a publisher rule names a GitHub Actions workflow builder
+- **THEN** the provenance must carry a workflow record whose repository, path, and ref are that builder's
+- **AND** provenance without it, or with another workflow, fails verification
 
 #### Scenario: Retry publication from a newer workflow revision
 
@@ -169,6 +187,12 @@ automatic engine installation or a fallback to legacy APIs.
 - **WHEN** a bundle needs an unavailable provider, unsupported OSCAL/schema version, missing engine API, or cluster-scoped workload targeting
 - **THEN** the affected profile or binding reports the incompatibility and does not adopt that content
 - **AND** the controller remains available to reconcile supported configuration
+
+#### Scenario: Reject a non-Linux workload scope
+
+- **WHEN** a bundle's OS scope is empty, repeated, names an operating system other than Linux, or mixes Linux with another
+- **THEN** the bundle is reported invalid or incompatible and is not adopted
+- **AND** no operating system other than Linux is presented as supported
 
 #### Scenario: Recover an engine prerequisite
 

@@ -77,6 +77,11 @@ descriptor, never inferred from filenames.
 
 - `name` is a DNS label and `version` is SemVer; the release is immutable.
 - `source.revision` is the full commit the content was built from.
+- `scope.os` is a non-empty list of distinct names. Konstapel supports Linux
+  workloads only: `["linux"]` is the only compatible scope. `windows` is
+  recognized only so that content naming it, alone or with `linux`, is
+  reported Incompatible and never adopted (see [Compatibility](#compatibility));
+  an empty, repeated or other value is an invalid descriptor.
 - `policies[].checks` carry the C2P `Rule_Id`/`Check_Id` pairs unchanged. Rule
   and check IDs are unique across the bundle.
 - `files` inventories **every** regular payload file except `bundle.json` with
@@ -263,9 +268,13 @@ sources:
 - **Publisher rule.** Keyless fixes the exact OIDC issuer and signing identity
   (an optional `trustRoot` reference replaces the built-in Sigstore public-good
   root); public-key fixes a referenced key and its SHA-256 fingerprint.
-  Provenance fixes the exact source repository and builder either way. No
-  wildcards or patterns are accepted, and nothing the bundle itself carries can
-  change the rule.
+  Provenance is required for every publisher and fixes the exact source
+  repository and builder either way; the builder also decides which build
+  record the provenance carries (see [Bundle provenance v1](#bundle-provenance-v1)).
+  A keyless rule's issuer and identity are required, non-empty exact values,
+  and a keyless rule with the GitHub Actions issuer must name a GitHub Actions
+  workflow builder. No wildcards or patterns are accepted (and there is no
+  pattern field), and nothing the bundle itself carries can change the rule.
 - **Strict and atomic.** Unknown fields, repeated keys, unsupported versions and
   any invalid entry reject the whole revision; nothing is partially accepted.
   `BundleSource.CheckPayload` requires the fetched payload's name to equal the
@@ -926,6 +935,13 @@ order, and the first that verifies is used; none at all is
   transparency log) or, when the rule references none, the embedded Sigstore
   public-good root (`internal/bundle/verify/publicgood`, with its provenance and
   refresh procedure; its SHA-256 is pinned in the code).
+- **A root is not a publisher.** Trusting a root (the public-good one or a
+  referenced one) only says which certificate authorities, logs and timestamp
+  authorities are genuine; it authorizes nobody. Every keyless rule names one
+  exact issuer and one exact identity, validated when the configuration is
+  parsed and again by the verifier: an empty or missing value, a wildcard or
+  regular-expression character (`*?[]{}()|^$\`), or surrounding space is
+  `ErrTrustConfig`, so a rule can never match every identity a root certifies.
 - **Signing time and transparency.** The minimum for a keyless proof is at
   least one transparency log entry that verifies under a log in the root
   (inclusion proof, as bundle v0.3 requires, and/or a signed entry timestamp;
@@ -961,9 +977,9 @@ and materials on the already verified statement without verifying again.
 - The provenance policy, receipts and recheck are described in
   [Provenance verification](#provenance-verification).
 - Signing, trust-root maintenance and publisher rotation are documented in
-  [Signing, trust roots and rotation](#signing-trust-roots-and-rotation);
-  keyless interoperability with the Cosign CLI under an isolated Sigstore stack
-  (3.5), caching and controller wiring are not done.
+  [Signing, trust roots and rotation](#signing-trust-roots-and-rotation). A
+  keyless proof made by the Cosign CLI under an isolated Sigstore stack has
+  not been verified (task 3.5 stays open, see that section).
 - Public-key rules accept one ECDSA P-256 key; keyless certificates whose only
   identity is an otherName SAN are not accepted.
 
@@ -990,11 +1006,28 @@ fails the run):
 - Real Cosign v3 CI output: the signature and provenance of
   `ghcr.io/backend-bunny/konstapel:0.1.0` verify offline against the embedded
   public-good root under the publishing workflow's identity, two days after
-  their certificates expired (`testdata/ghcr/README.md`).
+  their certificates expired (`testdata/ghcr/README.md`). The same proofs fail
+  under rules whose identity is empty, `*`, `.*`, a regular expression or a
+  prefix glob, whose issuer is empty or a wildcard, and under a GitHub rule
+  with an empty or non-workflow builder (`ErrTrustConfig`).
+- The first official bundle release (`konstapel-privileged-containers` 0.1.0,
+  `sha256:1a2ca25a…`), signed keylessly by the bundle release workflow: its
+  real proofs, kept in `internal/bundle/release/testdata/official`, verify
+  offline through the production verifier and release check under
+  `bundles/official-sources.yaml`, and fail under another workflow identity,
+  ref, fork, issuer, builder or source repository; referencing a root object
+  replaces the embedded root, with no fallback when it is missing.
+- Public-good interoperability (network, opt-in): `devbox run -- go test -tags
+  publicinterop -count=1 -run '^TestOfficialReleasePublicGood'
+  ./internal/bundle/release/` retrieves that release anonymously from
+  `ghcr.io` through the consumer's registry adapter and verifies it the same
+  way, with the same negatives. Run on 2026-11-12: passed (referrers through
+  the tag schema).
 
 Not verified: a keyless proof made by the Cosign CLI with an isolated Fulcio
-and Rekor (3.5), a private Sigstore deployment's real trusted root, and use
-from a running controller.
+and Rekor (3.5), a private Sigstore deployment's real trusted root (custom
+roots are tested with sigstore-go's virtual instance and with the public-good
+root referenced as an object), and use from a running controller.
 
 ## Provenance verification
 
@@ -1020,10 +1053,25 @@ predicate follows this contract. Field names are SLSA provenance v1's; SLSA
 leaves the content of the parameters and dependencies to each build type, and
 `cosign attest --type slsaprovenance1 --predicate <file>` signs whatever
 predicate the publisher supplies, so the content below is Konstapel's own
-contract. The bundle release workflow produces exactly this
+contract. Provenance is required for every publisher. It holds exactly one
+**build record**, chosen by the rule's builder, and kept apart from the source
+commit:
+
+- a **GitHub Actions workflow builder**, a builder id of the form
+  `https://github.com/<owner>/<repo>/.github/workflows/<file>.yml@<ref>` (the
+  form of the workflow's keyless identity), requires the **workflow record**
+  `internalParameters.workflow`, whose repository, path and ref must be the
+  builder's;
+- **any other builder**, such as an organization's own pipeline signing with
+  its key, requires the **builder record** `internalParameters.builder`, with
+  the builder's own `revision`, and refuses a workflow record it could not be
+  checked against. No GitHub workflow is needed.
+
+The bundle release workflow produces the workflow form
 (`publish.BuildProvenance`, see [Release a bundle](#release-a-bundle)); an
-organization publishing with its own key must too, and can generate it with
-`bundlerelease provenance` (see [Signing, trust roots and rotation](#signing-trust-roots-and-rotation)).
+organization publishing with its own key produces whichever form its builder
+requires, and can generate it with `bundlerelease provenance` (see
+[Signing, trust roots and rotation](#signing-trust-roots-and-rotation)).
 
 ```json
 {
@@ -1062,16 +1110,24 @@ organization publishing with its own key must too, and can generate it with
 }
 ```
 
-(The digests are those of the official bundle built from `e30d507`; the full
-conforming predicate is
-`internal/bundle/verify/testdata/provenance/valid.predicate.json`.)
+(The digests are those of the official bundle built from `e30d507`; full
+conforming predicates are `internal/bundle/verify/testdata/release/valid.predicate.json`
+for the workflow record and `internal/bundle/verify/testdata/provenance/valid.predicate.json`
+for the builder record.) An organization builder replaces `internalParameters`
+and the builder id, and nothing else:
+
+```json
+"internalParameters": {"builder": {"revision": "591d6fea5e6517bffc906540cec1e94c3def738a"}},
+…
+"runDetails": {"builder": {"id": "https://ci.example.test/konstapel/bundle-release@refs/heads/main"}}
+```
 
 | Field | Meaning |
 | --- | --- |
 | `buildDefinition.buildType` | exactly the URI above |
 | `externalParameters.bundle` | the requested release: bundle `name` and SemVer `version` |
 | `externalParameters.source` | the requested content source: `repository` (https URL) and full 40-character `commit` |
-| `internalParameters.workflow` | the pipeline that ran: `repository`, `path`, full `commit`, optional `ref`. Recorded separately from the content source: a retry from a newer workflow revision packaging an older source commit stays distinguishable. It is never used in place of the source commit. |
+| `internalParameters` | exactly one build record, never both. `workflow` (GitHub Actions workflow builders): `repository`, `path`, full `commit`, and `ref` (optional in the syntax, required in effect because it must equal the builder's ref). `builder` (any other builder): `revision`, the builder's own revision as a non-empty string. Either is recorded separately from the content source: a retry from a newer pipeline revision packaging an older source commit stays distinguishable. Neither is ever used in place of the source commit. |
 | `resolvedDependencies` `source` | exactly one: `git+<repository>`, digest exactly `{"gitCommit": <commit>}` |
 | `resolvedDependencies` `bundle-definition` | exactly one: `git+<repository>@<commit>#bundles/<name>/definition.json`, digest exactly `{"sha256": …}` of that file |
 | `resolvedDependencies` `bundle-content` | exactly one: `bundle-content:<name>@<version>`, digest exactly `{"sha256": …}` of the payload's canonical inventory (`Descriptor.ContentDigest()`, the handle's `digests.content`) |
@@ -1115,6 +1171,13 @@ In addition to everything in [Signature verification](#signature-verification):
   (`ErrSubject`, already enforced by the signature verifier).
 - **Builder.** `runDetails.builder.id` equals `publisher.provenance.builder`
   exactly (`ErrProvenanceBuilder`).
+- **Build record.** For a GitHub Actions workflow builder the workflow record
+  is required and its repository, path and ref must be the builder's; for any
+  other builder the builder record is required and a workflow record is
+  refused (`ErrProvenanceBuilder`). Both records, or neither, is
+  `ErrProvenanceContract`. The workflow commit and builder revision are
+  recorded, not checked against anything: the certificate's own workflow
+  claims are not compared with them.
 - **Source.** The attested repository equals `publisher.provenance.sourceRepository`
   exactly, and the descriptor's `source.repository` must equal it too. No
   normalization is applied: a trailing `.git` or `/`, another case or a
@@ -1134,8 +1197,8 @@ In addition to everything in [Signature verification](#signature-verification):
 
 The result, `VerifiedProvenance`, carries the builder, build type, source
 repository and revision, bundle name and version, content digest, definition,
-test and tool materials, workflow and invocation ID: public identifiers and
-digests only.
+test and tool materials, the workflow or builder revision and invocation ID:
+public identifiers and digests only.
 
 **Limit: generic GitHub provenance is refused.** Provenance written by GitHub's
 attestation actions or by a `cosign attest` of the generic Actions workflow
@@ -1143,8 +1206,8 @@ build type (`https://actions.github.io/buildtypes/workflow/v1`, as on the
 application image's real CI proofs in `internal/bundle/verify/testdata/ghcr`)
 records the workflow and its trigger commit, not the bundle, its source commit
 or its content, and fails with `ErrProvenanceContract`. Official bundles get
-conforming provenance from the bundle release workflow; no official bundle has
-been released with it yet (the workflow has not been dispatched).
+conforming provenance from the bundle release workflow, as the first release
+(`konstapel-privileged-containers` 0.1.0) shows.
 
 ### Receipts and recheck
 
@@ -1159,7 +1222,7 @@ been released with it yet (the workflow has not been dispatched).
 | `trustRoot` | keyless: where the root came from (`embedded:sigstore-public-good` or `ConfigMap/<name>[<key>]`); public key: `Secret/<name>[<key>]` or `ConfigMap/…` |
 | `signer` | the verified signer |
 | `proofs.signature`, `proofs.attestation` | referrer manifest, Sigstore bundle and signed statement digests |
-| `provenance` | predicate type, build type, repository, revision, builder, content digest, workflow |
+| `provenance` | predicate type, build type, repository, revision, builder, content digest, and either `workflow` or `builderRevision` |
 | `verifiedAt` | the verifier's injectable clock |
 
 **Rule revision.** `RuleRevision` is `sha256:` plus the SHA-256 of the JSON
@@ -1208,14 +1271,12 @@ certificate expired still verifies while the root still trusts it.
 
 ### Not done yet
 
-- Signing and trust-root maintenance documentation and CLI interoperability
-  for both methods (3.5).
+- Keyless interoperability with the Cosign CLI under isolated test roots
+  (3.5; see [Signing, trust roots and rotation](#signing-trust-roots-and-rotation)).
 - Controller wiring (group 5): retained `RecheckBundle`s, acceptance records
   and their invalidation, and cache leases now exist in the
   [content cache and resolver](#safe-materialization-and-the-content-cache),
   but nothing watches configuration or calls them yet.
-- Provenance from a real run of the release workflow (it is implemented, but
-  has not been dispatched; see [Release a bundle](#release-a-bundle)).
 
 ### What has and has not been verified
 
@@ -1225,12 +1286,19 @@ an explicit transport):
 
 - Real `cosign attest --key` output of the pinned Cosign v3.1.3 for the real
   official bundle (`testdata/provenance/README.md`): conforming organization-key
-  provenance is accepted; wrong builder, source repository, source commit,
-  version and name, the workflow revision attested as the source, forged
-  content and test digests, missing materials, provenance for another digest,
-  missing proofs, and mixed keys are rejected.
-- Contract strictness with runtime-signed predicates; the real GitHub CI
-  provenance is refused with `ErrProvenanceContract`; keyless mixed identities.
+  provenance with the builder record is accepted; wrong builder, source
+  repository, source commit, version and name, the builder revision attested
+  as the source, a GitHub workflow record instead of the builder record, a rule
+  naming a GitHub workflow builder, forged content and test digests, missing
+  materials, provenance for another digest, missing proofs, and mixed keys are
+  rejected.
+- Contract strictness with runtime-signed predicates, including both, neither
+  or malformed build records and workflow records of another repository, path
+  or ref, or without a ref; the real GitHub CI provenance is refused with
+  `ErrProvenanceContract`; keyless mixed identities.
+- The official release's real keyless provenance (workflow record) is accepted
+  under `bundles/official-sources.yaml`, offline and against `ghcr.io` (see
+  [Signature verification](#signature-verification)).
 - Receipt fields, rule revision stability, recheck encoding and integrity,
   forged receipts, evidence that does not verify behind a consistent receipt,
   changed rules, removed sources, unreadable trust inputs, keyless root swaps,
@@ -1244,10 +1312,16 @@ test key for a release that packages an older source commit (e30d507) from a
 newer workflow revision (834c259), is accepted with both commits recorded apart
 (`testdata/release/README.md`), and generator output for a confused source and
 workflow commit, another builder, other tests and tampered records is refused.
+Its builder-record output for an organization builder, signed at run time, is
+accepted only under a rule naming that builder, and the generator refuses to
+write a workflow record for such a builder, a builder record for a GitHub
+workflow builder, or a workflow that is not the builder's. In the
+registry-compatibility suite the pinned Cosign CLI in key mode signs both forms
+through `bundlerelease`'s publication path, and verify-release accepts each
+only under its own rule.
 
-Not verified: provenance from a real run of the release workflow (it has not
-been dispatched), keyless provenance made by the Cosign CLI, and use from a
-running controller.
+Not verified: keyless provenance made by the Cosign CLI against isolated test
+roots, and use from a running controller.
 
 ## Signing, trust roots and rotation
 
@@ -1267,7 +1341,7 @@ organization runs by hand.
 | Trust anchor | the referenced public key, checked against the configured fingerprint | the trusted root (the embedded Sigstore public-good root unless the rule references its own) |
 | Needs | a key pair you keep private; no Sigstore service | an OIDC identity (GitHub Actions for official releases) and the Sigstore services |
 | Evidence the verifier requires | the signature | a transparency-log entry and an authenticated signing time, plus a certificate transparency timestamp when the root lists CT logs; the leaf certificate only has to be valid at that signing time |
-| Provenance | same rule: the attestation must be signed by the same key | same rule: the same identity |
+| Provenance | required; signed by the same key; builder record unless the builder is a GitHub Actions workflow | required; signed by the same identity; workflow record of the builder's workflow for GitHub publishers |
 
 Both proofs, the signature and the SLSA provenance attestation, are made over
 the **manifest digest** (never a tag) and are stored as Sigstore bundle v0.3
@@ -1298,17 +1372,26 @@ and the Role that lets the controller read the key.
 **Generating the predicate.** `bundlerelease provenance` writes the
 conforming predicate for a frozen package (`scripts/bundles/package.sh`, then
 `bundlerelease freeze`), with the builder taken from the publisher rule and the
-pipeline that ran recorded separately from the source commit:
+build record it requires recorded separately from the source commit. For an
+organization builder that is not a GitHub Actions workflow, pass the builder's
+own revision (any printable string, such as the pipeline definition's commit);
+`-workflow-*` flags are refused:
 
 ```sh
 devbox run -- go run ./cmd/bundlerelease provenance -package /path/to/bundle \
   -sources /path/to/sources.yaml -out predicate.json \
-  -workflow-repository https://git.example.com/acme/policies \
-  -workflow-path ci/release.yml -workflow-ref refs/heads/main -workflow-commit <40 hex>
+  -builder-revision <your pipeline revision>
 ```
 
+For a GitHub Actions workflow builder outside GitHub Actions, pass the run's
+workflow instead (`-workflow-repository https://github.com/<owner>/<repo>
+-workflow-path .github/workflows/<file>.yml -workflow-ref <ref>
+-workflow-commit <40 hex>`); repository, path and ref must be the builder's,
+and `-builder-revision` is refused. Inside GitHub Actions the run's environment
+is recorded.
+
 `bundlerelease publish -signing key -key /abs/cosign.key -registry <prefix>`
-(password in `COSIGN_PASSWORD`, registry credential in
+(with the same build-record flag; password in `COSIGN_PASSWORD`, registry credential in
 `BUNDLE_REGISTRY_USERNAME`/`BUNDLE_REGISTRY_PASSWORD`) does the publication,
 signature and attestation in one step for a repository that follows this
 repository's release layout, and `bundlerelease verify-release -sources
@@ -1335,6 +1418,20 @@ The verifier embeds the Sigstore public-good trusted root
 (`internal/bundle/verify/publicgood/`) and never fetches or refreshes it. A rule
 that references its own `trustRoot` object replaces it entirely and never falls
 back to it, which is also how a private Sigstore deployment is supported.
+
+**Custom roots.** A keyless rule's `trustRoot` references a ConfigMap or
+Secret key in the controller namespace holding a Sigstore `trusted_root.json`
+(at most 1 MiB, with at least one certificate authority and one transparency
+log). The operator owns that object: refresh it from the private instance's
+own TUF repository or its operator, never from the bundle. To rotate a
+private instance's CA, log or timestamp authority without an outage, publish
+a root that lists the old and the new authority, each with its validity
+window, before signing with the new one, and drop the old entry once nothing
+pinned depends on it; receipts made under the old root bytes then recheck as
+`changed`, and those whose authority left the root as `invalid`. A referenced
+root that is missing or unreadable fails closed; there is no fallback to the
+embedded root. A root, embedded or custom, never authorizes a publisher by
+itself: the rule's exact issuer and identity do.
 
 The embedded copy only changes through a reviewed pull request:
 
@@ -1387,7 +1484,10 @@ exists. Rotate in this order:
 2. Check each digest against the new rule (the verifier tests show the shape: the
    same manifest verifies under the new key or identity and fails under the old).
 3. **Switch the central rule** (new `keyFingerprint` and key Secret, or new
-   `identity` and `provenance.builder`) in the sources ConfigMap.
+   `identity` and `provenance.builder`) in the sources ConfigMap. A builder
+   change that crosses between a GitHub Actions workflow and another builder
+   also changes the build record the provenance must carry, so the re-issued
+   provenance has to use the new builder's form.
 4. Retire the old key or workflow identity once nothing pins an unsigned digest.
 
 The same order applies to a keyless identity change such as renaming the release
@@ -1404,19 +1504,26 @@ administrator action.
 
 ### What has and has not been verified
 
-Verified: the public-key flow end to end with the pinned Cosign v3.1.3 CLI
-(real signatures and provenance against a disposable registry, accepted by the Go
-verifier, and the rotated-key and swapped-root cases); the embedded root's hash
-against the live signed TUF targets metadata (checked independently on
-2026-11-11, targets v14); and real Cosign v3 output from GitHub Actions
-(`ghcr.io/backend-bunny/konstapel:0.1.0`) accepted offline against the embedded
-root, including after its leaf certificates expired.
+Coverage of the two methods (task 3.5):
 
-Not verified: a keyless proof made by the Cosign CLI against an isolated
-Fulcio, Rekor and timestamp authority (the keyless tests use sigstore-go's
-virtual Sigstore instead, and the real CI proof covers the public instance), the
+| Path | Isolated, deterministic | Real public instance |
+| --- | --- | --- |
+| Public key | pinned Cosign v3.1.3 CLI output with generated test keys, offline, against a disposable registry (`testdata/cosign`, `testdata/provenance`, `testdata/release`), and the CLI driven by `bundlerelease` in the registry-compatibility suite; no verification check disabled | not applicable |
+| Keyless | sigstore-go's virtual Sigstore and a test CA as isolated roots, with Go-made proofs (`keyless_test.go`); no check disabled | pinned Cosign CLI output from GitHub Actions against the public-good root: the application image proofs and the official bundle release, offline, and the opt-in live test against `ghcr.io` |
+
+Verified also: the embedded root's hash against the live signed TUF targets
+metadata (checked independently on 2026-11-11, targets v14), and real Cosign
+output verifying after its leaf certificates expired.
+
+Not verified, and why task 3.5 stays open: **Cosign CLI output made against
+isolated keyless test roots.** The Cosign CLI only signs keylessly through a
+Fulcio and a Rekor (and optionally a timestamp authority), so that path needs
+an isolated Sigstore stack, which was deliberately not deployed: the CLI's
+keyless output format is covered by the real public-good proofs, and the
+verifier's checks against an isolated root are covered with Go-made proofs.
+The remaining gap is exactly the combination of the two. Also not verified: the
 rotation steps end to end (only their building blocks are tested), and anything
-that runs in the controller. Because of the first item, task 3.5 is not ticked.
+that runs in the controller.
 
 ## Organization publication and mirroring
 
@@ -1982,9 +2089,10 @@ All rules must hold; each failure is one reason in the verdict:
   controller version that is not SemVer is a configuration error.
 - every declared OSCAL version is supported: `1.1.3` (authored component
   definitions) and `1.2.3` (the NIST documents).
-- `scope.os` is exactly `linux`: the initial provider path evaluates only
-  namespaced Linux workloads, so a bundle that also or only claims another OS
-  is incompatible.
+- `scope.os` is exactly `linux`: Konstapel supports only namespaced Linux
+  workloads, so a bundle that also or only claims another OS is incompatible
+  (an empty, repeated or unrecognized scope is already an invalid descriptor;
+  see [Descriptor](#descriptor-bundlejson)).
 
 `Revision` hashes a rules version, the controller version, the sorted and
 deduplicated allowlist and the supported OSCAL versions and OS. It changes when

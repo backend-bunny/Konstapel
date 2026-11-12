@@ -94,7 +94,11 @@ licenses/                   # applicable third-party terms and notices
 The versioned JSON descriptor identifies name, SemVer release version, immutable
 source repository/revision, logical policy/check inventory, provider contract,
 parameter-schema paths, workload/OS scope, compatibility requirements, and OSCAL
-entry points. Its file inventory records relative paths, roles, sizes, and SHA-256
+entry points. Konstapel supports Linux workloads only: the only compatible OS
+scope is exactly `["linux"]`. An empty, repeated or unrecognized scope is an
+invalid descriptor; `windows` is recognized solely so that content naming it,
+alone or mixed with `linux`, is reported Incompatible and never adopted. This
+implies no Windows support. Its file inventory records relative paths, roles, sizes, and SHA-256
 digests for all regular payload files except `bundle.json` itself. The enclosing
 OCI digest authenticates the descriptor; do not create a circular self-checksum.
 Retain the existing content checksums as provenance and validate them as well.
@@ -208,6 +212,35 @@ Support alternative publisher rules of two types:
   provenance verified under that publisher rule. Organizations can use this
   mode without a public transparency service. Private keys never enter Konstapel.
 
+A trusted root authorizes no publisher by itself. The embedded Sigstore
+public-good root stays the default for public keyless verification and a rule
+may reference its own root instead (replacing it, never falling back), but every
+keyless rule must name one exact, non-empty issuer and identity; empty values,
+wildcards, regular-expression characters, surrounding space or pattern fields are
+configuration errors at parse time and again in the verifier.
+
+Provenance is required for every publisher, but a GitHub workflow record is not.
+The provenance predicate holds exactly one build record, selected by the rule's
+exact builder and kept apart from the source revision:
+
+- GitHub publishers: a builder of the form
+  `https://github.com/<owner>/<repo>/.github/workflows/<file>@<ref>` requires the
+  workflow record (repository, path, ref, commit), whose repository, path and ref
+  must equal the builder's. A keyless rule with the GitHub Actions issuer must
+  name such a builder, so GitHub publishers keep issuer, identity, builder and
+  workflow constraints.
+- Organization builders (any other builder id, typically an organization's own
+  pipeline signing with its key): the builder record `{"revision": <string>}`
+  is required and a workflow record is refused, because nothing could check it.
+  The rule's exact builder and source repository constrain them.
+
+Both, neither, or the wrong record fails verification; the release tool writes
+the form the rule's builder requires (`-builder-revision` for organization
+builders) and refuses to sign otherwise. The selection is derived from the
+already-configured builder, so the rule revision and existing configurations are
+unchanged. Binding the workflow record to the Fulcio certificate's GitHub
+workflow claims is not done; the record's commit is recorded, not authenticated.
+
 Trust roots, keys and builder/source constraints come only from central
 configuration, never from fields that the fetched artifact asks the verifier to
 trust. Provide documented public Sigstore trust-root configuration for official
@@ -215,6 +248,16 @@ releases and an operator-controlled update path. Missing necessary proof or an
 unavailable required trust input fails resolution; there is no verification-off
 switch. Signature/provenance metadata is attached to the subject, not embedded
 recursively in the payload whose digest it signs.
+
+Verification is tested with isolated test roots and keys and signed fixtures:
+pinned Cosign CLI output for public-key mode, and sigstore-go's virtual Sigstore
+and a test CA for keyless checks. Real keyless Cosign output is covered by
+checked-in proofs from GitHub Actions and the first official bundle release
+against the public-good root, plus an opt-in network test (`publicinterop` build
+tag) that retrieves that release anonymously and verifies it under the official
+source configuration, refusing other identities. A full isolated Sigstore stack
+(Fulcio, Rekor) is not deployed; consequently Cosign CLI keyless output under
+isolated roots remains unverified and task 3.5 stays open for that gap.
 
 Record verification time, source/trust revision, signer identity or key
 fingerprint, trusted-root identity, proof/attestation hashes and predicate

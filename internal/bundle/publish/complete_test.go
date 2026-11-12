@@ -122,19 +122,65 @@ func TestBuildProvenanceFollowsTheContract(t *testing.T) {
 	}
 }
 
+// An organization builder that is not a GitHub Actions workflow records its
+// own revision in internalParameters.builder, apart from the source commit,
+// and no workflow.
+func TestBuildProvenanceOrganizationBuilder(t *testing.T) {
+	f := frozenAt(t, olderSource, testTime)
+	in := ProvenanceInput{Builder: "https://ci.acme.example/pipelines/policy-release", BuilderRevision: newerWorkflow,
+		SigningTools: []Tool{{Name: "cosign", Version: "v3.1.3"}}}
+	b, err := BuildProvenance(f.Record, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		BuildDefinition struct {
+			ExternalParameters struct {
+				Source struct{ Commit string } `json:"source"`
+			} `json:"externalParameters"`
+			InternalParameters map[string]map[string]string `json:"internalParameters"`
+		} `json:"buildDefinition"`
+		RunDetails struct {
+			Builder struct {
+				ID string `json:"id"`
+			} `json:"builder"`
+		} `json:"runDetails"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	ip := p.BuildDefinition.InternalParameters
+	if len(ip) != 1 || len(ip["builder"]) != 1 || ip["builder"]["revision"] != newerWorkflow ||
+		p.BuildDefinition.ExternalParameters.Source.Commit != olderSource || p.RunDetails.Builder.ID != in.Builder {
+		t.Fatalf("predicate %s", b)
+	}
+}
+
 func TestBuildProvenanceRefusesBadInputs(t *testing.T) {
 	f := frozenAt(t, olderSource, testTime)
 	for name, c := range map[string]struct {
 		rec func(*Record)
 		in  func(*ProvenanceInput)
 	}{
-		"no builder":                {in: func(i *ProvenanceInput) { i.Builder = "" }},
-		"builder not https":         {in: func(i *ProvenanceInput) { i.Builder = "http://ci.example/x" }},
-		"short workflow commit":     {in: func(i *ProvenanceInput) { i.Workflow.Commit = "0123abc" }},
-		"workflow path escapes":     {in: func(i *ProvenanceInput) { i.Workflow.Path = ".github/../x.yml" }},
-		"absolute workflow path":    {in: func(i *ProvenanceInput) { i.Workflow.Path = "/etc/x.yml" }},
-		"workflow repository":       {in: func(i *ProvenanceInput) { i.Workflow.Repository = "git@github.com:o/r" }},
-		"control character in ref":  {in: func(i *ProvenanceInput) { i.Workflow.Ref = "refs/heads/main\n" }},
+		"no builder":                       {in: func(i *ProvenanceInput) { i.Builder = "" }},
+		"builder not https":                {in: func(i *ProvenanceInput) { i.Builder = "http://ci.example/x" }},
+		"short workflow commit":            {in: func(i *ProvenanceInput) { i.Workflow.Commit = "0123abc" }},
+		"workflow path escapes":            {in: func(i *ProvenanceInput) { i.Workflow.Path = ".github/../x.yml" }},
+		"absolute workflow path":           {in: func(i *ProvenanceInput) { i.Workflow.Path = "/etc/x.yml" }},
+		"workflow repository":              {in: func(i *ProvenanceInput) { i.Workflow.Repository = "git@github.com:o/r" }},
+		"control character in ref":         {in: func(i *ProvenanceInput) { i.Workflow.Ref = "refs/heads/main\n" }},
+		"workflow of another repository":   {in: func(i *ProvenanceInput) { i.Workflow.Repository = "https://github.com/example-fork/Konstapel" }},
+		"workflow at another path":         {in: func(i *ProvenanceInput) { i.Workflow.Path = ".github/workflows/other.yml" }},
+		"workflow on another ref":          {in: func(i *ProvenanceInput) { i.Workflow.Ref = "refs/heads/dev" }},
+		"workflow ref omitted":             {in: func(i *ProvenanceInput) { i.Workflow.Ref = "" }},
+		"GitHub builder, builder revision": {in: func(i *ProvenanceInput) { i.BuilderRevision = "r1" }},
+		"org builder with a workflow":      {in: func(i *ProvenanceInput) { i.Builder = "https://ci.acme.example/release"; i.BuilderRevision = "r1" }},
+		"org builder without a revision": {in: func(i *ProvenanceInput) {
+			i.Builder, i.Workflow = "https://ci.acme.example/release", Workflow{}
+		}},
+		"org builder, unprintable revision": {in: func(i *ProvenanceInput) {
+			i.Builder, i.Workflow, i.BuilderRevision = "https://ci.acme.example/release", Workflow{}, "r1\n"
+		}},
 		"unprintable signing tool":  {in: func(i *ProvenanceInput) { i.SigningTools = []Tool{{Name: "cosign", Version: ""}} }},
 		"record without tests":      {rec: func(r *Record) { r.Tests.Files = nil }},
 		"record with short commit":  {rec: func(r *Record) { r.Source.Commit = "abc" }},

@@ -59,18 +59,41 @@ func TestTrustObjectsFromFiles(t *testing.T) {
 	}
 }
 
-func TestWorkflowRunSource(t *testing.T) {
-	o := options{wf: publish.Workflow{Repository: "https://x.example/r", Path: "ci.yml", Commit: strings.Repeat("a", 40)}}
+func TestBuildRunSource(t *testing.T) {
+	const ghBuilder = "https://github.com/acme/policies/.github/workflows/release.yml@refs/heads/main"
+	const orgBuilder = "https://ci.acme.example/pipelines/policy-release"
+	o := options{wf: publish.Workflow{Repository: "https://github.com/acme/policies", Path: ".github/workflows/release.yml", Ref: "refs/heads/main", Commit: strings.Repeat("a", 40)}}
 	t.Setenv("GITHUB_ACTIONS", "true")
-	if _, err := workflowRun(o); err == nil {
+	if _, err := buildRun(o, ghBuilder); err == nil {
 		t.Error("-workflow-* flags accepted inside GitHub Actions")
 	}
 	t.Setenv("GITHUB_ACTIONS", "")
-	if r, err := workflowRun(o); err != nil || r.Workflow != o.wf || r.Identity != "" {
+	if r, err := buildRun(o, ghBuilder); err != nil || r.Workflow != o.wf || r.Identity != "" || r.BuilderRevision != "" {
 		t.Errorf("%+v %v", r, err)
 	}
-	if _, err := workflowRun(options{}); err == nil {
+	if _, err := buildRun(options{}, ghBuilder); err == nil {
 		t.Error("no workflow revision accepted outside GitHub Actions")
+	}
+	both := o
+	both.builderRevision = "r1"
+	if _, err := buildRun(both, ghBuilder); err == nil || !strings.Contains(err.Error(), "not -builder-revision") {
+		t.Errorf("a builder revision accepted for a GitHub Actions workflow builder: %v", err)
+	}
+
+	// Any other builder records its own revision, never a workflow.
+	if r, err := buildRun(options{builderRevision: "pipeline@" + strings.Repeat("b", 40)}, orgBuilder); err != nil ||
+		r.BuilderRevision != "pipeline@"+strings.Repeat("b", 40) || r.Workflow != (publish.Workflow{}) {
+		t.Errorf("%+v %v", r, err)
+	}
+	if _, err := buildRun(both, orgBuilder); err == nil || !strings.Contains(err.Error(), "not -workflow-* flags") {
+		t.Errorf("a workflow record accepted for a builder that is not a GitHub Actions workflow: %v", err)
+	}
+	if _, err := buildRun(options{}, orgBuilder); err == nil {
+		t.Error("no builder revision accepted for an organization builder")
+	}
+	t.Setenv("GITHUB_ACTIONS", "true")
+	if _, err := buildRun(options{}, orgBuilder); err == nil {
+		t.Error("an organization builder took the GitHub Actions run instead of its own revision")
 	}
 }
 

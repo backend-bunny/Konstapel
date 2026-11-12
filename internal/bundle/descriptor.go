@@ -119,14 +119,18 @@ type Descriptor struct {
 }
 
 var (
-	namePattern    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-	semverPattern  = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
-	revisionPat    = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	sha256Pattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	oscalVerPat    = regexp.MustCompile(`^1\.\d+\.\d+$`)
-	providerPat    = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*/v[0-9]+$`)
-	workloadPat    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
-	knownOS        = map[string]bool{"linux": true, "windows": true}
+	namePattern   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+	semverPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+	revisionPat   = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	oscalVerPat   = regexp.MustCompile(`^1\.\d+\.\d+$`)
+	providerPat   = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*/v[0-9]+$`)
+	workloadPat   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+	// recognizedOS are the scope.os names a descriptor may carry. Only linux
+	// is supported: compatibility checking (internal/bundle/content) reports
+	// content that names windows, alone or with linux, as Incompatible so it
+	// is never adopted. Any other name is an invalid descriptor.
+	recognizedOS   = map[string]bool{"linux": true, "windows": true}
 	reservedPrefix = []string{"content/", "tests/", "licenses/"}
 )
 
@@ -209,13 +213,20 @@ func (d *Descriptor) Validate() error {
 			fail("scope.workloads entry %q must be a Kubernetes kind", w)
 		}
 	}
+	// scope.os is a non-empty list of distinct recognized names; only
+	// ["linux"] is compatible (see recognizedOS).
 	if len(d.Scope.OS) == 0 {
 		fail("scope.os must not be empty")
 	}
+	seenOS := map[string]bool{}
 	for _, o := range d.Scope.OS {
-		if !knownOS[o] {
-			fail("scope.os entry %q is not supported", o)
+		switch {
+		case !recognizedOS[o]:
+			fail("scope.os entry %q is not a recognized operating system; only linux workloads are supported", o)
+		case seenOS[o]:
+			fail("scope.os repeats %q", o)
 		}
+		seenOS[o] = true
 	}
 
 	// File inventory: unique clean paths, a known role, a real digest.
