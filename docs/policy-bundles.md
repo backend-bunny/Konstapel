@@ -5,17 +5,16 @@ policy content: Kyverno policies, their tests, and the OSCAL/C2P mappings to
 NIST controls. A profile references a bundle by name and digest; the controller
 resolves it centrally and verifies it before use.
 
-> **Status.** This page documents the payload contract implemented in
-> [`internal/bundle`](../internal/bundle) and how to build a bundle locally.
-> The release workflow can publish a bundle write-once to the registry, but
-> signing, provenance and runtime resolution by the controller are tracked in
-> the `add-policy-bundle-distribution` OpenSpec change and are **not available
-> yet**: no official bundle has been released (a published bundle stays
-> incomplete until it is signed), and a locally built bundle cannot yet be
-> consumed by a profile. Until those land, the only
-> supported way to deliver policies is the existing prototype workflow in
-> [development](development.md). This page gains release and mirroring
-> instructions as each group lands.
+> **Status.** The first official bundle,
+> [`konstapel-privileged-containers` 0.1.0](#first-official-release-konstapel-privileged-containers-010),
+> is released, signed and verifiable. The controller resolves, verifies and
+> caches bundles by digest and serves them to profiles when central bundle
+> sources are enabled (off by default; see [charts](charts.md)); assessment
+> runs of an OCI bundle export from the bundle's own frozen content. A
+> reproducible end-to-end example is the
+> [Audit walkthrough](integration/bundle-audit-walkthrough.md). Remaining work
+> is tracked in the `add-policy-bundle-distribution` OpenSpec change; live
+> acceptance of the full official and organization matrix is not finished.
 
 ## OCI layout
 
@@ -2882,11 +2881,12 @@ so no admission path on a non-leader exists to test); a profile digest
 upgrade to a different, semantically changed signed bundle (only one signed
 subject exists as a fixture; the revision advance by another manifest digest
 is unit-tested in `internal/bundle/content`); keyless signatures in the
-cluster (the fixture is public-key signed); bearer-token registries; and
-assessment export, which still reads the image's vendored `content/` tree
-(`AssessmentRunReconciler` passes `Runtime.ContentRoot` to
-`collector.Export`), so OSCAL for a run of an OCI-bundle binding is built from
-vendored catalog and mapping files rather than the bundle's own.
+cluster (the fixture is public-key signed; the
+[Audit walkthrough](integration/bundle-audit-walkthrough.md) does run the
+official keyless bundle in a cluster, by hand); and bearer-token registries.
+Assessment export of an OCI-bundle run uses the run's frozen bundle content,
+not the image's vendored tree (see
+[Assessment runs freeze their bundle](#assessment-runs-freeze-their-bundle)).
 
 ## Create and package a bundle
 
@@ -3403,6 +3403,7 @@ and the GitHub CLI creating or editing the release with the job token
 same Cosign version verify offline (`internal/bundle/verify/testdata/ghcr`),
 which is the closest local evidence.
 
-**Not implemented yet.** Organization publication and mirroring (6.5), and live
-acceptance evidence for official compatibility claims. No official bundle has
-been released yet.
+**Not implemented yet.** Live acceptance evidence for official compatibility
+claims beyond the [Audit walkthrough](integration/bundle-audit-walkthrough.md).
+The first official bundle is released (see
+[First official release](#first-official-release-konstapel-privileged-containers-010)).
