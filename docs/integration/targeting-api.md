@@ -406,6 +406,9 @@ while applied policies stay
 ([Conditions and requeue](../policy-bundles.md#conditions-and-requeue)).
 `TestLiveHelmBundles` runs an Audit binding over a profile pinning a signed
 OCI bundle with the Helm-installed controller.
+[Walkthrough: audit with the official signed bundle](bundle-audit-walkthrough.md)
+does the same by hand with the released official bundle, through to the
+assessment finding and the bundle identity in its package.
 
 ### Deployment and RBAC
 

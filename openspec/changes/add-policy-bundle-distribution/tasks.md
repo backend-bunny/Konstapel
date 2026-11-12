@@ -72,7 +72,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 5.4 Verify profile digest upgrades and rollbacks through the existing replacement-readiness and revision contracts; test that semantic changes advance revisions while mirrors/credential rotation do not, and that an earlier exception cannot authorize a new revision when exception integration is available.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 5.5 Update targeting/provider documentation with configured official and organization sources; run the documented Audit example and retain existing local CLI/capture regression results without rewriting historical hashes.
+- [x] 5.5 Update targeting/provider documentation with configured official and organization sources; run the documented Audit example and retain existing local CLI/capture regression results without rewriting historical hashes.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 - [x] 5.6 Audit the controller ServiceAccount's effective Secret/ConfigMap access across every Role and ClusterRole the chart and `config/rbac` bind to it; remove grants no implemented feature uses (the unused ConfigMap `list`), keep and document the by-any-name `get` that CR-named S3 credentials, CA trust, legacy configuration, snapshots and inventories need, and state what the bundle Role adds; assert the exact rendered union and allowed/denied requests against a real API server.
   <!-- agent: tier=deep risk=high reason="Authorization boundary shared by every controller feature" -->
