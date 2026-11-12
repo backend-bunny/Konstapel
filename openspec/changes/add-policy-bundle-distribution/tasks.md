@@ -75,13 +75,13 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 ## 6. Independent release publication
 
-- [ ] 6.1 Add bundle-specific versions, Git release-tag validation and a dedicated dispatch workflow using reviewed main-ancestor commits; test invalid names/versions/source commits and demonstrate that it requires no application or chart release.
+- [x] 6.1 Add bundle-specific versions, Git release-tag validation and a dedicated dispatch workflow using reviewed main-ancestor commits; test invalid names/versions/source commits and demonstrate that it requires no application or chart release.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 6.2 Freeze tested archives/manifests and implement serialized write-once publication with recoverable inputs; use registry failure injection to verify missing-upload recovery, conflicting version refusal and completion of missing proofs without replacing original bytes.
+- [x] 6.2 Freeze tested archives/manifests and implement serialized write-once publication with recoverable inputs; use registry failure injection to verify missing-upload recovery, conflicting version refusal and completion of missing proofs without replacing original bytes.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 6.3 Sign and attest the exact remote OCI digest through GitHub OIDC; validate provenance identifies actual content source, bundle inputs and tests separately from dispatch/workflow revision, and verify the resulting subject through the consumer's trust contract.
+- [x] 6.3 Sign and attest the exact remote OCI digest through GitHub OIDC; validate provenance identifies actual content source, bundle inputs and tests separately from dispatch/workflow revision, and verify the resulting subject through the consumer's trust contract.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 6.4 Add bundle release notes and CI summaries with version, digest, compatibility, policies, licenses and verification instructions; test rendering/idempotent updates and ensure publication is not reported complete while required remote verification is missing.
+- [x] 6.4 Add bundle release notes and CI summaries with version, digest, compatibility, policies, licenses and verification instructions; test rendering/idempotent updates and ensure publication is not reported complete while required remote verification is missing.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 6.5 Document organization publication and mirroring with the same format and verifier; test copying a subject plus referrers to the private fixture registry, preserving its digest and original provenance, and rejection when required evidence is omitted.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
