@@ -1,0 +1,38 @@
+# Sources whose registry's bearer token service is on another origin. The
+# realms are the ones Docker Hub and GitLab.com named in their unauthenticated
+# /v2/ challenges on 2026-11-12 (see docs/policy-bundles.md, "Token realms on
+# another origin"); only these origins may receive the credential, and only
+# as a token request for the source's own repository. The repositories,
+# Secrets and publisher rules are examples.
+version: 1
+sources:
+  # Docker Hub: use the registry host the API is served from,
+  # registry-1.docker.io, not docker.io; the credential Secret's auths entry
+  # must name the same host.
+  - name: acme-dockerhub
+    repository: registry-1.docker.io/acme/policy-bundles
+    credentialSecret:
+      name: dockerhub-reader
+    tokenRealms:
+      - https://auth.docker.io
+    publisher:
+      type: keyless
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/acme/policies/.github/workflows/bundle-release.yml@refs/heads/main
+      provenance:
+        sourceRepository: https://github.com/acme/policies
+        builder: https://github.com/acme/policies/.github/workflows/bundle-release.yml@refs/heads/main
+  # GitLab.com container registry: the realm is https://gitlab.com/jwt/auth.
+  - name: acme-gitlab
+    repository: registry.gitlab.com/acme/policies/bundles
+    credentialSecret:
+      name: gitlab-deploy-token
+    tokenRealms:
+      - https://gitlab.com
+    publisher:
+      type: keyless
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/acme/policies/.github/workflows/bundle-release.yml@refs/heads/main
+      provenance:
+        sourceRepository: https://github.com/acme/policies
+        builder: https://github.com/acme/policies/.github/workflows/bundle-release.yml@refs/heads/main

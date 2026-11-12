@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 
@@ -60,14 +61,29 @@ type fetchTransport struct {
 }
 
 // credentialScope is where a retrieval may send credential material: the
-// source's registry origin, and on a redirect only paths of its repository.
+// source's registry origin, on a redirect only paths of its repository, and
+// the token realm origins configured for the source, only as token requests
+// for the source's own repository.
 type credentialScope struct {
-	origin   string // scheme://host[:port], default port omitted
-	repoPath string // "/v2/<repository path>/"
+	origin     string          // scheme://host[:port], default port omitted
+	repository string          // the repository path, without the host
+	repoPath   string          // "/v2/<repository path>/"
+	realms     map[string]bool // configured token realm origins (canonical)
+	actions    map[string]bool // token scope actions a realm may be asked for
 }
 
-func newCredentialScope(scheme, host, path string) credentialScope {
-	return credentialScope{origin: canonicalOrigin(scheme, host), repoPath: "/v2/" + path + "/"}
+func newCredentialScope(scheme, host, path string, realms []string, actions ...string) credentialScope {
+	s := credentialScope{
+		origin: canonicalOrigin(scheme, host), repository: path, repoPath: "/v2/" + path + "/",
+		realms: map[string]bool{}, actions: map[string]bool{},
+	}
+	for _, r := range realms {
+		s.realms[r] = true
+	}
+	for _, a := range actions {
+		s.actions[a] = true
+	}
+	return s
 }
 
 func canonicalOrigin(scheme, host string) string {
@@ -93,29 +109,160 @@ func (s credentialScope) inRepository(u *url.URL) bool {
 	return p == "/v2/" || strings.HasPrefix(p, s.repoPath)
 }
 
-// guard decides what may be sent. Credential material is an Authorization
-// header or a request body (an OAuth2 token request carries the password or
-// refresh token in its form). Another origin never receives it: a direct
-// request (such as a token fetch from a realm on another host or port) fails
-// before it is sent, and on a redirect the Authorization header is dropped.
-// On the registry's own origin a redirect keeps the header only within the
-// source's repository; direct requests there (the API and same-origin token
-// realms) are unchanged.
+// credentialed reports whether req carries credential material: an
+// Authorization header or a request body (an OAuth2 token request carries the
+// password or refresh token in its form).
+func credentialed(req *http.Request) bool {
+	return req.Header.Get("Authorization") != "" || (req.Method != http.MethodGet && req.Method != http.MethodHead)
+}
+
+// guard decides what may be sent. Credential material never reaches an
+// origin other than the registry's, except a token request to a token realm
+// origin configured for the source: a direct request carrying it anywhere
+// else fails before it is sent, and on a redirect the Authorization header is
+// dropped. On the registry's own origin a redirect keeps the header only
+// within the source's repository; direct requests there (the API and
+// same-origin token realms) are unchanged. A request to a configured realm
+// must be a plain token request (see tokenRequest), and is never redirected
+// (see redirectScope).
 func (s credentialScope) guard(req *http.Request) (*http.Request, error) {
 	authz := req.Header.Get("Authorization") != ""
-	sameOrigin := canonicalOrigin(req.URL.Scheme, req.URL.Host) == s.origin
+	origin := canonicalOrigin(req.URL.Scheme, req.URL.Host)
+	sameOrigin := origin == s.origin
 	if req.Response != nil { // a redirect hop built by net/http
+		// CheckRedirect (redirectScope) already refused this; repeated here
+		// so that the transport alone never follows such a redirect.
+		if first := firstHop(req); first != nil {
+			if err := s.redirectScope([]*http.Request{first}); err != nil {
+				return nil, err
+			}
+		}
 		if authz && !(sameOrigin && s.inRepository(req.URL)) {
 			req = req.Clone(req.Context())
 			req.Header.Del("Authorization")
 		}
 		return req, nil
 	}
-	bodied := req.Method != http.MethodGet && req.Method != http.MethodHead
-	if !sameOrigin && (authz || bodied) {
-		return nil, fmt.Errorf("%w: %s %s is not the source's registry %s", ErrCredentialScope, req.Method, req.URL.Host, s.origin)
+	if sameOrigin || !credentialed(req) {
+		return req, nil
+	}
+	if !s.realms[origin] {
+		return nil, fmt.Errorf("%w: %s %s is neither the source's registry %s nor a token realm configured for it", ErrCredentialScope, req.Method, req.URL.Host, s.origin)
+	}
+	if err := s.tokenRequest(req); err != nil {
+		return nil, fmt.Errorf("%w: %s %s: %w", ErrCredentialScope, req.Method, req.URL.Host, err)
 	}
 	return req, nil
+}
+
+// firstHop returns the request that started req's redirect chain, or nil
+// when the chain is not recorded (a base transport that does not set
+// Response.Request).
+func firstHop(req *http.Request) *http.Request {
+	for req.Response != nil {
+		if req.Response.Request == nil {
+			return nil
+		}
+		req = req.Response.Request
+	}
+	return req
+}
+
+// maxTokenForm bounds the OAuth2 token request form the guard inspects.
+const maxTokenForm = 64 << 10
+
+// tokenRequest checks a credentialed request to a configured token realm
+// (whose origin, and so its https scheme, guard has matched): a GET (distribution token, Basic credentials) or form POST (OAuth2,
+// password or refresh token) with no URL userinfo, whose every requested
+// scope, in the query or the form, is the source's own repository with
+// permitted actions. A realm or challenge that asks for another repository,
+// the registry catalog or any other resource gets no credential.
+func (s credentialScope) tokenRequest(req *http.Request) error {
+	if req.URL.User != nil {
+		return errors.New("token realm URL carries userinfo")
+	}
+	scopes := req.URL.Query()["scope"]
+	switch req.Method {
+	case http.MethodGet:
+		if req.Body != nil && req.Body != http.NoBody {
+			return errors.New("token GET has a body")
+		}
+	case http.MethodPost:
+		if mt, _, _ := strings.Cut(req.Header.Get("Content-Type"), ";"); strings.TrimSpace(mt) != "application/x-www-form-urlencoded" {
+			return errors.New("token POST is not a form")
+		}
+		if req.GetBody == nil {
+			return errors.New("token POST body cannot be inspected")
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return errors.New("token POST body cannot be inspected")
+		}
+		raw, err := io.ReadAll(io.LimitReader(body, maxTokenForm+1))
+		body.Close()
+		if err != nil || len(raw) > maxTokenForm {
+			return errors.New("token POST body cannot be inspected")
+		}
+		form, err := url.ParseQuery(string(raw))
+		if err != nil {
+			return errors.New("token POST form is malformed")
+		}
+		scopes = append(scopes, form["scope"]...)
+	default:
+		return fmt.Errorf("method %s is not a token request", req.Method)
+	}
+	n := 0
+	for _, v := range scopes {
+		for _, scope := range strings.Fields(v) {
+			if !s.repositoryScope(scope) {
+				return fmt.Errorf("token scope %q is not the source's repository %q with %s", scope, s.repository, s.actionList())
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		return errors.New("token request names no repository scope")
+	}
+	return nil
+}
+
+// repositoryScope reports whether scope is "repository:<the source's
+// repository>:<actions>" with only permitted actions.
+func (s credentialScope) repositoryScope(scope string) bool {
+	rest, ok := strings.CutPrefix(scope, "repository:"+s.repository+":")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, a := range strings.Split(rest, ",") {
+		if !s.actions[a] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s credentialScope) actionList() string {
+	var out []string
+	for a := range s.actions {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+// redirectScope refuses every redirect of a credentialed request to a
+// configured token realm, so a token service cannot pass the credential, or
+// the request for it, anywhere else, nor turn it into an anonymous token
+// request: the exchange fails instead. via[0] is the request as first sent.
+func (s credentialScope) redirectScope(via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	first := via[0]
+	if canonicalOrigin(first.URL.Scheme, first.URL.Host) != s.origin && credentialed(first) {
+		return fmt.Errorf("%w: token realm %s redirected; token requests carrying credentials are not redirected", ErrCredentialScope, first.URL.Host)
+	}
+	return nil
 }
 
 func (t *fetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -198,6 +345,24 @@ func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// tokenRealms validates src.TokenRealms again (the configuration loader
+// already did) and returns their canonical origins. Realms are https only, so
+// a plain-HTTP test registry has none.
+func tokenRealms(src bundle.BundleSource, scheme, host string) ([]string, error) {
+	out := make([]string, 0, len(src.TokenRealms))
+	for _, r := range src.TokenRealms {
+		o, err := bundle.ParseTokenRealm(r)
+		if err != nil {
+			return nil, fmt.Errorf("%w: source %q: %w", ErrInvalidRequest, src.Name, err)
+		}
+		if o == canonicalOrigin(scheme, host) {
+			return nil, fmt.Errorf("%w: source %q: token realm %q is the registry's own origin", ErrInvalidRequest, src.Name, r)
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
 func registryHost(repository string) string {
 	host, _, _ := strings.Cut(repository, "/")
 	return host
@@ -213,7 +378,7 @@ func (c *Client) retrieve(ctx context.Context, src bundle.BundleSource, d digest
 
 func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d digest.Digest, rec *secrets) (*Result, error) {
 	meta := &budget{limit: c.limits.MaxMetadataBytes, remaining: c.limits.MaxMetadataBytes}
-	repo, err := c.repository(ctx, src, rec, meta)
+	repo, err := c.repository(ctx, src, rec, meta, auth.ActionPull)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +426,9 @@ func (c *Client) retrieveRaw(ctx context.Context, src bundle.BundleSource, d dig
 // repository builds the ORAS repository for one attempt of src: the
 // credential preflight, the source's TLS transport, the credential scope
 // guard, bounded redirects and the per-source token cache. Every credential
-// value used is recorded in rec for redaction.
-func (c *Client) repository(ctx context.Context, src bundle.BundleSource, rec *secrets, meta *budget) (*remote.Repository, error) {
+// value used is recorded in rec for redaction. actions are the token scope
+// actions a configured cross-origin token realm may be asked for.
+func (c *Client) repository(ctx context.Context, src bundle.BundleSource, rec *secrets, meta *budget, actions ...string) (*remote.Repository, error) {
 	host := registryHost(src.Repository)
 	if err := c.preflightCredential(ctx, src, host, rec); err != nil {
 		return nil, err
@@ -275,11 +441,21 @@ func (c *Client) repository(ctx context.Context, src bundle.BundleSource, rec *s
 	if c.plainHTTP {
 		scheme = "http"
 	}
+	realms, err := tokenRealms(src, scheme, host)
+	if err != nil {
+		return nil, err
+	}
 	_, path, _ := strings.Cut(src.Repository, "/")
+	scope := newCredentialScope(scheme, host, path, realms, actions...)
 	httpClient := &http.Client{
-		Transport:     &fetchTransport{base: base, rec: rec, budget: meta, scope: newCredentialScope(scheme, host, path)},
-		Timeout:       c.limits.RequestTimeout,
-		CheckRedirect: c.checkRedirect,
+		Transport: &fetchTransport{base: base, rec: rec, budget: meta, scope: scope},
+		Timeout:   c.limits.RequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if err := scope.redirectScope(via); err != nil {
+				return err
+			}
+			return c.checkRedirect(req, via)
+		},
 	}
 	authClient := &auth.Client{
 		Client:     httpClient,

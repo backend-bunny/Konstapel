@@ -33,6 +33,8 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 2.5 Document private registry setup, least-privilege Secret access and registry compatibility requirements; verify the setup against the fixture and state explicitly that Konstapel does not inherit node pull credentials.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+- [x] 2.6 Add an explicit per-source HTTPS token-realm allowlist (`tokenRealms`) for token services on another origin; validate it at configuration load and in the adapter, and test allowed and denied realms, redirects of token and registry requests, malformed and multiple challenges, scope tampering, failures without anonymous fallback, credential confinement on recorded requests, and the Docker Hub/GitLab.com challenges observed without credentials.
+  <!-- agent: tier=deep risk=high reason="Credential forwarding and registry authorization boundary" -->
 
 ## 3. Signature and provenance verification
 

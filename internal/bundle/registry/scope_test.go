@@ -12,7 +12,7 @@ import (
 )
 
 func TestCredentialScope(t *testing.T) {
-	s := newCredentialScope("https", "registry.example", "bundles/x")
+	s := newCredentialScope("https", "registry.example", "bundles/x", nil, "pull")
 	redirect := &http.Response{}
 	for _, tc := range []struct {
 		name, method, url string

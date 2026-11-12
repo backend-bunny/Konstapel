@@ -43,9 +43,11 @@ var (
 	// is unavailable or invalid. There is no fallback to other roots.
 	ErrTrustConfig = errors.New("registry TLS trust configuration is unavailable")
 	// ErrCredentialScope: a request would have carried registry credentials
-	// to an origin other than the source's registry (for example a token
-	// realm on another host); it was not sent.
-	ErrCredentialScope = errors.New("refusing to send registry credentials to another origin")
+	// to an origin other than the source's registry and its configured token
+	// realms (for example an unlisted token realm), a token request to a
+	// configured realm asked for more than the source's repository, or a
+	// configured realm redirected; it was not sent or followed.
+	ErrCredentialScope = errors.New("refusing to send registry credentials outside the source's registry and token realms")
 	// ErrMissingProofs: a required proof kind was not attached to the subject.
 	ErrMissingProofs = errors.New("required verification proofs are missing")
 )

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -21,6 +22,9 @@ const SourcesVersion = 1
 const SourcesConfigKey = "sources.yaml"
 
 const maxSources = 256
+
+// maxTokenRealms bounds BundleSource.TokenRealms.
+const maxTokenRealms = 4
 
 // Reference kinds for custom CA and trust-root objects.
 const (
@@ -89,8 +93,15 @@ type BundleSource struct {
 	CredentialSecret *ObjectRef `json:"credentialSecret,omitempty"`
 	// CA references additional trusted roots for the registry's TLS. TLS
 	// verification is never disabled.
-	CA        *ObjectRef `json:"ca,omitempty"`
-	Publisher Publisher  `json:"publisher"`
+	CA *ObjectRef `json:"ca,omitempty"`
+	// TokenRealms lists the https origins (https://host[:port], no path) of
+	// bearer token services on another origin than the registry that may
+	// receive this source's credential, such as https://auth.docker.io for
+	// Docker Hub. Each is an exact origin: no wildcards, IP addresses or
+	// localhost. A token realm on the registry's own origin needs no entry;
+	// any other realm never receives the credential.
+	TokenRealms []string  `json:"tokenRealms,omitempty"`
+	Publisher   Publisher `json:"publisher"`
 }
 
 // Sources is the versioned central configuration document.
@@ -174,6 +185,51 @@ func httpsURL(what, v string) error {
 	return nil
 }
 
+// ParseTokenRealm checks one BundleSource.TokenRealms entry and returns its
+// canonical origin ("https://host" or "https://host:port", with the default
+// port omitted). The entry must be exactly an https origin: lowercase, no
+// userinfo, path (not even "/"), query or fragment, a DNS host name rather
+// than an IP address or localhost, and a port in 1-65535 if one is given.
+func ParseTokenRealm(v string) (string, error) {
+	bad := func(why string) (string, error) {
+		return "", fmt.Errorf("token realm %q %s", v, why)
+	}
+	rest, ok := strings.CutPrefix(v, "https://")
+	if !ok {
+		return bad("must be an https origin (https://host[:port])")
+	}
+	if rest == "" || strings.ContainsAny(rest, "/?#@\\%*[] \t\r\n") {
+		return bad("must be an https origin (https://host[:port]) without userinfo, path, query, fragment or wildcards")
+	}
+	if !hostPattern.MatchString(rest) {
+		return bad("must name a lowercase DNS host")
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.Host != rest || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return bad("must be an https origin (https://host[:port])")
+	}
+	host, port := u.Hostname(), u.Port()
+	// hostPattern admits no IPv6 literal; a numeric last label is an IPv4
+	// address (or a form of one that resolvers accept).
+	labels := strings.Split(host, ".")
+	if last := labels[len(labels)-1]; strings.Trim(last, "0123456789") == "" {
+		return bad("must name a DNS host, not an IP address")
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return bad("must not be localhost")
+	}
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strings.HasPrefix(port, "0") {
+			return bad("has an invalid port")
+		}
+		if n == 443 {
+			return "https://" + host, nil
+		}
+	}
+	return "https://" + rest, nil
+}
+
 // Validate checks one publisher rule.
 func (p Publisher) Validate() error {
 	var errs []error
@@ -244,6 +300,23 @@ func (s BundleSource) Validate() error {
 		if err := validateRef("ca", s.CA, KindConfigMap, KindSecret); err != nil {
 			fail("%v", err)
 		}
+	}
+	if len(s.TokenRealms) > maxTokenRealms {
+		fail("more than %d tokenRealms", maxTokenRealms)
+	}
+	host, _, _ := strings.Cut(s.Repository, "/")
+	seen := map[string]bool{}
+	for _, r := range s.TokenRealms {
+		o, err := ParseTokenRealm(r)
+		switch {
+		case err != nil:
+			fail("%v", err)
+		case seen[o]:
+			fail("token realm %q is listed more than once", r)
+		case o == "https://"+strings.TrimSuffix(host, ":443"):
+			fail("token realm %q is the registry's own origin, which needs no entry", r)
+		}
+		seen[o] = true
 	}
 	if err := s.Publisher.Validate(); err != nil {
 		fail("%v", err)

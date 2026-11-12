@@ -103,7 +103,9 @@ Konstapel SHALL retrieve bundle content and verification metadata using its own
 registry client and centrally referenced Kubernetes registry-credential Secrets.
 It SHALL support anonymous repositories and authenticated private repositories,
 verified TLS and configured custom CAs. Credentials SHALL NOT appear in profiles,
-status, evidence, or logs, and SHALL NOT be forwarded to unrelated origins.
+status, evidence, or logs, and SHALL NOT be forwarded to unrelated origins; a
+token service on another origin is related only when the source explicitly lists
+it.
 
 #### Scenario: Pull and verify from a private registry
 
@@ -116,6 +118,13 @@ status, evidence, or logs, and SHALL NOT be forwarded to unrelated origins.
 - **WHEN** a referenced Secret changes or becomes unavailable
 - **THEN** subsequent registry requests use the current credentials or report a recoverable authentication failure
 - **AND** errors contain no credential values and no anonymous bypass is used for a required missing credential
+
+#### Scenario: Token service on another origin
+
+- **WHEN** a registry's bearer challenge names a token realm on another origin than the registry
+- **THEN** the credential is sent there only if that exact https origin is listed for the source, validated when the configuration loads
+- **AND** only as an unredirected token request scoped to the source's own repository, with no anonymous retry if the exchange fails
+- **AND** an unlisted, malformed or redirecting realm, or a request for another scope, fails without sending the credential
 
 ### Requirement: Explicit keyless and public-key publisher trust
 
