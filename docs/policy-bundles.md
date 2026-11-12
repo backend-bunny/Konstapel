@@ -1733,12 +1733,90 @@ re-acquired by their owners. Reopening with a lower capacity keeps every entry;
 the next admission evicts unleased entries as needed, or fails with
 `ErrCapacity` if leases pin too much.
 
+### Cache lifetime and outage behavior
+
+What an operator can rely on. The cache is a performance and availability aid
+for bundle content, never a source of trust and never durable storage.
+
+**What survives what.** The default cache directory is a bounded `emptyDir`
+(not mounted by the chart yet; see below). An `emptyDir` lives as long as its
+Pod, so:
+
+| Event | Cached content and retained evidence | Acceptances and leases |
+| --- | --- | --- |
+| Container restart inside the same Pod | survive, and are re-verified on use | lost: recomputed from the retained evidence under the current configuration, re-acquired by their owners |
+| Pod replacement, node loss, eviction, rollout | lost with the `emptyDir`: the next start has an empty cache | lost, as above |
+| Operator-provided persistent volume | survive all of the above, with the same integrity rules (anything corrupt is removed and never served) | lost, as above |
+| Lowering the capacity on reopen | every entry is kept; the next admission evicts unleased entries or fails with `ErrCapacity` | lost, as above |
+
+Nothing in the default configuration promises that cached bytes survive a Pod
+replacement, and nothing here should be read as durable storage. A persistent
+volume is an operator choice that only changes how often content has to be
+fetched again; it never changes what is trusted.
+
+**What a cache hit means.** Cached bytes are never authorization. Serving them
+needs an acceptance under the current source rule, trust material (root or
+key) and compatibility revision, recomputed offline from the retained evidence
+when none is held (`Verifier.Recheck`; the stored receipt is data to compare
+against, not authority). Rotating registry credentials or pointing the source at
+a mirror changes none of those revisions, so it invalidates nothing. A changed
+rule, key, root or provider contract does, and the next resolution either
+re-verifies or fails.
+
+**What operators see, and what to do.** Every failure is `ErrUnresolved`
+without a lease held; the controller (group 5) turns them into status
+conditions. Applied policies are never removed because resolution failed.
+
+| Result | Meaning | Action |
+| --- | --- | --- |
+| `ErrContentUnavailable` | not cached (a fresh or wiped cache, or an entry found corrupt) and not retrievable now | restore access to the registry; the content is fetched again and verified |
+| `ErrProofUnavailable` | content cached but the retained verification evidence is missing or corrupt, and the registry cannot supply it | restore registry access; fresh evidence replaces it |
+| `ErrUntrusted` | the evidence no longer satisfies the current rule, key or root (rotated, replaced, or unreadable) | publish proofs that satisfy the current rule, or correct the configuration |
+| `ErrIncompatible` | the content does not match the controller or provider contract | use a compatible bundle version or upgrade |
+| `ErrConfig` | no source is configured for the bundle name | configure it, or restore the removed entry |
+| `ErrStale` | the configuration changed while resolving | none: resolve again |
+| `ErrCapacity` | leased (pinned) content leaves no room | raise the capacity or use a persistent volume; leases are released when owners advance |
+
+**Registry outages.** With the registry down, a bundle resolves only if its
+content and complete evidence are still cached and still satisfy the current
+trust configuration. A wiped cache, missing evidence, or changed trust stays
+unresolved; there is no stale success and no verification is skipped.
+
+**Applied policies.** Resolution decides whether content may be newly used, not
+whether already applied policies keep running. When content becomes unresolved,
+policies already applied stay in place and are reported as stale or unresolved
+with the applied and desired revisions kept apart; content that failed to
+resolve is never newly installed or reapplied, and an exception cannot newly
+authorize anything meanwhile. After a process or cache loss the controller
+reconstructs applied ownership through the targeting contract; cached status
+alone never authorizes content. That reporting is the controller's (group 5) and
+is not implemented yet.
+
+**Sizing.** The defaults (1 GiB total, 64 MiB compressed and 256 MiB unpacked
+per entry, 16 MiB of retained evidence per entry) exist to bound hostile
+content; the official bundle is well under 1 MiB compressed. Size the volume
+for the bundles you configure plus the worst-case reservation of one entry
+(about 372 MiB at the defaults), which is the minimum the configuration
+validation accepts.
+
+**How the cases are tested.** `TestOutage` in `internal/bundle/resolve` runs
+each scenario above with and without a process restart, against a registry that
+is down and records whether it was called: reuse after restart (offline recheck,
+no registry request), a lost cache (the whole directory removed, as on Pod
+replacement) giving `ErrContentUnavailable`, missing and corrupt evidence giving
+`ErrProofUnavailable`, corrupt content, rotated-out or replaced keys and a
+changed builder giving `ErrUntrusted`, a removed source, an incompatible
+provider, and recovery when the registry returns. The cache package tests cover
+corruption and capacity after restart. The stale-applied-policy reporting is
+verified with the controller wiring, so task 4.5 is not ticked.
+
 ### Not done yet
 
-- Documentation of cache lifetime across process restarts and Pod or cache
-  loss (task 4.5). The default will be a bounded `emptyDir` that does not
-  survive Pod replacement, optionally an operator-provided persistent volume
-  with the same integrity rules. Neither is mounted by the chart yet.
+- The cache volume itself: the default bounded `emptyDir` (which does not
+  survive Pod replacement) and the optional operator-provided persistent volume
+  are described above, but neither is mounted by the chart yet; and the
+  controller's reporting of stale applied policies (task 4.5 stays unticked
+  until it is verified with the controller wiring).
 - Controller wiring (group 5): configuration and Secret/ConfigMap watches
   feeding `Revisions` and the invalidation calls, the compatibility check,
   re-acquiring leases from applied ownership after a restart, status
