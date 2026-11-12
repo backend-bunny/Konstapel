@@ -44,6 +44,13 @@ affected resolution unavailable; it cannot silently retain old trust as current.
 Keep sensitive data out of the ConfigMap and restrict source/trust writes to
 platform administrators. Grant only the namespace-local read permissions the
 loader actually needs; do not introduce cluster-wide Secret access.
+The bundle Role grants these reads by name, but RBAC is additive: the
+controller ServiceAccount is shared by every feature, and its generated Role
+already allows Secret and ConfigMap `get` by any name in the controller
+namespace for CR-named S3 credentials, CA trust and runtime-named snapshots.
+The bundle Role's effective addition is therefore the named `list`/`watch` of
+the sources ConfigMap; narrowing the shared `get` would be a separate contract
+change (docs/charts.md, "Controller ServiceAccount boundary").
 
 A mirror replaces the configured repository while retaining the expected name,
 digest, and original publisher/source constraints. Multiple registries and bundle

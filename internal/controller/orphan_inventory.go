@@ -21,8 +21,10 @@ import (
 )
 
 // The orphan inventory is written as immutable ConfigMaps in the controller
-// namespace.
-// +kubebuilder:rbac:groups="",namespace=konstapel-system,resources=configmaps,verbs=get;list;create
+// namespace. Their names are derived from the destination UID, so each is
+// created and read back by name (get;create); nothing lists ConfigMaps
+// (docs/charts.md, "Controller ServiceAccount boundary").
+// +kubebuilder:rbac:groups="",namespace=konstapel-system,resources=configmaps,verbs=get;create
 
 const (
 	// OrphanInventoryVersion versions the inventory documents.

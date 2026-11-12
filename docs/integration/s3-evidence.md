@@ -590,7 +590,9 @@ must be writable and should survive restarts so staged captures can be
 recovered. `--content-root` must name the vendored `content` directory, which
 the exporter copies into each package. A `credentialSecret` is read from the
 controller's namespace (`POD_NAMESPACE`) with an uncached `get`; the generated
-controller Role grants `get` on Secrets in `konstapel-system` only. Values are
+controller Role grants `get` on Secrets in `konstapel-system` only (any name,
+because the name is chosen here; no `list` or `watch`; see
+[Controller ServiceAccount boundary](../charts.md#controller-serviceaccount-boundary)). Values are
 reused for `s3store.CredentialRefresh` (5 minutes), so a rotated Secret takes
 effect without a restart. Starting the controller never contacts the backend:
 a missing Secret or an unreachable or incompatible endpoint shows up as the

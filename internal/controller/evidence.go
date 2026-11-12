@@ -11,7 +11,9 @@ import (
 )
 
 // A credentialSecret destination's Secret is read, uncached, from the
-// controller's own namespace.
+// controller's own namespace. Its name is chosen in the EvidenceDestination
+// spec, so the grant cannot carry static resourceNames; it is get only, never
+// list or watch (docs/charts.md, "Controller ServiceAccount boundary").
 // +kubebuilder:rbac:groups="",namespace=konstapel-system,resources=secrets,verbs=get
 // EvidenceDestinations are platform-managed; the controller reads them and
 // owns their status.

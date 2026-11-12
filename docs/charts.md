@@ -261,7 +261,9 @@ renders:
   `replicaCount > 1`. Development values (`replicaCount: 1`) omit it.
 - **RBAC.** The ServiceAccount; ClusterRoleBindings to `konstapel-controller`
   and `konstapel-controller-assessments`; a RoleBinding to the Lease, Secret
-  and ConfigMap Role in `konstapel-system`.
+  and ConfigMap Role in `konstapel-system`. See
+  [Controller ServiceAccount boundary](#controller-serviceaccount-boundary)
+  for what that adds up to.
 - **Copied manifests.** `scripts/charts/runtime.sh` copies these unchanged as
   `templates/generated-*.yaml`, and `scripts/generate.sh --check` keeps them
   current:
@@ -411,7 +413,67 @@ The schema also rejects unknown values. The exception webhooks are
 unavailable, so no webhook Service or configuration is rendered.
 `internal/charttest` checks the defaults, the development case, the download
 server and all three TLS shapes, that every binding refers to a shipped role,
+the controller ServiceAccount's exact effective Secret and ConfigMap rules,
 and the refusals.
+
+### Controller ServiceAccount boundary
+
+One ServiceAccount, `konstapel-system/konstapel-controller`, runs every
+controller feature, so its permissions are the union of everything bound to
+it. There is no per-feature identity: a defect in one feature's code runs
+with all of these grants. The bindings are:
+
+| Binding | Role | Scope | Source |
+| --- | --- | --- | --- |
+| ClusterRoleBinding `konstapel-controller` | ClusterRole `konstapel-controller` | cluster | `+kubebuilder:rbac` markers in `internal/controller`, generated to `config/rbac/controller/role.yaml` |
+| ClusterRoleBinding `konstapel-controller-assessments` | ClusterRole `konstapel-controller-assessments` | cluster | `config/rbac/controller-assessments.yaml` |
+| RoleBinding `konstapel-controller` | Role `konstapel-controller` | `konstapel-system` | the same markers (`namespace=konstapel-system`) |
+| RoleBinding `konstapel-controller-bundles` (only with `bundles.sourcesConfigMap`) | Role `konstapel-controller-bundles` | `konstapel-system` | `templates/bundles.yaml` |
+
+Neither ClusterRole grants Secrets or ConfigMaps, so all such access is in
+`konstapel-system`. The effective Secret and ConfigMap access, and the
+implemented feature behind each grant:
+
+| Grant (in `konstapel-system`) | Feature and object | Why not narrower |
+| --- | --- | --- |
+| Secret `get`, any name | EvidenceDestination `spec.s3.credentialSecret` (S3 static credentials, read uncached on each client build, `internal/s3store.LoadCredentials`) | The name is chosen in the CR, so it cannot be a static `resourceNames` entry. |
+| ConfigMap `get`, any name | Central default destination (`konstapel-evidence-destination`, fixed); EvidenceDestination `spec.s3.caTrust` (user-named); preserved legacy configuration (`spec.legacy`, user-named); exception acceptance snapshots and orphan-inventory chunks and headers (names derived from exception UIDs and revisions, and destination UIDs) read back by name | Same: user-chosen or runtime-derived names. All reads are uncached `get`s through the manager's API reader. |
+| ConfigMap `create` | Exception acceptance snapshots and orphan-inventory chunks (immutable; never updated or deleted) | The API server cannot restrict `create` by name. |
+| Bundles Role: ConfigMap `get`/`list`/`watch` on `bundles.sourcesConfigMap`; `get` on each `bundles.referencedConfigMaps` and `bundles.referencedSecrets` entry | [OCI policy bundles](#oci-policy-bundles) | Already by name. |
+
+Nothing has `list`, `watch`, `update`, `patch`, `delete` or
+`deletecollection` on Secrets, nor on ConfigMaps other than the named,
+field-selected watch of the bundle sources ConfigMap; no rule uses a
+wildcard; nothing reaches Secrets or ConfigMaps in another namespace. The
+orphan inventory used to declare ConfigMap `list`, which no code path used;
+it was removed. The same Role also grants Lease
+`get`/`list`/`watch`/`create`/`update`/`patch`/`delete` (leader election)
+and Event `create`/`patch`, unchanged here.
+
+What this does not give you:
+- **Any Secret in `konstapel-system` is readable by name.** That includes
+  objects no feature references, such as the download server's TLS Secret or
+  a registry credential missing from the bundle values. Keep only Konstapel's
+  own objects in this namespace.
+- **The bundle Role's `get` rules add nothing today.** The generated Role
+  already grants `get` on every Secret and ConfigMap here, so the bundle
+  Role's only new privilege is the named `list`/`watch` of the sources
+  ConfigMap, and a reference missing from the bundle values is still read
+  rather than `Forbidden`. The rules record what bundles need and become
+  operative if the generated grants are narrowed.
+- **Narrowing is a contract change.** Restricting Secret `get` to names
+  would require listing every `credentialSecret` in chart values, as the
+  bundle values do; that is not implemented.
+
+Checks: `TestRuntimeChartControllerSecretConfigMapAccess`
+(`internal/charttest`) computes the union of every rule bound to the
+ServiceAccount from the rendered chart, with and without bundles, and
+asserts it exactly, along with allowed and denied requests.
+`scripts/generate.sh --check` (in `task check`) fails when the markers and
+`config/rbac/controller/role.yaml` or its chart copy disagree.
+`TestLiveHelmBundles` (charts acceptance group) asserts the same allowed and
+denied requests against a real API server, through impersonation of the
+ServiceAccount and SubjectAccessReview.
 
 ### OCI policy bundles
 
@@ -450,11 +512,12 @@ release when you add one.
 RBAC is additive, and the bundle Role is not the only grant: the
 controller's generated `konstapel-controller` Role (from
 `+kubebuilder:rbac` markers for evidence destinations, exceptions and the
-orphan inventory) already grants `get` on every Secret and `get`/`list` on
-every ConfigMap in `konstapel-system`. So today the bundle Role's effective
-new privilege is the named, field-selected `watch` of the sources ConfigMap,
-and a reference missing from these lists is still readable rather than
-`Forbidden`. Its `get` rules record exactly what bundles need and become the
+orphan inventory) already grants `get` on every Secret and ConfigMap in
+`konstapel-system` (see
+[Controller ServiceAccount boundary](#controller-serviceaccount-boundary)).
+So today the bundle Role's effective new privilege is the named,
+field-selected `list`/`watch` of the sources ConfigMap, and a reference
+missing from these lists is still readable rather than `Forbidden`. Its `get` rules record exactly what bundles need and become the
 operative grant if those broader rules are narrowed. `TestLiveHelmBundles`
 checks the watch against the API server: allowed with the bundle RoleBinding,
 forbidden without it, and forbidden unselected, for other ConfigMaps, for
