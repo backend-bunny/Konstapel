@@ -64,7 +64,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 - [x] 5.1 After the targeting resolver/manager merges, connect central ConfigMap and referenced Secret/CA watches to affected profiles with appropriate namespace-local RBAC; test atomic invalid configuration, deletion, rotation, requeue and observed-generation status.
   <!-- agent: tier=deep risk=medium reason="Cross-owner content resolution and bounded registry access" -->
-- [ ] 5.2 Connect resolved bundle content to the existing provider and contribution resolver; test unknown policies/parameters, provider allowlisting, unsupported workload scope/APIs, engine recovery and preservation of profile/binding governance without installing fixture resources.
+- [x] 5.2 Connect resolved bundle content to the existing provider and contribution resolver; test unknown policies/parameters, provider allowlisting, unsupported workload scope/APIs, engine recovery and preservation of profile/binding governance without installing fixture resources.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 5.3 Integrate bundle failures with detailed profile conditions and the existing ContentUnavailable boundary; test initial failure, failed update, trust revocation and recovery while preserving applied ownership and prohibiting new use of rejected content.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
