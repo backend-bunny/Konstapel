@@ -51,11 +51,11 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 - [x] 4.1 Implement isolated extraction and file-inventory checks; test traversal, symlinks/hardlinks, special files, duplicate normalized paths, truncated blobs and decompression limits, proving existing verified entries and unrelated files stay unchanged.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 4.2 Implement atomic digest-cache promotion, capacity reservation and configurable limits; test concurrent staging, disk exhaustion, interruption and recovery within the documented payload/proof/cache defaults.
+- [x] 4.2 Implement atomic digest-cache promotion, capacity reservation and configurable limits; test concurrent staging, disk exhaustion, interruption and recovery within the documented payload/proof/cache defaults.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 4.3 Separate cached bytes from source/trust/compatibility acceptance revisions; test reuse during registry outages, invalidation after trust/key/source changes and rejection of a result invalidated concurrently with its verification.
+- [x] 4.3 Separate cached bytes from source/trust/compatibility acceptance revisions; test reuse during registry outages, invalidation after trust/key/source changes and rejection of a result invalidated concurrently with its verification.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 4.4 Implement leases for desired/applied content and active assessments, plus eviction of unreferenced entries; test exhausted capacity with active pins, lease release, corrupted reuse and safe restoration from persistent cache.
+- [x] 4.4 Implement leases for desired/applied content and active assessments, plus eviction of unreferenced entries; test exhausted capacity with active pins, lease release, corrupted reuse and safe restoration from persistent cache.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 4.5 Document cache lifetime and outage behavior; verify process restart and Pod/cache-loss cases distinguish usable proofs, missing content and stale applied policies without claiming default durable storage.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
