@@ -15,6 +15,7 @@
 //	bundlerelease verify-release -name NAME -digest sha256:HEX [-sources FILE]
 //	                      [-record FILE] [-public-key-file FILE] [-trust-root-file FILE] [-out FILE]
 //	bundlerelease provenance -package DIR -out FILE [-sources FILE] [-workflow-* ...]
+//	bundlerelease mirror -from REPO -to REPO -digest sha256:HEX
 //	bundlerelease release-notes -name NAME -package DIR -verification FILE [-out FILE]
 //	                      [-announce [-repository OWNER/REPO]]
 //
@@ -40,6 +41,10 @@
 // GitHub release for the bundle tag, leaving an identical release untouched;
 // the token comes only from GH_TOKEN.
 //
+// mirror copies a published bundle and its signature and provenance referrers
+// by digest from -from (anonymous) to -to (written with the credential), then
+// reads the destination back; it refuses a source without the required proofs.
+//
 // The registry credential comes only from the environment
 // (BUNDLE_REGISTRY_USERNAME, BUNDLE_REGISTRY_PASSWORD), never from a flag, and
 // is never printed. Keyless signing uses GitHub Actions' ambient OIDC
@@ -62,6 +67,7 @@ import (
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/mirror"
 	"github.com/backend-bunny/Konstapel/internal/bundle/publish"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry/kubeaccess"
@@ -87,14 +93,15 @@ type options struct {
 	sources, signing, key, recordOut, record, digest                       string
 	publicKeyFile, trustRootFile, verification, repository                 string
 	announce                                                               bool
+	from, to                                                               string
 	tlogUpload                                                             bool
 	wf                                                                     publish.Workflow
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
-	cmds := map[string]bool{"verify": true, "tag": true, "freeze": true, "publish": true, "verify-release": true, "provenance": true, "release-notes": true}
+	cmds := map[string]bool{"verify": true, "tag": true, "freeze": true, "publish": true, "verify-release": true, "provenance": true, "release-notes": true, "mirror": true}
 	if len(args) == 0 || !cmds[args[0]] {
-		return fmt.Errorf("usage: bundlerelease verify|freeze|tag|publish|verify-release|provenance|release-notes -name NAME ...")
+		return fmt.Errorf("usage: bundlerelease verify|freeze|tag|publish|verify-release|provenance|release-notes|mirror -name NAME ...")
 	}
 	var o options
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
@@ -120,6 +127,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.StringVar(&o.verification, "verification", "", "release-notes: the verification record verify-release wrote")
 	fs.StringVar(&o.repository, "repository", "", "release-notes -announce: OWNER/REPO of the GitHub repository (default: $GITHUB_REPOSITORY)")
 	fs.BoolVar(&o.announce, "announce", false, "release-notes: create or update the GitHub release for the bundle tag (needs GH_TOKEN)")
+	fs.StringVar(&o.from, "from", "", "mirror: source repository (HOST/PATH), read anonymously")
+	fs.StringVar(&o.to, "to", "", "mirror: destination repository (HOST/PATH), written with the BUNDLE_REGISTRY_* credential")
 	fs.StringVar(&o.wf.Repository, "workflow-repository", "", "outside GitHub Actions: the pipeline's repository URL recorded in provenance")
 	fs.StringVar(&o.wf.Path, "workflow-path", "", "outside GitHub Actions: the pipeline definition's path")
 	fs.StringVar(&o.wf.Ref, "workflow-ref", "", "outside GitHub Actions: the pipeline's ref (optional)")
@@ -164,6 +173,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 		fmt.Fprintf(stdout, "tag=%s\ncommit=%s\nstate=%s\n", rel.Tag, rel.Commit, state)
 		return nil
+	case "mirror":
+		return mirrorBundle(ctx, o, stdout)
 	case "release-notes":
 		return releaseNotes(ctx, o, stdout)
 	case "verify-release":
@@ -680,5 +691,38 @@ func releaseNotes(ctx context.Context, o options, stdout io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "tag=%s\nrelease=%s\nstatus=announced\n", tag, outcome)
+	return nil
+}
+
+// mirrorBundle copies one published bundle, with its proofs, to another
+// repository by digest and verifies the destination holds identical content.
+func mirrorBundle(ctx context.Context, o options, stdout io.Writer) error {
+	if o.from == "" || o.to == "" || o.digest == "" {
+		return errors.New("mirror requires -from, -to and -digest")
+	}
+	cred, err := envCredential()
+	if err != nil {
+		return err
+	}
+	host, _, _ := strings.Cut(o.to, "/")
+	dst, err := registry.NewClient(registry.Options{Credentials: hostCredential{host: host, cred: cred}})
+	if err != nil {
+		return err
+	}
+	src, err := registry.NewClient(registry.Options{})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	res, err := mirror.Mirror(ctx, src, dst, mirror.Request{
+		Source:      bundle.BundleSource{Name: "source", Repository: o.from},
+		Destination: bundle.BundleSource{Name: "mirror", Repository: o.to, CredentialSecret: &publish.PublisherCredential},
+		Digest:      o.digest,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "digest=%s\nproofs=%d\nrepository=%s\n", res.Digest, len(res.Proofs), o.to)
 	return nil
 }

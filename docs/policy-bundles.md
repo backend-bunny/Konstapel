@@ -1424,6 +1424,56 @@ virtual Sigstore instead, and the real CI proof covers the public instance), the
 rotation steps end to end (only their building blocks are tested), and anything
 that runs in the controller. Because of the first item, task 3.5 is not ticked.
 
+## Organization publication and mirroring
+
+An organization publishes its own bundles, or mirrors the official ones into a
+private registry, with the same format and the same verifier as the official
+release. Nothing here is a second trust path.
+
+### Publish your own bundle
+
+Build with `bundle.Build` and package like the official bundles, then run
+`bundlerelease publish` against your repository (`-registry HOST/PREFIX`,
+credential in `BUNDLE_REGISTRY_USERNAME` and `BUNDLE_REGISTRY_PASSWORD`) with
+`-signing key` (your Cosign key) or `-signing keyless` (your CI identity) and
+`-sources FILE` naming your publisher rule. Consumers reference the bundle
+through a `BundleSource` whose publisher rule pins your key fingerprint or
+issuer and identity, and the provenance source repository and builder. See
+[Signing, trust roots and rotation](#signing-trust-roots-and-rotation).
+
+### Mirror a published bundle
+
+```sh
+BUNDLE_REGISTRY_USERNAME=... BUNDLE_REGISTRY_PASSWORD=... \
+  bundlerelease mirror -from ghcr.io/backend-bunny/konstapel/bundles/NAME \
+    -to registry.example.org/mirror/NAME -digest sha256:HEX
+```
+
+The source is read anonymously; the destination is written with the
+credential. The copy is by digest and never rewrites bytes: the subject
+manifest, its layer, and the signature and provenance referrers keep their
+digests, so the original publisher's signature and provenance verify at the
+mirror. Point a `BundleSource` at the mirror with the same `publisher` rule
+and a different `repository`; the rule revision excludes the repository, so
+only the location changes. A mirror is never a source of trust.
+
+The command refuses, before any write, a source that lacks the required
+signature or provenance referrers (`ErrMissingProofs`), and after the copy
+reads the destination back and fails if it does not return identical content
+and proofs. Publication-record referrers and tags are not copied; the
+consumer verifies by digest. A subject copied by other tools without its
+referrers is refused by verification (`ErrMissingProofs`).
+
+### What has and has not been verified
+
+The registry compatibility suite (`scripts/registry-compat.sh`) copies a
+signed bundle from a distribution registry to a Zot with htpasswd writes:
+digests and proofs are identical, verification passes anonymously under the
+same rule with only the repository changed, a source without proofs is not
+mirrored and leaves nothing at the destination, and a subject-only copy fails
+verification. Mirroring from registries that require credentials for reading
+is not supported by the command.
+
 ## Safe materialization and the content cache
 
 Package `internal/bundle/cache` turns the digest-verified manifest and layer
