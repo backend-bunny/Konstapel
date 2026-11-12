@@ -3016,6 +3016,48 @@ checks the attested builder, source, name, version and materials as well.
   command line, and errors never include the token.
 - The notes are also appended to the run's step summary.
 
+### First official release: `konstapel-privileged-containers` 0.1.0
+
+Released on 2026-11-12 from commit `863f4853151bb342a46eefa57c31cb2d46e17cff`
+by the `bundle-release` workflow (dispatched on `main` with the bundle name
+and the full commit; no application, image or chart release was involved).
+The tag is `bundle/konstapel-privileged-containers/v0.1.0`; the GitHub release
+carries the rendered notes.
+
+| | |
+| --- | --- |
+| Repository | `ghcr.io/backend-bunny/bundles/konstapel-privileged-containers` |
+| Manifest digest | `sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8` |
+| Content digest | `sha256:791b6e4a006101c5dd676e3c005bd4452d14892554d7c7f336171eace33457c8` |
+| Signer | `https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main` (issuer `https://token.actions.githubusercontent.com`) |
+| Trust root | embedded public-good root, revision `sha256:6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66` |
+
+Checked anonymously after the release, from a machine with no registry
+credentials, with the pinned Cosign v3.1.3 and the production verifier:
+
+```sh
+ref=ghcr.io/backend-bunny/bundles/konstapel-privileged-containers@sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8
+id=https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
+iss=https://token.actions.githubusercontent.com
+cosign verify "$ref" --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+cosign verify-attestation "$ref" --type slsaprovenance1 --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+bundlerelease verify-release -name konstapel-privileged-containers -digest sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8
+```
+
+Both Cosign commands pass; the same signature checked against another
+identity is refused. `cosign tree` lists the signature, the provenance and the
+publication record as referrers. `verify-release` reports status `complete`
+with referrers retrieved through the OCI tag-schema fallback (ghcr.io does not
+serve the referrers API), source and workflow commit both
+`863f4853151bb342a46eefa57c31cb2d46e17cff`, and the source rule revision
+`sha256:0812f19fc13d0ff42bba7420c2111c81ca9a87dbe11740be79c7e56f5184dcd8`.
+The first dispatch with an abbreviated commit was refused by validation before
+any tag or upload, as designed.
+
+Still outstanding for this release: a private mirror of this exact subject
+verified through the production verifier, and live runtime acceptance
+(`bundles:acceptance`).
+
 ### What has and has not been verified
 
 Verified locally: every publication safeguard above against an in-process
