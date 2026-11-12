@@ -156,6 +156,22 @@ verification with system or configured CAs; insecure HTTP belongs only to
 explicit isolated test fixtures. Preserve standard authenticated registry token
 flows without forwarding credentials across unrelated redirects or repositories.
 
+Credentials go to the source's registry origin and, only when the central source
+lists it, to a bearer token realm on another origin (Docker Hub's
+`auth.docker.io`, GitLab.com's `gitlab.com`). The per-source `tokenRealms`
+allowlist holds exact `https://host[:port]` origins, validated when the
+configuration loads: no paths, wildcards, userinfo, IP addresses or localhost,
+and not the registry's own origin, whose realm behaves as before. A challenge
+naming any other realm gets no credential. A request to a listed realm carries
+the credential only as a token request whose every scope is the source's own
+repository with the actions the operation needs (pull to retrieve, pull and push
+for the publisher), is never redirected, and a refusal or timeout fails the
+attempt rather than retrying anonymously. The adapter enforces this beneath the
+standard ORAS token flow instead of replacing it; realm addresses ORAS already
+blocks stay blocked. A per-registry allowlist was chosen over trusting any
+public realm because the registry, not the operator, names the realm in its
+challenge.
+
 The same adapter retrieves the subject and required signature/provenance
 referrers from the configured repository, in the OCI referrers layout written by
 the pinned Cosign publisher. It lists referrers through the OCI 1.1 referrers

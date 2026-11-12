@@ -71,6 +71,43 @@ sources:
 `
 }
 
+// realms adds a tokenRealms list to the base document.
+func realms(entries ...string) func(string) string {
+	return func(s string) string {
+		list := "    tokenRealms:\n"
+		for _, e := range entries {
+			list += "      - " + e + "\n"
+		}
+		return strings.Replace(s, "    publisher:", list+"    publisher:", 1)
+	}
+}
+
+func TestTokenRealmsAccepted(t *testing.T) {
+	c := loadExample(t, "token-realms.yaml")
+	want := map[string]string{"acme-dockerhub": "https://auth.docker.io", "acme-gitlab": "https://gitlab.com"}
+	for _, s := range c.Sources {
+		if len(s.TokenRealms) != 1 || s.TokenRealms[0] != want[s.Name] {
+			t.Errorf("%s: tokenRealms %v", s.Name, s.TokenRealms)
+		}
+	}
+	for in, canon := range map[string]string{
+		"https://auth.example":       "https://auth.example",
+		"https://auth.example:443":   "https://auth.example",
+		"https://auth.example:8443":  "https://auth.example:8443",
+		"https://token-service":      "https://token-service",
+		"https://a.b-c.example:1":    "https://a.b-c.example:1",
+		"https://auth.example:65535": "https://auth.example:65535",
+	} {
+		got, err := ParseTokenRealm(in)
+		if err != nil || got != canon {
+			t.Errorf("%s: got %q, %v; want %q", in, got, err, canon)
+		}
+	}
+	if _, err := ParseSources([]byte(realms("https://auth.example", "https://auth2.example:8443")(baseDoc()))); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSourcesRejections(t *testing.T) {
 	cases := map[string]struct {
 		doc  func(string) string
@@ -140,6 +177,34 @@ func TestSourcesRejections(t *testing.T) {
 		"bad data key": {func(s string) string {
 			return strings.Replace(s, "    publisher:", "    ca:\n      kind: Secret\n      name: ca\n      key: a/b\n    publisher:", 1)
 		}, "data key"},
+		"http token realm":                      {realms("http://auth.example"), "https origin"},
+		"token realm with a path":               {realms("https://auth.example/token"), "without userinfo, path"},
+		"token realm with a trailing slash":     {realms("https://auth.example/"), "without userinfo, path"},
+		"token realm with a query":              {realms("https://auth.example?x=1"), "without userinfo, path"},
+		"token realm with a fragment":           {realms("https://auth.example#x"), "without userinfo, path"},
+		"token realm with userinfo":             {realms("https://user@auth.example"), "without userinfo, path"},
+		"token realm wildcard":                  {realms("https://*.example"), "wildcards"},
+		"token realm uppercase":                 {realms("https://Auth.example"), "lowercase DNS host"},
+		"token realm IPv4":                      {realms("https://192.0.2.1"), "not an IP address"},
+		"token realm IPv4 with port":            {realms("https://192.0.2.1:8443"), "not an IP address"},
+		"token realm numeric host":              {realms("https://3221225985"), "not an IP address"},
+		"token realm IPv6":                      {realms("https://[2001:db8::1]"), "wildcards"},
+		"token realm localhost":                 {realms("https://localhost"), "localhost"},
+		"token realm localhost subdomain":       {realms("https://auth.localhost"), "localhost"},
+		"token realm port zero":                 {realms("https://auth.example:0"), "invalid port"},
+		"token realm port too large":            {realms("https://auth.example:65536"), "invalid port"},
+		"token realm port leading zero":         {realms("https://auth.example:0443"), "invalid port"},
+		"token realm empty port":                {realms(`"https://auth.example:"`), "lowercase DNS host"},
+		"token realm empty":                     {realms(""), "https origin"},
+		"token realm space":                     {realms("' https://auth.example'"), "https origin"},
+		"token realm trailing newline":          {realms("\"https://auth.example\\n\""), "without userinfo"},
+		"token realm duplicate":                 {realms("https://auth.example", "https://auth.example:443"), "more than once"},
+		"token realm is the registry":           {realms("https://ghcr.io"), "registry's own origin"},
+		"token realm is the registry with port": {realms("https://ghcr.io:443"), "registry's own origin"},
+		"too many token realms":                 {realms("https://a.example", "https://b.example", "https://c.example", "https://d.example", "https://e.example"), "more than 4"},
+		"token realms not a list": {func(s string) string {
+			return strings.Replace(s, "    publisher:", "    tokenRealms: https://auth.example\n    publisher:", 1)
+		}, "cannot unmarshal"},
 		"inline private key": {func(s string) string { return s + "# -----BEGIN PRIVATE KEY-----\n" }, "belong in referenced Secrets"},
 		"inline credentials": {func(s string) string { return s + "# auths: {}\n" }, "belong in referenced Secrets"},
 	}

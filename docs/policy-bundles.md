@@ -241,6 +241,7 @@ sources:
     repository: ghcr.io/backend-bunny/bundles/konstapel-privileged-containers
     credentialSecret: {name: registry-creds}     # optional dockerconfigjson Secret
     ca: {kind: ConfigMap, name: registry-ca, key: ca.crt}   # optional extra trusted roots
+    tokenRealms: [https://auth.example]          # optional token services on another origin
     publisher:
       type: keyless                              # or public-key
       issuer: https://token.actions.githubusercontent.com
@@ -257,6 +258,10 @@ sources:
   embedded digest is rejected: the profile's digest alone selects the content,
   and TLS is always verified. A mirror replaces `repository` and nothing else;
   the pinned digest and the publisher rule are unchanged.
+- **`tokenRealms` lists exact https origins** of bearer token services on
+  another origin than the registry that may receive the source's credential,
+  as token requests for this repository only; see
+  [Token realms on another origin](#token-realms-on-another-origin).
 - **References, not secrets.** Credentials, the CA, trust roots and public keys
   are references to objects in the controller's namespace; a reference has no
   namespace field. Inline key material or credentials are rejected.
@@ -416,16 +421,20 @@ error fails the attempt with `ErrTrustConfig` before any request. Plain HTTP is
 possible only with `Options.TestOnlyPlainHTTP`, used by in-process fixtures.
 Redirects are limited to five and may not leave HTTPS (`ErrInsecureRedirect`).
 Credential material is confined to the source's registry origin
-(scheme, host and port): a request that would carry an `Authorization` header
-or a body (an OAuth2 token request) to another origin, such as a bearer token
-`realm` on another host or port, is not sent and fails with
+(scheme, host and port) and the token realm origins listed in the source's
+`tokenRealms`: a request that would carry an `Authorization` header or a body
+(an OAuth2 token request) to any other origin, such as an unlisted bearer
+token `realm` on another host or port, is not sent and fails with
 `ErrCredentialScope`; an anonymous token request to such a realm is allowed.
+A listed realm receives the credential only as an unredirected token request
+for the source's repository (see
+[Token realms on another origin](#token-realms-on-another-origin)).
 On a redirect the `Authorization` header is dropped unless the target is the
 registry's origin *and* a path of the source's repository (`/v2/<path>/...`
 without dot segments or escapes), so neither another host nor another
-repository on the same registry receives it. A consequence: registries whose
-token service lives on another host (Docker Hub's `auth.docker.io`,
-GitLab.com's `gitlab.com/jwt/auth`) cannot be used with credentials yet.
+repository on the same registry receives it. Registries whose token service
+lives on another host (Docker Hub's `auth.docker.io`, GitLab.com's
+`gitlab.com/jwt/auth`) need that origin in `tokenRealms`.
 `Options.Credentials` is a `CredentialProvider` that is asked only for the
 source's own registry host, never for a token realm or another origin. When a
 source references a credential Secret, the credential is obtained before any
@@ -640,6 +649,92 @@ emptied or invalid CA object makes the source unavailable
 (`ErrTrustConfig`), never a silent fall back to system roots only. Sources
 without `ca` share one transport with the system roots.
 
+### Token realms on another origin
+
+Many registries hand out bearer tokens from a service on another origin than
+the registry API: the registry answers `401` with
+`WWW-Authenticate: Bearer realm="https://<token service>/...",service=...,scope=...`.
+By default a source's credential goes only to its registry's own origin, so
+such a realm gets an anonymous token request at most, and a source with a
+credential fails with `ErrCredentialScope`. `tokenRealms` names, per source,
+the token service origins that may receive the credential:
+
+```yaml
+  - name: acme-dockerhub
+    repository: registry-1.docker.io/acme/policy-bundles
+    credentialSecret: {name: dockerhub-reader}
+    tokenRealms: [https://auth.docker.io]
+    publisher: ...
+```
+
+- **Exact origins, checked at load.** Each entry is `https://host[:port]`:
+  lowercase DNS host, no path (not even `/`), query, fragment, userinfo,
+  wildcard, IP address or `localhost`, port 1-65535 (`:443` is the same as no
+  port). At most 4 per source, no duplicates, and not the registry's own
+  origin (a same-origin realm needs no entry and behaves as before). An
+  invalid entry rejects the whole configuration revision; the adapter checks
+  the list again and fails with `ErrInvalidRequest` before any request.
+- **Exact match at run time.** The realm the registry names is compared with
+  the list by scheme, host and port only; `x.auth.example`, `auth.example.`,
+  another port, `http://` or a realm with userinfo do not match and get no
+  credential (`ErrCredentialScope`, nothing is sent to them). ORAS's own realm
+  checks (no `http` realm for an `https` registry, no loopback, link-local or
+  similar realm addresses) still apply first.
+- **Token requests for this repository only.** A request to a listed realm
+  carries the credential only as a token request: `GET` with Basic credentials
+  (distribution token) or a form `POST` with the refresh token or password
+  (OAuth2). Every `scope` it asks for, in the URL query or the form, must be
+  `repository:<the source's repository path>:<actions>` with `pull` only when
+  retrieving (`pull` and `push` for the publisher's write session), and at
+  least one is required. A challenge or realm URL that asks for another
+  repository, a prefix or parent of it, `*` actions, `push` while reading or
+  `registry:catalog:*` makes the attempt fail with `ErrCredentialScope`
+  before anything is sent.
+- **No redirects of credentialed token requests.** A listed realm that
+  redirects such a request, to any URL including its own origin, fails the
+  attempt with `ErrCredentialScope`; the redirect is not followed, so the
+  credential and the token request never reach a third party and are never
+  replayed as an anonymous request. Registry redirects are unchanged: the
+  `Authorization` header (the registry token) is dropped unless the target is
+  the registry's origin and the source's repository, so a token service or
+  blob store reached by a redirect never receives it.
+- **No weaker fallback.** A realm that refuses the credential, times out or
+  fails makes the retrieval fail (`ErrUnauthorized`, a timeout or
+  `ErrCredentialScope`); it is never retried anonymously, and with a
+  configured credential the registry is never read anonymously instead. The
+  credential provider is still asked only for the registry host, never for a
+  realm, and every value sent, including to a realm, is redacted from errors.
+
+**Observed challenges.** On 2026-11-12 an unauthenticated, read-only `GET`
+(no credentials) of each registry's `/v2/` and of one public repository's
+manifest answered:
+
+| Registry | `repository` host | Challenge | `tokenRealms` |
+| --- | --- | --- | --- |
+| Docker Hub | `registry-1.docker.io` | `Bearer realm="https://auth.docker.io/token",service="registry.docker.io"` (manifest: plus `scope="repository:library/alpine:pull"`) | `https://auth.docker.io` |
+| GitLab.com | `registry.gitlab.com` | `Bearer realm="https://gitlab.com/jwt/auth",service="container_registry"` (manifest: plus `scope="repository:gitlab-org/gitlab-runner:pull"`) | `https://gitlab.com` |
+
+`internal/bundle/registry/realm_test.go` records these headers verbatim and
+replays them against local stand-ins named like the real hosts (nothing leaves
+the machine): without the entry the credential stays home, with it the
+retrieval succeeds and the credential reaches only the realm.
+`testdata/bundles/sources/token-realms.yaml` is a parsed example of both
+sources. For Docker Hub, use `registry-1.docker.io/<namespace>/<repository>`
+as `repository`, not `docker.io/...` (the API host is `registry-1.docker.io`,
+and a `docker.io` repository with a credential fails with
+`ErrCredentialScope`), and give the credential Secret an `auths` entry for
+`registry-1.docker.io` (the `https://index.docker.io/v1/` key Docker writes
+does not match). A self-managed GitLab uses its own registry host and realm
+origin; read them from its `/v2/` challenge.
+
+**Not validated.** No Docker Hub or GitLab credentials were available: no
+authenticated token exchange or pull against either service was performed,
+so it is not shown that their token services accept the request forms above
+(Basic `GET`, or OAuth2 `POST` for an identity token) for every credential
+type, nor that their tokens then work for referrers or the referrers tag
+schema there. Only the challenge text was observed; the realm path and
+service value may change without notice, but only the origin is configured.
+
 ### Verification
 
 Unit tests use an in-process TLS registry with Basic and bearer-token
@@ -651,7 +746,14 @@ or is removed), a cached bearer token dropped after rotation although the
 registry would still accept it, a realm on another port, a redirect to another
 host and a redirect to another repository receiving no credential, redaction
 in every `fmt` verb, `slog` and JSON, CA rejections, CA rotation closing idle
-connections, per-source trust, and concurrent rotation under `-race`. The
+connections, per-source trust, and concurrent rotation under `-race`. Token
+realms are tested over real TLS between named in-process hosts
+(`realm_test.go`): listed and unlisted realms, the near misses above,
+malformed and multiple challenges, scope tampering, token-service and registry
+redirects (also with a transport that does not record the redirect chain),
+refusal and timeout without an anonymous retry, and, on every recorded
+request, that the credential reached only the listed realm and the registry
+token only the registry. The
 [real-registry suite](#real-registry-compatibility) repeats the essential cases
 against real registries.
 

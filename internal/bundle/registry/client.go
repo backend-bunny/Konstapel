@@ -70,7 +70,8 @@ func (c Credential) empty() bool { return c == Credential{} }
 
 // CredentialProvider supplies the credential for a source. It is asked only
 // for the registry host of src.Repository, never for a token realm or any
-// other origin. When src.CredentialSecret is set, the provider must return a
+// other origin. The credential goes to that registry and, as a token request
+// for the source's repository only, to the token realms in src.TokenRealms. When src.CredentialSecret is set, the provider must return a
 // non-empty credential or an error; retrieval then fails without an anonymous
 // attempt. Errors must not contain credential values.
 type CredentialProvider interface {
@@ -194,15 +195,15 @@ type call struct {
 	cancel  context.CancelFunc
 }
 
-// sourceKey identifies the source and the credential it would use, so two
-// requests are shared (and tokens cached) only when they would authenticate
-// identically.
+// sourceKey identifies the source, the credential it would use and the token
+// realms it may send it to, so two requests are shared (and tokens cached)
+// only when they would authenticate identically.
 func sourceKey(src bundle.BundleSource) string {
 	secret := ""
 	if s := src.CredentialSecret; s != nil {
 		secret = s.Kind + "/" + s.Name + "/" + s.Key
 	}
-	return src.Name + "\x00" + src.Repository + "\x00" + secret
+	return src.Name + "\x00" + src.Repository + "\x00" + secret + "\x00" + strings.Join(src.TokenRealms, " ")
 }
 
 // Fetch retrieves the manifest pinned by manifestDigest from src.Repository,

@@ -20,6 +20,8 @@ controller and Helm releases, with verifiable content and explicit publisher tru
 - Retrieve content and verification metadata in the controller using maintained
   OCI and Cosign/Sigstore libraries. Support private registries with Konstapel's
   own Kubernetes Secret credentials, plus keyless and public-key verification.
+  Credentials reach a token service on another origin (Docker Hub, GitLab)
+  only through an explicit per-source allowlist of exact HTTPS origins.
 - Validate content, compatibility, and current trust before use; cache verified
   content by digest and preserve existing applied policies when updates fail.
 - Carry the exact bundle and verification identity into resolved content and

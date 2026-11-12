@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
 )
@@ -34,7 +35,7 @@ func (c *Client) Open(ctx context.Context, src bundle.BundleSource) (*Session, e
 	}
 	rec := &secrets{}
 	meta := &budget{limit: c.limits.MaxMetadataBytes, remaining: c.limits.MaxMetadataBytes}
-	repo, err := c.repository(ctx, src, rec, meta)
+	repo, err := c.repository(ctx, src, rec, meta, auth.ActionPull, auth.ActionPush)
 	if err != nil {
 		return nil, rec.redact(err)
 	}
