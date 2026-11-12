@@ -139,6 +139,13 @@ func ValidateRepository(repo string) error {
 	if !ok {
 		return fmt.Errorf("repository %q must be host[:port]/path", repo)
 	}
+	if isDockerHubAlias(host) {
+		return fmt.Errorf("repository %q uses Docker Hub alias %q, which is not supported: "+
+			"write the repository as registry-1.docker.io/<namespace>/<name> (Docker Hub's registry host; "+
+			"list its token realm https://auth.docker.io in tokenRealms) and give the credential Secret "+
+			"(dockerconfigjson) an `auths` entry for registry-1.docker.io, not Docker's usual "+
+			"https://index.docker.io/v1/ key; identities and credential lookups are never rewritten", repo, host)
+	}
 	if strings.Contains(path, ":") {
 		return fmt.Errorf("repository %q must not embed a tag; the profile pins the digest", repo)
 	}
@@ -149,6 +156,22 @@ func ValidateRepository(repo string) error {
 		return fmt.Errorf("repository %q has an invalid path %q (lowercase OCI name components only)", repo, path)
 	}
 	return nil
+}
+
+// dockerHubAliases are hosts that name Docker Hub but are not its registry API
+// host (registry-1.docker.io). They are rejected so that a registry identity and
+// its credential lookup stay unambiguous; nothing is rewritten.
+var dockerHubAliases = map[string]bool{
+	"docker.io":               true,
+	"index.docker.io":         true,
+	"registry.hub.docker.com": true,
+	"registry.docker.io":      true,
+	"hub.docker.com":          true,
+}
+
+func isDockerHubAlias(host string) bool {
+	h, _, _ := strings.Cut(strings.ToLower(host), ":")
+	return dockerHubAliases[strings.TrimSuffix(h, ".")]
 }
 
 func validateRef(what string, r *ObjectRef, kinds ...string) error {

@@ -438,6 +438,15 @@ func TestInvalidRequests(t *testing.T) {
 			t.Errorf("%s@%s: %v", tc.repo, tc.digest, err)
 		}
 	}
+	for _, repo := range []string{"docker.io/acme/bundles", "index.docker.io/acme/bundles"} {
+		src := bundle.BundleSource{Name: "n", Repository: repo}
+		if _, err := c.Fetch(context.Background(), src, good); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("Fetch %s: %v", repo, err)
+		}
+		if _, err := c.Open(context.Background(), src); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("Open %s: %v", repo, err)
+		}
+	}
 	if len(f.log()) != 0 {
 		t.Fatalf("invalid requests reached the registry: %v", f.log())
 	}

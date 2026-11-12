@@ -156,6 +156,13 @@ verification with system or configured CAs; insecure HTTP belongs only to
 explicit isolated test fixtures. Preserve standard authenticated registry token
 flows without forwarding credentials across unrelated redirects or repositories.
 
+Docker Hub aliases (`docker.io`, `index.docker.io`, `registry.hub.docker.com`,
+`registry.docker.io`, `hub.docker.com`) are rejected in `repository` at
+configuration load, and by the adapter through the same validation, with an
+error naming `registry-1.docker.io`, the `auths` entry and `tokenRealms`.
+Identities and credential lookups are never rewritten; alias support may follow
+as an explicit tested compatibility feature.
+
 Credentials go to the source's registry origin and, only when the central source
 lists it, to a bearer token realm on another origin (Docker Hub's
 `auth.docker.io`, GitLab.com's `gitlab.com`). The per-source `tokenRealms`

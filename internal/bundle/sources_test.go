@@ -297,3 +297,44 @@ func TestProfileBundleSchemaIsUnchanged(t *testing.T) {
 		t.Error("source names do not follow the profile name pattern")
 	}
 }
+
+func TestDockerHubAliasesRejected(t *testing.T) {
+	d := "sha256:" + strings.Repeat("a", 64)
+	for _, repo := range []string{
+		"docker.io/library/alpine",
+		"docker.io/acme/bundles",
+		"index.docker.io/acme/bundles",
+		"registry.hub.docker.com/acme/bundles",
+		"registry.docker.io/acme/bundles",
+		"hub.docker.com/acme/bundles",
+		"DOCKER.IO/acme/bundles",
+		"Index.Docker.IO/acme/bundles",
+		"docker.io:443/acme/bundles",
+		"index.docker.io:5000/acme/bundles",
+		"docker.io/acme/bundles:latest",
+		"docker.io/acme/bundles@" + d,
+	} {
+		err := ValidateRepository(repo)
+		if err == nil {
+			t.Errorf("%s: accepted", repo)
+			continue
+		}
+		if strings.Contains(repo, "@") {
+			continue // the digest rule fires first; still rejected
+		}
+		for _, w := range []string{"registry-1.docker.io", "`auths`", "tokenRealms"} {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("%s: error lacks %q: %v", repo, w, err)
+			}
+		}
+		doc := strings.Replace(baseDoc(), "ghcr.io/backend-bunny/bundles/konstapel-privileged-containers", repo, 1)
+		if _, err := ParseSources([]byte(doc)); err == nil || !strings.Contains(err.Error(), "registry-1.docker.io") {
+			t.Errorf("%s: ParseSources: %v", repo, err)
+		}
+	}
+	for _, repo := range []string{"registry-1.docker.io/acme/bundles", "registry-1.docker.io:443/acme/bundles", "notdocker.io/acme/bundles"} {
+		if err := ValidateRepository(repo); err != nil {
+			t.Errorf("%s: %v", repo, err)
+		}
+	}
+}
