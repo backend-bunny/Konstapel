@@ -61,7 +61,13 @@ Keep election enabled for both production and development. Use a namespace-local
 controller namespace, shared by every pod and supported old/new runtime revision
 of the installation. The Lease name must not include a pod name, image digest,
 or chart version; each candidate process uses its own unique holder identity.
-Scope Lease RBAC to that namespace and required operations. A second
+Scope Lease RBAC to that namespace and required operations: the pinned
+client-go LeaseLock only gets, creates and updates the Lease (acquisition,
+renewal, takeover after expiry and release are get+update), so the Role grants
+`get`/`update` on that Lease by name and `create`, which the API server cannot
+restrict by name, plus Event `create`/`patch` for the election's recorder.
+Nothing lists, watches, patches or deletes Leases. Acceptance runs creation,
+renewal under contention, takeover and restart under exactly these grants. A second
 cluster-wide installation remains unsupported even in a different namespace;
 separate Lease namespaces would not partition cluster-scoped resource ownership.
 

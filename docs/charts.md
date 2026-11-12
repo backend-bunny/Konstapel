@@ -260,8 +260,9 @@ renders:
 - **PodDisruptionBudget.** `minAvailable: 1` with the same selector, only when
   `replicaCount > 1`. Development values (`replicaCount: 1`) omit it.
 - **RBAC.** The ServiceAccount; ClusterRoleBindings to `konstapel-controller`
-  and `konstapel-controller-assessments`; a RoleBinding to the Lease, Secret
-  and ConfigMap Role in `konstapel-system`. See
+  and `konstapel-controller-assessments`; a RoleBinding to the Role in
+  `konstapel-system` for the leader-election Lease, Events, Secrets and
+  ConfigMaps. See
   [Controller ServiceAccount boundary](#controller-serviceaccount-boundary)
   for what that adds up to.
 - **Copied manifests.** `scripts/charts/runtime.sh` copies these unchanged as
@@ -446,9 +447,25 @@ Nothing has `list`, `watch`, `update`, `patch`, `delete` or
 field-selected watch of the bundle sources ConfigMap; no rule uses a
 wildcard; nothing reaches Secrets or ConfigMaps in another namespace. The
 orphan inventory used to declare ConfigMap `list`, which no code path used;
-it was removed. The same Role also grants Lease
-`get`/`list`/`watch`/`create`/`update`/`patch`/`delete` (leader election)
-and Event `create`/`patch`, unchanged here.
+it was removed.
+
+The same Role grants the leader-election Lease and Events, also only in
+`konstapel-system`. The grants are what the pinned client-go `LeaseLock`
+behind controller-runtime's election issues; no other code reads or writes
+Leases:
+
+| Grant (in `konstapel-system`) | Election use | Why not narrower |
+| --- | --- | --- |
+| Lease `get` and `update`, name `konstapel-controller-leader-election` | Every candidate reads the Lease each retry period; the holder renews it with `update`; a candidate takes over an expired Lease with `update`; release on cancel (off) would also be an `update` | Already by name. |
+| Lease `create` | The first candidate creates the Lease when it is missing (fresh install, or after it was deleted) | The API server cannot restrict `create` by name. |
+| Event `create`/`patch` | The election records `LeaderElection` Events about the Lease (`became leader`, `stopped leading`); repeats are patched | Event names are generated. |
+
+Nothing can `list`, `watch`, `patch`, `delete` or `deletecollection`
+Leases, nor `get` or `update` any other Lease or a Lease in another
+namespace. Before this was narrowed the Role granted Lease
+`get`/`list`/`watch`/`create`/`update`/`patch`/`delete` on every Lease in
+the namespace. `create` by any name lets a defect create other Leases in
+`konstapel-system`, but not read, renew or take over them.
 
 What this does not give you:
 - **Any Secret in `konstapel-system` is readable by name.** That includes
@@ -468,12 +485,18 @@ What this does not give you:
 Checks: `TestRuntimeChartControllerSecretConfigMapAccess`
 (`internal/charttest`) computes the union of every rule bound to the
 ServiceAccount from the rendered chart, with and without bundles, and
-asserts it exactly, along with allowed and denied requests.
+asserts it exactly, along with allowed and denied requests;
+`TestRuntimeChartControllerLeaseAccess` does the same for Leases.
 `scripts/generate.sh --check` (in `task check`) fails when the markers and
 `config/rbac/controller/role.yaml` or its chart copy disagree.
 `TestLiveHelmBundles` (charts acceptance group) asserts the same allowed and
 denied requests against a real API server, through impersonation of the
-ServiceAccount and SubjectAccessReview.
+ServiceAccount and SubjectAccessReview. `TestLiveHelmAvailability`
+(availability group) does so for Leases, and runs the election under these
+grants through Lease creation on a fresh install, renewal while a second
+replica contends, takeover after a rolling replacement, a restart from zero
+replicas and abrupt leader loss, failing on any refused Lease request in a
+controller log.
 
 ### OCI policy bundles
 

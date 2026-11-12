@@ -42,8 +42,16 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
-// Leader election and its events live in the controller's namespace.
-// +kubebuilder:rbac:groups=coordination.k8s.io,namespace=konstapel-system,resources=leases,verbs=get;list;watch;create;update;patch;delete
+// Leader election and its events live in the controller's namespace. The
+// pinned client-go LeaseLock only gets, creates and updates the one Lease
+// LeaderElectionID: acquisition, renewal, takeover after expiry and release
+// on cancel (disabled here) are get+update, and the first candidate creates
+// it. Nothing lists, watches, patches or deletes Leases. Create cannot be
+// restricted by name (the authorizer sees no name), so it is a separate
+// rule; get and update are limited to the one Lease. The election's event
+// recorder writes core Events about the Lease (create, patch for repeats).
+// +kubebuilder:rbac:groups=coordination.k8s.io,namespace=konstapel-system,resources=leases,verbs=create
+// +kubebuilder:rbac:groups=coordination.k8s.io,namespace=konstapel-system,resources=leases,resourceNames=konstapel-controller-leader-election,verbs=get;update
 // +kubebuilder:rbac:groups="",namespace=konstapel-system,resources=events,verbs=create;patch
 
 // ProfileRefIndex indexes ComplianceBindings by spec.profileRef.name.
