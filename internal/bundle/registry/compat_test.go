@@ -343,9 +343,11 @@ type CompatEnv struct {
 	API, APIAuthd     string
 	CAPEM, OtherCAPEM []byte
 	User, Pass        string
-	// Record adds a case to the evidence; CheckFetched asserts a complete
-	// tag-schema retrieval of the published bundle.
+	// Record adds a case to the evidence; Skip records a case that did not
+	// run, with the reason; CheckFetched asserts a complete tag-schema
+	// retrieval of the published bundle.
 	Record       func(name string, err error, detail string)
+	Skip         func(name, reason string)
 	CheckFetched func(t *testing.T, res *Result)
 }
 
@@ -401,6 +403,9 @@ func TestRegistryCompat(t *testing.T) {
 			r.Result, r.Detail = "fail", err.Error()
 		}
 		records = append(records, r)
+	}
+	skip := func(name, reason string) {
+		records = append(records, compatRecord{Case: name, Result: "skip", Detail: reason})
 	}
 	src := func(r regInstance, withSecret bool) bundle.BundleSource {
 		s := bundle.BundleSource{Name: "konstapel-privileged-containers", Repository: r.host + "/" + repoPath}
@@ -570,7 +575,7 @@ func TestRegistryCompat(t *testing.T) {
 		Ctx: ctx, Pinned: pinned, Anon: anon.host, Authd: authd.host, Other: other.host,
 		API: api.host, APIAuthd: apiAuthd.host,
 		CAPEM: p.caPEM, OtherCAPEM: otherPKI.caPEM, User: user, Pass: pass,
-		Record: record, CheckFetched: checkFetched,
+		Record: record, Skip: skip, CheckFetched: checkFetched,
 	}
 	for _, c := range CompatCases {
 		c(t, env)
@@ -626,6 +631,7 @@ func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []co
 		"authentication": "anonymous and htpasswd (basic), directly and through kubeaccess (dockerconfigjson Secret, rotation, CA ConfigMap); bearer-token service not covered",
 		"publication":    "internal/bundle/publish write-once publication: anonymous-write distribution registry (tag schema) and Zot with htpasswd writes and anonymous reads (referrers API); recovery through a fault-injecting TLS proxy; anonymous read-back failure against the htpasswd distribution registry",
 		"signing":        "internal/bundle/sign (pinned Cosign CLI, key mode, no transparency log, outbound HTTP(S) to a closed port) through publish.Completer: digest-only signatures and SLSA provenance for missing kinds only, recovery, refusal of another subject; release.VerifyRelease anonymously under a test public-key rule; keyless (GitHub OIDC) not covered",
+		"official":       "with KONSTAPEL_NETWORK_INTEROP=1: the official keyless release read anonymously from ghcr.io, verified directly, mirrored with mirror.Mirror and bundlerelease mirror into the htpasswd Zot and distribution registries and verified there through the production verifier (and Cosign) under bundles/official-sources.yaml with only the location changed; otherwise recorded as skip",
 		"tls":            "throwaway CAs (a second, unrelated one for the per-source trust case), verification always on", "cases": records,
 	}
 	b, err := json.MarshalIndent(ev, "", "  ")

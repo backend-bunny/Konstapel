@@ -525,7 +525,12 @@ every case. It verifies:
   Secret is `ErrCredentials` although the registry is anonymous; an invalid
   CA object is `ErrTrustConfig`; and the CA ConfigMap of one registry does not
   trust a third registry instance with its own unrelated CA, which succeeds
-  with its own CA object.
+  with its own CA object;
+- with `KONSTAPEL_NETWORK_INTEROP=1` (otherwise recorded as `skip`): the
+  official keyless release read anonymously from `ghcr.io` and its private
+  mirror through the production verifier, the mirror refusals and the
+  organization commands; see
+  [Official release and its private mirror](#official-release-and-its-private-mirror).
 
 Why two registries: the first run of this suite found that neither the
 reference registry nor `ghcr.io` (the planned official registry) serves the
@@ -534,8 +539,8 @@ referrers API, although `ghcr.io` stores referrers under the tag-schema tag
 finding, and Zot keeps the API path covered by a real server.
 
 Not covered: bearer-token (token service) authentication, which neither image
-offers without a separate token server, and `ghcr.io` itself (only its tag
-schema format was checked, by read-only anonymous requests). The suite is run on
+offers without a separate token server. `ghcr.io` is only read, anonymously,
+and only by the network-gated official mirror cases. The suite is run on
 demand; it is not part of `task check` or CI, and `task bundles:acceptance`
 (task 8.1) will compose it. It is deliberately not a Taskfile task.
 
@@ -1650,7 +1655,7 @@ issuer and identity, and the provenance source repository and builder. See
 
 ```sh
 BUNDLE_REGISTRY_USERNAME=... BUNDLE_REGISTRY_PASSWORD=... \
-  bundlerelease mirror -from ghcr.io/backend-bunny/konstapel/bundles/NAME \
+  bundlerelease mirror -from ghcr.io/backend-bunny/bundles/NAME \
     -to registry.example.org/mirror/NAME -digest sha256:HEX
 ```
 
@@ -1669,6 +1674,93 @@ and proofs. Publication-record referrers and tags are not copied; the
 consumer verifies by digest. A subject copied by other tools without its
 referrers is refused by verification (`ErrMissingProofs`).
 
+The command uses the system trust store for both registries and has no CA
+option. A destination with a private CA must be trusted by the machine that
+runs it: install the CA in the system store, or add it for the one command
+with Go's `SSL_CERT_DIR` (a directory holding the PEM file; Go still reads the
+system bundle file, so `ghcr.io` stays trusted), as the evidence below does.
+`SSL_CERT_FILE` instead replaces the system bundle and needs the public roots
+in the same file. The credential is sent only to the `-to` registry host.
+
+Check the mirror with the same command consumers rely on, under a copy of the
+central source configuration in which only `repository` differs:
+
+```sh
+sed 's|repository: ghcr.io/backend-bunny/bundles/NAME|repository: registry.example.org/mirror/NAME|' \
+  bundles/official-sources.yaml > mirror-sources.yaml
+bundlerelease verify-release -sources mirror-sources.yaml -name NAME -digest sha256:HEX
+```
+
+In the cluster, the mirror's `BundleSource` keeps the official `publisher`
+block and adds `credentialSecret` and `ca` (location access only; neither is
+part of the rule revision).
+
+### Official release and its private mirror
+
+Run on 2026-11-12 by `KONSTAPEL_NETWORK_INTEROP=1 scripts/registry-compat.sh
+OUTPUT_DIR` (the `official mirror` cases, together with the rest of the suite;
+all 90 cases passed). It reads the
+[first official release](#first-official-release-konstapel-privileged-containers-010)
+anonymously from `ghcr.io` (nothing is written there) and mirrors it into the
+suite's private registries, over TLS with a throwaway CA and random htpasswd
+credentials:
+
+| | |
+| --- | --- |
+| Subject | `ghcr.io/backend-bunny/bundles/konstapel-privileged-containers@sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8` |
+| Referrers | signature `sha256:0d2484523fc82bec88b3e5c3cf35b0aaa3d4a3b764134a8bb14559fcc776a2c5`, provenance `sha256:5141de7e7f35faf2fe54c8fa0c5f43514a534fc18c2a07053d842aa054961190` (tag schema on `ghcr.io`) |
+| Private registries | Zot v2.1.23 (`ghcr.io/project-zot/zot-linux-amd64@sha256:b68f727fe35c1eb45b2ae91519dfb0e33192d69b5104882c3e7809b7146c4a02`; htpasswd writes, anonymous reads, referrers API) and distribution 3.1.2 (`registry@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c`; htpasswd reads and writes, tag schema) |
+| Tools | Go 1.27.3, ORAS Go v2.7.0, Cosign v3.1.3, Docker 29.9.2 |
+
+What it shows:
+
+- the official release verifies directly: `release.VerifyRelease` reads it
+  anonymously (referrers through the tag schema) and the production verifier
+  accepts it under `bundles/official-sources.yaml` with the embedded
+  public-good root (keyless signer and issuer as configured, source and
+  workflow commit `863f4853151bb342a46eefa57c31cb2d46e17cff`);
+- `mirror.Mirror` copies the subject and exactly those two referrers into both
+  private registries; read through `kubeaccess` (ConfigMap CA added to the
+  system roots; a dockerconfigjson Secret for the distribution registry) the
+  mirror returns the identical manifest, layer and proof digests, and the
+  production verifier (`release.CheckRelease`, what `verify-release` runs)
+  accepts it under the official rule with only the location changed: the rule
+  revision stays `sha256:0812f19fc13d0ff42bba7420c2111c81ca9a87dbe11740be79c7e56f5184dcd8`
+  and the receipt equals the direct one except `retrievedFrom` (and the
+  verification time); the anonymous Zot mirror is also accepted by
+  `VerifyRelease` with only `repository` changed;
+- refused: the official subject copied without referrers (`ErrMissingProofs`,
+  and `mirror` refuses to copy it onward before any write); a copy that dropped
+  either the signature or the provenance referrer (`ErrMissingProofs`); the
+  official proofs re-pointed at a re-serialized official manifest or at
+  another bundle (`ErrNoValidProof`: the signed statement is for the official
+  digest); and the mirror under a rule naming a fork's workflow (`ErrSigner`);
+- the organization commands, with the throwaway CA added through
+  `SSL_CERT_DIR` and the credential in `BUNDLE_REGISTRY_*`:
+
+  ```sh
+  # MIRROR is the private registry host; id and iss as for the official release
+  digest=sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8
+  bundlerelease mirror -from ghcr.io/backend-bunny/bundles/konstapel-privileged-containers \
+    -to "$MIRROR/org/konstapel-privileged-containers" -digest "$digest"
+  bundlerelease verify-release -sources mirror-sources.yaml -name konstapel-privileged-containers -digest "$digest"
+  cosign verify "$MIRROR/org/konstapel-privileged-containers@$digest" --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+  cosign verify-attestation "$MIRROR/org/konstapel-privileged-containers@$digest" --type slsaprovenance1 --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+  ```
+
+  `mirror` reports `proofs=2`; `verify-release` reports status `complete`
+  with the official signer, source and workflow commit and rule revision;
+  both Cosign commands pass against the Zot and the authenticated distribution
+  mirrors (Cosign fetching the public-good trusted root through Sigstore's TUF
+  repository) and `cosign verify` under the `refs/heads/dev` identity fails.
+
+The case fails if the mirror drops a referrer, if verification at the mirror
+is skipped, or if the rule revision covered the repository; each was checked by
+a deliberately broken run. Not shown here: a mirror in a production registry
+product other than Zot and distribution, bearer-token registries, and the
+controller consuming the mirror on a cluster (the
+[walkthrough](integration/bundle-audit-walkthrough.md) consumes `ghcr.io`).
+
 ### What has and has not been verified
 
 The registry compatibility suite (`scripts/registry-compat.sh`) copies a
@@ -1676,8 +1768,9 @@ signed bundle from a distribution registry to a Zot with htpasswd writes:
 digests and proofs are identical, verification passes anonymously under the
 same rule with only the repository changed, a source without proofs is not
 mirrored and leaves nothing at the destination, and a subject-only copy fails
-verification. Mirroring from registries that require credentials for reading
-is not supported by the command.
+verification. The official release and its private mirror are covered
+[above](#official-release-and-its-private-mirror). Mirroring from registries
+that require credentials for reading is not supported by the command.
 
 ## Safe materialization and the content cache
 
@@ -3344,8 +3437,9 @@ any tag or upload, as designed.
 uses this release end to end on a disposable cluster, from the sources
 ConfigMap to an assessment package naming this digest.
 
-Still outstanding for this release: a private mirror of this exact subject
-verified through the production verifier, and live runtime acceptance
+Its private mirror is verified through the production verifier in
+[Official release and its private mirror](#official-release-and-its-private-mirror).
+Still outstanding for this release: live runtime acceptance
 (`bundles:acceptance`).
 
 ### What has and has not been verified

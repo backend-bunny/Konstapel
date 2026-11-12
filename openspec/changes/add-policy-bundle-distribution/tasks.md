@@ -108,5 +108,5 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 8.2 Exercise full upgrade/rollback with the merged targeting/exception/evidence integrations; retain evidence proving replacement readiness, fresh exception revisions, stable logical checks and OSCAL provenance for the exact applied bundle.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 8.3 Verify one official independently released OIDC-signed subject and its private mirror through the production verifier; retain release/registry/runtime versions, digest-based commands and results, and run the repository's applicable checks without treating unimplemented dependency integrations as complete.
+- [x] 8.3 Verify one official independently released OIDC-signed subject and its private mirror through the production verifier; retain release/registry/runtime versions, digest-based commands and results, and run the repository's applicable checks without treating unimplemented dependency integrations as complete.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
