@@ -24,7 +24,8 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 | [Linux hardening](integration/linux-hardening.md) | Shipped policy variants, partial mappings, and live admission coverage; background/applicability and exception integration still in progress. |
 | [Policy exceptions](integration/policy-exceptions.md) | API, authenticated admission and acceptance snapshots exist; native grants remain disabled pending engine compatibility and lifecycle work. |
 | [Helm charts](charts.md) | CRD and runtime charts: installation, both TLS modes and certificate rotation, values, feature availability and installed-image acceptance; not yet published, and exception admission is not in the chart. |
-| [Policy bundles](policy-bundles.md) | The bundle payload contract (OCI layout, `bundle.json`, file inventory). Building, releasing and consuming bundles are not implemented yet and no bundle has been released. |
+| [Policy bundles](policy-bundles.md) | Payload contract, central sources, registry retrieval, signature and provenance verification, the content cache, controller and Helm wiring, and bundle releases; the first official bundle (`konstapel-privileged-containers` 0.1.0) is published. Remaining work is tracked in the `add-policy-bundle-distribution` change. |
+| [Official bundle Audit walkthrough](integration/bundle-audit-walkthrough.md) | Copy-paste run on a disposable kind cluster: official sources, a profile pinning the released bundle by digest, an Audit binding, a privileged Pod admitted, and the assessment finding with matching bundle and content digests. Run by hand, not in CI. |
 | [Assessment-loop prototype](integration/assessment-loop.md) | Standalone Kyverno/C2P runner and shared disposable-cluster acceptance commands. |
 | [Trivy proposal](../openspec/changes/add-trivy-vulnerability-assessment/proposal.md) | Planned reporting-only image vulnerability assessment; no implemented Trivy provider yet. |
 

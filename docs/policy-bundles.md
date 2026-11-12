@@ -3340,6 +3340,10 @@ serve the referrers API), source and workflow commit both
 The first dispatch with an abbreviated commit was refused by validation before
 any tag or upload, as designed.
 
+[Walkthrough: audit with the official signed bundle](integration/bundle-audit-walkthrough.md)
+uses this release end to end on a disposable cluster, from the sources
+ConfigMap to an assessment package naming this digest.
+
 Still outstanding for this release: a private mirror of this exact subject
 verified through the production verifier, and live runtime acceptance
 (`bundles:acceptance`).
