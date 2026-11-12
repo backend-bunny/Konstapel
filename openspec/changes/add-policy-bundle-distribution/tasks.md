@@ -59,7 +59,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 4.4 Implement leases for desired/applied content and active assessments, plus eviction of unreferenced entries; test exhausted capacity with active pins, lease release, corrupted reuse and safe restoration from persistent cache.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 4.5 Document cache lifetime and outage behavior; verify process restart and Pod/cache-loss cases distinguish usable proofs, missing content and stale applied policies without claiming default durable storage.
+- [x] 4.5 Document cache lifetime and outage behavior; verify process restart and Pod/cache-loss cases distinguish usable proofs, missing content and stale applied policies without claiming default durable storage.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 5. Targeting and provider integration
@@ -96,7 +96,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 7.2 After the continuous-assessment descriptor contract merges, include applied bundle identity, content and verification context in frozen packages through its owner; verify evidence remains complete after runtime cache eviction and registry loss, with desired/applied differences preserved.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 7.3 After the Helm chart implementation merges, expose central configuration, Secret/CA references and bounded cache mounts through existing chart conventions; verify schema/render tests and installed runtime configuration without generating competing CRDs or exposing trust bypasses.
+- [x] 7.3 After the Helm chart implementation merges, expose central configuration, Secret/CA references and bounded cache mounts through existing chart conventions; verify schema/render tests and installed runtime configuration without generating competing CRDs or exposing trust bypasses.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 - [x] 7.4 Freeze each OCI-bundle assessment run's verified bundle (bytes, identities and verification receipt) at start and export, replay and package only that copy; prove with a bundle whose catalog and mapping differ from the vendored content, after eviction, registry loss and trust revocation, and with explicit diagnostics for unfrozen, lost, mismatched and incompatible content.
