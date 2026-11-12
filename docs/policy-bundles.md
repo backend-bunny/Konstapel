@@ -728,12 +728,15 @@ replays them against local stand-ins named like the real hosts (nothing leaves
 the machine): without the entry the credential stays home, with it the
 retrieval succeeds and the credential reaches only the realm.
 `testdata/bundles/sources/token-realms.yaml` is a parsed example of both
-sources. For Docker Hub, use `registry-1.docker.io/<namespace>/<repository>`
-as `repository`, not `docker.io/...` (the API host is `registry-1.docker.io`,
-and a `docker.io` repository with a credential fails with
-`ErrCredentialScope`), and give the credential Secret an `auths` entry for
-`registry-1.docker.io` (the `https://index.docker.io/v1/` key Docker writes
-does not match). A self-managed GitLab uses its own registry host and realm
+sources. For Docker Hub, write `repository` as
+`registry-1.docker.io/<namespace>/<repository>` (the API host) and give the
+credential Secret an `auths` entry for `registry-1.docker.io` (the
+`https://index.docker.io/v1/` key Docker writes does not match). Docker Hub
+aliases (`docker.io`, `index.docker.io`, `registry.hub.docker.com` and similar)
+are rejected when the configuration loads, with or without a credential, so
+registry identities and credential lookups stay unambiguous and nothing is
+silently rewritten; alias support may follow as an explicit, tested
+compatibility feature. A self-managed GitLab uses its own registry host and realm
 origin; read them from its `/v2/` challenge.
 
 **Not validated.** No Docker Hub or GitLab credentials were available: no
