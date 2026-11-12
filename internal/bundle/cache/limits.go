@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/verify"
 )
 
 // Errors. Every failure wraps exactly one of these so callers can classify it
@@ -41,9 +42,20 @@ var (
 	ErrNoSpace = errors.New("no space left for the cache")
 	// ErrNotFound: no entry for the digest.
 	ErrNotFound = errors.New("cache entry not found")
-	// ErrCorrupt: a stored entry failed its integrity check on reuse. It was
-	// removed and is never served.
+	// ErrCorrupt: a stored entry or its retained verification material
+	// failed its integrity check on reuse. It was removed and is never served.
+	// Get also returns it for an entry that was removed as corrupt while it
+	// was leased, until the lease is released or the entry is stored again.
 	ErrCorrupt = errors.New("cache entry is corrupt")
+	// ErrNoProofs: the entry has no retained verification material.
+	ErrNoProofs = errors.New("no verification material is retained for the entry")
+	// ErrProofs: verification material offered to PutProofs is invalid or is
+	// not for the entry's digest.
+	ErrProofs = errors.New("invalid verification material")
+	// ErrLease: a lease request or release is invalid: an unknown holder, an
+	// empty owner, or a lease that is unknown, already released or does not
+	// match the one acquired.
+	ErrLease = errors.New("invalid cache lease")
 )
 
 const (
@@ -85,16 +97,22 @@ type Limits struct {
 	MaxNameBytes int
 	// MaxDepth bounds the number of path components.
 	MaxDepth int
+	// MaxProofBytes bounds the retained verification material of one entry
+	// (one encoded verify.RecheckBundle). It cannot exceed
+	// verify.MaxRecheckBytes.
+	MaxProofBytes int64
 	// CapacityBytes bounds everything under the cache root that the cache
-	// owns: stored blobs, extracted entries, integrity records and in-flight
-	// staging, each charged in whole 4 KiB blocks.
+	// owns: stored blobs, extracted entries, integrity records, retained
+	// verification material and in-flight staging, each charged in whole
+	// 4 KiB blocks.
 	CapacityBytes int64
 }
 
 // DefaultLimits are the documented defaults (docs/policy-bundles.md, "Safe
 // materialization and the content cache"): 4 MiB manifest and 64 MiB
 // compressed payload (the registry adapter's limits), 256 MiB unpacked and
-// 4096 regular files (bundle.Unpack's), and a 1 GiB cache.
+// 4096 regular files (bundle.Unpack's), 16 MiB of verification material per
+// entry (verify.MaxRecheckBytes) and a 1 GiB cache.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxManifestBytes:   4 << 20,
@@ -105,6 +123,7 @@ func DefaultLimits() Limits {
 		MaxPathBytes:       1024,
 		MaxNameBytes:       255,
 		MaxDepth:           32,
+		MaxProofBytes:      verify.MaxRecheckBytes,
 		CapacityBytes:      1 << 30,
 	}
 }
@@ -136,6 +155,9 @@ func (l Limits) Validate() error {
 	if l.MaxDepth <= 0 || l.MaxDepth > 255 {
 		fail("MaxDepth %d must be between 1 and 255", l.MaxDepth)
 	}
+	if l.MaxProofBytes <= 0 || l.MaxProofBytes > verify.MaxRecheckBytes {
+		fail("MaxProofBytes %d must be between 1 and %d (verify.MaxRecheckBytes)", l.MaxProofBytes, verify.MaxRecheckBytes)
+	}
 	if l.MaxDescriptorBytes > l.MaxUnpackedBytes {
 		fail("MaxDescriptorBytes %d exceeds MaxUnpackedBytes %d", l.MaxDescriptorBytes, l.MaxUnpackedBytes)
 	}
@@ -143,18 +165,21 @@ func (l Limits) Validate() error {
 		return fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	if worst := l.worstCaseReservation(); l.CapacityBytes < worst {
-		return fmt.Errorf("%w: CapacityBytes %d cannot hold one maximal entry while it stages (%d)", ErrConfig, l.CapacityBytes, worst)
+		return fmt.Errorf("%w: CapacityBytes %d cannot hold one maximal entry with its verification material while it stages (%d)", ErrConfig, l.CapacityBytes, worst)
 	}
 	return nil
 }
 
-// worstCaseReservation is the most one Put can reserve under these limits.
+// worstCaseReservation is the most one maximal entry can need: a Put's
+// reservation (blobs, tree, record and staging) plus its retained
+// verification material.
 func (l Limits) worstCaseReservation() int64 {
 	files := int64(l.MaxFiles)
 	tree := l.MaxUnpackedBytes + files*blockSize + // each file rounds up by less than a block
 		files*blockSize + // at most MaxFiles implied directories
 		2*blockSize // the entry and tree directories
-	return blocks(l.MaxManifestBytes) + blocks(l.MaxCompressedBytes) + tree + blocks(maxRecordBytes) + stagingOverhead
+	return blocks(l.MaxManifestBytes) + blocks(l.MaxCompressedBytes) + tree + blocks(maxRecordBytes) + stagingOverhead +
+		blocks(l.MaxProofBytes+int64(proofHeaderLen))
 }
 
 // blocks is the capacity charge for a file of n bytes.
@@ -174,8 +199,13 @@ type Config struct {
 	// gate on what is stored, not acceptance: compatibility and trust are
 	// evaluated separately each time an entry is used.
 	CheckContent func(d *bundle.Descriptor, dir string) error
-	// Now stamps last use; nil means time.Now.
+	// Now stamps last use and lease acquisition; nil means time.Now.
 	Now func() time.Time
+	// OnRemove, if set, is called with the manifest digest after an entry
+	// was removed (evicted or found corrupt), without any cache lock held.
+	// Acceptance records for the digest are expected to be dropped here
+	// (resolve.Acceptances.InvalidateDigest). It must not block for long.
+	OnRemove func(digest string)
 
 	// wrapFS lets tests inject failures over the real filesystem.
 	wrapFS func(fileSystem) fileSystem

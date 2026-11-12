@@ -216,7 +216,8 @@ Rendered engine-policy hashes are recorded per policy by the renderer
   the handle and receipt introduced the per-proof digests and the full
   provenance claims; version 1 was never persisted and is not accepted.
 - **Lease.** An explicit pin on the cache entry by a holder (`profile`,
-  `applied` or `assessment`), released when that holder finishes or advances.
+  `applied` or `assessment`), released when that holder finishes or advances
+  ([leases and eviction](#leases-and-eviction)).
 - The handle carries no credentials and no payload bytes.
 
 ## Central source configuration
@@ -1213,10 +1214,10 @@ certificate expired still verifies while the root still trusts it.
 
 - Signing and trust-root maintenance documentation and CLI interoperability
   for both methods (3.5).
-- Persisting `RecheckBundle`s, cache leases and eviction, and invalidating on
-  configuration changes (tasks 4.3 and 4.4; the content cache itself exists,
-  see [safe materialization](#safe-materialization-and-the-content-cache));
-  controller wiring (group 5).
+- Controller wiring (group 5): retained `RecheckBundle`s, acceptance records
+  and their invalidation, and cache leases now exist in the
+  [content cache and resolver](#safe-materialization-and-the-content-cache),
+  but nothing watches configuration or calls them yet.
 - Provenance from a real run of the release workflow (it is implemented, but
   has not been dispatched; see [Release a bundle](#release-a-bundle)).
 
@@ -1426,14 +1427,19 @@ that runs in the controller. Because of the first item, task 3.5 is not ticked.
 Package `internal/bundle/cache` turns the digest-verified manifest and layer
 bytes from the [registry adapter](#registry-retrieval) into an extracted,
 verified, immutable tree on local disk that rendering and the assessment
-producer will read. It implements tasks 4.1 and 4.2 only and is **not wired
-into the controller yet**: nothing in the shipped binaries links it, no volume
-is mounted for it, and nothing reads from it.
+producer will read, retains the verification evidence beside it, and pins
+entries with leases. Package `internal/bundle/resolve` composes retrieval,
+the cache, the [verifier](#receipts-and-recheck) and in-memory acceptance
+records into one resolution of a pinned digest. Both are **not wired into
+the controller yet**: nothing in the shipped binaries links them, no volume is
+mounted for the cache, and nothing calls the resolver.
 
 A cache entry is never an authorization. It proves only that the stored bytes
 are the ones the manifest digest names and that they passed the archive policy,
 the inventory check and the content check when stored. Trust, source rules and
-compatibility are evaluated separately each time content is used (task 4.3).
+compatibility are evaluated separately, as an
+[acceptance](#acceptance-is-separate-from-cached-bytes) under the revisions
+current when the content is used.
 
 ### Layout
 
@@ -1442,6 +1448,7 @@ compatibility are evaluated separately each time content is used (task 4.3).
 | `blobs/sha256/<hex>` | the raw manifest and layer bytes, named by their digests |
 | `content/sha256/<manifest hex>/tree/` | the extracted payload, `bundle.json` included |
 | `content/sha256/<manifest hex>/record.json` | the integrity record |
+| `proofs/sha256/<manifest hex>` | the retained verification evidence (a header with its SHA-256, then the canonical `RecheckBundle`) |
 | `staging/<random>/` | in-flight work; never read as content |
 | `.lock` | the owner lock |
 
@@ -1470,13 +1477,15 @@ while it stages.
 | Regular files, `bundle.json` included; implied directories are bounded by the same number | 4096 |
 | `bundle.json` | 4 MiB |
 | Path / path component / depth | 1024 bytes / 255 bytes / 32 components |
-| Cache capacity, including staging, blobs and records | 1 GiB |
+| Retained verification evidence per entry (`MaxProofBytes`, at most `verify.MaxRecheckBytes`) | 16 MiB |
+| Cache capacity, including staging, blobs, records and retained evidence | 1 GiB |
 
 Decompressed tar metadata (headers, PAX records, padding) is bounded at 16 KiB
 per entry on top of the unpacked limit. Capacity is charged in whole 4 KiB
 blocks per file and directory, at least one block each, to approximate disk
-allocation. With the defaults, one maximal entry plus its staging reserves
-about 356 MiB.
+allocation. With the defaults, one maximal entry plus its staging and its
+retained evidence needs about 372 MiB, and `Validate` requires the capacity to
+hold at least that.
 
 ### Archive policy
 
@@ -1584,30 +1593,156 @@ root, such as a volume's `lost+found`, is touched. An interruption at any
 step of `Put` therefore leaves either no entry or a complete one, plus
 staging debris that the next Open removes.
 
+### Retained verification evidence
+
+`Cache.PutProofs(ctx, digest, recheckBundle)` stores the `RecheckBundle` of a
+stored entry ([receipts and recheck](#receipts-and-recheck)), replacing any
+earlier one. It refuses, before writing anything, material that fails
+`RecheckBundle.Check`, is for another subject, or exceeds `MaxProofBytes`.
+Its charge (whole blocks of the file) is reserved first, evicting other
+unleased entries if needed but never the entry itself; the file is written in
+staging, fsynced and renamed over the old one under the commit lock, so either
+the old or the new material is in place after a crash.
+
+`Cache.Proofs(digest)` re-reads the file on every call and checks its size, the
+SHA-256 recorded when it was written (in memory, and in the file header after a
+restart), the strict canonical decoding (`verify.DecodeRecheckBundle`, which
+also checks every retained digest) and that it is for exactly this digest.
+Material that fails is removed and `ErrCorrupt` returned; the entry itself is
+kept, and `ErrNoProofs` follows until verified material is stored again. The
+material is removed with its entry on every removal path, and `Open` removes
+material whose entry is gone or whose header is malformed (`Recovery().Proofs`).
+It is evidence for a recheck under current trust, never a decision: a
+well-formed file carrying other valid material for the subject is served after
+a restart (only the header hash remains to compare with), and the recheck then
+judges it like any other evidence.
+
 ### Capacity
 
-The charge covers stored blobs, entries and in-flight reservations. When
-existing entries fill the capacity, `Put` returns `ErrCapacity` and leaves
-them intact. There is no eviction yet. `Stats()` exposes the bookkeeping that
-eviction will need: capacity, used and reserved bytes, and per entry its
-charge (including the layer blob unless shared) and last use. Reservation is
-the single admission point and entry removal a single internal path.
+The charge covers stored blobs, entries, retained evidence and in-flight
+reservations, and `Stats()` reports it: capacity, used and reserved bytes,
+the number of leases, and per entry its charge (including its evidence, and
+its layer blob unless shared), the evidence charge, its leases and its last
+use. Reservation is the single admission point and entry removal a single
+internal path (detach from the index, then remove the files, then release the
+charge).
+
+### Leases and eviction
+
+`Cache.Acquire(digest, holder, owner)` pins a stored entry and returns a
+`bundle.Lease` with a random 128-bit ID; `Release(lease)` ends it. Holders are
+`profile` (a desired profile references it), `applied` (the last applied
+contribution uses it) and `assessment` (an active assessment snapshot needs
+it). Several owners can lease one entry, each with its own lease. Only the
+exact lease returned can be released: an unknown, already released or altered
+lease (another owner, holder, digest or time under a known ID) is `ErrLease`
+and releases nothing. `PutLeased` stores content and leases it atomically, so
+it cannot be evicted between the two. Leases live in memory only; after a
+restart there are none, and owners re-acquire them from their own state.
+
+When a reservation does not fit, the cache evicts unleased entries in
+least-recently-used order (`Get` and `Acquire` count as use; ties go to the
+smaller digest). It first computes the shortest such prefix whose removal frees
+enough, counting a shared layer blob only when every entry using it is a
+victim. Only if that prefix suffices are the victims detached from the index
+and removed, under the commit lock, so no lease can be taken on a chosen
+victim. Otherwise the reservation fails with `ErrCapacity` having evicted and
+written nothing. Leased entries are never evicted: when leases pin too much of
+the capacity, new content fails rather than displacing content that is still
+needed. Eviction never touches staging, `OnRemove` reports each removed digest
+(the resolver drops its acceptances), and `Get` of an entry evicted while it
+was being read is `ErrNotFound`, never a corrupt read. An entry's files stay
+valid only while a lease is held.
+
+A leased entry is removed only when it is found corrupt. Its holders then get
+`ErrCorrupt` from `Get`, never the bytes, until they release it or the verified
+bytes are stored again under the same digest (the leases then pin the new
+copy).
+
+### Acceptance is separate from cached bytes
+
+An acceptance (`resolve.Acceptance`) is a derived, in-memory decision that a
+cached digest may be used. It is keyed by every revision it depends on:
+
+| Key component | Source | Unchanged by |
+| --- | --- | --- |
+| `Name`, `Digest` | the request | |
+| `Rule` | `verify.RuleRevision` of the source as configured now | a mirror (repository), credential Secret or CA change |
+| `Trust` | `Revisions.Trust`: the revision of the root or key object the rule references | credential or CA rotation |
+| `Compat` | `Revisions.Compatibility`: the controller and provider contract | |
+
+The current revisions are read on every lookup, so a decision under changed
+revisions is never found. `Acceptances.InvalidateSource`, `InvalidateDigest`,
+`Invalidate(predicate)` and `InvalidateAll` also drop decisions explicitly.
+Nothing is persisted: after a restart no acceptance exists until one is
+recomputed from retained evidence or a fresh verification.
+
+**Concurrent changes.** A resolution captures invalidation generations
+(global, per source and per digest) before it reads the revisions. It records
+its acceptance only if those generations and the revisions are unchanged, and
+checks both again immediately before adoption; otherwise it fails with
+`ErrStale`, records and adopts nothing, and releases its lease. Whoever changes
+configuration must first make `Revisions` return the new value and then
+invalidate, so a resolution either sees the new revisions or is refused.
+`Resolver.Confirm(handle)` repeats the check for a caller about to apply an
+earlier result.
+
+### Resolution and registry outages
+
+`Resolver.Resolve(ctx, {Name, Digest, Holder, Owner})` takes the source
+configured now for `Name`, leases the cached entry if there is one (and checks
+its integrity), then:
+
+1. an acceptance under the current revisions: the cached content is served,
+   with no registry request and no verification;
+2. otherwise, cached content with retained evidence: `Verifier.Recheck` under
+   the current rule and trust material, offline, then the compatibility check.
+   The receipt in the evidence is never used; the handle carries the
+   recomputed one, and changed claims replace the stored evidence;
+3. otherwise retrieval by digest through the registry adapter, full
+   verification (`Verifier.Accept`), the compatibility check, `PutLeased` and
+   `PutProofs`.
+
+It returns a `bundle.ResolvedContent` with a new lease that the caller
+releases (`Resolver.Release`), or an error wrapping `ErrUnresolved` with no
+lease held. There are no retries: the caller re-runs resolution.
+
+| Situation, registry unavailable | Result |
+| --- | --- |
+| intact content, complete evidence that satisfies current trust | resolved offline (path 1 or 2) |
+| content lost (not cached, or found corrupt) | `ErrContentUnavailable` |
+| content cached, evidence missing or corrupt | `ErrProofUnavailable` |
+| evidence no longer satisfies the rule (another key, builder or source repository required) | `ErrUntrusted` |
+| referenced key or root unreadable or replaced by other material | `ErrUntrusted` (no retrieval is tried) |
+| source removed | `ErrConfig` |
+| content incompatible with the controller or provider | `ErrIncompatible` |
+| configuration changed during resolution | `ErrStale` |
+| capacity pinned by leases | `ErrCapacity` |
+
+With the registry reachable, missing or insufficient evidence is replaced by
+fresh evidence when that satisfies current trust.
+
+### Restart and persistent storage
+
+The same rules apply to the default `emptyDir` and to an operator-provided
+persistent directory. After a restart `Open` recovers as described above,
+entries and evidence are re-verified on use and anything corrupt is removed and
+never served, and no acceptance or lease exists: acceptances are recomputed
+from retained evidence under the configuration current then, and leases are
+re-acquired by their owners. Reopening with a lower capacity keeps every entry;
+the next admission evicts unleased entries as needed, or fails with
+`ErrCapacity` if leases pin too much.
 
 ### Not done yet
 
-- Leases for desired, applied and assessment holders, and LRU eviction of
-  unreferenced entries (task 4.4).
-- Acceptance records keyed by source, trust and compatibility revisions, and
-  their invalidation (task 4.3). The cache stores bytes, not decisions.
 - Documentation of cache lifetime across process restarts and Pod or cache
   loss (task 4.5). The default will be a bounded `emptyDir` that does not
   survive Pod replacement, optionally an operator-provided persistent volume
   with the same integrity rules. Neither is mounted by the chart yet.
-- Storing verification material (`RecheckBundle`s, up to 16 MiB each) beside
-  entries and charging it against the same capacity, as the 1 GiB default
-  intends. Until then capacity covers payload, blobs, records and staging only,
-  and task 4.2 stays open.
-- Controller wiring (group 5).
+- Controller wiring (group 5): configuration and Secret/ConfigMap watches
+  feeding `Revisions` and the invalidation calls, the compatibility check,
+  re-acquiring leases from applied ownership after a restart, status
+  conditions, retries, and the chart's cache volume.
 
 ### What has and has not been verified
 
@@ -1623,12 +1758,37 @@ every mutating step of a `Put`, and a panic. The tests cover:
 - the destination-exists race, coalescing, and exact admission under
   concurrent capacity pressure;
 - corruption of every stored component, with and without a restart, and
-  recovery.
+  recovery;
+- retained evidence: round trip, replacement and restart, refusal without
+  writing, corruption of every part of the file with and without a restart,
+  reservation before writing (refused with zero writes and zero evictions,
+  never evicting its own entry), removal with its entry, `ENOSPC` while
+  writing it, concurrent replacement, and a crash at every mutating step of
+  `PutProofs`;
+- leases (several owners, double, foreign and altered releases), exact LRU
+  victim order and tie-break, refusal with zero evictions and writes when
+  leases pin the capacity, all-or-nothing eviction after reopening with a lower
+  capacity, eviction racing a `Get` at a deterministic point (`ErrNotFound` for
+  an unleased entry, untouched when leased), a leased entry found corrupt, and
+  a concurrent put/evict/lease stress test, with the accounting recounted from
+  disk afterwards.
+
+The resolver is tested with the real Cosign organization-key fixtures of the
+official bundle ([provenance verification](#provenance-verification)), a fake
+registry and real temporary directories: the three resolution paths, every
+acceptance key component (each change misses, a mirror or credential or CA
+change hits), every outage row above with and without a restart, an edited
+receipt (replaced by the recomputed one) and a consistent receipt over
+another key's evidence (no acceptance), invalidation and revision changes
+injected exactly between verification and recording and between recording
+and adoption on both the retrieval and the recheck path (`ErrStale`, nothing
+recorded, no lease left), and a concurrent resolve/invalidate stress test.
 
 Not verified: behaviour on a real full disk or quota (only injected), a real
 power loss (fsync ordering is checked from the operation log, not by cutting
-power), filesystems other than the test host's, and anything in the
-controller.
+power), filesystems other than the test host's, keyless trust-root swaps
+through the resolver (the verifier's own tests cover them), and anything in
+the controller.
 
 ## Create and package a bundle
 

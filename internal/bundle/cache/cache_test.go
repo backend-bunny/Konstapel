@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/backend-bunny/Konstapel/internal/bundle"
 )
 
 // The documented defaults (docs/policy-bundles.md).
@@ -21,7 +23,7 @@ func TestDefaultLimitsMatchDocs(t *testing.T) {
 	want := Limits{
 		MaxManifestBytes: 4 << 20, MaxCompressedBytes: 64 << 20, MaxUnpackedBytes: 256 << 20,
 		MaxFiles: 4096, MaxDescriptorBytes: 4 << 20, MaxPathBytes: 1024, MaxNameBytes: 255,
-		MaxDepth: 32, CapacityBytes: 1 << 30,
+		MaxDepth: 32, MaxProofBytes: 16 << 20, CapacityBytes: 1 << 30,
 	}
 	if got := DefaultLimits(); got != want {
 		t.Fatalf("defaults %+v, documented %+v", got, want)
@@ -29,9 +31,10 @@ func TestDefaultLimitsMatchDocs(t *testing.T) {
 	if err := want.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// A maximal entry with its staging fits the default capacity about
-	// three times over; the bound itself is documented as ~356 MiB.
-	if w := want.worstCaseReservation(); w > want.CapacityBytes/2 || w < 356<<20 || w > 357<<20 {
+	// A maximal entry with its staging and its verification material fits
+	// the default capacity about 2.75 times over; the bound itself is
+	// documented as ~372 MiB.
+	if w := want.worstCaseReservation(); w > want.CapacityBytes/2 || w < 372<<20 || w > 373<<20 {
 		t.Fatalf("worst case %d", w)
 	}
 }
@@ -52,6 +55,9 @@ func TestLimitsValidate(t *testing.T) {
 		"path too long":         mod(func(l *Limits) { l.MaxPathBytes = 4096 }),
 		"zero depth":            mod(func(l *Limits) { l.MaxDepth = 0 }),
 		"zero capacity":         mod(func(l *Limits) { l.CapacityBytes = 0 }),
+		"zero proofs":           mod(func(l *Limits) { l.MaxProofBytes = 0 }),
+		"proofs above recheck":  mod(func(l *Limits) { l.MaxProofBytes = 16<<20 + 1 }),
+		"capacity below proofs": mod(func(l *Limits) { l.CapacityBytes = l.worstCaseReservation() - 1 }),
 		"capacity below entry":  mod(func(l *Limits) { l.CapacityBytes = 300 << 20 }),
 	}
 	for name, l := range bad {
@@ -334,6 +340,9 @@ func checkAccounting(t *testing.T, c *Cache) {
 	}
 	for _, en := range c.entries {
 		sum += en.cost
+		if en.proofs != nil {
+			sum += en.proofs.cost
+		}
 	}
 	if s.UsedBytes != sum {
 		t.Fatalf("used %d, components %d", s.UsedBytes, sum)
@@ -354,12 +363,14 @@ func checkAccounting(t *testing.T, c *Cache) {
 		}
 		return nil
 	}))
-	blobs, err := os.ReadDir(filepath.Join(c.dir, blobsDir))
-	must(t, err)
-	for _, b := range blobs {
-		info, err := b.Info()
+	for _, dir := range []string{blobsDir, proofsDir} {
+		files, err := os.ReadDir(filepath.Join(c.dir, dir))
 		must(t, err)
-		disk += blocks(info.Size())
+		for _, b := range files {
+			info, err := b.Info()
+			must(t, err)
+			disk += blocks(info.Size())
+		}
 	}
 	if disk != s.UsedBytes {
 		t.Fatalf("disk charge %d, accounted %d", disk, s.UsedBytes)
@@ -424,7 +435,7 @@ func TestDestinationExistsRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = c.put(bg(), h, a.Manifest, a.Layer, a.LayerDigest)
+			_, _, errs[i] = c.put(bg(), h, a.Manifest, a.Layer, a.LayerDigest, nil)
 		}()
 	}
 	wg.Wait()
@@ -441,7 +452,7 @@ func TestDestinationExistsRace(t *testing.T) {
 	first, err := os.Stat(filepath.Join(e.root, contentDir, h))
 	must(t, err)
 	// Another staged copy over an intact entry leaves it in place.
-	if _, err := c.put(bg(), h, a.Manifest, a.Layer, a.LayerDigest); err != nil {
+	if _, _, err := c.put(bg(), h, a.Manifest, a.Layer, a.LayerDigest, nil); err != nil {
 		t.Fatal(err)
 	}
 	again, err := os.Stat(filepath.Join(e.root, contentDir, h))
@@ -451,8 +462,8 @@ func TestDestinationExistsRace(t *testing.T) {
 	}
 }
 
-// N concurrent distinct Puts against a capacity that fits exactly k of them:
-// exactly k are promoted, the rest fail with ErrCapacity, and the
+// N concurrent distinct leased Puts against a capacity that fits exactly k
+// of them: exactly k are promoted, the rest fail with ErrCapacity, and the
 // reservation returns to zero.
 func TestConcurrentCapacity(t *testing.T) {
 	const n, k = 12, 5
@@ -479,7 +490,9 @@ func TestConcurrentCapacity(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				_, errs[i] = c.Put(bg(), m, l)
+				// Leased, so that admission alone decides: nothing can be
+				// evicted to admit more than k.
+				_, _, errs[i] = c.PutLeased(bg(), m, l, bundle.HolderProfile, fmt.Sprint("p", i))
 			}()
 		}
 		close(start)
@@ -511,8 +524,9 @@ func TestConcurrentCapacity(t *testing.T) {
 	}
 }
 
-// Capacity exhausted by existing entries: the refusal writes nothing at all
-// and leaves the entries intact and usable.
+// Capacity exhausted by leased entries: nothing can be evicted, so the
+// refusal evicts nothing, writes nothing at all and leaves the entries intact
+// and usable.
 func TestCapacityExhaustedByEntries(t *testing.T) {
 	m0, l0 := variant(t, 0)
 	probe := newEnv(t)
@@ -526,7 +540,7 @@ func TestCapacityExhaustedByEntries(t *testing.T) {
 	var stored []string
 	for i := 0; ; i++ {
 		m, l := variant(t, i)
-		got, err := c.Put(bg(), m, l)
+		got, _, err := c.PutLeased(bg(), m, l, bundle.HolderApplied, fmt.Sprint("owner-", i))
 		if errors.Is(err, ErrCapacity) {
 			break
 		}
@@ -565,6 +579,7 @@ func TestCapacityExhaustedByEntries(t *testing.T) {
 func tinyLimits() Limits {
 	l := DefaultLimits()
 	l.MaxManifestBytes, l.MaxCompressedBytes, l.MaxUnpackedBytes, l.MaxDescriptorBytes, l.MaxFiles = 4<<10, 8<<10, 16<<10, 8<<10, 8
+	l.MaxProofBytes = 64 << 10
 	return l
 }
 

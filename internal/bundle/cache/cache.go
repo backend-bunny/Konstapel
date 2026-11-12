@@ -8,14 +8,16 @@
 //
 //	<root>/blobs/sha256/<hex>              raw manifest and layer bytes
 //	<root>/content/sha256/<manifest-hex>/  record.json and tree/ (the payload)
+//	<root>/proofs/sha256/<manifest-hex>    retained verification material
 //	<root>/staging/<random>/               in-flight work, removed on Open
 //	<root>/.lock                           exclusive owner lock
 //
 // Entries are re-verified from the manifest digest down on every reuse; a
 // corrupt entry is removed and never served. Capacity is reserved before
-// anything is written. Leases, eviction and acceptance (trust, source and
-// compatibility revisions) are separate concerns layered on top; a cache
-// entry is never an authorization by itself.
+// anything is written; when it does not fit, unleased entries are evicted in
+// least-recently-used order, and leased entries never are. Acceptance (trust,
+// source and compatibility revisions) is a separate concern layered on top
+// (package resolve); a cache entry is never an authorization by itself.
 package cache
 
 import (
@@ -45,6 +47,7 @@ const (
 	lockName   = ".lock"
 	blobsDir   = "blobs/sha256"
 	contentDir = "content/sha256"
+	proofsDir  = "proofs/sha256"
 	stagingDir = "staging"
 	recordName = "record.json"
 	treeName   = "tree"
@@ -56,16 +59,19 @@ var hexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // safe for concurrent use. One Cache owns a root at a time (an exclusive
 // lock enforces this across processes).
 type Cache struct {
-	dir   string
-	lim   Limits
-	check func(*bundle.Descriptor, string) error
-	now   func() time.Time
-	fs    fileSystem
-	root  *os.Root
-	lock  io.Closer
+	dir      string
+	lim      Limits
+	check    func(*bundle.Descriptor, string) error
+	now      func() time.Time
+	onRemove func(string)
+	fs       fileSystem
+	root     *os.Root
+	lock     io.Closer
 
-	// commit serializes every change to blobs/ and content/: promotion and
-	// removal. Staging, extraction and verification run outside it.
+	// commit serializes every change to blobs/, content/ and proofs/:
+	// promotion, proof replacement, eviction and removal. Staging,
+	// extraction and verification run outside it. Lock order: commit, then
+	// mu.
 	commit sync.Mutex
 
 	mu       sync.Mutex // guards everything below
@@ -77,11 +83,19 @@ type Cache struct {
 	inflight map[string]*call
 	gen      uint64
 	recovery Recovery
+	// leases pins entries by manifest hex, independently of whether the
+	// entry is currently stored: a lease outlives a corrupt entry's removal
+	// so that its holder sees the loss. Leases live in memory only.
+	leases map[string]map[string]bundle.Lease
+	// lost marks leased entries that were removed as corrupt; Get reports
+	// ErrCorrupt for them until they are stored again or their leases end.
+	lost map[string]bool
 }
 
 type entryState struct {
 	manifest, layer string // blob hex digests
 	cost            int64  // the content directory only
+	proofs          *proofState
 	lastUsed        time.Time
 	gen             uint64 // changes whenever the entry is (re)promoted
 }
@@ -103,7 +117,10 @@ type Recovery struct {
 	Staging []string
 	Entries []string
 	Blobs   []string
-	Other   []string
+	// Proofs lists verification material removed because its entry was
+	// gone or the file was not well-formed.
+	Proofs []string
+	Other  []string
 }
 
 // Entry is a verified, immutable cache entry. Dir and FS are read-only views
@@ -127,7 +144,9 @@ type Entry struct {
 	layerSize       int64
 }
 
-// FS returns the extracted payload as a read-only filesystem.
+// FS returns the extracted payload as a read-only filesystem. Dir and FS
+// stay valid only while the caller holds a lease on the entry: an unleased
+// entry can be evicted at any time.
 func (e *Entry) FS() fs.FS { return os.DirFS(e.Dir) }
 
 // Manifest re-reads the stored manifest and checks it against Digest.
@@ -184,9 +203,9 @@ func Open(dir string, cfg Config) (*Cache, error) {
 		return nil, err
 	}
 	c := &Cache{
-		dir: abs, lim: lim, check: cfg.CheckContent, now: cfg.Now, root: root, lock: lock,
+		dir: abs, lim: lim, check: cfg.CheckContent, now: cfg.Now, onRemove: cfg.OnRemove, root: root, lock: lock,
 		fs: osFS{root}, entries: map[string]*entryState{}, blobs: map[string]*blobState{},
-		inflight: map[string]*call{},
+		inflight: map[string]*call{}, leases: map[string]map[string]bundle.Lease{}, lost: map[string]bool{},
 	}
 	if c.check == nil {
 		c.check = bundle.ValidateContentDir
@@ -226,7 +245,7 @@ func (c *Cache) Close() error {
 func (c *Cache) Recovery() Recovery { return c.recovery }
 
 func (c *Cache) recover() error {
-	for _, d := range []string{"blobs", blobsDir, "content", contentDir, stagingDir} {
+	for _, d := range []string{"blobs", blobsDir, "content", contentDir, "proofs", proofsDir, stagingDir} {
 		if err := c.fs.Mkdir(d, privateMode); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err
 		}
@@ -309,7 +328,10 @@ func (c *Cache) recover() error {
 			c.recovery.Blobs = append(c.recovery.Blobs, b)
 		}
 	}
-	for _, s := range [][]string{c.recovery.Staging, c.recovery.Entries, c.recovery.Blobs, c.recovery.Other} {
+	if err := c.recoverProofs(); err != nil {
+		return err
+	}
+	for _, s := range [][]string{c.recovery.Staging, c.recovery.Entries, c.recovery.Blobs, c.recovery.Proofs, c.recovery.Other} {
 		sort.Strings(s)
 	}
 	return nil
@@ -401,7 +423,9 @@ func (c *Cache) diskCost(dir string) (int64, error) {
 // Get returns the verified entry for a manifest digest. Every call re-hashes
 // the stored manifest and layer, re-derives the inventory from the layer and
 // checks the record and every extracted file against it. A mismatch removes
-// the entry and returns ErrCorrupt; corrupt content is never returned.
+// the entry and returns ErrCorrupt; corrupt content is never returned. An
+// entry evicted while it was being read is ErrNotFound, not ErrCorrupt. The
+// returned Entry's files stay valid only while a lease is held (Acquire).
 func (c *Cache) Get(ctx context.Context, digest string) (*Entry, error) {
 	h, err := hexOf(digest)
 	if err != nil {
@@ -414,16 +438,31 @@ func (c *Cache) Get(ctx context.Context, digest string) (*Entry, error) {
 	}
 	st := c.entries[h]
 	var gen uint64
+	lost := false
 	if st != nil {
 		gen = st.gen
+	} else {
+		lost = c.lost[h]
 	}
 	c.mu.Unlock()
+	if lost {
+		return nil, fmt.Errorf("%w: %s was removed as corrupt while leased; resolve it again", ErrCorrupt, digest)
+	}
 	if st == nil {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, digest)
 	}
 	e, err := c.verifyEntry(ctx, h)
 	if err != nil {
 		if errors.Is(err, ErrCorrupt) {
+			// Entries are detached from the index before their files are
+			// removed, so a read that failed while the same promotion is
+			// still indexed saw stored bytes, not a removal in progress.
+			c.mu.Lock()
+			cur := c.entries[h]
+			c.mu.Unlock()
+			if cur == nil || cur.gen != gen {
+				return nil, fmt.Errorf("%w: %s was removed while being read", ErrNotFound, digest)
+			}
 			if qerr := c.quarantine(h, gen); qerr != nil {
 				return nil, errors.Join(err, qerr)
 			}
@@ -547,39 +586,71 @@ func (r *ctxReader) Read(p []byte) (int, error) {
 }
 
 // quarantine removes a corrupt entry, unless it was re-promoted since it was
-// found corrupt (gen changed). The content directory is first renamed into
-// staging, so it disappears atomically, then deleted. The manifest blob is
-// removed with it; the layer blob only when no other entry references it.
+// found corrupt (gen changed). Leases on it stay registered and their
+// holders get ErrCorrupt from Get until they release or the entry is stored
+// again.
 func (c *Cache) quarantine(h string, gen uint64) error {
 	c.commit.Lock()
-	defer c.commit.Unlock()
 	c.mu.Lock()
 	st := c.entries[h]
 	if st == nil || st.gen != gen || c.closed {
 		c.mu.Unlock()
+		c.commit.Unlock()
 		return nil
 	}
+	c.detachLocked(h)
 	c.mu.Unlock()
-	return c.removeEntryLocked(h)
+	err := c.dispose(h, st, true)
+	c.commit.Unlock()
+	c.notifyRemoved(h)
+	return err
 }
 
 // removeEntryLocked deletes a stored entry and releases its charge. The
-// caller holds c.commit. It is the single removal path; eviction (task 4.4)
-// is expected to call it for unpinned entries chosen by LRU.
+// caller holds c.commit. Together with detachLocked and dispose it is the
+// single removal path: quarantine, replacement of a corrupt entry and
+// eviction all go through detachLocked and dispose.
 func (c *Cache) removeEntryLocked(h string) error {
 	c.mu.Lock()
 	st := c.entries[h]
+	if st != nil {
+		c.detachLocked(h)
+	}
 	c.mu.Unlock()
 	if st == nil {
 		return nil
 	}
+	return c.dispose(h, st, true)
+}
+
+// detachLocked removes an entry from the index so that Get and Acquire no
+// longer find it. Its charge stays until dispose has removed its files. The
+// caller holds c.commit and c.mu.
+func (c *Cache) detachLocked(h string) {
+	delete(c.entries, h)
+}
+
+// dispose removes a detached entry's files and releases its charge: the
+// content directory is first renamed into staging, so it disappears
+// atomically, then deleted with its verification material; the manifest
+// blob goes with it and the layer blob when no other entry references it. If
+// the content directory cannot be moved the entry is re-attached unchanged.
+// corrupt marks a leased entry as lost. The caller holds c.commit, not c.mu.
+func (c *Cache) dispose(h string, st *entryState, corrupt bool) error {
 	trash := path.Join(stagingDir, "removed-"+randomName())
 	if err := c.fs.Rename(path.Join(contentDir, h), trash); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		c.mu.Lock()
+		if c.entries[h] == nil {
+			c.entries[h] = st
+		}
+		c.mu.Unlock()
 		return err
 	}
 	c.mu.Lock()
-	delete(c.entries, h)
 	c.used -= st.cost
+	if st.proofs != nil {
+		c.used -= st.proofs.cost
+	}
 	var drop []string
 	for _, b := range []string{st.manifest, st.layer} {
 		if bs := c.blobs[b]; bs != nil {
@@ -590,13 +661,27 @@ func (c *Cache) removeEntryLocked(h string) error {
 			}
 		}
 	}
+	if corrupt && len(c.leases[h]) > 0 {
+		c.lost[h] = true
+	}
 	c.mu.Unlock()
-	var errs []error
-	errs = append(errs, c.fs.RemoveAll(trash))
+	errs := []error{c.fs.RemoveAll(trash)}
+	if st.proofs != nil {
+		errs = append(errs, c.fs.RemoveAll(path.Join(proofsDir, h)))
+	}
 	for _, b := range drop {
 		errs = append(errs, c.fs.RemoveAll(path.Join(blobsDir, b)))
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Cache) notifyRemoved(hs ...string) {
+	if c.onRemove == nil {
+		return
+	}
+	for _, h := range hs {
+		c.onRemove("sha256:" + h)
+	}
 }
 
 // Stats is the cache's accounting and the bookkeeping eviction needs.
@@ -604,7 +689,10 @@ type Stats struct {
 	CapacityBytes int64
 	UsedBytes     int64
 	ReservedBytes int64
-	Entries       []EntryInfo
+	// Leases counts every active lease, including leases on entries that
+	// were removed as corrupt.
+	Leases  int
+	Entries []EntryInfo
 }
 
 // EntryInfo describes one stored entry.
@@ -612,9 +700,15 @@ type EntryInfo struct {
 	Digest      string
 	LayerDigest string
 	// Bytes is the charge removing the entry would release: its content
-	// directory and manifest blob, plus the layer blob unless another entry
-	// shares it.
-	Bytes    int64
+	// directory, verification material and manifest blob, plus the layer
+	// blob unless another entry shares it.
+	Bytes int64
+	// ProofBytes is the charge of its retained verification material
+	// (included in Bytes); 0 when none is stored.
+	ProofBytes int64
+	// Leases counts the leases pinning the entry; a leased entry is never
+	// evicted.
+	Leases   int
 	LastUsed time.Time
 }
 
@@ -623,34 +717,151 @@ func (c *Cache) Stats() Stats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := Stats{CapacityBytes: c.lim.CapacityBytes, UsedBytes: c.used, ReservedBytes: c.reserved}
+	for _, ls := range c.leases {
+		s.Leases += len(ls)
+	}
 	for h, st := range c.entries {
 		b := st.cost
+		var pb int64
+		if st.proofs != nil {
+			pb = st.proofs.cost
+			b += pb
+		}
 		if bs := c.blobs[st.manifest]; bs != nil {
 			b += bs.cost
 		}
 		if bs := c.blobs[st.layer]; bs != nil && bs.refs == 1 {
 			b += bs.cost
 		}
-		s.Entries = append(s.Entries, EntryInfo{Digest: "sha256:" + h, LayerDigest: "sha256:" + st.layer, Bytes: b, LastUsed: st.lastUsed})
+		s.Entries = append(s.Entries, EntryInfo{Digest: "sha256:" + h, LayerDigest: "sha256:" + st.layer, Bytes: b,
+			ProofBytes: pb, Leases: len(c.leases[h]), LastUsed: st.lastUsed})
 	}
 	sort.Slice(s.Entries, func(i, j int) bool { return s.Entries[i].Digest < s.Entries[j].Digest })
 	return s
 }
 
 // reserve charges n bytes against capacity before anything is written. It
-// is the single admission point: task 4.4 adds eviction of unpinned entries
-// here before giving up with ErrCapacity.
-func (c *Cache) reserve(n int64) error {
+// is the single admission point. When n does not fit, it evicts unleased
+// entries in least-recently-used order (ties by digest), never keep and
+// never a leased entry: the victims are chosen first, and only if removing
+// them makes n fit are they detached and removed, all under the commit lock
+// so that no lease can be taken on a chosen victim. Otherwise it fails with
+// ErrCapacity having evicted nothing.
+func (c *Cache) reserve(n int64, keep string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed {
+		c.mu.Unlock()
 		return ErrClosed
 	}
-	if c.used+c.reserved+n > c.lim.CapacityBytes {
-		return fmt.Errorf("%w: need %d bytes, %d of %d used and %d reserved", ErrCapacity, n, c.used, c.lim.CapacityBytes, c.reserved)
+	if c.used+c.reserved+n <= c.lim.CapacityBytes {
+		c.reserved += n
+		c.mu.Unlock()
+		return nil
 	}
+	c.mu.Unlock()
+
+	c.commit.Lock()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		c.commit.Unlock()
+		return ErrClosed
+	}
+	over := c.used + c.reserved + n - c.lim.CapacityBytes
+	if over <= 0 { // freed meanwhile
+		c.reserved += n
+		c.mu.Unlock()
+		c.commit.Unlock()
+		return nil
+	}
+	victims, freed, pinned := c.victimsLocked(over, keep)
+	if freed < over {
+		err := fmt.Errorf("%w: need %d bytes, %d of %d used (%d pinned by leases) and %d reserved; evicting every unleased entry would free %d",
+			ErrCapacity, n, c.used, c.lim.CapacityBytes, pinned, c.reserved, freed)
+		c.mu.Unlock()
+		c.commit.Unlock()
+		return err
+	}
+	states := make([]*entryState, len(victims))
+	for i, h := range victims {
+		states[i] = c.entries[h]
+		c.detachLocked(h)
+	}
+	// Reserve now: the victims' charge is released as they are removed, and
+	// no concurrent reservation can take the room this eviction frees.
 	c.reserved += n
+	c.mu.Unlock()
+	var errs []error
+	var removed []string
+	for i, h := range victims {
+		if err := c.dispose(h, states[i], false); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed = append(removed, h)
+	}
+	c.commit.Unlock()
+	c.notifyRemoved(removed...)
+	if err := errors.Join(errs...); err != nil {
+		c.release(n)
+		return fmt.Errorf("evicting for %d bytes: %w", n, err)
+	}
 	return nil
+}
+
+// victimsLocked returns the shortest least-recently-used prefix of unleased
+// entries (except keep) whose removal frees at least need bytes, what it
+// frees, and the bytes pinned by leased entries. A blob shared by several
+// entries is counted as freed only when every entry using it is a victim. If
+// even every candidate together frees too little, it returns them all and
+// their total, and the caller evicts nothing. The caller holds c.mu.
+func (c *Cache) victimsLocked(need int64, keep string) (victims []string, freed, pinned int64) {
+	var cands []string
+	for h, st := range c.entries {
+		if len(c.leases[h]) > 0 {
+			pinned += st.cost
+			if st.proofs != nil {
+				pinned += st.proofs.cost
+			}
+			continue
+		}
+		if h == keep {
+			continue
+		}
+		cands = append(cands, h)
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		a, b := c.entries[cands[i]], c.entries[cands[j]]
+		if !a.lastUsed.Equal(b.lastUsed) {
+			return a.lastUsed.Before(b.lastUsed)
+		}
+		return cands[i] < cands[j]
+	})
+	refs := map[string]int{}
+	for _, h := range cands {
+		st := c.entries[h]
+		victims = append(victims, h)
+		freed += st.cost
+		if st.proofs != nil {
+			freed += st.proofs.cost
+		}
+		for _, b := range []string{st.manifest, st.layer} {
+			bs := c.blobs[b]
+			if bs == nil {
+				continue
+			}
+			if _, ok := refs[b]; !ok {
+				refs[b] = bs.refs
+			}
+			if refs[b]--; refs[b] == 0 {
+				freed += bs.cost
+			}
+		}
+		if freed >= need {
+			return victims, freed, pinned
+		}
+	}
+	return victims, freed, pinned
 }
 
 func (c *Cache) release(n int64) {
