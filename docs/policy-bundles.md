@@ -2448,9 +2448,12 @@ Because `resourceNames` are static, the referenced names come from chart
 values (`bundles.referencedSecrets`, `bundles.referencedConfigMaps`); an empty
 list renders no rule rather than an unrestricted one. RBAC is additive: the
 generated `konstapel-controller` Role already grants `get` on every Secret and
-`get`/`list` on every ConfigMap in the controller namespace for other
-features, so today the bundle Role's effective new privilege is the named
-`watch`, and a reference missing from the values is still readable rather than
+ConfigMap in the controller namespace for other features (S3 credentials, CA
+trust, snapshots and inventories whose names come from CR specs or are derived
+at runtime; see
+[Controller ServiceAccount boundary](charts.md#controller-serviceaccount-boundary)),
+so today the bundle Role's effective new privilege is the named `list`/`watch`
+of the sources ConfigMap, and a reference missing from the values is still readable rather than
 `Forbidden`. If those broader rules are narrowed, a missing reference becomes
 `Forbidden`, which makes its source unavailable (never a fallback).
 
@@ -2459,7 +2462,11 @@ ServiceAccount: the field-selected `watch` of the sources ConfigMap is allowed
 with the chart's RoleBinding and forbidden once that RoleBinding is deleted
 (no other grant allows it); an unselected ConfigMap watch, a field-selected
 watch of another ConfigMap or of a Secret, a Secret `list`, a ConfigMap
-`update` and the same watch in another namespace are all forbidden.
+`update` and the same watch in another namespace are all forbidden. The same
+step asserts the controller's effective Secret/ConfigMap boundary: a Secret no
+bundle value lists is readable (the generated Role), while an unselected
+ConfigMap `list`, Secret `watch`, writes and deletes of either kind, and reads
+in other namespaces are forbidden.
 
 ### Conditions and requeue
 

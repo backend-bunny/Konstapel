@@ -12,7 +12,9 @@ package controller
 // bundle (internal/bundle/verify/testdata/provenance) under two
 // repositories. Nothing runs in-process:
 //   - the API server authorizes the controller's field-selected watch of the
-//     sources ConfigMap through the chart's Role, and only that watch;
+//     sources ConfigMap through the chart's Role, and only that watch, and
+//     the controller's effective Secret/ConfigMap access is exactly the
+//     documented boundary;
 //   - every replica's Watcher loads the configuration and sees changes;
 //   - the leader's Trigger reconciles profiles on configuration, trust and
 //     key changes: invalid configuration, deletion, trust revocation and
@@ -53,6 +55,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/crypto/bcrypt"
 	appsv1 "k8s.io/api/apps/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -518,7 +521,8 @@ func TestLiveHelmBundles(t *testing.T) {
 
 	// 1. RBAC against the real API server, as the controller's
 	// ServiceAccount: the field-selected watch of the sources ConfigMap is
-	// allowed, by the chart's bundle Role alone; nothing broader is.
+	// allowed, by the chart's bundle Role alone; nothing broader is. Then
+	// the effective Secret/ConfigMap boundary of all the controller's roles.
 	sa := l.saClient(ns, "konstapel-controller")
 	allowed := func(what string, f func() error) {
 		t.Helper()
@@ -564,9 +568,94 @@ func TestLiveHelmBundles(t *testing.T) {
 		_, err := sa.CoreV1().ConfigMaps(ns).Get(l.ctx, obCAConfig, metav1.GetOptions{})
 		return err
 	})
-	// The generated controller Role grants get on every Secret here for
-	// other features; record it rather than claim a narrower grant.
-	_, decoyErr := sa.CoreV1().Secrets(ns).Get(l.ctx, obDecoy, metav1.GetOptions{})
+	// The effective union of every Role and ClusterRole bound to the
+	// controller ServiceAccount (docs/charts.md, "Controller ServiceAccount
+	// boundary"). The S3 credentialSecret, CA trust, legacy configuration,
+	// acceptance snapshot and orphan inventory names are chosen in CR specs
+	// or derived at runtime, so Secret and ConfigMap get in this namespace
+	// are not by name: a Secret the bundle values do not list is readable.
+	// Asserted as allowed so a narrowing is a deliberate test change.
+	allowed("get of a Secret no bundle value lists", func() error {
+		_, err := sa.CoreV1().Secrets(ns).Get(l.ctx, obDecoy, metav1.GetOptions{})
+		return err
+	})
+	forbidden("unselected ConfigMap list", func() error { _, err := sa.CoreV1().ConfigMaps(ns).List(l.ctx, metav1.ListOptions{}); return err })
+	forbidden("field-selected list of a referenced ConfigMap", func() error {
+		_, err := sa.CoreV1().ConfigMaps(ns).List(l.ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + obCAConfig})
+		return err
+	})
+	forbidden("unselected Secret watch", func() error { _, err := fieldWatch(l.ctx, sa, ns, "Secret", ""); return err })
+	forbidden("Secret get in another namespace", func() error {
+		_, err := sa.CoreV1().Secrets("default").Get(l.ctx, obDecoy, metav1.GetOptions{})
+		return err
+	})
+	forbidden("ConfigMap get in another namespace", func() error {
+		_, err := sa.CoreV1().ConfigMaps("kube-system").Get(l.ctx, "kube-root-ca.crt", metav1.GetOptions{})
+		return err
+	})
+	forbidden("Secret update", func() error {
+		s, err := sa.CoreV1().Secrets(ns).Get(l.ctx, obDecoy, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		_, err = sa.CoreV1().Secrets(ns).Update(l.ctx, s, metav1.UpdateOptions{})
+		return err
+	})
+	forbidden("Secret delete", func() error {
+		return sa.CoreV1().Secrets(ns).Delete(l.ctx, obDecoy, metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}})
+	})
+	forbidden("ConfigMap delete", func() error {
+		return sa.CoreV1().ConfigMaps(ns).Delete(l.ctx, obCAConfig, metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}})
+	})
+	// Writes that would create objects are checked with SubjectAccessReview
+	// (the same authorizer, without side effects).
+	admin, err := kubernetes.NewForConfig(l.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := func(namespace, group, resource, verb, name string) bool {
+		t.Helper()
+		r, err := admin.AuthorizationV1().SubjectAccessReviews().Create(l.ctx, &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:               "system:serviceaccount:" + ns + ":konstapel-controller",
+			Groups:             []string{"system:serviceaccounts", "system:serviceaccounts:" + ns, "system:authenticated"},
+			ResourceAttributes: &authorizationv1.ResourceAttributes{Namespace: namespace, Group: group, Resource: resource, Verb: verb, Name: name},
+		}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Status.Allowed
+	}
+	reviews := map[string]bool{}
+	for _, q := range []struct {
+		namespace, group, resource, verb, name string
+		want                                   bool
+	}{
+		{ns, "", "configmaps", "create", "", true},                              // acceptance snapshots, orphan inventory
+		{ns, "", "configmaps", "get", DefaultDestinationConfigMap, true},        // central default destination
+		{ns, "", "secrets", "get", "s3-credentials", true},                      // EvidenceDestination credentialSecret
+		{ns, "", "events", "create", "", true},                                  // manager events
+		{ns, "coordination.k8s.io", "leases", "update", LeaderElectionID, true}, // leader election
+		{ns, "", "secrets", "create", "", false},
+		{ns, "", "secrets", "list", "", false},
+		{ns, "", "secrets", "patch", "s3-credentials", false},
+		{ns, "", "secrets", "deletecollection", "", false},
+		{ns, "", "configmaps", "list", "", false},
+		{ns, "", "configmaps", "watch", "", false},
+		{ns, "", "configmaps", "update", DefaultDestinationConfigMap, false},
+		{ns, "", "configmaps", "patch", DefaultDestinationConfigMap, false},
+		{ns, "", "configmaps", "deletecollection", "", false},
+		{"default", "", "secrets", "get", "s3-credentials", false},
+		{"default", "", "configmaps", "create", "", false},
+		{"", "", "secrets", "get", "s3-credentials", false},
+		{"", "", "configmaps", "list", "", false},
+	} {
+		got := access(q.namespace, q.group, q.resource, q.verb, q.name)
+		what := fmt.Sprintf("%s %s/%s %s %q", q.namespace, q.group, q.resource, q.verb, q.name)
+		reviews[what] = got
+		if got != q.want {
+			t.Errorf("SubjectAccessReview %s: allowed=%v, want %v", what, got, q.want)
+		}
+	}
 	// Without the chart's bundle RoleBinding the selected watch is
 	// forbidden: no other grant allows it.
 	rb := &rbacv1.RoleBinding{}
@@ -583,8 +672,10 @@ func TestLiveHelmBundles(t *testing.T) {
 	}
 	allowed("field-selected watch with the RoleBinding restored", selectedWatch)
 	l.record("rbac", map[string]any{"selectedWatch": "allowed by konstapel-controller-bundles only",
-		"forbidden":         []string{"unselected ConfigMap watch", "selected watch of other ConfigMaps", "Secret watch and list", "ConfigMap update", "other namespaces"},
-		"unlistedSecretGet": fmt.Sprint(decoyErr)})
+		"forbidden": []string{"unselected ConfigMap watch and list", "selected watch and list of other ConfigMaps", "Secret watch and list",
+			"ConfigMap and Secret update and delete", "other namespaces"},
+		"unlistedSecretGet": "allowed (generated Role: Secret get in the controller namespace, not by name)",
+		"accessReviews":     reviews})
 
 	// 2. Every replica's Watcher loaded the configuration through that watch.
 	l.eventually("both replicas loaded the sources configuration", func() (bool, string) {
