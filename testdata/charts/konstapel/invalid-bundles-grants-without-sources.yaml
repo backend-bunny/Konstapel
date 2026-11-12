@@ -1,0 +1,3 @@
+# expect: grant the controller access to objects only for OCI bundles
+bundles:
+  referencedSecrets: [acme-registry]

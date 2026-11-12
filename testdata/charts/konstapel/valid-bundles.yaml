@@ -1,0 +1,7 @@
+# expect: ok
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  cache: {capacity: 2Gi, sizeLimit: 3Gi}
+  refreshInterval: 5m
+  referencedSecrets: [acme-registry, acme-bundle-signing-key]
+  referencedConfigMaps: [acme-registry-ca]

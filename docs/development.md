@@ -105,7 +105,7 @@ runner with its own disposable kind cluster and test-owned S3 services:
 | `storage` | Destination/credential changes, downloads, retention, and orphaning |
 | `recovery` | Kyverno outages and assessment/publication faults |
 | `capabilities` | Engine API and permission loss and recovery without a controller restart |
-| `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving); installs cert-manager and builds the image |
+| `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving), and OCI policy bundles from a disposable TLS registry (chart RBAC, watches, revocation, follower pins, upgrade and rollback); installs cert-manager and builds the image |
 | `availability` | The Helm-installed image on a multi-node cluster (two workers): placement, PDB, rolling and capacity-blocked upgrades, co-location, development values, controller outage, leader pod and node loss, and leader loss during an S3 outage; builds the image |
 
 `scripts/acceptance-groups.json` defines the matrix and Go test selection. The

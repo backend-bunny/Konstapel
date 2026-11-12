@@ -37,6 +37,36 @@ controller:
   nodeSelector: {}
   tolerations: []
 
+# Verified OCI policy bundles (docs/policy-bundles.md, "Controller wiring").
+# Off by default: with sourcesConfigMap empty the chart renders exactly what
+# it renders without this section, and the controller serves only the
+# vendored bundle.
+bundles:
+  # Name of the central sources ConfigMap (data key sources.yaml) in the
+  # release namespace. Setting it enables OCI bundle content. You create and
+  # maintain that ConfigMap; the chart never renders or changes it.
+  sourcesConfigMap: ""
+  cache:
+    # --bundle-cache-capacity: what the content cache may hold, including
+    # staging and retained verification evidence. It must hold one maximal
+    # entry (about 372Mi with the default limits).
+    capacity: 1Gi
+    # Per-pod emptyDir for the cache; must be larger than capacity. Each
+    # replica keeps its own cache, rebuilt from the registry (or retained
+    # evidence) after a restart.
+    sizeLimit: 1536Mi
+  # --bundle-refresh-interval: how often referenced Secrets and ConfigMaps
+  # are re-read by name (at most 5m). A rotation or revocation of one is
+  # noticed within this interval.
+  refreshInterval: 30s
+  # Every object sources.yaml references, in the release namespace: each
+  # credentialSecret and Secret-held ca, publicKey or trustRoot, and each
+  # ConfigMap-held ca, publicKey or trustRoot. The bundle Role grants get on
+  # exactly these names (docs/charts.md, "OCI policy bundles", explains how
+  # this relates to the controller's broader generated Role).
+  referencedSecrets: []
+  referencedConfigMaps: []
+
 tls:
   # mode selects who issues the service certificates, exclusively:
   #   certManager (default): a separately installed cert-manager. Optionally

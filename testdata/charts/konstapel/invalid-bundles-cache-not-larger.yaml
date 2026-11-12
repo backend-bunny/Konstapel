@@ -1,0 +1,4 @@
+# expect: bundles.cache.sizeLimit (1Gi) must be larger than bundles.cache.capacity (1024Mi)
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  cache: {capacity: 1024Mi, sizeLimit: 1Gi}

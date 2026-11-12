@@ -38,6 +38,7 @@ app.kubernetes.io/component: controller
 {{- if and .Values.download.enabled (gt (int .Values.download.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.download.replicaCount)) -}}
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than download.replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.download.replicaCount) -}}
 {{- end -}}
+{{- include "konstapel.validateBundles" . -}}
 {{- end }}
 
 {{- define "konstapel.downloadSelector" -}}
@@ -52,5 +53,40 @@ app.kubernetes.io/component: download
 {{ .Values.tls.secret.name }}
 {{- else -}}
 konstapel-download-tls
+{{- end -}}
+{{- end }}
+
+{{/*
+OCI bundle values (docs/policy-bundles.md, "Controller wiring"). Nothing is
+checked or rendered while bundles.sourcesConfigMap is empty, except that
+access grants without the feature are refused.
+*/}}
+{{- define "konstapel.bundlesEnabled" -}}
+{{- if (.Values.bundles | default dict).sourcesConfigMap -}}true{{- end -}}
+{{- end }}
+
+{{/* A schema-validated <n>Mi or <n>Gi quantity in MiB. */}}
+{{- define "konstapel.mebibytes" -}}
+{{- if hasSuffix "Gi" . -}}{{ mul (trimSuffix "Gi" . | int64) 1024 }}{{- else -}}{{ trimSuffix "Mi" . | int64 }}{{- end -}}
+{{- end }}
+
+{{- define "konstapel.validateBundles" -}}
+{{- $b := .Values.bundles | default dict -}}
+{{- if not (include "konstapel.bundlesEnabled" .) -}}
+{{- if or $b.referencedSecrets $b.referencedConfigMaps -}}
+{{- fail "bundles.referencedSecrets and bundles.referencedConfigMaps grant the controller access to objects only for OCI bundles: set bundles.sourcesConfigMap, or leave them empty" -}}
+{{- end -}}
+{{- else -}}
+{{- if le (include "konstapel.mebibytes" $b.cache.sizeLimit | int64) (include "konstapel.mebibytes" $b.cache.capacity | int64) -}}
+{{- fail (printf "bundles.cache.sizeLimit (%v) must be larger than bundles.cache.capacity (%v): the cache's block accounting only approximates disk use, and exceeding an emptyDir sizeLimit evicts the pod" $b.cache.sizeLimit $b.cache.capacity) -}}
+{{- end -}}
+{{- $refresh := $b.refreshInterval -}}
+{{- $seconds := ternary (mul (trimSuffix "m" $refresh | int64) 60) (trimSuffix "s" $refresh | int64) (hasSuffix "m" $refresh) -}}
+{{- if gt (int64 $seconds) 300 -}}
+{{- fail (printf "bundles.refreshInterval (%v) must be at most 5m" $refresh) -}}
+{{- end -}}
+{{- if has $b.sourcesConfigMap $b.referencedConfigMaps -}}
+{{- fail (printf "bundles.referencedConfigMaps must not list the sources ConfigMap %q: it is granted separately, and sources.yaml cannot reference itself" $b.sourcesConfigMap) -}}
+{{- end -}}
 {{- end -}}
 {{- end }}

@@ -38,7 +38,16 @@ type writer interface {
 // created with O_CREATE|O_EXCL, which never follows a final symlink.
 type osFS struct{ root *os.Root }
 
-func (o osFS) Mkdir(name string, perm fs.FileMode) error { return o.root.Mkdir(name, perm) }
+// Mkdir sets the new directory's mode explicitly after creating it: a
+// directory created under a setgid parent (an emptyDir mounted with a pod
+// fsGroup) inherits the setgid bit, which the cache's own payload checks
+// reject, and umask can only remove bits, never this one.
+func (o osFS) Mkdir(name string, perm fs.FileMode) error {
+	if err := o.root.Mkdir(name, perm); err != nil {
+		return err
+	}
+	return o.root.Chmod(name, perm)
+}
 
 func (o osFS) Create(name string, perm fs.FileMode) (writer, error) {
 	return o.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)

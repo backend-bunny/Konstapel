@@ -1,0 +1,11 @@
+# Verified OCI policy bundles from a private registry (docs/policy-bundles.md,
+# "Private registry setup"). Create the objects first in konstapel-system:
+# the sources ConfigMap (data key sources.yaml) and every Secret and
+# ConfigMap it references. The chart creates none of them; it grants the
+# controller get on exactly these names, plus get, list and watch on the
+# sources ConfigMap alone. List every reference here: an unlisted one is
+# Forbidden and makes its source unavailable.
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedSecrets: [acme-registry, acme-bundle-signing-key]
+  referencedConfigMaps: [acme-registry-ca]
