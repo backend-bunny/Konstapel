@@ -35,6 +35,9 @@ type Deps struct {
 	fetcher       resolve.Fetcher
 	verifyOptions []verify.Option
 	now           func() time.Time
+	// providers replaces the installed provider allowlist (nil keeps
+	// content.DefaultProvider, the only contract Konstapel installs).
+	providers []string
 }
 
 // Stack is the assembled machinery. Every part is safe for concurrent use.
@@ -87,7 +90,7 @@ func New(opts Options, deps Deps) (*Stack, error) {
 		return nil, err
 	}
 	acc := resolve.NewAcceptances()
-	compat := content.Compatibility{Controller: opts.ControllerVersion}
+	compat := content.Compatibility{Controller: opts.ControllerVersion, Providers: deps.providers}
 	watcher, err := sources.New(sources.Options{
 		Namespace: opts.Namespace, Name: opts.SourcesConfigMap,
 		Config: deps.Config, Objects: objects, Acceptances: acc, Transport: provider,
