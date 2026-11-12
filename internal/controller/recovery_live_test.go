@@ -37,6 +37,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -190,9 +191,13 @@ func TestLiveEvidenceRecovery(t *testing.T) {
 		return out
 	}
 	policies := specs()
-	bb := l.binding("er-audit")
-	bb.Spec.Assessment.Retention = "600s"
-	if err := l.c.Update(l.ctx, bb); err != nil {
+	// The controller writes the binding's status concurrently: re-read and
+	// retry on conflict instead of failing on a stale resourceVersion.
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		bb := l.binding("er-audit")
+		bb.Spec.Assessment.Retention = "600s"
+		return l.c.Update(l.ctx, bb)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	manual("er-audit-later")
