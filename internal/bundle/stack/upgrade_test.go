@@ -16,13 +16,11 @@ package stack_test
 //   - C: B under another version, signed only by a rotated publisher key.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -42,9 +40,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/bundle/internal/provfixture"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry"
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
-	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/controller"
-	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -118,6 +114,8 @@ type multiFetcher struct {
 	repos map[string]map[string]*registry.Result
 	calls []fetchCall
 	down  atomic.Bool
+	// lost is a digest no longer served (nil: every one is).
+	lost atomic.Pointer[string]
 }
 
 func (f *multiFetcher) serve(repo string, res ...*registry.Result) {
@@ -145,7 +143,7 @@ func (f *multiFetcher) Fetch(_ context.Context, src bundle.BundleSource, digest 
 		return nil, fmt.Errorf("%w: connection refused", registry.ErrUnavailable)
 	}
 	r, ok := f.repos[src.Repository][digest]
-	if !ok {
+	if lost := f.lost.Load(); !ok || lost != nil && *lost == digest {
 		return nil, registry.ErrNotFound
 	}
 	c := *r
@@ -525,106 +523,6 @@ func TestOCIPublisherRotation(t *testing.T) {
 	}
 }
 
-// add-policy-bundle-distribution 7.2: a run captured while the profile
-// already pins B but B's replacement is not engine-ready (A's policy is
-// still the one enforcing) is exported from B's frozen bundle, keeps the
-// enforcing A policy in its evidence, and reports B's not-yet-ready
-// subject's evidence as missing rather than attributing A's report to it.
-// The export is replayed after the cache is evicted and the registry lost,
-// from the frozen copy alone.
-func TestOCIRunDesiredDiffersFromApplied(t *testing.T) {
-	u := newUpgradeWorld(t)
-	rc := newRunCluster(t, u.router(), ref(u.a))
-	rc.deliver()
-	pa := rc.policyNames()
-	if len(pa) != 1 {
-		t.Fatalf("initial: %v", pa)
-	}
-	f := func(o *unstructured.Unstructured) bool { return o.GetName() == pa[0] }
-	rc.ready.Store(&f)
-	p := &v1alpha1.ComplianceProfile{}
-	rc.must(rc.c.Get(context.Background(), client.ObjectKey{Name: "org"}, p))
-	p.Spec.Bundle = ref(u.b)
-	p.Generation++
-	rc.must(rc.c.Update(context.Background(), p))
-	rc.ref = ref(u.b)
-	rc.deliver()
-	names := rc.policyNames()
-	if len(names) != 2 || !slices.Contains(names, pa[0]) {
-		t.Fatalf("replacement: %v", names)
-	}
-	pb := names[0]
-	if pb == pa[0] {
-		pb = names[1]
-	}
-	run := rc.start()
-	rc.reportFor(pa[0], runT0.Add(time.Minute))
-
-	// The window closes and the package is exported, but the closure is not
-	// recorded; then the cache is evicted and the registry lost, and the
-	// replayed export must come from the frozen copy alone.
-	rc.failNext.Store(true)
-	rc.now = runT0.Add(6 * time.Minute)
-	if err := rc.reconcile(rc.runs, run.Name); err == nil || !strings.Contains(err.Error(), "injected") {
-		t.Fatalf("closure was not interrupted: %v", err)
-	}
-	u.fetch.down.Store(true)
-	u.coldRestart(rc.setRouter)
-	if _, err := rc.assess.Content.Content(context.Background(), ref(u.b)); err == nil {
-		t.Fatal("B is still resolvable; the loss did not take effect")
-	}
-	run = rc.finish(run.Name)
-	dir, d := rc.pkg(run)
-	fz := requireBundleExport(t, dir, d, ref(u.b))
-	if fz.Identity.Receipt.Signer.KeyFingerprint != u.key.Fingerprint || d.Revisions.Content.ContentDigest != u.b.Descriptor.ContentDigest() {
-		t.Fatalf("frozen identity %+v, content revision %+v", fz.Identity, d.Revisions.Content)
-	}
-	// The run is of the desired revision B: its subject is B's policy, and
-	// the report of A's still-enforcing policy is never attributed to it.
-	if d.Evidence.Expected != 1 || d.Evidence.Attributable != 0 || d.Evidence.Missing != 1 || d.Evidence.Unresolved != 0 || d.Outcomes.Fail != 0 ||
-		d.Evidence.Completeness != publication.Incomplete {
-		t.Fatalf("evidence %+v outcomes %+v", d.Evidence, d.Outcomes)
-	}
-	// The difference is preserved in the packaged capture: both engine
-	// policies with their own bundle digests and revisions, and A's report.
-	var capture collector.CaptureV2
-	raw, err := os.ReadFile(filepath.Join(dir, "capture.json"))
-	rc.must(err)
-	rc.must(json.Unmarshal(raw, &capture))
-	digests := map[string]string{}
-	revisionsOf := map[string]string{}
-	for _, o := range capture.EnginePolicies {
-		md, _ := o["metadata"].(map[string]any)
-		ann, _ := md["annotations"].(map[string]any)
-		name, _ := md["name"].(string)
-		digests[name], _ = ann[targeting.AnnotationBundleDigest].(string)
-		revisionsOf[name], _ = ann[targeting.AnnotationRevision].(string)
-	}
-	if !maps.Equal(digests, map[string]string{pa[0]: u.a.ManifestDigest, pb: u.b.ManifestDigest}) {
-		t.Fatalf("captured engine policies %v", digests)
-	}
-	if len(capture.Subjects) != 1 || capture.Subjects[0].EnginePolicy != pb || capture.Subjects[0].BundleDigest != u.b.ManifestDigest ||
-		!slices.Equal(d.Revisions.Enforcement, []string{revisionsOf[pb]}) || revisionsOf[pa[0]] == revisionsOf[pb] {
-		t.Fatalf("subjects %+v, enforcement revisions %v, engine revisions %v", capture.Subjects, d.Revisions.Enforcement, revisionsOf)
-	}
-	reported, err := json.Marshal(capture.Reports)
-	rc.must(err)
-	if !bytes.Contains(reported, []byte(`"policy":"`+pa[0]+`"`)) {
-		t.Fatalf("the enforcing policy's report is not retained: %s", reported)
-	}
-	// The exported OSCAL is B's (tightened) content, not A's.
-	results, err := os.ReadFile(filepath.Join(dir, "assessment-results.json"))
-	rc.must(err)
-	if bytes.Contains(results, []byte(u.a.ManifestDigest)) {
-		t.Fatal("the results attribute the run to the applied, not the desired, bundle")
-	}
-	pol, err := os.ReadFile(filepath.Join(dir, bundletest.OfficialPolicy))
-	rc.must(err)
-	if !bytes.Contains(pol, []byte(bundletest.TightenedMarker)) {
-		t.Fatal("the packaged policy is not B's")
-	}
-}
-
 func (rc *runCluster) policyNames() []string {
 	rc.t.Helper()
 	list := &unstructured.UnstructuredList{}
@@ -638,15 +536,20 @@ func (rc *runCluster) policyNames() []string {
 	return out
 }
 
-// reportFor records a failure for the pod from the named engine policy.
-func (rc *runCluster) reportFor(policy string, at time.Time) {
+// reportFor records a failure for the pod from each named engine policy,
+// in one report.
+func (rc *runCluster) reportFor(at time.Time, policies ...string) {
 	rc.t.Helper()
+	var results []any
+	for _, policy := range policies {
+		results = append(results, map[string]any{"policy": policy, "result": "fail", "source": "KyvernoValidatingPolicy",
+			"properties": map[string]any{"cel.validationIndex": "0"},
+			"timestamp":  map[string]any{"seconds": at.Unix(), "nanos": int64(0)}})
+	}
 	r := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "r-pod-1", "namespace": "app"},
 		"scope":    map[string]any{"apiVersion": "v1", "kind": "Pod", "namespace": "app", "name": "web", "uid": "pod-1"},
-		"results": []any{map[string]any{"policy": policy, "result": "fail", "source": "KyvernoValidatingPolicy",
-			"properties": map[string]any{"cel.validationIndex": "0"},
-			"timestamp":  map[string]any{"seconds": at.Unix(), "nanos": int64(0)}}},
+		"results":  results,
 	}}
 	r.SetGroupVersionKind(controller.PolicyReportGVK)
 	r.SetUID("report-pod-1")

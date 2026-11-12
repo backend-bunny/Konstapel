@@ -141,24 +141,74 @@ type Revisions struct {
 	BindingConfiguration string   `json:"bindingConfiguration"`
 	Enforcement          []string `json:"enforcement"`
 	MappingSHA256        string   `json:"mappingSha256"`
-	// Content identifies the OCI bundle the run assessed against. It is
-	// absent for runs of the image's vendored content, whose identity is the
-	// packaged content/SHA256SUMS, so their descriptors are unchanged.
-	Content *ContentRevision `json:"content,omitempty"`
+	// Content records the bundles the run's content came from: every
+	// applied bundle, the desired one and their differences. It is absent
+	// for runs whose contributions were all applied from the image's
+	// vendored content while it was also desired (or no profile was
+	// selected), whose identity is the packaged content/SHA256SUMS, so their
+	// descriptors are unchanged.
+	Content *RunContent `json:"content,omitempty"`
 }
 
-// ContentRevision identifies the applied OCI bundle of a run and the
-// verification context its content was frozen under. Frozen content is
-// packaged under bundle/ and content/; an assessment package always has
-// it, and a diagnostic package records which bundle could not be frozen.
+// RunContent is the content set of a run. Each applied bundle is packaged
+// separately under its own directory (ContentPath) and is never collapsed
+// into another bundle's identity; desired content is recorded beside it and
+// is never substituted for applied content.
+type RunContent struct {
+	// Applied lists every bundle a contribution assessed by the run was
+	// applied from (its engine policies' bundle and bundle-digest), sorted
+	// by manifest digest. It is empty when nothing was applied.
+	Applied []ContentRevision `json:"applied"`
+	// Desired is the bundle the binding's profile selected when the run
+	// started; nil without a profile. Its content is packaged (Frozen) only
+	// when nothing was applied: it is then the content the plan names.
+	Desired *ContentRevision `json:"desired,omitempty"`
+	// Differences are the explicit desired/applied differences: the desired
+	// bundle when no assessed contribution was applied from it, and every
+	// applied bundle that is not the desired one. They are derived from
+	// Applied and Desired and must match them.
+	Differences []ContentDifference `json:"differences,omitempty"`
+}
+
+// ContentDifference kinds.
+const (
+	// DesiredNotApplied: the profile selects this bundle, but no assessed
+	// contribution was applied from it (for example the update is not yet
+	// delivered or ready, or it could not be resolved).
+	DesiredNotApplied = "DesiredNotApplied"
+	// AppliedNotDesired: assessed contributions were applied from this
+	// bundle, which the profile no longer selects (for example the previous
+	// revision still enforcing while an update rolls out).
+	AppliedNotDesired = "AppliedNotDesired"
+)
+
+// ContentDifference is one difference between desired and applied content.
+type ContentDifference struct {
+	Kind           string `json:"kind"`
+	Bundle         string `json:"bundle"`
+	ManifestDigest string `json:"manifestDigest"`
+}
+
+// ContentRevision identifies one bundle of a run and the verification
+// context its content was frozen under. Frozen content is packaged under
+// its Path (bundle/ proofs and content/); an assessment package always has
+// it for every applied bundle, and a diagnostic package records which
+// bundle could not be frozen.
 type ContentRevision struct {
 	Bundle string `json:"bundle"`
-	// ManifestDigest is the OCI manifest digest, the enforcement identity.
+	// ManifestDigest is the OCI manifest digest, the enforcement identity;
+	// for the vendored bundle it is the sha256 of its content/SHA256SUMS.
 	ManifestDigest string `json:"manifestDigest"`
-	// Frozen reports that the frozen content is packaged under bundle/ and
-	// content/ (always for an assessment package). The fields below are
-	// recorded whenever the content was frozen, packaged or not.
-	Frozen         bool   `json:"frozen"`
+	// Vendored marks the image's vendored content: it is packaged as its
+	// content/ tree (no bundle/ proofs) and verified by its SHA256SUMS.
+	Vendored bool `json:"vendored,omitempty"`
+	// Frozen reports that the content is packaged under Path (always for
+	// an applied bundle of an assessment package). The fields below are
+	// recorded whenever OCI content was frozen, packaged or not.
+	Frozen bool `json:"frozen"`
+	// Path is the package directory of the content, ContentPath of the
+	// manifest digest; set exactly when Frozen.
+	Path           string `json:"path,omitempty"`
 	Version        string `json:"version,omitempty"`
 	ContentDigest  string `json:"contentDigest,omitempty"`
 	ArchiveDigest  string `json:"archiveDigest,omitempty"`
@@ -171,20 +221,81 @@ type ContentRevision struct {
 	VerifiedAt    *time.Time `json:"verifiedAt,omitempty"`
 }
 
+// ContentPath is the package directory of a bundle's content:
+// "bundles/<hex of the manifest digest>".
+func ContentPath(manifestDigest string) string {
+	return "bundles/" + strings.TrimPrefix(manifestDigest, "sha256:")
+}
+
 var ociDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-func (c *ContentRevision) validate(kind PackageKind) error {
+func (c *ContentRevision) validate(what string) error {
 	var errs []error
-	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
+	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf(what+": "+format, a...)) }
 	if c.Bundle == "" || !ociDigest.MatchString(c.ManifestDigest) {
 		fail("content revision requires a bundle name and manifest digest")
 	}
-	if c.Frozen {
-		if c.Version == "" || !ociDigest.MatchString(c.ContentDigest) || !ociDigest.MatchString(c.ArchiveDigest) {
-			fail("frozen content requires its version, content and archive digests")
+	switch {
+	case c.Frozen && c.Path != ContentPath(c.ManifestDigest):
+		fail("frozen content of %s must be packaged at %s", c.ManifestDigest, ContentPath(c.ManifestDigest))
+	case !c.Frozen && c.Path != "":
+		fail("content that is not packaged has no path")
+	}
+	if c.Frozen && !c.Vendored && (c.Version == "" || !ociDigest.MatchString(c.ContentDigest) || !ociDigest.MatchString(c.ArchiveDigest)) {
+		fail("frozen content requires its version, content and archive digests")
+	}
+	return errors.Join(errs...)
+}
+
+// ContentDifferences derives the desired/applied differences.
+func ContentDifferences(applied []ContentRevision, desired *ContentRevision) []ContentDifference {
+	var out []ContentDifference
+	same := func(a ContentRevision) bool {
+		return desired != nil && a.Bundle == desired.Bundle && a.ManifestDigest == desired.ManifestDigest
+	}
+	if desired != nil && !slices.ContainsFunc(applied, same) {
+		out = append(out, ContentDifference{Kind: DesiredNotApplied, Bundle: desired.Bundle, ManifestDigest: desired.ManifestDigest})
+	}
+	for _, a := range applied {
+		if !same(a) {
+			out = append(out, ContentDifference{Kind: AppliedNotDesired, Bundle: a.Bundle, ManifestDigest: a.ManifestDigest})
 		}
-	} else if kind == KindAssessment {
-		fail("an assessment package requires its bundle content to be frozen")
+	}
+	return out
+}
+
+func (c *RunContent) validate(kind PackageKind) error {
+	var errs []error
+	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
+	for i := range c.Applied {
+		a := &c.Applied[i]
+		if err := a.validate("applied " + a.Bundle); err != nil {
+			errs = append(errs, err)
+		}
+		if i > 0 && c.Applied[i-1].ManifestDigest >= a.ManifestDigest {
+			fail("applied content must be unique and sorted by manifest digest")
+		}
+		if kind == KindAssessment && !a.Frozen {
+			fail("an assessment package requires the content of every applied bundle to be frozen (%s@%s is not)", a.Bundle, a.ManifestDigest)
+		}
+	}
+	if d := c.Desired; d != nil {
+		if err := d.validate("desired " + d.Bundle); err != nil {
+			errs = append(errs, err)
+		}
+		if d.Frozen && len(c.Applied) > 0 {
+			fail("desired content is packaged only when nothing was applied")
+		}
+	}
+	if kind == KindAssessment && len(c.Applied) == 0 && (c.Desired == nil || !c.Desired.Frozen) {
+		fail("an assessment package with nothing applied requires the desired bundle's content to be frozen")
+	}
+	if c.Applied == nil {
+		fail("applied content must be listed (empty when nothing was applied)")
+	}
+	want := ContentDifferences(c.Applied, c.Desired)
+	if !slices.Equal(want, c.Differences) {
+		fail("content differences %v do not match the applied and desired content (%v)", c.Differences, want)
 	}
 	return errors.Join(errs...)
 }

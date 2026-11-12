@@ -22,6 +22,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/bundle"
 	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
 // ExportVersion identifies this exporter in package descriptors.
@@ -29,25 +30,22 @@ const ExportVersion = "collector-export/v1"
 
 // ExportRequest describes one frozen, evaluated run to package.
 type ExportRequest struct {
-	// Root contains the verified content/ tree (mapping, catalog, profile,
-	// schemas): the image's vendored content, or, with Bundle, the run's
-	// frozen bundle directory.
+	// Root contains the image's verified vendored content/ tree (mapping,
+	// catalog, profile, schemas). A run without Content exports from it.
 	Root string
-	// Bundle is the run's frozen OCI bundle (bundle.ReadFrozen(Root)). OSCAL
-	// is then derived only from it: its component definitions, policies,
-	// catalog and profile, never from vendored content. Nil means Root is the
-	// vendored content tree.
-	Bundle *bundle.Frozen
-	// TrustedRoot is the image's own content tree. With Bundle, its OSCAL
+	// Content is the run's content set when the run is not purely vendored:
+	// one member per applied bundle (each OCI member a frozen copy). OSCAL
+	// is then derived per member only from that member's content (its
+	// component definitions, policies, catalog and profile) for the
+	// observations of the contributions applied from it, and each member is
+	// packaged under its own directory. A failed member, or a run-level
+	// failure, makes the package a Diagnostic with that reason; no OSCAL is
+	// produced from any other content.
+	Content *RunContent
+	// TrustedRoot is the image's own content tree. With Content, its OSCAL
 	// schemas are the ones every document is validated against; a bundle
 	// that ships different schema bytes is incompatible.
 	TrustedRoot string
-	// Content, when set, is a content failure decided before export (the
-	// run's bundle could not be frozen, or was lost): the package is a
-	// Diagnostic with that reason, and no OSCAL is produced from any other
-	// content. ContentRef identifies the bundle it concerns.
-	Content    *ContentFailure
-	ContentRef *v1alpha1.BundleReference
 	// Out must not exist or be empty; the package is written there.
 	Out                  string
 	Run                  publication.RunRef
@@ -93,13 +91,16 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	kind := publication.KindAssessment
 	var diag *publication.Diagnostic
 	var err error
-	if req.Content != nil {
-		err = req.Content
-	} else {
+	if rc := req.Content; rc != nil {
+		if f := rc.failure(); f != nil {
+			err = f
+		}
+	}
+	if err == nil {
 		err = writeOSCAL(ctx, req)
 	}
 	if err != nil {
-		for _, p := range []string{"assessment-plan.json", "assessment-results.json", "system-security-plan.json", "content", bundle.FrozenDir} {
+		for _, p := range []string{"assessment-plan.json", "assessment-results.json", "system-security-plan.json", "content", bundle.FrozenDir, bundlesDir} {
 			if rmErr := os.RemoveAll(filepath.Join(req.Out, p)); rmErr != nil {
 				return publication.Descriptor{}, rmErr
 			}
@@ -137,7 +138,7 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	checks := []string{"capture-inventory"}
 	if kind == publication.KindAssessment {
 		checks = append(checks, "oscal-schema-1.1.3", "reference-closure")
-		if req.Bundle != nil {
+		if req.Content != nil {
 			checks = append(checks, "frozen-bundle-content")
 		}
 	}
@@ -157,59 +158,125 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	if err := assessment.Write(filepath.Join(req.Out, publication.DescriptorFile), d); err != nil {
 		return d, err
 	}
-	return d, publication.VerifyDir(req.Out, d)
+	if err := publication.VerifyDir(req.Out, d); err != nil {
+		return d, err
+	}
+	if kind == publication.KindAssessment {
+		return d, VerifyContent(req.Out, d.Revisions.Content)
+	}
+	return d, nil
+}
+
+// bundlesDir holds one directory per member of a run's content set.
+const bundlesDir = "bundles"
+
+// oscalPart is the OSCAL of one content root: the vendored run's content,
+// or one member of a run's content set with the observations of the
+// contributions applied from it.
+type oscalPart struct {
+	// prefix is the package directory of the content ("" for a vendored
+	// run, "bundles/<hex>/" for a member).
+	prefix string
+	root   string
+	set    assessment.ContentSet
+	member *ContentMember
+	// capture holds the part's subjects and expected observations.
+	capture CaptureV2
+	cov     coverage
+	plan    *oscal.AssessmentPlan
+	ar      *oscal.AssessmentResults
+	mapping string
+}
+
+// exportParts splits the request into its OSCAL parts and returns the root
+// whose schemas validate every output.
+func exportParts(req ExportRequest) ([]*oscalPart, string, error) {
+	rc := req.Content
+	if rc == nil {
+		return []*oscalPart{{root: req.Root, set: assessment.Shipped, capture: req.Capture, mapping: "content/component-definition.json"}}, req.Root, nil
+	}
+	if req.TrustedRoot == "" {
+		return nil, "", contentFailure(ReasonContentIncompatible, "no trusted content root is configured to validate frozen bundle content")
+	}
+	applied := map[v1alpha1.BundleReference]bool{}
+	for _, m := range rc.Members {
+		if m.Applied {
+			applied[m.Ref] = true
+		}
+	}
+	if err := captureUses(req.Capture, applied); err != nil {
+		return nil, "", err
+	}
+	// Each observation belongs to the bundle its contribution was applied
+	// from; overlapping revisions of one policy stay with their own bundle.
+	type contribution struct{ binding, revision, policy string }
+	bundleOf := map[contribution]v1alpha1.BundleReference{}
+	for _, s := range req.Capture.Subjects {
+		bundleOf[contribution{string(s.BindingUID), s.Revision, s.EnginePolicy}] = v1alpha1.BundleReference{Name: s.BundleName, Digest: s.BundleDigest}
+	}
+	var parts []*oscalPart
+	for i := range rc.Members {
+		m := &rc.Members[i]
+		if !m.Applied && len(applied) > 0 {
+			continue
+		}
+		set, err := memberContent(*m, req.TrustedRoot)
+		if err != nil {
+			return nil, "", err
+		}
+		sub := req.Capture
+		sub.Subjects = slices.DeleteFunc(slices.Clone(sub.Subjects), func(s targeting.EvidenceSubject) bool {
+			return s.BundleName != m.Ref.Name || s.BundleDigest != m.Ref.Digest
+		})
+		sub.Expected = slices.DeleteFunc(slices.Clone(sub.Expected), func(e Expected) bool {
+			return bundleOf[contribution{e.Contribution.BindingUID, e.Contribution.Revision, e.Contribution.EnginePolicy}] != m.Ref
+		})
+		prefix := m.Path() + "/"
+		parts = append(parts, &oscalPart{prefix: prefix, root: m.Root, set: set, member: m, capture: sub, mapping: prefix + set.Definitions[0]})
+	}
+	if len(parts) == 0 {
+		return nil, "", contentFailure(ReasonContentMismatch, "the run's content set has no content to export")
+	}
+	return parts, req.TrustedRoot, nil
 }
 
 // writeOSCAL writes the plan, results, and SSP plus the content they
-// reference, then validates schemas and reference closure.
+// reference, then validates schemas and reference closure. A run with a
+// content set gets one OSCAL result per member, each derived only from
+// that member's content and naming its bundle; the plan joins the members'
+// plans, so overlapping revisions are never collapsed into one bundle.
 func writeOSCAL(ctx context.Context, req ExportRequest) error {
-	set, schemaRoot, err := contentFor(req)
+	parts, schemaRoot, err := exportParts(req)
 	if err != nil {
 		return err
 	}
-	cov, err := coverageFor(req.Root, set, req.Capture, req.Bundle)
-	if err != nil {
-		return fmt.Errorf("mapping: %w", err)
-	}
-	input, plan, err := assessment.InputFromSet(req.Root, set, cov.rules)
-	if err != nil {
-		return fmt.Errorf("mapping: %w", err)
-	}
-	if err := os.CopyFS(filepath.Join(req.Out, "content"), os.DirFS(filepath.Join(req.Root, "content"))); err != nil {
-		return err
-	}
-	mappingDoc := "content/component-definition.json"
-	if req.Bundle != nil {
-		// The frozen proofs travel with the content they prove.
-		if err := os.CopyFS(filepath.Join(req.Out, bundle.FrozenDir), os.DirFS(filepath.Join(req.Root, bundle.FrozenDir))); err != nil {
+	ev := req.Evaluation.Evidence
+	for _, p := range parts {
+		if err := p.export(ctx, req); err != nil {
 			return err
 		}
-		mappingDoc = set.Definitions[0]
 	}
-	if plan.BackMatter != nil && plan.BackMatter.Resources != nil {
-		for i := range *plan.BackMatter.Resources {
-			if r := &(*plan.BackMatter.Resources)[i]; r.Rlinks != nil {
-				for j := range *r.Rlinks {
-					(*r.Rlinks)[j].Href = assessment.NIST + "NIST_SP-800-53_rev5_catalog.json"
-				}
+	if req.Content != nil {
+		// The controller's schemas, at the package path verifiers read.
+		for _, s := range trustedSchemas {
+			if err := copyFile(filepath.Join(schemaRoot, filepath.FromSlash(s)), filepath.Join(req.Out, filepath.FromSlash(s))); err != nil {
+				return err
 			}
 		}
 	}
+	plans, ars := make([]*oscal.AssessmentPlan, len(parts)), make([]*oscal.AssessmentResults, len(parts))
+	for i, p := range parts {
+		plans[i], ars[i] = p.plan, p.ar
+	}
+	plan, ar := mergePlans(plans), mergeResults(ars)
 	plan.Metadata.Title = "Konstapel continuous assessment plan"
 	plan.Metadata.OscalVersion = "1.1.3"
 	if err := assessment.Write(filepath.Join(req.Out, "assessment-plan.json"), assessment.Object{"assessment-plan": plan}); err != nil {
 		return err
 	}
 
-	results, attributableFail := pvpResults(req.Capture, req.Evaluation)
-	ar, err := actions.Report(ctx, input, "assessment-plan.json", *plan, results)
-	if err != nil {
-		return fmt.Errorf("report: %w", err)
-	}
-	mapping := assessment.FileHash(filepath.Join(req.Out, filepath.FromSlash(mappingDoc)))
 	ar.Metadata.Title = "Konstapel continuous assessment results (partial technical evidence)"
 	ar.Metadata.OscalVersion = "1.1.3"
-	ev := req.Evaluation.Evidence
 	props := []oscal.Property{
 		{Name: "evidence-completeness", Ns: ns, Value: string(ev.Completeness)},
 		{Name: "expected-observations", Ns: ns, Value: fmt.Sprint(ev.Expected)},
@@ -217,34 +284,104 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 		{Name: "stale-scopes", Ns: ns, Value: fmt.Sprint(ev.StaleScopes)},
 		{Name: "cluster-id", Ns: ns, Value: req.Capture.Cluster},
 		{Name: "run-uid", Ns: ns, Value: req.Run.RunUID},
-		{Name: "mapping-sha256", Ns: ns, Value: mapping},
 	}
-	if b := req.Bundle; b != nil {
-		id := b.Identity
-		props = append(props,
-			oscal.Property{Name: "bundle-name", Ns: ns, Value: id.Name},
-			oscal.Property{Name: "bundle-version", Ns: ns, Value: id.Version},
-			oscal.Property{Name: "bundle-digest", Ns: ns, Value: id.Digests.OCI},
-			oscal.Property{Name: "bundle-content-digest", Ns: ns, Value: id.Digests.Content})
+	if len(parts) == 1 {
+		// One content root: the document is that content's, as before.
+		props = append(props, oscal.Property{Name: "mapping-sha256", Ns: ns, Value: assessment.FileHash(filepath.Join(req.Out, filepath.FromSlash(parts[0].mapping)))})
+		props = append(props, parts[0].bundleProps()...)
 	}
 	ar.Metadata.Props = &props
 	ar.Metadata.Links = &[]oscal.Link{
 		{Href: "capture.json", Rel: "related", Text: "Frozen scope, expected inventory, and raw reports"},
 		{Href: "evaluation.json", Rel: "related", Text: "Per-observation evidence states and reasons"},
 	}
-	if req.Bundle != nil {
-		*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: bundle.FrozenIdentityFile, Rel: "related", Text: "Applied bundle identity and verification context, frozen with its content"})
+	for _, p := range parts {
+		if p.member != nil && p.member.Frozen != nil {
+			*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: p.prefix + bundle.FrozenIdentityFile, Rel: "related", Text: "Applied bundle identity and verification context, frozen with its content"})
+		}
+		for _, def := range p.cov.definitions {
+			// Each definition that maps an assessed check is referenced, so the
+			// package resolves every mapping it relies on.
+			*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: p.prefix + def, Rel: "related", Text: "Authored partial mapping"})
+		}
 	}
-	for _, def := range cov.definitions {
-		// Each definition that maps an assessed check is referenced, so the
-		// package resolves every mapping it relies on.
-		*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: def, Rel: "related", Text: "Authored partial mapping"})
+	if err := assessment.Write(filepath.Join(req.Out, "assessment-results.json"), assessment.Object{"assessment-results": ar}); err != nil {
+		return err
 	}
+	if err := assessment.Write(filepath.Join(req.Out, "system-security-plan.json"), contextSSP(req.Capture.Cluster, req.Capture.Window.Closed, mergeCoverage(parts), parts[0].prefix)); err != nil {
+		return err
+	}
+	schema := filepath.Join(schemaRoot, "content/schemas/oscal-1.1.3.json")
+	for _, name := range []string{"assessment-plan", "assessment-results", "system-security-plan"} {
+		if err := assessment.Schema(filepath.Join(req.Out, name+".json"), schema); err != nil {
+			return fmt.Errorf("%s schema: %w", name, err)
+		}
+	}
+	if err := assessment.ValidateReferences(req.Out); err != nil {
+		return err
+	}
+	// Every engine policy must re-render from the packaged, digest-pinned
+	// source; otherwise the evidence is not attributable to that content.
+	if err := VerifyPackage(req.Out); err != nil {
+		return fmt.Errorf("engine policy verification: %w", err)
+	}
+	return nil
+}
+
+// export derives the part's coverage, plan and results and packages its
+// content (and frozen proofs) under its prefix.
+func (p *oscalPart) export(ctx context.Context, req ExportRequest) error {
+	var frozen *bundle.Frozen
+	if p.member != nil {
+		frozen = p.member.Frozen
+	}
+	cov, err := coverageFor(p.root, p.set, p.capture, frozen)
+	if err != nil {
+		return fmt.Errorf("mapping: %w", err)
+	}
+	p.cov = cov
+	input, plan, err := assessment.InputFromSet(p.root, p.set, cov.rules)
+	if err != nil {
+		return fmt.Errorf("mapping: %w", err)
+	}
+	if err := os.CopyFS(filepath.Join(req.Out, filepath.FromSlash(p.prefix), "content"), os.DirFS(filepath.Join(p.root, "content"))); err != nil {
+		return err
+	}
+	if frozen != nil {
+		// The frozen proofs travel with the content they prove.
+		if err := os.CopyFS(filepath.Join(req.Out, filepath.FromSlash(p.prefix), bundle.FrozenDir), os.DirFS(filepath.Join(p.root, bundle.FrozenDir))); err != nil {
+			return err
+		}
+	}
+	if plan.BackMatter != nil && plan.BackMatter.Resources != nil {
+		for i := range *plan.BackMatter.Resources {
+			if r := &(*plan.BackMatter.Resources)[i]; r.Rlinks != nil {
+				for j := range *r.Rlinks {
+					(*r.Rlinks)[j].Href = p.prefix + assessment.NIST + "NIST_SP-800-53_rev5_catalog.json"
+				}
+			}
+		}
+	}
+	p.plan = plan
+
+	results, attributableFail := pvpResults(p.capture, req.Evaluation)
+	ar, err := actions.Report(ctx, input, "assessment-plan.json", *plan, results)
+	if err != nil {
+		return fmt.Errorf("report: %w", err)
+	}
+	ev := req.Evaluation.Evidence
 	for i := range ar.Results {
 		r := &ar.Results[i]
 		r.Title = "Konstapel continuous assessment"
 		r.Description = fmt.Sprintf("Evidence %s: %d of %d expected observations attributable, %d stale scopes. %s",
 			ev.Completeness, ev.Attributable, ev.Expected, ev.StaleScopes, cov.summary)
+		if p.member != nil {
+			id := p.member.Ref.Name + "@" + p.member.Ref.Digest
+			r.Title = "Konstapel continuous assessment of " + id
+			r.Description = fmt.Sprintf("Contributions applied from %s: %d expected observations. %s", id, len(p.capture.Expected), r.Description)
+			props := append([]oscal.Property{{Name: "mapping-sha256", Ns: ns, Value: assessment.FileHash(filepath.Join(req.Out, filepath.FromSlash(p.mapping)))}}, p.bundleProps()...)
+			r.Props = &props
+		}
 		// Only an attributable failure is an observed violation. Missing,
 		// rejected, or unresolved evidence and zero targets make no claim.
 		if !attributableFail {
@@ -287,27 +424,171 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 			}
 		}
 	}
-	if err := assessment.Write(filepath.Join(req.Out, "assessment-results.json"), assessment.Object{"assessment-results": ar}); err != nil {
-		return err
+	p.ar = ar
+	return nil
+}
+
+// bundleProps name the part's bundle: its name and manifest digest, and
+// for frozen content its version and content digest.
+func (p *oscalPart) bundleProps() []oscal.Property {
+	m := p.member
+	if m == nil {
+		return nil
 	}
-	if err := assessment.Write(filepath.Join(req.Out, "system-security-plan.json"), contextSSP(req.Capture.Cluster, req.Capture.Window.Closed, cov)); err != nil {
-		return err
+	out := []oscal.Property{{Name: "bundle-name", Ns: ns, Value: m.Ref.Name}}
+	if f := m.Frozen; f != nil {
+		out = append(out, oscal.Property{Name: "bundle-version", Ns: ns, Value: f.Identity.Version})
 	}
-	schema := filepath.Join(schemaRoot, "content/schemas/oscal-1.1.3.json")
-	for _, name := range []string{"assessment-plan", "assessment-results", "system-security-plan"} {
-		if err := assessment.Schema(filepath.Join(req.Out, name+".json"), schema); err != nil {
-			return fmt.Errorf("%s schema: %w", name, err)
+	out = append(out, oscal.Property{Name: "bundle-digest", Ns: ns, Value: m.Ref.Digest})
+	if f := m.Frozen; f != nil {
+		out = append(out, oscal.Property{Name: "bundle-content-digest", Ns: ns, Value: f.Identity.Digests.Content})
+	}
+	return out
+}
+
+// mergePlans joins the members' plans into one: each member's activities,
+// tasks, subjects and reviewed controls are kept as generated (their UUIDs
+// are fresh per plan); a component defined by several members (the same
+// component definition UUID) is listed once.
+func mergePlans(plans []*oscal.AssessmentPlan) *oscal.AssessmentPlan {
+	out := *plans[0]
+	for _, p := range plans[1:] {
+		out.ReviewedControls.ControlSelections = append(slices.Clone(out.ReviewedControls.ControlSelections), p.ReviewedControls.ControlSelections...)
+		join(&out.ReviewedControls.ControlObjectiveSelections, p.ReviewedControls.ControlObjectiveSelections)
+		join(&out.ReviewedControls.Links, p.ReviewedControls.Links)
+		join(&out.AssessmentSubjects, p.AssessmentSubjects)
+		join(&out.Tasks, p.Tasks)
+		if p.LocalDefinitions != nil {
+			if out.LocalDefinitions == nil {
+				out.LocalDefinitions = &oscal.LocalDefinitions{}
+			} else {
+				ld := *out.LocalDefinitions
+				out.LocalDefinitions = &ld
+			}
+			join(&out.LocalDefinitions.Activities, p.LocalDefinitions.Activities)
+			join(&out.LocalDefinitions.InventoryItems, p.LocalDefinitions.InventoryItems)
+			join(&out.LocalDefinitions.Users, p.LocalDefinitions.Users)
+			join(&out.LocalDefinitions.ObjectivesAndMethods, p.LocalDefinitions.ObjectivesAndMethods)
+			joinComponents(&out.LocalDefinitions.Components, p.LocalDefinitions.Components)
+		}
+		if p.AssessmentAssets != nil {
+			if out.AssessmentAssets == nil {
+				out.AssessmentAssets = &oscal.AssessmentAssets{}
+			} else {
+				aa := *out.AssessmentAssets
+				out.AssessmentAssets = &aa
+			}
+			out.AssessmentAssets.AssessmentPlatforms = append(slices.Clone(out.AssessmentAssets.AssessmentPlatforms), p.AssessmentAssets.AssessmentPlatforms...)
+			joinComponents(&out.AssessmentAssets.Components, p.AssessmentAssets.Components)
+		}
+		if p.BackMatter != nil {
+			if out.BackMatter == nil {
+				out.BackMatter = &oscal.BackMatter{}
+			} else {
+				bm := *out.BackMatter
+				out.BackMatter = &bm
+			}
+			join(&out.BackMatter.Resources, p.BackMatter.Resources)
 		}
 	}
-	if err := assessment.ValidateReferences(req.Out); err != nil {
+	return &out
+}
+
+// mergeResults joins the members' results documents: one result per
+// member, each naming its bundle.
+func mergeResults(ars []*oscal.AssessmentResults) *oscal.AssessmentResults {
+	out := *ars[0]
+	for _, a := range ars[1:] {
+		out.Results = append(slices.Clone(out.Results), a.Results...)
+		if a.BackMatter != nil {
+			if out.BackMatter == nil {
+				out.BackMatter = &oscal.BackMatter{}
+			} else {
+				bm := *out.BackMatter
+				out.BackMatter = &bm
+			}
+			join(&out.BackMatter.Resources, a.BackMatter.Resources)
+		}
+		if a.LocalDefinitions != nil {
+			if out.LocalDefinitions == nil {
+				out.LocalDefinitions = &oscal.LocalDefinitions{}
+			} else {
+				ld := *out.LocalDefinitions
+				out.LocalDefinitions = &ld
+			}
+			join(&out.LocalDefinitions.Activities, a.LocalDefinitions.Activities)
+			join(&out.LocalDefinitions.InventoryItems, a.LocalDefinitions.InventoryItems)
+			join(&out.LocalDefinitions.Users, a.LocalDefinitions.Users)
+			joinComponents(&out.LocalDefinitions.Components, a.LocalDefinitions.Components)
+		}
+	}
+	return &out
+}
+
+func join[T any](dst **[]T, src *[]T) {
+	if src == nil || len(*src) == 0 {
+		return
+	}
+	var have []T
+	if *dst != nil {
+		have = slices.Clone(**dst)
+	}
+	have = append(have, *src...)
+	*dst = &have
+}
+
+func joinComponents(dst **[]oscal.SystemComponent, src *[]oscal.SystemComponent) {
+	if src == nil {
+		return
+	}
+	var have []oscal.SystemComponent
+	if *dst != nil {
+		have = slices.Clone(**dst)
+	}
+	for _, c := range *src {
+		if !slices.ContainsFunc(have, func(x oscal.SystemComponent) bool { return x.UUID == c.UUID }) {
+			have = append(have, c)
+		}
+	}
+	*dst = &have
+}
+
+// mergeCoverage is the coverage the context SSP states: every part's
+// mapped controls, with each member's summary naming its bundle.
+func mergeCoverage(parts []*oscalPart) coverage {
+	if len(parts) == 1 {
+		return parts[0].cov
+	}
+	out := coverage{controls: map[string]map[string][]string{}}
+	var summaries []string
+	for _, p := range parts {
+		for ctl, stmts := range p.cov.controls {
+			if out.controls[ctl] == nil {
+				out.controls[ctl] = map[string][]string{}
+			}
+			for st, rs := range stmts {
+				for _, r := range rs {
+					if !slices.Contains(out.controls[ctl][st], r) {
+						out.controls[ctl][st] = append(out.controls[ctl][st], r)
+					}
+				}
+			}
+		}
+		summaries = append(summaries, fmt.Sprintf("[%s@%s] %s", p.member.Ref.Name, p.member.Ref.Digest, p.cov.summary))
+	}
+	out.summary = strings.Join(summaries, " ")
+	return out
+}
+
+func copyFile(from, to string) error {
+	b, err := os.ReadFile(from)
+	if err != nil {
 		return err
 	}
-	// Every engine policy must re-render from the packaged, digest-pinned
-	// source; otherwise the evidence is not attributable to that content.
-	if err := VerifyPackage(req.Out); err != nil {
-		return fmt.Errorf("engine policy verification: %w", err)
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
 	}
-	return nil
+	return os.WriteFile(to, b, 0o644)
 }
 
 const ns = "https://konstapel.dev/ns"
@@ -378,13 +659,17 @@ func pvpResults(c CaptureV2, ev Evaluation) ([]policy.PVPResult, bool) {
 
 // contextSSP is the minimal system context the results import. It states
 // what it is not: Konstapel does not author a system security plan.
-func contextSSP(cluster string, at time.Time, cov coverage) assessment.Object {
+//
+// It imports the profile packaged under prefix (the first part's content:
+// a generated context has one profile import even when the run's members
+// ship their own profiles, which stay packaged with each member).
+func contextSSP(cluster string, at time.Time, cov coverage, prefix string) assessment.Object {
 	id := func() string { return uuid.NewString() }
 	note := "Generated assessment context for a Konstapel-assessed cluster; not an authored system security plan."
 	return assessment.Object{"system-security-plan": assessment.Object{
 		"uuid":           id(),
 		"metadata":       assessment.Object{"title": note, "last-modified": at, "version": "1.0.0", "oscal-version": "1.1.3"},
-		"import-profile": assessment.Object{"href": assessment.NIST + "NIST_SP-800-53_rev5_MODERATE-baseline_profile.json"},
+		"import-profile": assessment.Object{"href": prefix + assessment.NIST + "NIST_SP-800-53_rev5_MODERATE-baseline_profile.json"},
 		"system-characteristics": assessment.Object{
 			"system-ids": []any{assessment.Object{"id": cluster}}, "system-name": "Kubernetes cluster " + cluster, "description": note,
 			"system-information":     assessment.Object{"information-types": []any{assessment.Object{"uuid": id(), "title": "Cluster workloads", "description": "Workloads selected by ComplianceBindings."}}},
@@ -418,6 +703,9 @@ func exportRole(p string) publication.FileRole {
 	case p == "diagnostic.json":
 		return publication.RoleDiagnostic
 	case strings.HasPrefix(p, "content/"):
+		return publication.RoleContent
+	case strings.HasPrefix(p, bundlesDir+"/") && strings.Contains(p, "/content/"):
+		// A member's content (its proofs under bundle/ are provenance).
 		return publication.RoleContent
 	}
 	return publication.RoleProvenance

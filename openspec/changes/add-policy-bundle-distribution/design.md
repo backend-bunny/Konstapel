@@ -359,6 +359,14 @@ but current trusted resolution or compliance is never inferred from its presence
 The assessment producer consumes the applied content handle and verification
 receipt, copying required content into its frozen package before releasing its
 cache lease. Reports retain desired/applied differences and coverage limits.
+A run's content is the set of bundles its contributions were applied from
+(each delivered engine policy's bundle annotations, keyed by manifest digest),
+not the profile's selection: a previous revision still enforcing during an
+update is assessed from its own frozen content, overlapping revisions keep
+their own bundle identities (one OSCAL result and one packaged copy per
+bundle), and the desired bundle is recorded with explicit differences. An
+applied bundle that cannot be frozen and verified makes the package an
+explicit Diagnostic; desired or vendored content is never substituted.
 Coordinate descriptor additions through the continuous-assessment owner; do not
 create another evidence archive, run CRD, or retention mechanism here.
 

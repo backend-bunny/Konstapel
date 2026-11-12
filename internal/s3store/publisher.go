@@ -517,7 +517,8 @@ func isPreconditionFailed(err error) bool {
 // ValidatePackage checks a package directory before it is archived: the
 // descriptor and exact file inventory (no traversal, symlinks, or extra
 // files), OSCAL schemas and reference closure for assessment packages,
-// engine-policy verification for controller (v2) captures, and namespace
+// engine-policy verification for controller (v2) captures, every packaged
+// bundle against the descriptor's content record, and namespace
 // projection for namespace-scope packages.
 func ValidatePackage(dir string) (publication.Descriptor, error) {
 	d, err := publication.LoadDescriptor(dir)
@@ -551,6 +552,10 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 			if err := collector.VerifyPackage(dir); err != nil {
 				return d, err
 			}
+		}
+		// Every packaged bundle is the one the descriptor records.
+		if err := collector.VerifyContent(dir, d.Revisions.Content); err != nil {
+			return d, err
 		}
 	}
 	if d.Scope.Kind == publication.ScopeNamespace {

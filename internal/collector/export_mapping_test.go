@@ -39,7 +39,7 @@ func TestExportMappingNamesAssessedChecksOnly(t *testing.T) {
 	if !slices.Equal(cov.definitions, []string{"content/linux-hardening/component-definition.json"}) {
 		t.Fatalf("mapping definitions to link: %v", cov.definitions)
 	}
-	ssp, _ := json.Marshal(contextSSP(c.Cluster, time.Now(), cov))
+	ssp, _ := json.Marshal(contextSSP(c.Cluster, time.Now(), cov, ""))
 	if s := string(ssp); !strings.Contains(s, `"cm-6"`) || !strings.Contains(s, "cm-7_smt.b") || strings.Contains(s, `"ac-6"`) {
 		t.Fatalf("context SSP control implementation: %s", s)
 	}

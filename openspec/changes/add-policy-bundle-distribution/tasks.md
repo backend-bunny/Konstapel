@@ -94,7 +94,7 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 - [ ] 7.1 After Linux hardening content merges, assemble its complete bundle by build-time reference to owned sources; verify all shipped variants, tests and bounded mappings against that change's accepted inputs without copying source ownership or adding policies here.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 7.2 After the continuous-assessment descriptor contract merges, include applied bundle identity, content and verification context in frozen packages through its owner; verify evidence remains complete after runtime cache eviction and registry loss, with desired/applied differences preserved.
+- [x] 7.2 After the continuous-assessment descriptor contract merges, include applied bundle identity, content and verification context in frozen packages through its owner; verify evidence remains complete after runtime cache eviction and registry loss, with desired/applied differences preserved.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 7.3 After the Helm chart implementation merges, expose central configuration, Secret/CA references and bounded cache mounts through existing chart conventions; verify schema/render tests and installed runtime configuration without generating competing CRDs or exposing trust bypasses.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

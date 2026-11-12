@@ -964,3 +964,35 @@ func (w *world) mustContentKeeping(leases int) {
 		w.t.Fatalf("%d leases, want %d", n, leases)
 	}
 }
+
+// Freeze copies an assessment's content out of the cache under an
+// assessment lease: from resolution until the copy is written the entry is
+// pinned (a leased entry is never evicted), and the lease is released
+// before Freeze returns, so the run depends on its copy alone.
+func TestFreezeLeasesEntryUntilCopied(t *testing.T) {
+	w := newWorld(t)
+	w.mustContent()
+	pinned := false
+	w.oci.hook = func(point string) {
+		if point != "resolved" {
+			return
+		}
+		for _, e := range w.cache.Stats().Entries {
+			if e.Digest == w.ref().Digest && e.Leases == 1 {
+				pinned = true
+			}
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "frozen")
+	f, err := w.oci.Freeze(context.Background(), w.ref(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pinned {
+		t.Fatal("the entry was not leased while it was copied; eviction could remove it mid-freeze")
+	}
+	if f.Identity.Digests.OCI != w.ref().Digest {
+		t.Fatalf("froze %s", f.Identity.Digests.OCI)
+	}
+	noLeases(t, w.cache)
+}
