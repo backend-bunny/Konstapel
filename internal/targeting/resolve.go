@@ -303,6 +303,10 @@ func eligibility(ns NamespaceRef, policy string, cs []Contribution, errs []Resol
 	return e
 }
 
+// HasParameters reports whether a profile policy sets parameters: an empty
+// object or null counts as none, as in the resolver's parameter gate.
+func HasParameters(p v1alpha1.ProfilePolicy) bool { return hasParameters(p) }
+
 func hasParameters(p v1alpha1.ProfilePolicy) bool {
 	if p.Parameters == nil {
 		return false

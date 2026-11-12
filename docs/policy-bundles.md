@@ -272,8 +272,10 @@ sources:
   requested name.
 
 This is the configuration contract and its validation. The registry adapter
-and the signature verifier below use it as libraries; nothing in the controller
-reads the ConfigMap or watches Secrets yet.
+and the signature verifier below use it as libraries.
+[Central configuration and watches](#central-configuration-and-watches)
+describes the component that reads the ConfigMap at run time; it is not wired
+into the controller yet.
 
 ## Registry retrieval
 
@@ -554,11 +556,10 @@ with only
   resourceNames: [<every ConfigMap-held ca>]
 ```
 
-`resourceNames` is possible because every object is fetched by name. Change
-notification (task 5.1) needs `watch` as well; `resourceNames` cannot restrict
-`list`, and restricts `watch` only for single-object watches selected by
-`metadata.name`, so how the watches are granted is decided by that wiring
-task, not here.
+`resourceNames` is possible because every object is fetched by name.
+Referenced objects are never listed or watched: changes are noticed by
+re-reading them by name (see
+[Central configuration and watches](#central-configuration-and-watches)).
 
 ### Credential Secret
 
@@ -604,9 +605,9 @@ fails before any request is sent.
 ### Rotation and invalidation
 
 An object read is reused for at most `Options.CacheFor` (30 seconds by
-default, at most 5 minutes; negative disables reuse). The watcher that will be
-wired in task 5.1 calls `Provider.Invalidate(kind, name)` on every change or
-deletion of a referenced object (or `InvalidateAll` after a watch restarts), so
+default, at most 5 minutes; negative disables reuse). The source watcher
+(`internal/bundle/sources`) calls `Provider.Invalidate(kind, name)` on every
+change or deletion of a referenced object it observes (or `InvalidateAll` after a watch restarts), so
 the next retrieval re-reads at once; an invalidation that races with a read
 forces another read. Resolution is serialized per source, so a slower, older
 read can never replace a newer credential.
@@ -811,9 +812,9 @@ rules:
 ### Least privilege
 
 - A namespaced Role with `get` and `resourceNames` only: no `list`, no `watch`
-  from this loader, no ClusterRole, no other namespace. Change notification
-  (task 5.1) will need watches, which `resourceNames` restricts only for
-  single-object watches; that wiring decides how they are granted.
+  from this loader, no ClusterRole, no other namespace. Only the sources
+  ConfigMap itself is watched, through a single-object (field-selected)
+  watch; see [the exact grants](#rbac-and-informers).
 - One credential Secret per registry, scoped to the bundle repositories, so a
   leaked or rotated credential has a small blast radius.
 - Credentials are offered only for the source's own registry host, never to a
@@ -836,8 +837,9 @@ not supported.
 ### Rotating credentials and CAs
 
 Update the Secret or ConfigMap in place. The loader caches an object for at most
-30 seconds (configurable up to five minutes) unless the watcher in task 5.1
-invalidates it sooner. When the credential for a source changes, the tokens
+30 seconds (configurable up to five minutes) unless the source watcher
+invalidates it sooner; the watcher itself re-reads referenced objects every
+30 seconds by default (see [rotation latency](#rbac-and-informers)). When the credential for a source changes, the tokens
 cached for the old one are discarded before the next request, so a rotated
 credential is used immediately and an old token is never reused. Deleting or
 emptying the Secret makes retrieval fail with `ErrCredentials` (recoverable
@@ -2012,13 +2014,19 @@ controller wiring if admission latency needs it.
 
 ### What is wired next
 
-The controller wiring, not done here: build the `Resolver`, cache and
-`OCIContent` in the manager and pass `OCIContent` (or a source that routes the
-vendored bundle to `LocalContent`) as `Options.Content`; feed `Revisions`
-from the central ConfigMap and Secret/CA watches with `Compatibility.Revision`;
-map `ContentError` classes and `ValidateParameters` failures to detailed profile
-conditions (task 5.3); pin desired, applied and assessment content and
-re-establish the pins after a restart.
+Done since: `internal/bundle/sources.Watcher` implements `Revisions` from the
+central ConfigMap and the referenced objects, and the profile and binding
+reconcilers map `ContentError` classes to detailed conditions and requeues and
+accept `content.ValidateParameters` (see
+[Central configuration and watches](#central-configuration-and-watches)).
+
+The controller wiring, still not done: build the `Resolver`, cache,
+`OCIContent`, `kubeaccess.Provider` and `sources.Watcher` in the manager and pass
+`OCIContent` (or a source that routes the vendored bundle to `LocalContent`) as
+`Options.Content`; register the watcher, its trigger and the single-object
+ConfigMap cache; set `ValidateParameters`; grant the RBAC listed below in the
+chart; pin desired, applied and assessment content and re-establish the pins
+after a restart.
 
 ### What has and has not been verified
 
@@ -2073,6 +2081,231 @@ A version bump or a changed file fails the build until the entry is reviewed,
 and the check for unknown licenses stays in force for every other module. It
 is not implemented here because nothing shipped links these modules yet, so
 the image build could not exercise it.
+
+## Central configuration and watches
+
+[`internal/bundle/sources`](../internal/bundle/sources) is the run-time holder of
+the [central source configuration](#central-source-configuration). Its
+`Watcher` implements the resolver's `Revisions` and keeps them current; the
+profile and binding reconcilers report the outcome. It is built from injected
+readers and is **not wired into the controller yet**: nothing here is linked
+into the shipped binaries (see [what stage 2 wires](#what-the-manager-wiring-adds)).
+
+### Atomic revisions
+
+Each `Sync` reads the sources ConfigMap and parses it with
+`bundle.ParseConfigMapData` as one revision. `State.Revision` increases by one
+whenever what is served changes: availability, the parsed document, or the
+reason it is unavailable. An identical re-read (an informer resync) changes
+nothing.
+
+The configuration is **unavailable as a whole** before the first `Sync`, when
+the ConfigMap is missing or deleted, when `sources.yaml` is missing, when any
+other `data` key or any `binaryData` is present, and when the document is
+invalid in any way (an unsupported `version`, an invalid entry, inline key
+material). While it is unavailable, `Source` fails with
+`sources.ErrUnavailable` for every name and `Trust` fails too: the previous
+revision is **never** served in its place. `State.Reason` explains it
+(bounded to 512 bytes; the ConfigMap holds no secrets, and a document with key
+material or credentials is rejected with a fixed message) and
+`State.LastGoodRevision` names the last good revision, for diagnostics only.
+Fixing the ConfigMap makes the next `Sync` serve the new revision.
+
+A failure to *read* the ConfigMap other than its absence (the informer cache
+not synced, a cancelled context) is not a configuration change: that `Sync`
+fails, changes nothing and is retried at the next trigger. The informer
+reports a deletion as a deletion.
+
+### Trust revision
+
+`Trust(src)` is `<publisher type>:` followed by
+`verify.Verifier.TrustRevision`, computed by the last `Sync` from the objects
+the publisher rule references, read and parsed exactly as verification reads
+them:
+
+- keyless: the `sha256:` of the trusted root's bytes; without a `trustRoot`
+  reference, the pinned digest of the embedded public-good root;
+- public key: the key's fingerprint (`sha256:` of its DER
+  SubjectPublicKeyInfo), the same value a receipt records as
+  `TrustRevision`. A re-encoding of the same key (whitespace, line breaks)
+  keeps the token; any other key changes it.
+
+Credentials, CAs and the repository never contribute. A missing object or
+key, an unreadable object (including a transient read error), malformed or
+oversized material, an unsupported key type or a key whose fingerprint is not
+the rule's makes `Trust` fail (`sources.ErrTrustUnavailable`), so resolution of
+that source is unavailable (`Config`); no earlier token is served. `Trust` also
+fails for a source that is not the one configured now under its name (its
+`verify.RuleRevision` differs). `Compatibility` is the injected
+`content.Compatibility.Revision`.
+
+### What changes invalidate
+
+`Sync` builds the complete new state, publishes it (`Source`, `Trust` and
+`Compatibility` answer from it at once) and only then invalidates, which is
+the resolver's protocol: a verification that read the old revisions is refused
+(`ErrStale`) at record or adoption time, and one that begins after
+publication reads the new ones.
+
+| Change | Acceptances | Transport (`Provider.Invalidate`) | Profiles requeued |
+| --- | --- | --- | --- |
+| Configuration becomes unavailable, or available again | all (`InvalidateAll`) | every previously referenced object | every bundle name in the old and the new revision |
+| Source added or removed | that source (`InvalidateSource`) | its objects | that name |
+| Publisher rule changed (issuer, identity, key or root reference, fingerprint, provenance) | that source | changed references | that name |
+| Referenced key or root content changed, removed or unreadable (trust revision changed or unavailable) | that source | that object | every name referencing it |
+| Same key re-encoded | none | that object | names referencing it |
+| `repository` only (a mirror) | none | none | that name |
+| Credential or CA reference changed | none | old and new objects | that name |
+| Credential Secret rotated or deleted, CA changed or deleted | none | that object | every name referencing it |
+| Anything else (unrelated objects, an unchanged re-read) | none | none | none |
+
+A rotated credential resets the registry tokens through the provider and
+keeps every acceptance: verified content is still reused offline. A deleted
+credential makes the next retrieval fail with `ErrCredentials`, but content
+whose acceptance or retained evidence still satisfies current trust is served
+without the registry. A CA change rebuilds that source's transport.
+
+### Events
+
+The `Watcher` records the affected bundle names. Its `Trigger` (a
+leader-elected runnable) lists the `ComplianceProfile`s whose
+`spec.bundle.name` is affected (`sources.ProfilesFor`) and sends one
+`GenericEvent` per profile to each output channel: one for the profile
+controller (`handler.EnqueueRequestForObject`) and one for the binding
+controller (the existing profile-to-bindings map function). Unrelated
+objects and profiles of other bundles produce nothing. Names affected while no
+trigger runs (a non-leader replica) are kept, at most one entry per bundle
+name, and sent when it starts. The `Watcher` itself runs on every replica,
+because admission webhooks resolve content on every replica.
+
+`Predicate()` admits the sources ConfigMap and, in the controller namespace
+only, exactly the Secrets and ConfigMaps (by kind) the current configuration
+references; it consults the current configuration on every event.
+`ConfigMapHandler()` is the informer handler for the sources ConfigMap: it only
+asks for a `Sync`, so the informer is never blocked.
+
+### RBAC and informers
+
+Informers need `list` and `watch`, and RBAC `resourceNames` restricts those only
+for requests that carry a `metadata.name` field selector. So:
+
+- **The sources ConfigMap** is the only watched object, through a dedicated
+  cache that holds just that object (`sources.ConfigMapCacheOptions(namespace,
+  name)`: ConfigMaps of the controller namespace with the field selector
+  `metadata.name=<name>`). Its `list` and `watch` carry the selector, so they
+  can be granted by name. Changes are noticed at once.
+- **Referenced Secrets and ConfigMaps** (credentials, CAs, public keys, trusted
+  roots) are never listed or watched. `Sync` reads each by name with `get`,
+  through an uncached reader (`kubeaccess.NewClientReader` over the manager's
+  API reader), at most once per `Sync`. `Sync` runs on every ConfigMap event and
+  every `Options.Interval`: `kubeaccess.DefaultCacheFor` (30 s) by default, at
+  most `kubeaccess.MaxCacheFor` (5 min). **A rotation, revocation or removal
+  of a referenced object is therefore noticed within one interval**, and the
+  transport provider's own object cache uses the same bound. Until then a
+  previously accepted digest can still be served under the old key; any new
+  verification reads the objects directly.
+
+Per-object field-selected watchers for referenced objects would notice changes
+sooner, but the referenced set changes with the configuration, controller-runtime
+cannot stop a watch it started, and the chart's `resourceNames` must be static
+anyway; polling by name keeps the grant to `get` and the design to one cache.
+
+The grants the chart must add (stage 2b), in the controller namespace only, in
+a namespaced `Role`; no `ClusterRole` and no namespace-wide Secret access:
+
+```yaml
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch]
+  resourceNames: [<sources ConfigMap name, default konstapel-bundle-sources>]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get]
+  resourceNames: [<every ConfigMap-held ca, publicKey and trustRoot>]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get]
+  resourceNames: [<every credentialSecret and Secret-held ca, publicKey and trustRoot>]
+```
+
+Because `resourceNames` are static, the referenced names come from chart
+values; an object the configuration references but the Role does not grant is
+`Forbidden`, which makes its source unavailable (never a fallback). That the
+API server authorizes the field-selected `list`/`watch` by name has not been
+verified against a real API server here. RBAC is additive: the existing
+controller Role's broader rules for other features are not narrowed by these.
+
+### Conditions and requeue
+
+A profile whose content is unavailable keeps the existing boundary:
+`Resolved=False` with reason `ContentUnavailable` and `observedGeneration` set.
+For a classified error the message is
+`bundle content unavailable (<Class>): <detail>`, where the detail is the
+`ContentError`'s bounded, credential-free detail; the whole message is bounded
+(1024 bytes). Recovery sets `Resolved=True` with reason `Resolved` again.
+`LocalContent` errors are reported exactly as before. Bindings report the same
+message on their `Resolved` condition, including when content resolved for the
+snapshot but not when it was read for rendering.
+
+| Class | Retried after |
+| --- | --- |
+| `Stale` | 1 s |
+| `ContentUnavailable`, `ProofUnavailable`, `Capacity`, `Unresolved` | 1 min |
+| `Untrusted` | 5 min (fresh evidence from the registry can fix it) |
+| `Config`, `Incompatible`, `DigestMismatch`, `Malformed`, unclassified | not on a timer |
+
+Configuration, trust and object changes re-trigger the affected profiles and
+bindings through events, and profile edits through their generation, so no
+class loops; a binding uses the shorter of this and its own engine requeue.
+
+On failed update or trust revocation a binding retains the policies it
+applied, reports `EngineReady=False/StaleRevision` ("last applied policies
+kept"), renders and applies nothing from the rejected content (it does not
+reapply a policy that disappears meanwhile), and exception eligibility is
+`Forbidden` while it is unresolved. Recovery delivers the current revision
+through the normal create-before-retire path without duplicates. If the
+binding's applied policies cannot be listed while content is unavailable, the
+reconcile fails and retries rather than holding nothing (holding nothing would
+let delivery remove applied policies).
+
+With `ValidateParameters` set (`content.ValidateParameters`), parameters of
+content that declares a parameter contract are rejected with
+`InvalidConfiguration` and a precise message on the profile and the binding
+(an unknown property, a wrong type, parameters for a policy without a schema,
+or valid parameters that the renderer does not render yet). Content without a
+contract (`LocalContent`) keeps the resolver's generic rejection on bindings
+and no parameter check on profiles.
+
+### What the manager wiring adds
+
+Stage 2b, not done here: build the cache, `kubeaccess.Provider` and registry
+client, `verify.Verifier`, `resolve.Acceptances` and `Resolver`, and
+`content.OCIContent`; build `sources.New` with the single-object ConfigMap
+cache (`cache.New(cfg, sources.ConfigMapCacheOptions(ns, name))`, added to the
+manager, `ConfigMapHandler` on its ConfigMap informer), the uncached object
+reader, the provider as `Transport` and `Compatibility.Revision`; add the
+`Watcher` and its `Trigger` (two channels, wired as `source.Channel` into the
+profile and binding controllers); set `ValidateParameters` on both
+reconcilers; add the flags, the chart RBAC above, the cache volume and the
+`go-notices` override; and run live acceptance.
+
+### What has and has not been verified
+
+Unit tests (`-race`, repeated, also with `-cpu 1`, no sleeps for ordering)
+cover atomic configuration (invalid update after a good one, deletion, extra,
+missing and `binaryData` keys, version 2, recovery, revision numbering), the
+trust token (key and root bytes, re-encoding, credential/CA/mirror
+independence, every unusable-material case), the full invalidation matrix
+including transport invalidations and acceptance survival, the
+publish-before-invalidate ordering at a deterministic hook, the real resolver,
+cache and verifier with the signed fixture bundle (a rule change during a
+retrieval is `ErrStale` and records nothing; credential rotation and deletion
+and a mirror keep acceptance and offline reuse; trust revocation is
+`Untrusted`; a missing key is `Config`; recovery), predicates and the informer
+handler, the trigger, per-class conditions and requeues with planted secrets,
+and the binding scenarios above. Thirteen safeguards were removed one at a
+time to confirm a test fails for each. Not verified: anything in a cluster,
+the field-selected watch against a real API server, and the RBAC above.
 
 ## Create and package a bundle
 

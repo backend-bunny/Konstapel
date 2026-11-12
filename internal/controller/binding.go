@@ -74,6 +74,11 @@ type BindingReconciler struct {
 	Engine  EngineAvailable
 	Cluster string // assessment-loop cluster identity, "kube-system:<uid>"
 	Ready   targeting.ReadyFunc
+	// ValidateParameters, when set, gives rejected parameters of content
+	// that declares a parameter contract a precise message
+	// (content.ValidateParameters). Content without a contract
+	// (LocalContent) keeps the resolver's message.
+	ValidateParameters ParameterValidator
 }
 
 func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -89,10 +94,11 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	in, profile, err := r.input(ctx, b)
+	snap, err := r.resolveInput(ctx, b)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	in, profile := snap.in, snap.profile
 	res := targeting.Resolve(in)
 	var br targeting.BindingResult
 	for _, x := range res.Bindings {
@@ -100,6 +106,7 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			br = x
 		}
 	}
+	r.explain(&br, profile, snap)
 
 	status := v1alpha1.ComplianceBindingStatus{
 		ObservedGeneration: b.Generation,
@@ -119,6 +126,9 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	engine := metav1.Condition{Type: v1alpha1.ConditionEngineReady, ObservedGeneration: b.Generation}
 	requeue := time.Duration(0)
+	// Unavailable content is retried per its class; configuration and
+	// trust changes also re-trigger the binding through its profile.
+	contentRetry := ContentRequeue(snap.contentErr)
 	available, err := r.Engine(ctx)
 	switch {
 	case err != nil || !available:
@@ -130,7 +140,10 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		engine.Status, engine.Reason, engine.Message = metav1.ConditionFalse, engineReason(err), msg
 		requeue = TransitionRequeue
 	default:
-		desired, hold, renderErrs := r.desired(ctx, b, br)
+		desired, hold, renderErrs, contentErr, err := r.desired(ctx, b, br)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 		reader := r.Reader
 		if reader == nil {
 			reader = r.Client
@@ -149,8 +162,16 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 		status.ConfigurationRevision = revisionSummary(br.Contributions)
-		engine.Status, engine.Reason, engine.Message, requeue = engineCondition(sync, len(desired), len(br.Errors)+len(renderErrs) > 0, br.TargetCount)
-		if len(renderErrs) > 0 {
+		engine.Status, engine.Reason, engine.Message, requeue = engineCondition(sync, len(desired), len(br.Errors)+len(renderErrs) > 0 || contentErr != nil, br.TargetCount)
+		switch {
+		case contentErr != nil:
+			// The content resolved for the snapshot but not when it was
+			// read for rendering (trust revoked or content lost in
+			// between): nothing new was rendered or applied.
+			resolved.Status, resolved.Reason, resolved.Message = metav1.ConditionFalse, v1alpha1.ReasonContentUnavailable, contentMessage(contentErr)
+			meta.SetStatusCondition(&status.Conditions, resolved)
+			contentRetry = ContentRequeue(contentErr)
+		case len(renderErrs) > 0:
 			resolved.Status, resolved.Reason, resolved.Message = metav1.ConditionFalse, v1alpha1.ReasonInvalidConfiguration, truncate(strings.Join(renderErrs, "; "))
 			meta.SetStatusCondition(&status.Conditions, resolved)
 		}
@@ -164,7 +185,36 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	if contentRetry > 0 && (requeue == 0 || contentRetry < requeue) {
+		requeue = contentRetry
+	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// explain gives the resolver's errors the detail it cannot know: the class
+// of unavailable content, and why parameters are rejected for content that
+// declares a parameter contract. Reasons are unchanged.
+func (r *BindingReconciler) explain(br *targeting.BindingResult, profile *v1alpha1.ComplianceProfile, snap bindingInput) {
+	for i := range br.Errors {
+		e := &br.Errors[i]
+		switch {
+		case e.Reason == targeting.ReasonContentUnavailable && e.Policy == "" && targeting.ContentErrorClassOf(snap.contentErr) != "":
+			e.Message = contentMessage(snap.contentErr)
+		case e.Reason == targeting.ReasonInvalidConfiguration && e.Policy != "" && profile != nil && snap.content != nil:
+			for _, pol := range profile.Spec.Policies {
+				if pol.Name != e.Policy {
+					continue
+				}
+				for _, bp := range snap.content.Bundle.Policies {
+					if bp.Name == pol.Name && targeting.HasParameters(pol) && !bp.Parameters {
+						if msg := parameterProblem(r.ValidateParameters, snap.content, bp, pol); msg != "" {
+							e.Message = msg
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // snapshotCurrent confirms through reader (the API server, uncached) that
@@ -200,13 +250,32 @@ func (r *BindingReconciler) snapshotCurrent(reader client.Reader, b *v1alpha1.Co
 	}
 }
 
+// bindingInput is the resolver snapshot for one binding with the content
+// it was resolved from, or why that content is unavailable.
+type bindingInput struct {
+	in         targeting.Input
+	profile    *v1alpha1.ComplianceProfile
+	content    *targeting.Content
+	contentErr error // an ErrContentUnavailable, or nil
+}
+
 // input builds the resolver snapshot for one binding: its profile, that
 // profile's content and every namespace.
 func (r *BindingReconciler) input(ctx context.Context, b *v1alpha1.ComplianceBinding) (targeting.Input, *v1alpha1.ComplianceProfile, error) {
+	s, err := r.resolveInput(ctx, b)
+	return s.in, s.profile, err
+}
+
+func (r *BindingReconciler) resolveInput(ctx context.Context, b *v1alpha1.ComplianceBinding) (bindingInput, error) {
+	in, p, content, contentErr, err := r.buildInput(ctx, b)
+	return bindingInput{in: in, profile: p, content: content, contentErr: contentErr}, err
+}
+
+func (r *BindingReconciler) buildInput(ctx context.Context, b *v1alpha1.ComplianceBinding) (targeting.Input, *v1alpha1.ComplianceProfile, *targeting.Content, error, error) {
 	in := targeting.Input{Cluster: r.Cluster, Bindings: []v1alpha1.ComplianceBinding{*b}}
 	var nss corev1.NamespaceList
 	if err := r.Client.List(ctx, &nss); err != nil {
-		return in, nil, err
+		return in, nil, nil, nil, err
 	}
 	for _, ns := range nss.Items {
 		if ns.DeletionTimestamp.IsZero() {
@@ -216,29 +285,33 @@ func (r *BindingReconciler) input(ctx context.Context, b *v1alpha1.ComplianceBin
 	p := &v1alpha1.ComplianceProfile{}
 	err := r.Client.Get(ctx, client.ObjectKey{Name: b.Spec.ProfileRef.Name}, p)
 	if apierrors.IsNotFound(err) {
-		return in, nil, nil
+		return in, nil, nil, nil, nil
 	}
 	if err != nil {
-		return in, nil, err
+		return in, nil, nil, nil, err
 	}
 	in.Profiles = []v1alpha1.ComplianceProfile{*p}
 	content, err := r.Content.Content(ctx, p.Spec.Bundle)
 	switch {
 	case errors.Is(err, targeting.ErrContentUnavailable):
 		// The resolver reports ContentUnavailable for a missing bundle.
+		return in, p, nil, err, nil
 	case err != nil:
-		return in, p, err
+		return in, p, nil, nil, err
 	default:
 		in.Bundles = []targeting.Bundle{content.Bundle}
 	}
-	return in, p, nil
+	return in, p, content, nil, nil
 }
 
 // desired renders the binding's contributions. Policies that failed to
 // resolve or render are held: what is applied for them stays in place. A
-// binding-level error holds everything the binding currently owns.
-func (r *BindingReconciler) desired(ctx context.Context, b *v1alpha1.ComplianceBinding, br targeting.BindingResult) ([]*unstructured.Unstructured, []string, []string) {
-	var hold, renderErrs []string
+// binding-level error, or content that is unavailable when it is read for
+// rendering (returned as contentErr), holds everything the binding currently
+// owns and renders nothing. If what the binding owns cannot be listed, it
+// fails (err) rather than hold nothing: holding nothing would let delivery
+// remove applied policies while the configuration does not resolve.
+func (r *BindingReconciler) desired(ctx context.Context, b *v1alpha1.ComplianceBinding, br targeting.BindingResult) (desired []*unstructured.Unstructured, hold, renderErrs []string, contentErr, err error) {
 	bindingLevel := false
 	for _, e := range br.Errors {
 		if e.Policy == "" {
@@ -248,17 +321,24 @@ func (r *BindingReconciler) desired(ctx context.Context, b *v1alpha1.ComplianceB
 		}
 	}
 	if bindingLevel {
-		return nil, r.ownedPolicies(ctx, b.UID), nil
+		owned, err := r.ownedPolicies(ctx, b.UID)
+		return nil, owned, nil, nil, err
 	}
 	var content *targeting.Content
 	if len(br.Contributions) > 0 {
-		c, err := r.Content.Content(ctx, v1alpha1.BundleReference{Name: br.Contributions[0].BundleName, Digest: br.Contributions[0].BundleDigest})
-		if err != nil {
-			return nil, r.ownedPolicies(ctx, b.UID), []string{err.Error()}
+		c, cerr := r.Content.Content(ctx, v1alpha1.BundleReference{Name: br.Contributions[0].BundleName, Digest: br.Contributions[0].BundleDigest})
+		if cerr != nil {
+			owned, err := r.ownedPolicies(ctx, b.UID)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			if errors.Is(cerr, targeting.ErrContentUnavailable) {
+				return nil, owned, nil, cerr, nil
+			}
+			return nil, owned, []string{cerr.Error()}, nil, nil
 		}
 		content = c
 	}
-	var desired []*unstructured.Unstructured
 	for _, c := range br.Contributions {
 		obj, err := targeting.Render(c, content.Policies[c.Policy])
 		if err != nil {
@@ -268,11 +348,11 @@ func (r *BindingReconciler) desired(ctx context.Context, b *v1alpha1.ComplianceB
 		}
 		desired = append(desired, obj)
 	}
-	return desired, hold, renderErrs
+	return desired, hold, renderErrs, nil, nil
 }
 
 // ownedPolicies lists the logical policies the binding currently has applied.
-func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) []string {
+func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) ([]string, error) {
 	reader := r.Reader
 	if reader == nil {
 		reader = r.Client
@@ -280,7 +360,7 @@ func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) []
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(targeting.ValidatingPolicyGVK.GroupVersion().WithKind("ValidatingPolicyList"))
 	if err := reader.List(ctx, list, client.MatchingLabels{targeting.LabelManagedBy: targeting.ManagedByValue, targeting.LabelBindingUID: string(uid)}); err != nil {
-		return nil
+		return nil, fmt.Errorf("listing the binding's applied policies: %w", err)
 	}
 	var out []string
 	for _, o := range list.Items {
@@ -288,7 +368,7 @@ func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) []
 			out = append(out, p)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // engineCondition maps a delivery outcome to EngineReady. Ready means every
