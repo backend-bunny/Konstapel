@@ -96,6 +96,9 @@ type runCluster struct {
 	now      time.Time
 	ref      v1alpha1.BundleReference
 	failNext atomic.Bool // fail the next run status update to Publishing
+	// ready is the engine's readiness of a delivered policy; nil means
+	// every policy is ready.
+	ready atomic.Pointer[func(*unstructured.Unstructured) bool]
 }
 
 func newRunCluster(t *testing.T, router *stack.Router, ref v1alpha1.BundleReference) *runCluster {
@@ -152,7 +155,12 @@ func newRunCluster(t *testing.T, router *stack.Router, ref v1alpha1.BundleRefere
 	rc.c = c
 	engine := func(context.Context) (bool, error) { return true, nil }
 	rc.binding = &controller.BindingReconciler{Client: c, Reader: c, Cluster: "kube-system:test", Engine: engine,
-		Ready: func(*unstructured.Unstructured) bool { return true }, ValidateParameters: bundlecontent.ValidateParameters}
+		Ready: func(o *unstructured.Unstructured) bool {
+			if f := rc.ready.Load(); f != nil {
+				return (*f)(o)
+			}
+			return true
+		}, ValidateParameters: bundlecontent.ValidateParameters}
 	root, err := filepath.Abs(stack.RepoRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -227,16 +235,7 @@ func (rc *runCluster) report(at time.Time) {
 	if len(list.Items) != 1 {
 		rc.t.Fatalf("want one engine policy, have %d", len(list.Items))
 	}
-	r := &unstructured.Unstructured{Object: map[string]any{
-		"metadata": map[string]any{"name": "r-pod-1", "namespace": "app"},
-		"scope":    map[string]any{"apiVersion": "v1", "kind": "Pod", "namespace": "app", "name": "web", "uid": "pod-1"},
-		"results": []any{map[string]any{"policy": list.Items[0].GetName(), "result": "fail", "source": "KyvernoValidatingPolicy",
-			"properties": map[string]any{"cel.validationIndex": "0"},
-			"timestamp":  map[string]any{"seconds": at.Unix(), "nanos": int64(0)}}},
-	}}
-	r.SetGroupVersionKind(controller.PolicyReportGVK)
-	r.SetUID("report-pod-1")
-	rc.must(rc.c.Create(context.Background(), r))
+	rc.reportFor(list.Items[0].GetName(), at)
 }
 
 // finish advances the run past its collection timeout until it is done.

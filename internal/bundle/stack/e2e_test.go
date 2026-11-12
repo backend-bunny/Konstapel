@@ -42,6 +42,9 @@ type cluster struct {
 	engine atomic.Pointer[engineState]
 	// writes records every write the reconcilers make, as "verb Kind".
 	writes writeLog
+	// ready is the engine's readiness of a delivered policy; nil means
+	// every policy is ready.
+	ready atomic.Pointer[func(*unstructured.Unstructured) bool]
 }
 
 type engineState struct {
@@ -88,7 +91,12 @@ func newClusterOver(t *testing.T, w *stack.World, router *stack.Router, ref v1al
 				return e.available, e.err
 			}
 			return true, nil
-		}, Ready: func(*unstructured.Unstructured) bool { return true },
+		}, Ready: func(o *unstructured.Unstructured) bool {
+			if f := cl.ready.Load(); f != nil {
+				return (*f)(o)
+			}
+			return true
+		},
 		ValidateParameters: bundlecontent.ValidateParameters}
 	cl.setRouter(router)
 	if policies == nil {
