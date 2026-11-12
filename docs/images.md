@@ -98,6 +98,11 @@ texts, unpinned sources, or a package with no notice or canonical license text
 fail the build. Canonical-only APK notices are explicitly reported in the build
 log and `out/image/notices.md`.
 
+Linking the bundle resolver into the controller will add modules whose
+`LICENSE` is only the Apache-2.0 standard notice, which `go-licenses` cannot
+classify; see [linking into the controller image](policy-bundles.md#linking-into-the-controller-image)
+for the analysis and the proposed exact-version override.
+
 The OCI license label describes Konstapel's own Apache-2.0 code. It does not
 relicense the bundled dependencies or NIST content. See [LICENSE](../LICENSE),
 [NOTICE](../NOTICE), and the published per-package evidence.

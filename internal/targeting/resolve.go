@@ -22,6 +22,11 @@ const (
 	// ScopeCluster policies match cluster-scoped resources. Namespace targeting
 	// cannot constrain them, so they are rejected.
 	ScopeCluster PolicyScope = "Cluster"
+	// ScopeUnsupported policies are not a supported policy API or kind
+	// (PolicyScopeOf fails). A content source that reports scope per policy
+	// uses it instead of failing the whole bundle; like Cluster, it is
+	// rejected as UnsupportedScope.
+	ScopeUnsupported PolicyScope = "Unsupported"
 )
 
 // BundlePolicy is the resolver's view of one logical policy in pinned content.
