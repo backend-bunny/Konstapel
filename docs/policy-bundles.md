@@ -2089,7 +2089,15 @@ The reviewed `LICENSE` hashes (each `h1:` matched `go.sum`):
 | `github.com/in-toto/attestation` | v1.2.0 | `b3a6ac899861c2c28a1abd5c7ea8733fefaed6938d730e099c42671386032aeb` |
 | `github.com/cyberphone/json-canonicalization` | v0.0.0-20241213102144-19d51d7fe467 | `6821faaddedf2d78c95bb6d98b127e9e616097afd2f6bcc34389f000d13ab12d` |
 
-IMAGE_RESULTS_PLACEHOLDER
+With the controller wiring linked, the unstripped linux/amd64 `konstapel`
+binary grew from 85,312,889 to 93,263,248 bytes (+7.6 MiB, +9.3%; 114 to 158
+module dependencies), and the local `task image:build` image archive from
+69,913,088 to 73,686,528 bytes (+3.6 MiB compressed, +5.4%). The local image
+build and `task image:test` pass; the notices list the three modules as
+`Apache-2.0` with both files, and the Syft SBOM concludes `Apache-2.0` for the
+in-toto modules (it adds a `LicenseRef` for json-canonicalization from its own
+scan, and declares `NOASSERTION` for all three, as for other modules it finds
+no declared license for).
 
 ## Controller wiring
 
