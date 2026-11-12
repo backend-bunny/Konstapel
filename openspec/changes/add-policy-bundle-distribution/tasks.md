@@ -83,7 +83,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [ ] 6.4 Add bundle release notes and CI summaries with version, digest, compatibility, policies, licenses and verification instructions; test rendering/idempotent updates and ensure publication is not reported complete while required remote verification is missing.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.5 Document organization publication and mirroring with the same format and verifier; test copying a subject plus referrers to the private fixture registry, preserving its digest and original provenance, and rejection when required evidence is omitted.
+- [x] 6.5 Document organization publication and mirroring with the same format and verifier; test copying a subject plus referrers to the private fixture registry, preserving its digest and original provenance, and rejection when required evidence is omitted.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 7. Integrate independently owned content, evidence and deployment

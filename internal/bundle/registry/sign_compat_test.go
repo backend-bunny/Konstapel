@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/mirror"
 	"github.com/backend-bunny/Konstapel/internal/bundle/publish"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry/kubeaccess"
@@ -241,5 +242,68 @@ func signCompat(t *testing.T, env registry.CompatEnv) {
 		_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(tgt.Repository), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
 		record(t.Name()+": a signed release that anonymous consumers cannot read is not complete",
 			errors.Is(err, registry.ErrUnauthorized) && !strings.Contains(err.Error(), env.Pass), err, "")
+	})
+
+	t.Run("mirror: a copy keeps digests and the original provenance", func(t *testing.T) {
+		tgt, _, _ := setup(env.Anon, false)
+		tgt.Repository = env.Anon + "/bundles/mirror-src"
+		if res, err := publish.Publish(ctx, frozenA, tgt); err != nil || !res.Complete {
+			t.Fatalf("publish source: %v", err)
+		}
+		src, err := registry.NewClient(registry.Options{Transport: transport})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dst, err := registry.NewClient(registry.Options{Transport: transport, Credentials: hostCred{env.APIAuthd: creds}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dstRepo := env.APIAuthd + "/bundles/mirror-dst"
+		req := mirror.Request{
+			Source:      bundle.BundleSource{Name: frozenA.Record.Name, Repository: tgt.Repository},
+			Destination: bundle.BundleSource{Name: frozenA.Record.Name, Repository: dstRepo, CredentialSecret: &publish.PublisherCredential},
+			Digest:      frozenA.ManifestDigest,
+		}
+		res, err := mirror.Mirror(ctx, src, dst, req)
+		record(t.Name()+": subject and both referrers are copied by digest",
+			err == nil && res.Digest == frozenA.ManifestDigest && len(res.Proofs) == 2, err, "")
+
+		want, _ := src.Fetch(ctx, req.Source, frozenA.ManifestDigest)
+		got, err := tgt.Reader.Fetch(ctx, bundle.BundleSource{Name: frozenA.Record.Name, Repository: dstRepo}, frozenA.ManifestDigest)
+		same := err == nil && want != nil && len(got.Proofs) == len(want.Proofs)
+		for i := 0; same && i < len(got.Proofs); i++ {
+			same = got.Proofs[i].ManifestDigest == want.Proofs[i].ManifestDigest && got.Proofs[i].BundleDigest == want.Proofs[i].BundleDigest
+		}
+		record(t.Name()+": the mirror lists the identical proofs anonymously", same, err, "")
+
+		acc, _, err := release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(dstRepo), Digest: frozenA.ManifestDigest, Verifier: v, Transport: transport})
+		record(t.Name()+": the original signature and provenance verify under the same rule, only the repository changed",
+			err == nil && acc.Receipt.Provenance.Revision == frozenA.Record.Source.Commit && acc.Receipt.Signer.KeyFingerprint == fingerprint, err, "")
+
+		// A source without required proofs is refused before any write.
+		bare, _, _ := setup(env.Anon, false)
+		bare.Proofs = nil
+		bare.Repository = env.Anon + "/bundles/mirror-bare"
+		if _, err := publish.Publish(ctx, frozenB, bare); err != nil {
+			t.Fatal(err)
+		}
+		breq := mirror.Request{
+			Source:      bundle.BundleSource{Name: frozenB.Record.Name, Repository: bare.Repository},
+			Destination: bundle.BundleSource{Name: frozenB.Record.Name, Repository: env.APIAuthd + "/bundles/mirror-bare", CredentialSecret: &publish.PublisherCredential},
+			Digest:      frozenB.ManifestDigest,
+		}
+		_, err = mirror.Mirror(ctx, src, dst, breq)
+		_, ferr := dst.Fetch(ctx, breq.Destination, frozenB.ManifestDigest)
+		record(t.Name()+": a source missing required evidence is not mirrored", errors.Is(err, registry.ErrMissingProofs) && errors.Is(ferr, registry.ErrNotFound), err, fmt.Sprint(ferr))
+
+		// A subject copied without its referrers is not verifiable.
+		sub := bare
+		sub.Repository = env.APIAuthd + "/bundles/mirror-subject-only"
+		sub.Writer = dst
+		if _, err := publish.Publish(ctx, frozenB, sub); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = release.VerifyRelease(ctx, release.ReleaseCheck{Source: rule(sub.Repository), Digest: frozenB.ManifestDigest, Verifier: v, Transport: transport})
+		record(t.Name()+": a copy without referrers is refused by verification", errors.Is(err, registry.ErrMissingProofs), err, "")
 	})
 }
