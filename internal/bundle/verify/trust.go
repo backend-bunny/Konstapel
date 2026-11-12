@@ -124,6 +124,28 @@ func (v *Verifier) loadTrust(ctx context.Context, p bundle.Publisher) (*trust, e
 	return t, nil
 }
 
+// TrustRevision reads and parses the trust material a publisher rule
+// references now, exactly as verification does, and returns the revision a
+// receipt records as TrustRevision: for a keyless rule the sha256:<hex> of
+// the trusted root's bytes (the embedded public-good root's when the rule
+// references none), for a public-key rule the key's fingerprint
+// sha256:<hex> of its DER SubjectPublicKeyInfo. A re-encoding of the same
+// key therefore keeps the revision, and any other key or root changes it.
+//
+// Missing, unreadable, oversized or malformed material, an unsupported key
+// type, or a key whose fingerprint is not the rule's is an error wrapping
+// ErrTrustConfig: there is no default and no last known value.
+func (v *Verifier) TrustRevision(ctx context.Context, p bundle.Publisher) (string, error) {
+	t, err := v.loadTrust(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	if p.Type == bundle.SignerKeyless {
+		return t.rootID, nil
+	}
+	return t.fingerprint, nil
+}
+
 func refString(r *bundle.ObjectRef, defaultKey string) string {
 	key := r.Key
 	if key == "" {
