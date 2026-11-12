@@ -149,7 +149,7 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			reader = r.Client
 		}
 		d := &targeting.Delivery{Client: readThrough{Client: r.Client, reader: reader}, Ready: r.Ready,
-			Current: r.snapshotCurrent(reader, b, profile)}
+			Current: r.confirmContent(r.snapshotCurrent(reader, b, profile), br, len(desired))}
 		sync, err := d.Sync(ctx, b.UID, desired, hold)
 		if errors.Is(err, targeting.ErrStaleSnapshot) {
 			// A newer binding or profile exists than this cache snapshot (a
@@ -245,6 +245,31 @@ func (r *BindingReconciler) snapshotCurrent(reader client.Reader, b *v1alpha1.Co
 			return err
 		case profile == nil || p.UID != profile.UID || p.Generation != profile.Generation:
 			return fmt.Errorf("%w: profile %s changed", targeting.ErrStaleSnapshot, b.Spec.ProfileRef.Name)
+		}
+		return nil
+	}
+}
+
+// confirmContent extends the snapshot check with the content source's
+// adoption guard (ContentConfirmer), so content whose acceptance was
+// withdrawn after desired() read it (trust revoked, source removed, the
+// entry evicted) is never applied: the Sync stops as stale and the binding
+// resolves again, keeping what is applied. Delivery calls it before its
+// first write and again before any delete. Sources without the guard
+// (LocalContent, whose bytes are in the image) and syncs that render
+// nothing keep the snapshot check alone.
+func (r *BindingReconciler) confirmContent(current func(context.Context) error, br targeting.BindingResult, desired int) func(context.Context) error {
+	cf, ok := r.Content.(ContentConfirmer)
+	if !ok || desired == 0 || len(br.Contributions) == 0 {
+		return current
+	}
+	ref := v1alpha1.BundleReference{Name: br.Contributions[0].BundleName, Digest: br.Contributions[0].BundleDigest}
+	return func(ctx context.Context) error {
+		if err := current(ctx); err != nil {
+			return err
+		}
+		if err := cf.Confirm(ctx, ref); err != nil {
+			return fmt.Errorf("%w: content %s@%s is no longer accepted: %w", targeting.ErrStaleSnapshot, ref.Name, ref.Digest, err)
 		}
 		return nil
 	}

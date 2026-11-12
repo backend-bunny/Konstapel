@@ -98,10 +98,33 @@ texts, unpinned sources, or a package with no notice or canonical license text
 fail the build. Canonical-only APK notices are explicitly reported in the build
 log and `out/image/notices.md`.
 
-Linking the bundle resolver into the controller will add modules whose
-`LICENSE` is only the Apache-2.0 standard notice, which `go-licenses` cannot
-classify; see [linking into the controller image](policy-bundles.md#linking-into-the-controller-image)
-for the analysis and the proposed exact-version override.
+The controller links the bundle resolver (see
+[controller wiring](policy-bundles.md#controller-wiring)), which adds about
+44 Go modules (sigstore-go, rekor, go-tuf, certificate-transparency-go,
+go-openapi, oras-go, go-containerregistry, OpenTelemetry and others). Three of
+them ship a root `LICENSE` that is only the Apache-2.0 standard notice, which
+`go-licenses` cannot classify: `github.com/in-toto/in-toto-golang` v0.11.0,
+`github.com/in-toto/attestation` v1.2.0 and
+`github.com/cyberphone/json-canonicalization`
+v0.0.0-20241213102144-19d51d7fe467. `scripts/image/go-notices.py` handles
+exactly those versions through its `LICENSE_OVERRIDES` table: they are passed
+to `go-licenses` with `--ignore`, their notice is copied from the module
+archive (whose `h1:` hash is recomputed and compared with `go.sum`) and must
+match the pinned sha256, the full Apache-2.0 text ships beside it as
+`LICENSE-Apache-2.0.txt`, and `bundled-sources.json` records the override and
+its reason under `licenseOverride`. The script fails for every other module
+whose license is unknown or unreported, for a listed module at another
+version, for a changed `LICENSE`, and for a module that merely shares an
+override's path prefix.
+
+To review a version bump of an overridden module: download the new version
+(`go mod download -json <module>@<version>`), read its `LICENSE`, `NOTICE` and
+any other license files in the archive, confirm the license is still
+Apache-2.0 (and that no NOTICE needs shipping), then update the version and the
+`LICENSE` sha256 in `LICENSE_OVERRIDES` in one reviewed change. If the new
+version ships the full license text, `go-licenses` identifies it and the entry
+should be removed instead. `scripts/ci/test_go_notices.py` (run by
+`task test`) covers the table and the failure cases.
 
 The OCI license label describes Konstapel's own Apache-2.0 code. It does not
 relicense the bundled dependencies or NIST content. See [LICENSE](../LICENSE),

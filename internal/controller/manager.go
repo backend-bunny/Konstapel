@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -34,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	bundlecontent "github.com/backend-bunny/Konstapel/internal/bundle/content"
+	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -128,6 +131,15 @@ type Options struct {
 	// SnapshotNamespace holds acceptance snapshots; empty means
 	// DefaultSnapshotNamespace.
 	SnapshotNamespace string
+	// LocalBundle is the bundle name Content serves (the image's vendored
+	// bundle). When set, Content is wrapped in a stack.Router that serves
+	// that name from Content exactly as before and every other name from
+	// verified OCI content (Bundles enabled) or as a Config ContentError
+	// (disabled). Empty uses Content as is.
+	LocalBundle string
+	// Bundles configures OCI bundle sources; the zero value is disabled and
+	// constructs nothing.
+	Bundles stack.Options
 }
 
 // Scheme returns the scheme the manager uses.
@@ -201,6 +213,22 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		return nil, err
 	}
 
+	// One content source for every consumer: reconcilers, assessments and
+	// admission webhooks all receive this same instance.
+	content, bundles, err := setupBundles(mgr, opts, func(o crcache.Options) (crcache.Cache, error) {
+		o.Scheme, o.Mapper, o.HTTPClient = mgr.GetScheme(), mgr.GetRESTMapper(), mgr.GetHTTPClient()
+		return crcache.New(mgr.GetConfig(), o)
+	})
+	if err != nil {
+		return nil, err
+	}
+	opts.Content = content
+	if bundles != nil {
+		if err := bundles.stack.CompatibilityProblem(); err != nil {
+			log.Log.WithName("bundle-sources").Info("controller version cannot satisfy bundle compatibility; every OCI bundle is unavailable as a configuration error", "version", opts.Bundles.ControllerVersion, "reason", err.Error())
+		}
+	}
+
 	// The cluster identity is the assessment loop's: kube-system's UID.
 	ks := &corev1.Namespace{}
 	if err := mgr.GetAPIReader().Get(context.Background(), client.ObjectKey{Name: "kube-system"}, ks); err != nil {
@@ -231,20 +259,26 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		return nil, err
 	}
 
-	br := &BindingReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: opts.Content, Engine: engine, Cluster: "kube-system:" + string(ks.UID)}
-	bc, err := builder.ControllerManagedBy(mgr).
+	br, pr := targetingReconcilers(mgr.GetClient(), mgr.GetAPIReader(), opts.Content, engine, "kube-system:"+string(ks.UID))
+	bb := builder.ControllerManagedBy(mgr).
 		Named("compliancebinding").
 		For(&v1alpha1.ComplianceBinding{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.Namespace{}, namespaceHandler(mgr.GetClient())).
-		WatchesRawSource(source.Channel(deliveryEvents, &handler.EnqueueRequestForObject{})).
-		Build(br)
+		WatchesRawSource(source.Channel(deliveryEvents, &handler.EnqueueRequestForObject{}))
+	pb := builder.ControllerManagedBy(mgr).Named("complianceprofile").
+		For(&v1alpha1.ComplianceProfile{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
+	if bundles != nil {
+		// Source configuration, trust and referenced-object changes
+		// re-reconcile the affected profiles and their bindings.
+		bb = bb.WatchesRawSource(source.Channel(bundles.bindingEvents, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient()))))
+		pb = pb.WatchesRawSource(source.Channel(bundles.profileEvents, &handler.EnqueueRequestForObject{}))
+	}
+	bc, err := bb.Build(br)
 	if err != nil {
 		return nil, err
 	}
-	if err := builder.ControllerManagedBy(mgr).Named("complianceprofile").
-		For(&v1alpha1.ComplianceProfile{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Complete(&ProfileReconciler{Client: mgr.GetClient(), Content: opts.Content}); err != nil {
+	if err := pb.Complete(pr); err != nil {
 		return nil, err
 	}
 	owned := &unstructured.Unstructured{}
@@ -272,6 +306,15 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		exception.Register(mgr.GetWebhookServer(), m, v)
 	}
 	return mgr, nil
+}
+
+// targetingReconcilers builds the binding and profile reconcilers over one
+// content source. Both give rejected parameters of content that declares a
+// parameter contract (OCI bundles) a precise reason; content without one
+// (LocalContent) is unaffected.
+func targetingReconcilers(c client.Client, r client.Reader, content targeting.ContentSource, engine EngineAvailable, cluster string) (*BindingReconciler, *ProfileReconciler) {
+	return &BindingReconciler{Client: c, Reader: r, Content: content, Engine: engine, Cluster: cluster, ValidateParameters: bundlecontent.ValidateParameters},
+		&ProfileReconciler{Client: c, Content: content, ValidateParameters: bundlecontent.ValidateParameters}
 }
 
 // capabilityTimeout bounds each discovery and authorization request.
