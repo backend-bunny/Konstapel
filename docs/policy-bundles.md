@@ -10,7 +10,8 @@ resolves it centrally and verifies it before use.
 > is released, signed and verifiable. The controller resolves, verifies and
 > caches bundles by digest and serves them to profiles when central bundle
 > sources are enabled (off by default; see [charts](charts.md)); assessment
-> runs of an OCI bundle export from the bundle's own frozen content. A
+> runs export from the frozen content of the bundles their policies were
+> applied from, and record the desired bundle and any difference. A
 > reproducible end-to-end example is the
 > [Audit walkthrough](integration/bundle-audit-walkthrough.md). Remaining work
 > is tracked in the `add-policy-bundle-distribution` OpenSpec change; live
@@ -2924,8 +2925,9 @@ is unit-tested in `internal/bundle/content`); keyless signatures in the
 cluster (the fixture is public-key signed; the
 [Audit walkthrough](integration/bundle-audit-walkthrough.md) does run the
 official keyless bundle in a cluster, by hand); and bearer-token registries.
-Assessment export of an OCI-bundle run uses the run's frozen bundle content,
-not the image's vendored tree (see
+Assessment export of an OCI-bundle run uses the frozen content of each
+bundle its contributions were applied from, not the image's vendored tree
+(see
 [Assessment runs freeze their bundle](#assessment-runs-freeze-their-bundle)).
 
 ## Create and package a bundle
