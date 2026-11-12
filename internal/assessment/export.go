@@ -35,10 +35,16 @@ import (
 // dropped, so the plan and results never mention or "satisfy" a control
 // through a check that was not assessed.
 func InputFrom(root string, defs, rules []string) (*actions.InputContext, *oscal.AssessmentPlan, error) {
+	return InputFromSet(root, ContentSet{Definitions: defs, Policies: ShippedPolicies}, rules)
+}
+
+// InputFromSet is InputFrom for the content set of any content tree (the
+// vendored Shipped set or a frozen bundle's).
+func InputFromSet(root string, set ContentSet, rules []string) (*actions.InputContext, *oscal.AssessmentPlan, error) {
 	var merged *oscal.ComponentDefinition
 	byKey := map[string]int{}
-	for i, rel := range defs {
-		def, _, err := ValidateDefinition(root, rel, ShippedPolicies)
+	for i, rel := range set.Definitions {
+		def, _, err := ValidateDefinition(root, rel, set.Policies)
 		if err != nil {
 			return nil, nil, err
 		}

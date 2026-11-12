@@ -18,7 +18,9 @@ import (
 	"github.com/oscal-compass/compliance-to-policy-go/v2/framework/actions"
 	"github.com/oscal-compass/compliance-to-policy-go/v2/policy"
 
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -27,8 +29,25 @@ const ExportVersion = "collector-export/v1"
 
 // ExportRequest describes one frozen, evaluated run to package.
 type ExportRequest struct {
-	// Root contains the verified content/ tree (mapping, catalog, profile, schemas).
+	// Root contains the verified content/ tree (mapping, catalog, profile,
+	// schemas): the image's vendored content, or, with Bundle, the run's
+	// frozen bundle directory.
 	Root string
+	// Bundle is the run's frozen OCI bundle (bundle.ReadFrozen(Root)). OSCAL
+	// is then derived only from it: its component definitions, policies,
+	// catalog and profile, never from vendored content. Nil means Root is the
+	// vendored content tree.
+	Bundle *bundle.Frozen
+	// TrustedRoot is the image's own content tree. With Bundle, its OSCAL
+	// schemas are the ones every document is validated against; a bundle
+	// that ships different schema bytes is incompatible.
+	TrustedRoot string
+	// Content, when set, is a content failure decided before export (the
+	// run's bundle could not be frozen, or was lost): the package is a
+	// Diagnostic with that reason, and no OSCAL is produced from any other
+	// content. ContentRef identifies the bundle it concerns.
+	Content    *ContentFailure
+	ContentRef *v1alpha1.BundleReference
 	// Out must not exist or be empty; the package is written there.
 	Out                  string
 	Run                  publication.RunRef
@@ -73,14 +92,24 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 
 	kind := publication.KindAssessment
 	var diag *publication.Diagnostic
-	if err := writeOSCAL(ctx, req); err != nil {
-		for _, p := range []string{"assessment-plan.json", "assessment-results.json", "system-security-plan.json", "content"} {
+	var err error
+	if req.Content != nil {
+		err = req.Content
+	} else {
+		err = writeOSCAL(ctx, req)
+	}
+	if err != nil {
+		for _, p := range []string{"assessment-plan.json", "assessment-results.json", "system-security-plan.json", "content", bundle.FrozenDir} {
 			if rmErr := os.RemoveAll(filepath.Join(req.Out, p)); rmErr != nil {
 				return publication.Descriptor{}, rmErr
 			}
 		}
 		kind = publication.KindDiagnostic
-		diag = &publication.Diagnostic{Reason: "ExportFailed", MissingExports: []publication.FileRole{publication.RoleAssessmentResults}, Message: truncate(err.Error(), 1024)}
+		reason := "ExportFailed"
+		if cf := (*ContentFailure)(nil); errors.As(err, &cf) {
+			reason = cf.Reason
+		}
+		diag = &publication.Diagnostic{Reason: reason, MissingExports: []publication.FileRole{publication.RoleAssessmentResults}, Message: truncate(err.Error(), 1024)}
 		if err := assessment.Write(filepath.Join(req.Out, "diagnostic.json"), diag); err != nil {
 			return publication.Descriptor{}, err
 		}
@@ -108,13 +137,17 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	checks := []string{"capture-inventory"}
 	if kind == publication.KindAssessment {
 		checks = append(checks, "oscal-schema-1.1.3", "reference-closure")
+		if req.Bundle != nil {
+			checks = append(checks, "frozen-bundle-content")
+		}
 	}
 	d := publication.Descriptor{
 		APIVersion: publication.APIVersion, Kind: publication.DescriptorKind, Run: req.Run, PackageKind: kind,
 		Scope: req.Scope, ScopeSHA256: req.Scope.Digest(),
-		Revisions: publication.Revisions{BindingConfiguration: req.BindingConfiguration, Enforcement: enforcement, MappingSHA256: req.Capture.MappingSHA256},
-		Window:    publication.Window{Started: req.Capture.Window.Started, Closed: req.Capture.Window.Closed},
-		Evidence:  req.Evaluation.Evidence, Outcomes: req.Evaluation.Outcomes, Diagnostic: diag,
+		Revisions: publication.Revisions{BindingConfiguration: req.BindingConfiguration, Enforcement: enforcement, MappingSHA256: req.Capture.MappingSHA256,
+			Content: contentRevision(req, kind)},
+		Window:   publication.Window{Started: req.Capture.Window.Started, Closed: req.Capture.Window.Closed},
+		Evidence: req.Evaluation.Evidence, Outcomes: req.Evaluation.Outcomes, Diagnostic: diag,
 		Producer: publication.Producer{Name: "konstapel-controller", Version: ExportVersion, ValidatedAt: time.Now().UTC().Truncate(time.Second), Checks: checks},
 		Files:    files,
 	}
@@ -130,16 +163,28 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 // writeOSCAL writes the plan, results, and SSP plus the content they
 // reference, then validates schemas and reference closure.
 func writeOSCAL(ctx context.Context, req ExportRequest) error {
-	cov, err := coverageFor(req.Root, req.Capture)
+	set, schemaRoot, err := contentFor(req)
+	if err != nil {
+		return err
+	}
+	cov, err := coverageFor(req.Root, set, req.Capture, req.Bundle)
 	if err != nil {
 		return fmt.Errorf("mapping: %w", err)
 	}
-	input, plan, err := assessment.InputFrom(req.Root, assessment.ComponentDefinitions, cov.rules)
+	input, plan, err := assessment.InputFromSet(req.Root, set, cov.rules)
 	if err != nil {
 		return fmt.Errorf("mapping: %w", err)
 	}
 	if err := os.CopyFS(filepath.Join(req.Out, "content"), os.DirFS(filepath.Join(req.Root, "content"))); err != nil {
 		return err
+	}
+	mappingDoc := "content/component-definition.json"
+	if req.Bundle != nil {
+		// The frozen proofs travel with the content they prove.
+		if err := os.CopyFS(filepath.Join(req.Out, bundle.FrozenDir), os.DirFS(filepath.Join(req.Root, bundle.FrozenDir))); err != nil {
+			return err
+		}
+		mappingDoc = set.Definitions[0]
 	}
 	if plan.BackMatter != nil && plan.BackMatter.Resources != nil {
 		for i := range *plan.BackMatter.Resources {
@@ -161,7 +206,7 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 	if err != nil {
 		return fmt.Errorf("report: %w", err)
 	}
-	mapping := assessment.FileHash(filepath.Join(req.Out, "content/component-definition.json"))
+	mapping := assessment.FileHash(filepath.Join(req.Out, filepath.FromSlash(mappingDoc)))
 	ar.Metadata.Title = "Konstapel continuous assessment results (partial technical evidence)"
 	ar.Metadata.OscalVersion = "1.1.3"
 	ev := req.Evaluation.Evidence
@@ -174,10 +219,21 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 		{Name: "run-uid", Ns: ns, Value: req.Run.RunUID},
 		{Name: "mapping-sha256", Ns: ns, Value: mapping},
 	}
+	if b := req.Bundle; b != nil {
+		id := b.Identity
+		props = append(props,
+			oscal.Property{Name: "bundle-name", Ns: ns, Value: id.Name},
+			oscal.Property{Name: "bundle-version", Ns: ns, Value: id.Version},
+			oscal.Property{Name: "bundle-digest", Ns: ns, Value: id.Digests.OCI},
+			oscal.Property{Name: "bundle-content-digest", Ns: ns, Value: id.Digests.Content})
+	}
 	ar.Metadata.Props = &props
 	ar.Metadata.Links = &[]oscal.Link{
 		{Href: "capture.json", Rel: "related", Text: "Frozen scope, expected inventory, and raw reports"},
 		{Href: "evaluation.json", Rel: "related", Text: "Per-observation evidence states and reasons"},
+	}
+	if req.Bundle != nil {
+		*ar.Metadata.Links = append(*ar.Metadata.Links, oscal.Link{Href: bundle.FrozenIdentityFile, Rel: "related", Text: "Applied bundle identity and verification context, frozen with its content"})
 	}
 	for _, def := range cov.definitions {
 		// Each definition that maps an assessed check is referenced, so the
@@ -237,7 +293,7 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 	if err := assessment.Write(filepath.Join(req.Out, "system-security-plan.json"), contextSSP(req.Capture.Cluster, req.Capture.Window.Closed, cov)); err != nil {
 		return err
 	}
-	schema := filepath.Join(req.Root, "content/schemas/oscal-1.1.3.json")
+	schema := filepath.Join(schemaRoot, "content/schemas/oscal-1.1.3.json")
 	for _, name := range []string{"assessment-plan", "assessment-results", "system-security-plan"} {
 		if err := assessment.Schema(filepath.Join(req.Out, name+".json"), schema); err != nil {
 			return fmt.Errorf("%s schema: %w", name, err)
@@ -398,9 +454,10 @@ type coverage struct {
 
 // coverageFor collects the mappings of the logical policies in the capture's
 // scope. A capture with nothing in scope reports the first-loop coverage
-// statement, so the context SSP always names a requirement.
-func coverageFor(root string, c CaptureV2) (coverage, error) {
-	all, err := assessment.Mappings(root)
+// statement for vendored content, and every mapping of a frozen bundle, so
+// the context SSP always names a requirement of the content assessed.
+func coverageFor(root string, set assessment.ContentSet, c CaptureV2, frozen *bundle.Frozen) (coverage, error) {
+	all, err := assessment.MappingsOf(root, set)
 	if err != nil {
 		return coverage{}, err
 	}
@@ -411,12 +468,23 @@ func coverageFor(root string, c CaptureV2) (coverage, error) {
 	for _, e := range c.Expected {
 		policies[e.Contribution.LogicalPolicy] = true
 	}
+	where := "shipped"
+	if frozen != nil {
+		where = "frozen bundle " + frozen.Identity.Name + "@" + frozen.Identity.Version
+		if len(policies) == 0 {
+			// Nothing in scope: plan every check the frozen bundle maps,
+			// never the vendored first-loop check.
+			for rule := range all {
+				policies[rule] = true
+			}
+		}
+	}
 	cov := coverage{controls: map[string]map[string][]string{}}
 	var parts []string
 	for _, p := range slices.Sorted(maps.Keys(policies)) {
 		ms, ok := all[p]
 		if !ok {
-			return coverage{}, fmt.Errorf("logical policy %s has no shipped control mapping", p)
+			return coverage{}, fmt.Errorf("logical policy %s has no %s control mapping", p, where)
 		}
 		var ids []string
 		for _, m := range ms {
@@ -439,6 +507,9 @@ func coverageFor(root string, c CaptureV2) (coverage, error) {
 	}
 	cov.definitions = slices.Sorted(maps.Keys(defs))
 	if len(parts) == 0 {
+		if frozen != nil {
+			return coverage{}, fmt.Errorf("%s maps no checks", where)
+		}
 		// Nothing in scope: plan the first-loop check so the package still
 		// names the mapping it would have assessed.
 		cov.rules = []string{assessment.PolicyName}

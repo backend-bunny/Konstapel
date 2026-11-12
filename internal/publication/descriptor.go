@@ -141,6 +141,52 @@ type Revisions struct {
 	BindingConfiguration string   `json:"bindingConfiguration"`
 	Enforcement          []string `json:"enforcement"`
 	MappingSHA256        string   `json:"mappingSha256"`
+	// Content identifies the OCI bundle the run assessed against. It is
+	// absent for runs of the image's vendored content, whose identity is the
+	// packaged content/SHA256SUMS, so their descriptors are unchanged.
+	Content *ContentRevision `json:"content,omitempty"`
+}
+
+// ContentRevision identifies the applied OCI bundle of a run and the
+// verification context its content was frozen under. Frozen content is
+// packaged under bundle/ and content/; an assessment package always has
+// it, and a diagnostic package records which bundle could not be frozen.
+type ContentRevision struct {
+	Bundle string `json:"bundle"`
+	// ManifestDigest is the OCI manifest digest, the enforcement identity.
+	ManifestDigest string `json:"manifestDigest"`
+	// Frozen reports that the frozen content is packaged under bundle/ and
+	// content/ (always for an assessment package). The fields below are
+	// recorded whenever the content was frozen, packaged or not.
+	Frozen         bool   `json:"frozen"`
+	Version        string `json:"version,omitempty"`
+	ContentDigest  string `json:"contentDigest,omitempty"`
+	ArchiveDigest  string `json:"archiveDigest,omitempty"`
+	SourceRevision string `json:"sourceRevision,omitempty"`
+	// SourceRule and TrustRevision are the publisher rule and trust input
+	// revisions of the verification the content was resolved under, and
+	// VerifiedAt when it happened. Verification is not proof of compliance.
+	SourceRule    string     `json:"sourceRule,omitempty"`
+	TrustRevision string     `json:"trustRevision,omitempty"`
+	VerifiedAt    *time.Time `json:"verifiedAt,omitempty"`
+}
+
+var ociDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+func (c *ContentRevision) validate(kind PackageKind) error {
+	var errs []error
+	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
+	if c.Bundle == "" || !ociDigest.MatchString(c.ManifestDigest) {
+		fail("content revision requires a bundle name and manifest digest")
+	}
+	if c.Frozen {
+		if c.Version == "" || !ociDigest.MatchString(c.ContentDigest) || !ociDigest.MatchString(c.ArchiveDigest) {
+			fail("frozen content requires its version, content and archive digests")
+		}
+	} else if kind == KindAssessment {
+		fail("an assessment package requires its bundle content to be frozen")
+	}
+	return errors.Join(errs...)
 }
 
 // Window is the bounded observation window, not an atomic cluster snapshot.
@@ -240,6 +286,11 @@ func (d Descriptor) Validate() error {
 	}
 	if d.Revisions.BindingConfiguration == "" || d.Revisions.MappingSHA256 == "" {
 		fail("revisions require bindingConfiguration and mappingSha256")
+	}
+	if c := d.Revisions.Content; c != nil {
+		if err := c.validate(d.PackageKind); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if d.Window.Started.IsZero() || d.Window.Closed.Before(d.Window.Started) {
 		fail("capture window must start and close in order")

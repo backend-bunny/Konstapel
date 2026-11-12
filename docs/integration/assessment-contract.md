@@ -144,7 +144,13 @@ Kubernetes 1.36 or later; the current acceptance node image is pinned in
 - the run reference (cluster ID, binding UID, run UID)
 - the package kind: `Assessment` or `Diagnostic`
 - the frozen scope and its SHA-256
-- the binding configuration, enforcement, and mapping revisions
+- the binding configuration, enforcement, and mapping revisions, and for a run
+  of an OCI bundle `revisions.content`: the bundle name and manifest digest,
+  whether its frozen content is packaged (`frozen`, required for an
+  assessment package), and when it was frozen its version, content and archive
+  digests, source revision, and the source rule and trust revisions and time
+  of the verification it was resolved under. Vendored runs omit it, so their
+  descriptors are unchanged
 - the capture window
 - evidence counts, and outcome counts kept separately
 - the producer and its validation checks
@@ -504,6 +510,11 @@ This is the comparison delivery uses to decide a policy is current.
   `Diagnostic` package. A changed policy expression or source digest
   therefore cannot be legitimized by recomputing the capture's or the
   descriptor's own hashes.
+- A package of an OCI bundle run carries the frozen bundle instead:
+  `bundle/manifest.json` must hash to every subject's and contribution's
+  bundle digest, and the layer it names must unpack to exactly the packaged
+  `content/` files (`bundle.ReadFrozen`); the policy sources come from that
+  layer.
 - Limitation: a verifier cannot recompute `EnforcementRevision` from a
   recorded contribution, because the contribution does not carry the binding
   enforcement epoch. The revision is bound through the engine policy name and
@@ -532,6 +543,17 @@ This is the comparison delivery uses to decide a policy is current.
   becomes `Diagnostic` with reason `ExportFailed` and the error message.
   Evidence completeness and outcome counts are recorded unchanged: export
   state is separate from evidence.
+- **OCI bundle runs.** The run's bundle is frozen when the run starts and
+  export (and any replay) uses only that copy: its component definitions,
+  policies, catalog and profile, validated against the controller's own
+  OSCAL schemas, which the bundle must carry byte-identical. The package adds
+  the `bundle/` proofs (manifest, layer, descriptor, `identity.json` with the
+  verification receipt) and the results name the bundle. Content that could
+  not be frozen, a lost or altered frozen copy, a capture naming another
+  bundle, and an incompatible bundle produce a `Diagnostic` with reason
+  `ContentUnavailable`, `ContentLost`, `ContentMismatch`, or
+  `ContentIncompatible`. Vendored content is never substituted. See
+  [policy bundles](../policy-bundles.md#assessment-runs-freeze-their-bundle).
 - **Always present:** `capture.json`, `evaluation.json` (per-observation states
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is
   verified against the directory before `Export` returns.

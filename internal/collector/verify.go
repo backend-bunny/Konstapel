@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -115,7 +116,15 @@ func VerifyEnginePolicies(c CaptureV2, sources map[string]targeting.PolicySource
 // sources by digest. content/SHA256SUMS must hash to every contribution's
 // bundle digest and every listed file must match its sum, so the content
 // cannot be edited without changing the pinned bundle identity.
+//
+// A package of an OCI bundle run carries its frozen bundle instead
+// (bundle/): the manifest must hash to every subject's and contribution's
+// bundle digest, and the layer it names must unpack to exactly the packaged
+// content/ files (bundle.ReadFrozen).
 func PackageSources(dir string, c CaptureV2) (map[string]targeting.PolicySource, error) {
+	if _, err := os.Lstat(filepath.Join(dir, bundle.FrozenDir)); err == nil {
+		return frozenSources(dir, c)
+	}
 	sums, err := os.ReadFile(filepath.Join(dir, "content", "SHA256SUMS"))
 	if err != nil {
 		return nil, err
@@ -187,4 +196,38 @@ func SourcesOf(contents ...*targeting.Content) map[string]targeting.PolicySource
 		}
 	}
 	return out
+}
+
+// frozenSources is PackageSources for a package with a frozen bundle.
+func frozenSources(dir string, c CaptureV2) (map[string]targeting.PolicySource, error) {
+	f, err := bundle.ReadFrozen(dir)
+	if err != nil {
+		return nil, err
+	}
+	id := f.Identity
+	if err := captureUses(c, id.Name, id.Digests.OCI); err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{}
+	for _, s := range c.Subjects {
+		wanted[s.SourceDigest] = true
+	}
+	sources := map[string]targeting.PolicySource{}
+	for _, p := range f.Descriptor.Policies {
+		file, ok := f.Payload[p.Path]
+		if !ok {
+			return nil, fmt.Errorf("frozen bundle policy %s is missing", p.Path)
+		}
+		h := sha256.Sum256(file.Data)
+		digest := "sha256:" + hex.EncodeToString(h[:])
+		if !wanted[digest] {
+			continue
+		}
+		m, err := targeting.ParsePolicyManifest(file.Data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", p.Path, err)
+		}
+		sources[digest] = targeting.PolicySource{Manifest: m, SourceDigest: digest}
+	}
+	return sources, nil
 }

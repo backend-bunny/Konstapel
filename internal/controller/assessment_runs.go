@@ -703,7 +703,7 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
-	c, limits, _, err := r.Assess.snapshot(ctx, b, now)
+	c, limits, _, selected, err := r.Assess.snapshotContent(ctx, b, now)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -734,6 +734,11 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 		return ctrl.Result{}, err
 	}
 	if err := assessment.Write(filepath.Join(r.staging(run), "capture.json"), c); err != nil {
+		return ctrl.Result{}, err
+	}
+	// Freeze the content the capture was resolved against before anything
+	// is collected; export and replay use only this copy.
+	if err := r.freezeContent(ctx, run, c, selected); err != nil {
 		return ctrl.Result{}, err
 	}
 	var revisions []string
@@ -871,6 +876,10 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		}
 		return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
 	}
+	// Content that could not be frozen at start gets until closure.
+	if err := r.retryFreeze(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
 	// Close the bounded window: freeze the capture and its evaluation first.
 	frozen = closedRun{Capture: trial, Evaluation: ev}
 	if err := assessment.Write(filepath.Join(r.staging(run), "closed.json"), frozen); err != nil {
@@ -889,9 +898,13 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	if err := os.RemoveAll(pkg); err != nil {
 		return ctrl.Result{}, err
 	}
-	d, err := collector.Export(ctx, collector.ExportRequest{Root: r.Runtime.ContentRoot, Out: pkg,
+	req := collector.ExportRequest{Root: r.Runtime.ContentRoot, Out: pkg,
 		Run: publication.RunRef{ClusterID: c.Cluster, BindingUID: string(b.UID), RunUID: string(run.UID)}, Scope: r.scope(run, b, c),
-		BindingConfiguration: run.Status.BindingConfiguration, Capture: c, Evaluation: ev})
+		BindingConfiguration: run.Status.BindingConfiguration, Capture: c, Evaluation: ev}
+	if err := r.exportContent(run, &req); err != nil {
+		return ctrl.Result{}, err
+	}
+	d, err := collector.Export(ctx, req)
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())
 	}
