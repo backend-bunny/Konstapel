@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -112,6 +113,7 @@ func TestPromotionIsAtomic(t *testing.T) {
 				default:
 				}
 				if _, err := os.Lstat(final); err != nil {
+					runtime.Gosched()
 					continue
 				}
 				seen.Store(true)
@@ -126,7 +128,13 @@ func TestPromotionIsAtomic(t *testing.T) {
 		if _, err := c.Put(bg(), a.Manifest, a.Layer); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
+		// The entry exists now; let the observer look at the promoted entry
+		// at least once before it is stopped. A fixed short sleep is not
+		// enough on a loaded runner, where the observer may not be scheduled
+		// for a while; bound the wait instead of assuming it.
+		for deadline := time.Now().Add(10 * time.Second); !seen.Load() && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
 		close(stop)
 		wg.Wait()
 		if v := bad.Load(); v != nil {
@@ -380,24 +388,33 @@ func checkAccounting(t *testing.T, c *Cache) {
 // Concurrent identical Puts converge on one entry.
 func TestConcurrentIdenticalPuts(t *testing.T) {
 	e := newEnv(t)
-	var stages atomic.Int32
+	const putters = 16
+	var stages, started atomic.Int32
 	var ffs *faultFS
 	c := e.open(t, Config{CheckContent: noCheck, wrapFS: withFault(&ffs)})
 	ffs.hook = func(op, name string) error {
 		if op == "mkdir" && strings.Count(name, "/") == 1 && strings.HasPrefix(name, stagingDir+"/") {
 			stages.Add(1)
-			time.Sleep(10 * time.Millisecond)
+			// Hold the leader's staging open until every Put has been
+			// started, then a moment longer so the followers reach the
+			// in-flight join, instead of assuming a fixed delay is enough
+			// on a loaded runner.
+			for deadline := time.Now().Add(10 * time.Second); started.Load() < putters && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
 		return nil
 	}
 	a := small(t, 0)
 	var wg sync.WaitGroup
-	errs := make([]error, 16)
-	dirs := make([]string, 16)
+	errs := make([]error, putters)
+	dirs := make([]string, putters)
 	for i := range errs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			started.Add(1)
 			en, err := c.Put(bg(), a.Manifest, a.Layer)
 			errs[i] = err
 			if en != nil {
