@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/content"
 	"github.com/backend-bunny/Konstapel/internal/bundle/resolve"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
@@ -103,6 +105,35 @@ func (r *Router) Confirm(_ context.Context, ref v1alpha1.BundleReference) error 
 		return notConfigured(ref)
 	}
 	return r.confirm(ref.Name, ref.Digest)
+}
+
+// Freezer copies verified OCI content out of the cache for one
+// assessment; *content.OCIContent implements it.
+type Freezer interface {
+	Freeze(ctx context.Context, ref v1alpha1.BundleReference, dir string) (*bundle.Frozen, error)
+}
+
+var _ Freezer = (*content.OCIContent)(nil)
+
+// Freeze freezes the content an assessment of ref uses into dir. The
+// vendored bundle is never copied: it reports vendored, and the caller uses
+// the image's own content tree as before. Every other name is frozen from
+// the OCI content source (never from the memo, never substituted), or fails
+// exactly as Content would: a Config ContentError when bundle sources are
+// off.
+func (r *Router) Freeze(ctx context.Context, ref v1alpha1.BundleReference, dir string) (frozen *bundle.Frozen, vendored bool, err error) {
+	if ref.Name == r.localName {
+		return nil, true, nil
+	}
+	if r.oci == nil {
+		return nil, false, notConfigured(ref)
+	}
+	f, ok := r.oci.(Freezer)
+	if !ok {
+		return nil, false, fmt.Errorf("%s@%s: the OCI content source cannot freeze content for assessments", ref.Name, ref.Digest)
+	}
+	frozen, err = f.Freeze(ctx, ref, dir)
+	return frozen, false, err
 }
 
 func (r *Router) lookup(key string) (*targeting.Content, bool) {

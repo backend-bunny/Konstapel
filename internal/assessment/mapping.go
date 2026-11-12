@@ -258,18 +258,35 @@ var ShippedPolicies = map[string]string{
 	"restrict-seccomp-strict":       "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
 }
 
+// ContentSet names the mapping documents and policies of one content tree:
+// the image's vendored content (Shipped) or one frozen bundle. Every path is
+// relative to the tree's root.
+type ContentSet struct {
+	// Definitions are the component definitions, in composition order.
+	Definitions []string
+	// Policies maps every rule the definitions may reference to its policy
+	// manifest.
+	Policies map[string]string
+}
+
+// Shipped is the vendored content set.
+var Shipped = ContentSet{Definitions: ComponentDefinitions, Policies: ShippedPolicies}
+
 // Mappings validates every shipped component definition and returns each
 // logical check's bounded mappings, keyed by rule. A rule may appear in only
 // one definition, so composing them never duplicates a check.
-func Mappings(root string) (map[string][]Mapping, error) {
+func Mappings(root string) (map[string][]Mapping, error) { return MappingsOf(root, Shipped) }
+
+// MappingsOf is Mappings for the content set of any content tree.
+func MappingsOf(root string, set ContentSet) (map[string][]Mapping, error) {
 	nist, err := loadNIST(root)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string][]Mapping{}
 	owner := map[string]string{}
-	for _, rel := range ComponentDefinitions {
-		_, ms, err := validateDefinition(root, rel, ShippedPolicies, nist)
+	for _, rel := range set.Definitions {
+		_, ms, err := validateDefinition(root, rel, set.Policies, nist)
 		if err != nil {
 			return nil, err
 		}

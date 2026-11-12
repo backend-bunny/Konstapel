@@ -222,11 +222,20 @@ func ptrTime(t *metav1.Time) time.Time {
 // capture with the current PolicyReports attached. It also returns the
 // limitations found and the binding's maxEvidenceAge.
 func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (collector.CaptureV2, []string, time.Duration, error) {
+	c, limits, maxAge, _, err := r.snapshotContent(ctx, b, now)
+	return c, limits, maxAge, err
+}
+
+// snapshotContent is snapshot that also returns the bundle the binding's
+// profile selected when it was read (nil without a profile), which is the
+// content a run of the capture must be exported from even when nothing in
+// it resolved.
+func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (_ collector.CaptureV2, _ []string, _ time.Duration, selected *v1alpha1.BundleReference, _ error) {
 	maxAge := 2 * time.Hour
 	if b.Spec.Assessment != nil && b.Spec.Assessment.MaxEvidenceAge != "" {
 		d, err := time.ParseDuration(string(b.Spec.Assessment.MaxEvidenceAge))
 		if err != nil || d <= 0 {
-			return collector.CaptureV2{}, nil, 0, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
+			return collector.CaptureV2{}, nil, 0, nil, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
 		}
 		maxAge = d
 	}
@@ -237,20 +246,24 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 
 	in, profile, err := (&BindingReconciler{Client: r.Client, Content: r.Content, Cluster: r.Cluster}).input(ctx, b)
 	if err != nil {
-		return collector.CaptureV2{}, nil, 0, err
+		return collector.CaptureV2{}, nil, 0, nil, err
+	}
+	if profile != nil {
+		ref := profile.Spec.Bundle
+		selected = &ref
 	}
 	res := targeting.Resolve(in)
 	content := map[string]*targeting.Content{}
 	if profile != nil && len(in.Bundles) > 0 {
 		c, err := r.Content.Content(ctx, profile.Spec.Bundle)
 		if err != nil {
-			return collector.CaptureV2{}, nil, 0, err
+			return collector.CaptureV2{}, nil, 0, nil, err
 		}
 		content[c.Bundle.Digest] = c
 	}
 	subjects, stale, err := targeting.ExpectedEvidence(res, content)
 	if err != nil {
-		return collector.CaptureV2{}, nil, 0, err
+		return collector.CaptureV2{}, nil, 0, nil, err
 	}
 
 	engineUp := false
@@ -259,7 +272,7 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 		engineUp, engineErr = r.Engine(ctx)
 		// An unavailable capability is a limitation, not a failure.
 		if engineErr != nil && capability.ReasonOf(engineErr) == "" {
-			return collector.CaptureV2{}, nil, 0, engineErr
+			return collector.CaptureV2{}, nil, 0, nil, engineErr
 		}
 	}
 	var rendered []assessment.Object
@@ -267,7 +280,7 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 	if engineUp {
 		if rendered, err = r.listUnstructured(ctx, targeting.ValidatingPolicyGVK, "", client.MatchingLabels{
 			targeting.LabelManagedBy: targeting.ManagedByValue, targeting.LabelBindingUID: string(b.UID)}); err != nil {
-			return collector.CaptureV2{}, nil, 0, err
+			return collector.CaptureV2{}, nil, 0, nil, err
 		}
 	} else {
 		msg := "policy engine API is not served"
@@ -348,16 +361,16 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 		for _, ns := range sortedKeys(namespaces) {
 			_, list := mk()
 			if err := r.Client.List(ctx, list, client.InNamespace(ns)); err != nil {
-				return collector.CaptureV2{}, nil, 0, err
+				return collector.CaptureV2{}, nil, 0, nil, err
 			}
 			items, err := meta.ExtractList(list)
 			if err != nil {
-				return collector.CaptureV2{}, nil, 0, err
+				return collector.CaptureV2{}, nil, 0, nil, err
 			}
 			for _, it := range items {
 				o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(it)
 				if err != nil {
-					return collector.CaptureV2{}, nil, 0, err
+					return collector.CaptureV2{}, nil, 0, nil, err
 				}
 				if ts := assessment.Str(assessment.At(o, "metadata", "deletionTimestamp")); ts != "" {
 					continue
@@ -388,11 +401,11 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 
 	capture, err := collector.FreezeScope(r.Cluster, now, mappingDigest(subjects), subjects, stale, rendered, listed)
 	if err != nil {
-		return collector.CaptureV2{}, nil, 0, err
+		return collector.CaptureV2{}, nil, 0, nil, err
 	}
 	capture.Reports = reports
 	capture.Contributions = used
-	return capture, limits, maxAge, nil
+	return capture, limits, maxAge, selected, nil
 }
 
 // evaluate builds the current-evidence status for b at time now.

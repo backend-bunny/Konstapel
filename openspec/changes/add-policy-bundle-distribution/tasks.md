@@ -99,6 +99,9 @@ All work follows the ownership boundaries in [design.md](design.md).
 - [ ] 7.3 After the Helm chart implementation merges, expose central configuration, Secret/CA references and bounded cache mounts through existing chart conventions; verify schema/render tests and installed runtime configuration without generating competing CRDs or exposing trust bypasses.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
+- [x] 7.4 Freeze each OCI-bundle assessment run's verified bundle (bytes, identities and verification receipt) at start and export, replay and package only that copy; prove with a bundle whose catalog and mapping differ from the vendored content, after eviction, registry loss and trust revocation, and with explicit diagnostics for unfrozen, lost, mismatched and incompatible content.
+  <!-- agent: tier=deep risk=high reason="Content trust and evidence integrity across cache, registry and trust changes" -->
+
 ## 8. End-to-end acceptance
 
 - [ ] 8.1 Add the documented `bundles:acceptance` workflow over the existing registry and disposable Kyverno fixtures; verify official/organization content in Audit and Deny, valid/invalid signatures, credential rotation, warm-cache outage, cold-cache failure, trust revocation and recovery, cleaning up all task-owned resources.

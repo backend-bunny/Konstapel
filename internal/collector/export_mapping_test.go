@@ -29,7 +29,7 @@ func TestExportMappingNamesAssessedChecksOnly(t *testing.T) {
 	for i := range c.Subjects {
 		c.Subjects[i].LogicalPolicy = lp
 	}
-	cov, err := coverageFor(repo(t), c)
+	cov, err := coverageFor(repo(t), assessment.Shipped, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestExportMappingNamesAssessedChecksOnly(t *testing.T) {
 	// Nothing in scope falls back to the first-loop coverage statement.
 	empty := c
 	empty.Subjects, empty.Expected = nil, nil
-	if cov, _ := coverageFor(repo(t), empty); cov.summary != assessment.Coverage || !slices.Equal(cov.rules, []string{assessment.PolicyName}) ||
+	if cov, _ := coverageFor(repo(t), assessment.Shipped, empty, nil); cov.summary != assessment.Coverage || !slices.Equal(cov.rules, []string{assessment.PolicyName}) ||
 		!slices.Equal(cov.definitions, []string{"content/component-definition.json"}) {
 		t.Fatalf("no-targets coverage %+v", cov)
 	}

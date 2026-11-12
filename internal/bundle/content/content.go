@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -111,6 +112,15 @@ func (o *OCIContent) Content(ctx context.Context, ref v1alpha1.BundleReference) 
 		}
 	}()
 	o.at("resolved")
+	entry, err := o.entry(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return o.read(ref, entry)
+}
+
+// entry returns the integrity-checked cache entry of a resolved ref.
+func (o *OCIContent) entry(ctx context.Context, ref v1alpha1.BundleReference) (*cache.Entry, error) {
 	entry, err := o.cfg.Entries.Get(ctx, ref.Digest)
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
@@ -125,7 +135,69 @@ func (o *OCIContent) Content(ctx context.Context, ref v1alpha1.BundleReference) 
 	if entry.Digest != ref.Digest || entry.Descriptor == nil || entry.Descriptor.Name != ref.Name {
 		return nil, mismatch(ref, "the cache entry is not the pinned bundle")
 	}
-	return o.read(ref, entry)
+	return entry, nil
+}
+
+// freezeOwnerPrefix names the lease Freeze holds while it copies.
+const freezeOwnerPrefix = "assessment-freeze/"
+
+// Freeze copies the exact verified bytes of ref out of the cache into a new
+// frozen directory at dir (bundle.WriteFrozen), with the identities and the
+// verification receipt of the resolution it was read under. It resolves
+// exactly as Content does (current source rule, trust and compatibility),
+// under an assessment lease that is released before Freeze returns: the
+// copy, not the cache, is what the assessment uses from then on.
+//
+// Errors are classified as Content's are; a copy that does not verify is
+// DigestMismatch, and nothing is left at dir.
+func (o *OCIContent) Freeze(ctx context.Context, ref v1alpha1.BundleReference, dir string) (f *bundle.Frozen, err error) {
+	h, err := o.resolve(ctx, ref, bundle.HolderAssessment, freezeOwnerPrefix+strconv.FormatUint(o.seq.Add(1), 10))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if rerr := o.cfg.Resolver.Release(h); rerr != nil && err == nil {
+			_ = os.RemoveAll(dir)
+			f, err = nil, fmt.Errorf("content: releasing the freeze lease on %s@%s: %w", ref.Name, ref.Digest, rerr)
+		}
+	}()
+	o.at("resolved")
+	entry, err := o.entry(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	unavailable := func(what string, err error) error {
+		return contentError(targeting.ContentErrorContentUnavailable, resolve.ErrContentUnavailable,
+			fmt.Sprintf("%s@%s: %s: %v", ref.Name, ref.Digest, what, err))
+	}
+	manifest, err := entry.Manifest()
+	if err != nil {
+		return nil, unavailable("the cached manifest is not intact", err)
+	}
+	layer, err := entry.Layer()
+	if err != nil {
+		return nil, unavailable("the cached layer is not intact", err)
+	}
+	d := entry.Descriptor
+	id := bundle.FrozenIdentity{
+		FrozenVersion: bundle.FrozenVersion, Name: d.Name, Version: d.Version, Source: d.Source,
+		Digests:       bundle.Digests{Revision: d.Source.Revision, Content: d.ContentDigest(), Archive: entry.LayerDigest, OCI: entry.Digest},
+		Compatibility: h.Compatibility, Receipt: h.Receipt,
+	}
+	// The resolver's handle, when it states identities, must agree.
+	for _, pair := range [][2]string{{h.Digests.Content, id.Digests.Content}, {h.Digests.Archive, id.Digests.Archive}, {h.Digests.Revision, id.Digests.Revision}} {
+		if pair[0] != "" && pair[0] != pair[1] {
+			return nil, mismatch(ref, "the resolved handle does not describe the cached entry")
+		}
+	}
+	f, err = bundle.WriteFrozen(dir, manifest, layer, id)
+	if err != nil {
+		if _, statErr := os.Lstat(dir); statErr == nil {
+			return nil, err // an existing directory is the caller's error, never replaced
+		}
+		return nil, mismatch(ref, "the frozen copy does not verify: "+err.Error())
+	}
+	return f, nil
 }
 
 // read builds the targeting view from the verified entry.
