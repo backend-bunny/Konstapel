@@ -3,12 +3,12 @@ package bundle_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
@@ -16,13 +16,17 @@ import (
 )
 
 // The private registry guide in docs/policy-bundles.md embeds these manifests
-// verbatim. This test parses them with the real code and checks they agree with
-// each other, so the documented setup cannot drift from what Konstapel accepts.
+// and the chart values example verbatim. This test parses them with the real
+// code and checks they agree with each other, so the documented setup cannot
+// drift from what Konstapel accepts. internal/charttest checks the Role the
+// chart renders from those values.
 
 const (
 	exampleDir = "../../testdata/bundles/private-registry"
 	exampleDoc = "../../docs/policy-bundles.md"
 	exampleNS  = "konstapel-system"
+	// chartExample is the runtime chart values that enable these sources.
+	chartExample = "../../docs/examples/charts/oci-bundles.yaml"
 )
 
 func readExample(t *testing.T, name string) []byte {
@@ -44,16 +48,28 @@ func strict(t *testing.T, name string, v any) {
 func TestPrivateRegistryExamples(t *testing.T) {
 	var sourcesCM, caCM corev1.ConfigMap
 	var secret corev1.Secret
-	var role rbacv1.Role
 	strict(t, "sources-configmap.yaml", &sourcesCM)
 	strict(t, "ca-configmap.yaml", &caCM)
 	strict(t, "secret.yaml", &secret)
-	strict(t, "role.yaml", &role)
+	var values struct {
+		Bundles struct {
+			SourcesConfigMap     string   `json:"sourcesConfigMap"`
+			ReferencedSecrets    []string `json:"referencedSecrets"`
+			ReferencedConfigMaps []string `json:"referencedConfigMaps"`
+		} `json:"bundles"`
+	}
+	raw, err := os.ReadFile(chartExample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.UnmarshalStrict(raw, &values); err != nil {
+		t.Fatalf("%s: %v", chartExample, err)
+	}
 
 	// Everything lives in the controller's namespace.
 	for name, ns := range map[string]string{
 		"sources ConfigMap": sourcesCM.Namespace, "CA ConfigMap": caCM.Namespace,
-		"Secret": secret.Namespace, "Role": role.Namespace,
+		"Secret": secret.Namespace,
 	} {
 		if ns != exampleNS {
 			t.Errorf("%s is in namespace %q, want the controller namespace %q", name, ns, exampleNS)
@@ -97,9 +113,12 @@ func TestPrivateRegistryExamples(t *testing.T) {
 		t.Errorf("CA ConfigMap %q does not match the source's ca %+v", caCM.Name, *src.CA)
 	}
 
-	// The Role grants get, by name, on exactly the objects the configuration
-	// references plus the configuration ConfigMap itself, and nothing else.
-	want := map[string][]string{"secrets": {}, "configmaps": {sourcesCM.Name}}
+	// The chart values name the sources ConfigMap and grant get on exactly
+	// the objects the configuration references, and nothing else.
+	if values.Bundles.SourcesConfigMap != sourcesCM.Name {
+		t.Errorf("chart values name sources ConfigMap %q, the example is %q", values.Bundles.SourcesConfigMap, sourcesCM.Name)
+	}
+	want := map[string][]string{"secrets": {}, "configmaps": {}}
 	add := func(r *bundle.ObjectRef, kind string) {
 		if r == nil {
 			return
@@ -116,23 +135,14 @@ func TestPrivateRegistryExamples(t *testing.T) {
 		add(s.Publisher.TrustRoot, "")
 		add(s.Publisher.PublicKey, "")
 	}
-	got := map[string][]string{}
-	for _, rule := range role.Rules {
-		if len(rule.APIGroups) != 1 || rule.APIGroups[0] != "" || len(rule.Resources) != 1 ||
-			len(rule.Verbs) != 1 || rule.Verbs[0] != "get" || len(rule.ResourceNames) == 0 {
-			t.Fatalf("rule %+v must be get, by resourceNames, on one core resource", rule)
-		}
-		got[rule.Resources[0]] = append(got[rule.Resources[0]], rule.ResourceNames...)
-	}
+	got := map[string][]string{"secrets": values.Bundles.ReferencedSecrets, "configmaps": values.Bundles.ReferencedConfigMaps}
 	for res, names := range want {
+		names, have := slices.Clone(names), slices.Clone(got[res])
 		sort.Strings(names)
-		sort.Strings(got[res])
-		if strings.Join(names, ",") != strings.Join(got[res], ",") {
-			t.Errorf("Role grants %s %v, but the configuration references %v", res, got[res], names)
+		sort.Strings(have)
+		if strings.Join(names, ",") != strings.Join(have, ",") {
+			t.Errorf("chart values grant %s %v, but the configuration references %v", res, have, names)
 		}
-	}
-	if len(got) != len(want) {
-		t.Errorf("Role covers resources %v, want only %v", got, want)
 	}
 }
 
@@ -142,9 +152,16 @@ func TestPrivateRegistryGuideEmbedsTheExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sources-configmap.yaml", "secret.yaml", "ca-configmap.yaml", "role.yaml"} {
+	for _, name := range []string{"sources-configmap.yaml", "secret.yaml", "ca-configmap.yaml"} {
 		if !strings.Contains(string(doc), strings.TrimSpace(string(readExample(t, name)))) {
 			t.Errorf("docs/policy-bundles.md does not embed testdata/bundles/private-registry/%s verbatim", name)
 		}
+	}
+	values, err := os.ReadFile(chartExample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), strings.TrimSpace(string(values))) {
+		t.Errorf("docs/policy-bundles.md does not embed %s verbatim", chartExample)
 	}
 }

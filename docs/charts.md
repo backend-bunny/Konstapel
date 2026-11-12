@@ -29,6 +29,7 @@ and doesn't need the charts.
 | --- | --- | --- |
 | Policy delivery (`ComplianceProfile`, `ComplianceBinding`) | yes | Kyverno serving `policies.kyverno.io/v1` ValidatingPolicy; see [External engine capabilities](#external-engine-capabilities) |
 | Continuous assessments (`AssessmentRun`, `AssessmentRequest`) | yes | Kyverno PolicyReports (`wgpolicyk8s.io/v1alpha2`) |
+| Verified OCI policy bundles | yes, with `bundles.sourcesConfigMap` (off by default) | the sources ConfigMap and the Secrets/ConfigMaps it references, created by you; see [OCI policy bundles](#oci-policy-bundles) |
 | Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
@@ -54,6 +55,7 @@ release can't substitute a fixture or a guess for it.
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
 | Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; replica serving readiness and leader/serving separation do not yet | add-controller-high-availability | resolved for the Lease, shutdown budgets, Deployment and PDB; replica serving readiness is pending |
 | TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server; webhook TLS waits for exception admission |
+| OCI policy bundles | `konstapel controller` `--bundle-sources-configmap` (off when empty), `--bundle-cache-dir`, `--bundle-cache-capacity`, `--bundle-refresh-interval` and `POD_NAMESPACE`; the operator-created sources ConfigMap and the Secrets/ConfigMaps it references, read by name in the controller namespace ([Controller wiring](policy-bundles.md#controller-wiring), [RBAC and informers](policy-bundles.md#rbac-and-informers)) | add-policy-bundle-distribution | resolved; values `bundles.*`, off by default |
 | Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
 
 ## CRD chart
@@ -249,6 +251,12 @@ renders:
     own bounded scratch space and nothing is shared.
   - **Selector:** stable across revisions (name, instance, component). No
     version or template hash.
+- **OCI policy bundles** (off by default). With `bundles.sourcesConfigMap`
+  set, the controller also gets the four `--bundle-*` flags, a per-pod
+  size-limited `emptyDir` for the content cache at
+  `/var/lib/konstapel/bundles`, and a `konstapel-controller-bundles` Role and
+  RoleBinding; see [OCI policy bundles](#oci-policy-bundles). With it empty
+  (the default) the render is unchanged.
 - **PodDisruptionBudget.** `minAvailable: 1` with the same selector, only when
   `replicaCount > 1`. Development values (`replicaCount: 1`) omit it.
 - **RBAC.** The ServiceAccount; ClusterRoleBindings to `konstapel-controller`
@@ -273,6 +281,10 @@ renders:
 - `podDisruptionBudget.minAvailable` that isn't below `replicaCount`, or
   below `download.replicaCount` when the download server runs more than one
   replica.
+- `bundles.referencedSecrets` or `bundles.referencedConfigMaps` without
+  `bundles.sourcesConfigMap`; a `bundles.cache.sizeLimit` that isn't larger
+  than `bundles.cache.capacity`; a `bundles.refreshInterval` above `5m`; the
+  sources ConfigMap listed among `bundles.referencedConfigMaps`.
 
 **Download server and TLS.** With `download.enabled` (the default), the chart
 also renders the evidence download server:
@@ -401,6 +413,62 @@ unavailable, so no webhook Service or configuration is rendered.
 server and all three TLS shapes, that every binding refers to a shipped role,
 and the refusals.
 
+### OCI policy bundles
+
+Profiles can pin verified OCI bundles from configured registries
+([Policy bundles](policy-bundles.md)). The chart only wires the controller;
+you create the configuration:
+
+1. In `konstapel-system`, create the sources ConfigMap (data key
+   `sources.yaml`, see [Central source configuration](policy-bundles.md#central-source-configuration))
+   and every Secret and ConfigMap it references: registry credentials, custom
+   CAs, public keys and trusted roots
+   ([Private registry setup](policy-bundles.md#private-registry-setup)). The
+   chart never renders or changes them.
+2. Install or upgrade with `bundles.sourcesConfigMap` naming that ConfigMap
+   and every referenced object listed by kind
+   (`docs/examples/charts/oci-bundles.yaml`):
+
+```sh
+helm upgrade --install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
+  --namespace konstapel-system -f docs/examples/charts/oci-bundles.yaml
+```
+
+The `konstapel-controller-bundles` Role grants, in `konstapel-system` only:
+
+| Objects | Verbs | Why |
+| --- | --- | --- |
+| ConfigMap `bundles.sourcesConfigMap` | `get`, `list`, `watch` | the single-object, field-selected (`metadata.name=<name>`) watch of the configuration; the API server authorizes such a `list`/`watch` by `resourceNames` |
+| ConfigMaps in `bundles.referencedConfigMaps` | `get` | read by name every refresh interval |
+| Secrets in `bundles.referencedSecrets` | `get` | read by name every refresh interval |
+
+A rule whose list is empty is not rendered (an empty `resourceNames` would
+grant every object of the kind), and names are validated, so no rule is a
+wildcard. List every reference `sources.yaml` makes, and upgrade the
+release when you add one.
+
+RBAC is additive, and the bundle Role is not the only grant: the
+controller's generated `konstapel-controller` Role (from
+`+kubebuilder:rbac` markers for evidence destinations, exceptions and the
+orphan inventory) already grants `get` on every Secret and `get`/`list` on
+every ConfigMap in `konstapel-system`. So today the bundle Role's effective
+new privilege is the named, field-selected `watch` of the sources ConfigMap,
+and a reference missing from these lists is still readable rather than
+`Forbidden`. Its `get` rules record exactly what bundles need and become the
+operative grant if those broader rules are narrowed. `TestLiveHelmBundles`
+checks the watch against the API server: allowed with the bundle RoleBinding,
+forbidden without it, and forbidden unselected, for other ConfigMaps, for
+Secrets and in other namespaces.
+
+Each replica has its own cache (`bundles.cache.capacity`, default `1Gi`, in
+an `emptyDir` of `bundles.cache.sizeLimit`, default `1536Mi`). A replaced pod
+starts empty and fetches again; while the registry is unreachable, its
+profiles report `ContentUnavailable` and bindings keep the policies they
+applied. `bundles.refreshInterval` (`30s`, at most `5m`) bounds how late a
+rotated or revoked referenced object is noticed. `TestLiveHelmBundles`
+installs these values against a disposable TLS registry (see
+[Policy bundles](policy-bundles.md#helm-installation-and-live-acceptance)).
+
 ## Uninstalling the runtime chart
 
 `helm uninstall konstapel -n konstapel-system` removes the controller, the
@@ -453,8 +521,15 @@ retention.
   - `shutdownDrainSeconds` (20): must be below the grace period.
   - `resources`.
 
-There are no values for evidence locations, credentials, Kyverno or
-cert-manager installation, or exception enablement.
+- **`bundles`:** verified OCI policy bundles, off while `sourcesConfigMap` is empty (the default).
+  - `sourcesConfigMap`: the operator-created sources ConfigMap in `konstapel-system`.
+  - `cache.capacity` (1Gi) and `cache.sizeLimit` (1536Mi, must be larger): the per-pod content cache and its `emptyDir`.
+  - `refreshInterval` (30s, at most 5m): re-read interval for referenced objects.
+  - `referencedSecrets`, `referencedConfigMaps`: the names `sources.yaml` references; the controller may `get` only these. Set only with `sourcesConfigMap`.
+
+There are no values for evidence locations, credentials (only the names of
+bundle credential Secrets), Kyverno or cert-manager installation, or exception
+enablement.
 
 The CRD chart accepts no values. Its definitions are generated, and retention
 can't be turned off.

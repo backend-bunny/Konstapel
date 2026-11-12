@@ -380,6 +380,33 @@ Profiles pin the vendored content as bundle `konstapel-vendored` at
 echo "sha256:$(sha256sum content/SHA256SUMS | cut -d' ' -f1)"
 ```
 
+#### Profiles pinning OCI bundles
+
+A profile may instead pin a released or organization bundle by its OCI
+manifest digest (`spec.bundle.name` and `spec.bundle.digest`). The controller
+serves those only when OCI bundle sources are enabled
+([Controller wiring](../policy-bundles.md#controller-wiring); in the runtime
+chart, `bundles.sourcesConfigMap`, see
+[Helm charts](../charts.md#oci-policy-bundles)). The central sources ConfigMap
+says where each name is fetched from and whom to trust:
+
+- **Official bundles:** store
+  [`bundles/official-sources.yaml`](../../bundles/official-sources.yaml) as
+  `sources.yaml`. It pins anonymous pulls from `ghcr.io/backend-bunny/bundles/`
+  and the keyless identity of this repository's bundle-release workflow.
+- **Organization bundles or mirrors:** one entry per name with your
+  repository, credential Secret, CA and publisher rule
+  ([Private registry setup](../policy-bundles.md#private-registry-setup)). A
+  mirror changes only `repository`.
+
+Resolution, rendering and delivery are the same as for the vendored bundle:
+the binding's revision follows the manifest digest, not the repository or
+credential, and unavailable content reports `ContentUnavailable` with a class
+while applied policies stay
+([Conditions and requeue](../policy-bundles.md#conditions-and-requeue)).
+`TestLiveHelmBundles` runs an Audit binding over a profile pinning a signed
+OCI bundle with the Helm-installed controller.
+
 ### Deployment and RBAC
 
 Install the CRDs from `config/crd/bases/` first. The controller runs as service

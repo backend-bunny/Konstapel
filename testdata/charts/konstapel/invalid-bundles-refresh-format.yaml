@@ -1,0 +1,4 @@
+# expect: '1h30m' does not match
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  refreshInterval: 1h30m

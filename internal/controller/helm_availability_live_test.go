@@ -605,9 +605,9 @@ func liveImage(t *testing.T) (image, repo, digest string) {
 }
 
 // installCharts installs both charts into ns with operator TLS and the
-// packaged image, uninstalls them when the test ends, and returns the CA
-// that issued the download server's certificate.
-func (l *live) installCharts(ns, repo, digest string) []byte {
+// packaged image (plus extra Helm arguments), uninstalls them when the test
+// ends, and returns the CA that issued the download server's certificate.
+func (l *live) installCharts(ns, repo, digest string, extra ...string) []byte {
 	t := l.t
 	t.Helper()
 	if out, err := l.helm("install", "konstapel-crds", chartArchive(t, "konstapel-crds"), "--namespace", ns, "--create-namespace", "--wait"); err != nil {
@@ -619,7 +619,7 @@ func (l *live) installCharts(ns, repo, digest string) []byte {
 		t.Fatal(err)
 	}
 	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m",
-		"-f", "../../docs/examples/charts/operator-tls.yaml"}, imageValues(repo, digest)...)...); err != nil {
+		"-f", "../../docs/examples/charts/operator-tls.yaml"}, append(extra, imageValues(repo, digest)...)...)...); err != nil {
 		t.Fatalf("install runtime chart: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
 	}
 	t.Cleanup(func() {

@@ -1,0 +1,4 @@
+# expect: capacity': '1G' does not match
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  cache: {capacity: 1G, sizeLimit: 2Gi}

@@ -544,21 +544,11 @@ a controller-runtime `client.Reader`; use the manager's uncached `APIReader`,
 because a cached client would need `list`/`watch` on every Secret in the
 namespace. `MemoryReader` is the in-memory reader for tests and fixtures.
 
-RBAC for the later chart task: a namespaced `Role` in the controller namespace
-with only
-
-```yaml
-- apiGroups: [""]
-  resources: [secrets]
-  verbs: [get]
-  resourceNames: [<every configured credentialSecret and Secret-held ca>]
-- apiGroups: [""]
-  resources: [configmaps]
-  verbs: [get]
-  resourceNames: [<every ConfigMap-held ca>]
-```
-
-`resourceNames` is possible because every object is fetched by name.
+The runtime chart grants this access in a namespaced `Role`, `get` by name on
+exactly the objects listed in its `bundles.referencedSecrets` and
+`bundles.referencedConfigMaps` values (see
+[RBAC and informers](#rbac-and-informers) and
+[Helm charts](charts.md#oci-policy-bundles)). `resourceNames` is possible because every object is fetched by name.
 Referenced objects are never listed or watched: changes are noticed by
 re-reading them by name (see
 [Central configuration and watches](#central-configuration-and-watches)).
@@ -667,15 +657,15 @@ against real registries.
 
 ## Private registry setup
 
-How to point a bundle name at a private registry. Everything here is the
-configuration contract plus tested examples: nothing in the controller reads
-these objects yet (task 5.1 wires them in), so the steps cannot be followed end
-to end today. The manifests below are the files in
-`testdata/bundles/private-registry/`; `TestPrivateRegistryExamples` parses them
-with the real code (the source configuration, the credential document, the CA
-bundle) and checks they agree with each other, including the Role, and
-`TestPrivateRegistryGuideEmbedsTheExamples` fails if this page and those files
-differ.
+How to point a bundle name at a private registry. The manifests below are the
+files in `testdata/bundles/private-registry/` and the chart values in
+`docs/examples/charts/oci-bundles.yaml`; `TestPrivateRegistryExamples` parses
+them with the real code (the source configuration, the credential document,
+the CA bundle) and checks they agree with each other, including the chart
+values' grants, and `TestPrivateRegistryGuideEmbedsTheExamples` fails if this
+page and those files differ. `TestLiveHelmBundles` installs the chart with
+those values and objects of the same names against a disposable registry (see
+[Helm installation and live acceptance](#helm-installation-and-live-acceptance)).
 
 ### What the registry must provide
 
@@ -786,29 +776,26 @@ data:
             builder: https://git.acme.internal/ci/bundle-builder@refs/heads/main
 ```
 
-5. **Grant read access.** The controller's ServiceAccount needs only `get`, by
-   name, on the objects above, and on the configuration ConfigMap itself. Bind
-   this Role to that ServiceAccount (the chart task defines it). The Role must
-   list every object the configuration references, including a Secret-held CA
-   or trust root when you use one.
+5. **Enable it in the chart.** Install or upgrade the runtime chart with the
+   sources ConfigMap's name and every object it references. The chart then
+   passes the `--bundle-*` flags, mounts the cache and binds a Role granting
+   `get` on exactly those names, plus `get`, `list` and `watch` on the sources
+   ConfigMap alone ([Helm charts](charts.md#oci-policy-bundles)). List every
+   reference, including a Secret-held CA or trust root when you use one, and
+   upgrade the release when the references change.
 
 ```yaml
-# Least-privilege read access: get, by name, in the controller's namespace only.
-# resourceNames lists every object the sources configuration references.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: konstapel-bundle-sources
-  namespace: konstapel-system
-rules:
-  - apiGroups: [""]
-    resources: [configmaps]
-    verbs: [get]
-    resourceNames: [acme-registry-ca, konstapel-bundle-sources]
-  - apiGroups: [""]
-    resources: [secrets]
-    verbs: [get]
-    resourceNames: [acme-bundle-signing-key, acme-registry]
+# Verified OCI policy bundles from a private registry (docs/policy-bundles.md,
+# "Private registry setup"). Create the objects first in konstapel-system:
+# the sources ConfigMap (data key sources.yaml) and every Secret and
+# ConfigMap it references. The chart creates none of them; it grants the
+# controller get on exactly these names, plus get, list and watch on the
+# sources ConfigMap alone. List every reference here: an unlisted one is
+# Forbidden and makes its source unavailable.
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedSecrets: [acme-registry, acme-bundle-signing-key]
+  referencedConfigMaps: [acme-registry-ca]
 ```
 
 ### Least privilege
@@ -816,7 +803,10 @@ rules:
 - A namespaced Role with `get` and `resourceNames` only: no `list`, no `watch`
   from this loader, no ClusterRole, no other namespace. Only the sources
   ConfigMap itself is watched, through a single-object (field-selected)
-  watch; see [the exact grants](#rbac-and-informers).
+  watch; see [the exact grants](#rbac-and-informers). The controller's
+  generated Role also grants `get` on every Secret and ConfigMap in its
+  namespace for other features, so today a reference the chart values omit
+  is still readable ([Helm charts](charts.md#oci-policy-bundles)).
 - One credential Secret per registry, scoped to the bundle repositories, so a
   leaked or rotated credential has a small blast radius.
 - Credentials are offered only for the source's own registry host, never to a
@@ -855,9 +845,11 @@ Verified: the parsing and agreement of the examples above (unit test), and, in
 the real-registry suite, Secret-backed credentials, a wrong password then a
 rotated Secret on the same client, a missing Secret, a ConfigMap-backed CA on top
 of the system roots, an invalid CA, and one source's CA not trusting another
-registry. Not verified: a running controller reading these objects, the Role
-against a real API server, and bearer-token services other than the in-process
-fake.
+registry. In a cluster, `TestLiveHelmBundles` runs the Helm-installed
+controller with these values against a disposable htpasswd/TLS registry: the
+dockerconfigjson Secret, the ConfigMap CA and the public-key Secret are read by
+name, and a rotated credential is used by the pods that start after it. Not
+verified: bearer-token services other than the in-process fake.
 
 ## Signature verification
 
@@ -2070,9 +2062,9 @@ Done: `internal/bundle/sources.Watcher` implements `Revisions` from the central
 ConfigMap and the referenced objects, the profile and binding reconcilers map
 `ContentError` classes to detailed conditions and requeues and accept
 `content.ValidateParameters`, and the controller builds the whole stack behind
-a flag (see [Controller wiring](#controller-wiring)). Still to do (stage 2b-ii):
-the chart (RBAC below, cache volume, values), live acceptance and the upgrade
-and rollback tests.
+a flag (see [Controller wiring](#controller-wiring)), and the runtime chart
+enables it with live acceptance (see
+[Helm installation and live acceptance](#helm-installation-and-live-acceptance)).
 
 ### What has and has not been verified
 
@@ -2301,10 +2293,9 @@ registry) under the real profile and binding reconcilers: an OCI profile
 resolves and renders, trust revocation keeps the applied policy and reports
 `ContentUnavailable`, recovery creates no duplicate, a revocation between the
 render and the write is refused, and pins survive a restart with the registry
-down. Not verified: anything in a cluster, the chart, the real registry client
-against a real registry from the controller (the registry and kubeaccess
-packages' own suites cover it), and the field-selected watch against a real API
-server.
+down. The cluster, the chart, the real registry client from the controller and
+the field-selected watch against a real API server are covered by
+[live acceptance](#helm-installation-and-live-acceptance).
 
 ## Central configuration and watches
 
@@ -2434,8 +2425,9 @@ sooner, but the referenced set changes with the configuration, controller-runtim
 cannot stop a watch it started, and the chart's `resourceNames` must be static
 anyway; polling by name keeps the grant to `get` and the design to one cache.
 
-The grants the chart must add (stage 2b), in the controller namespace only, in
-a namespaced `Role`; no `ClusterRole` and no namespace-wide Secret access:
+The grants the chart adds (`konstapel-controller-bundles`, rendered only when
+`bundles.sourcesConfigMap` is set), in the controller namespace only, in a
+namespaced `Role`; no `ClusterRole` and no namespace-wide Secret access:
 
 ```yaml
 - apiGroups: [""]
@@ -2453,11 +2445,21 @@ a namespaced `Role`; no `ClusterRole` and no namespace-wide Secret access:
 ```
 
 Because `resourceNames` are static, the referenced names come from chart
-values; an object the configuration references but the Role does not grant is
-`Forbidden`, which makes its source unavailable (never a fallback). That the
-API server authorizes the field-selected `list`/`watch` by name has not been
-verified against a real API server here. RBAC is additive: the existing
-controller Role's broader rules for other features are not narrowed by these.
+values (`bundles.referencedSecrets`, `bundles.referencedConfigMaps`); an empty
+list renders no rule rather than an unrestricted one. RBAC is additive: the
+generated `konstapel-controller` Role already grants `get` on every Secret and
+`get`/`list` on every ConfigMap in the controller namespace for other
+features, so today the bundle Role's effective new privilege is the named
+`watch`, and a reference missing from the values is still readable rather than
+`Forbidden`. If those broader rules are narrowed, a missing reference becomes
+`Forbidden`, which makes its source unavailable (never a fallback).
+
+Against a real API server (`TestLiveHelmBundles`), acting as the controller's
+ServiceAccount: the field-selected `watch` of the sources ConfigMap is allowed
+with the chart's RoleBinding and forbidden once that RoleBinding is deleted
+(no other grant allows it); an unselected ConfigMap watch, a field-selected
+watch of another ConfigMap or of a Secret, a Secret `list`, a ConfigMap
+`update` and the same watch in another namespace are all forbidden.
 
 ### Conditions and requeue
 
@@ -2502,8 +2504,9 @@ and no parameter check on profiles.
 
 ### What the manager wiring adds
 
-Done; see [Controller wiring](#controller-wiring). The chart RBAC above, the
-cache volume and live acceptance are stage 2b-ii.
+Done; see [Controller wiring](#controller-wiring). The runtime chart adds the
+RBAC above and the cache volume; see
+[Helm installation and live acceptance](#helm-installation-and-live-acceptance).
 
 ### What has and has not been verified
 
@@ -2522,6 +2525,82 @@ handler, the trigger, per-class conditions and requeues with planted secrets,
 and the binding scenarios above. Thirteen safeguards were removed one at a
 time to confirm a test fails for each. Not verified: anything in a cluster,
 the field-selected watch against a real API server, and the RBAC above.
+
+## Helm installation and live acceptance
+
+The runtime chart enables OCI bundle content with `bundles.sourcesConfigMap`
+(off by default, which renders exactly the chart without it). It then adds the
+four `--bundle-*` flags, a per-pod `emptyDir` cache of
+`bundles.cache.sizeLimit` at `/var/lib/konstapel/bundles`, `POD_NAMESPACE`
+from the downward API (already set for other features), and the
+`konstapel-controller-bundles` Role and RoleBinding described in
+[RBAC and informers](#rbac-and-informers). The chart never renders the sources
+ConfigMap or the objects it references: a platform administrator creates them
+([Private registry setup](#private-registry-setup)) and lists the referenced
+names in the values ([Helm charts](charts.md#oci-policy-bundles)).
+
+**Cache directory modes.** A pod `fsGroup` makes the `emptyDir` a setgid
+directory, and Linux copies that bit to every directory created beneath it.
+The cache sets each directory's mode explicitly after creating it, so its own
+check that no stored file or directory carries a setuid, setgid or sticky bit
+still holds there (`TestPutUnderSetgidRoot`). Live acceptance found this:
+before the fix, every OCI bundle in the chart failed to store.
+
+**Live acceptance.** `TestLiveHelmBundles` (the `charts` acceptance group, so
+it also runs in release acceptance on the frozen archives) installs the chart
+with `docs/examples/charts/oci-bundles.yaml` on two replicas of the image
+built from the checkout. A disposable distribution registry
+(`KONSTAPEL_REGISTRY_IMAGE`: TLS from a throwaway CA, htpasswd users, no
+referrers API, so the tag-schema fallback) on the kind network serves the
+checked-in Cosign organization-key fixture (the official bundle's content,
+`internal/bundle/verify/testdata/provenance`) under a primary and a mirror
+repository; the test pushes it with the retrieval adapter's session and the
+mirror tool. It verifies, in order:
+
+1. RBAC against the API server as the controller's ServiceAccount (see
+   [RBAC and informers](#rbac-and-informers)), including that the
+   field-selected watch fails without the chart's RoleBinding.
+2. Each replica's Watcher loads the configuration through that watch (its
+   logged revision), and both observe a later change.
+3. An Audit binding over a profile pinning the fixture digest is delivered
+   from the verified bundle (policy annotated with that digest).
+4. A mirror (repository change) is seen by both replicas and changes nothing
+   applied: same policy UID, same binding revision.
+5. Invalid configuration (`version: 2`) and a deleted ConfigMap report
+   `ContentUnavailable (Config)` on the profile, the binding keeps its policy
+   (`EngineReady=False/StaleRevision`), and both recover with the same
+   revision.
+6. Trust revocation (the key Secret and rule moved to another key) reports
+   `ContentUnavailable (Untrusted)`; the applied policy stays; a new binding of
+   the same profile stays unresolved with no policies; after restoring trust
+   both resolve.
+7. Follower pins: with the registry paused, the leader is removed (scaled
+   away, so no fresh pod races for the Lease) and the former follower, which
+   reconciled nothing and serves no webhook, delivers a new binding from the
+   content its own Pinner fetched and verified.
+8. Controller upgrade (a changed value rolls both pods) after rotating the
+   credential Secret to another registry user: the new pods fetch with the
+   new credential (seen in the registry log) and the applied revision is
+   unchanged.
+9. `helm rollback` during a registry outage: the replaced pods cannot fetch,
+   the profile reports `ContentUnavailable (ContentUnavailable)`, the binding
+   keeps its policy, and after the registry returns the same revision
+   resolves again.
+
+Hand-broken checks: a chart Role without `watch` fails step 1, an image whose
+Pinner runs only on the leader fails step 7, and the image without the cache
+mode fix fails step 3.
+
+**Not covered live:** exception admission webhooks (the chart serves none,
+so no admission path on a non-leader exists to test); a profile digest
+upgrade to a different, semantically changed signed bundle (only one signed
+subject exists as a fixture; the revision advance by another manifest digest
+is unit-tested in `internal/bundle/content`); keyless signatures in the
+cluster (the fixture is public-key signed); bearer-token registries; and
+assessment export, which still reads the image's vendored `content/` tree
+(`AssessmentRunReconciler` passes `Runtime.ContentRoot` to
+`collector.Export`), so OSCAL for a run of an OCI-bundle binding is built from
+vendored catalog and mapping files rather than the bundle's own.
 
 ## Create and package a bundle
 

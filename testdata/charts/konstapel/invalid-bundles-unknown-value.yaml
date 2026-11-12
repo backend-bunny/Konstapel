@@ -1,0 +1,4 @@
+# expect: additional properties 'credentials' not allowed
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  credentials: {username: reader}

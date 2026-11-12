@@ -1,0 +1,4 @@
+# expect: '*' does not match pattern
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedSecrets: ["*"]

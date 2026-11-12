@@ -55,7 +55,8 @@
     "release": true,
     "goTests": [
       "TestLiveCRDChartLifecycle",
-      "TestLiveHelmInstall"
+      "TestLiveHelmInstall",
+      "TestLiveHelmBundles"
     ]
   },
   "recovery": {

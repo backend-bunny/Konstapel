@@ -105,3 +105,42 @@ func TestOfficialBundleRoundTrip(t *testing.T) {
 		t.Fatalf("missing digest: %v", err)
 	}
 }
+
+// A Kubernetes emptyDir mounted with a pod fsGroup is a setgid directory,
+// and Linux copies that bit to every directory created beneath it. The cache
+// creates its directories with exactly its own modes, so Put verifies and
+// stores the official bundle there, and no directory under the root carries
+// the inherited bit (the payload check still rejects one that does).
+func TestPutUnderSetgidRoot(t *testing.T) {
+	a := official(t)
+	e := newEnv(t)
+	must(t, os.Mkdir(e.root, 0o777))
+	must(t, os.Chmod(e.root, os.ModeSetgid|0o777))
+	if info, err := os.Stat(e.root); err != nil || info.Mode()&fs.ModeSetgid == 0 {
+		t.Skipf("this filesystem does not keep a setgid directory bit: %v %v", info, err)
+	}
+	c := e.open(t, Config{})
+	got, err := c.Put(bg(), a.Manifest, a.Layer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Descriptor.VerifyPayload(got.FS()); err != nil {
+		t.Fatal(err)
+	}
+	must(t, filepath.WalkDir(e.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == e.root {
+			return err
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 {
+			t.Errorf("%s: mode %v", p, info.Mode())
+		}
+		return nil
+	}))
+	if _, err := c.Get(bg(), a.ManifestDigest); err != nil {
+		t.Fatal(err)
+	}
+}

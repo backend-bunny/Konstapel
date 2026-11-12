@@ -190,6 +190,69 @@
         }
       }
     },
+    "bundles": {
+      "description": "Verified OCI policy bundles; off while sourcesConfigMap is empty.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourcesConfigMap",
+        "cache",
+        "refreshInterval",
+        "referencedSecrets",
+        "referencedConfigMaps"
+      ],
+      "properties": {
+        "sourcesConfigMap": {
+          "description": "Central sources ConfigMap in the release namespace; empty disables OCI bundles.",
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+        },
+        "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capacity",
+            "sizeLimit"
+          ],
+          "properties": {
+            "capacity": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+            },
+            "sizeLimit": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+            }
+          }
+        },
+        "refreshInterval": {
+          "description": "Go duration in whole seconds or minutes, at most 5m.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(s|m)$"
+        },
+        "referencedSecrets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+          }
+        },
+        "referencedConfigMaps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+          }
+        }
+      }
+    },
     "download": {
       "type": "object",
       "additionalProperties": false,

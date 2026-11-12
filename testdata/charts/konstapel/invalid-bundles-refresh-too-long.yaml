@@ -1,0 +1,4 @@
+# expect: bundles.refreshInterval (301s) must be at most 5m
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  refreshInterval: 301s

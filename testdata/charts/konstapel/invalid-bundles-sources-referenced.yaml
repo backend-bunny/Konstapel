@@ -1,0 +1,4 @@
+# expect: must not list the sources ConfigMap
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedConfigMaps: [konstapel-bundle-sources]

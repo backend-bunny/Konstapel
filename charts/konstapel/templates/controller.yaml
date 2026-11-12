@@ -119,6 +119,12 @@ spec:
             - --metrics-bind-address=0
             - --evidence-staging-dir=/var/lib/konstapel/staging
             - --shutdown-timeout={{ .Values.controller.shutdownTimeoutSeconds }}s
+            {{- if include "konstapel.bundlesEnabled" . }}
+            - --bundle-sources-configmap={{ .Values.bundles.sourcesConfigMap }}
+            - --bundle-cache-dir=/var/lib/konstapel/bundles
+            - --bundle-cache-capacity={{ .Values.bundles.cache.capacity }}
+            - --bundle-refresh-interval={{ .Values.bundles.refreshInterval }}
+            {{- end }}
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -157,6 +163,10 @@ spec:
               mountPath: /var/lib/konstapel/staging
             - name: tmp
               mountPath: /tmp
+            {{- if include "konstapel.bundlesEnabled" . }}
+            - name: bundle-cache
+              mountPath: /var/lib/konstapel/bundles
+            {{- end }}
       volumes:
         # Per-pod bounded working storage. Durable state lives in Kubernetes
         # and the evidence destination; a successor recovers from those.
@@ -166,6 +176,14 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if include "konstapel.bundlesEnabled" . }}
+        # Per-pod OCI bundle content cache (--bundle-cache-dir), owned by this
+        # replica's process only. Content is re-verified on use after a
+        # restart; acceptances and pins are recomputed from cluster state.
+        - name: bundle-cache
+          emptyDir:
+            sizeLimit: {{ .Values.bundles.cache.sizeLimit }}
+        {{- end }}
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
 ---
 apiVersion: policy/v1

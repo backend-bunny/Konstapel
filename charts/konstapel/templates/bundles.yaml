@@ -1,0 +1,56 @@
+{{- if include "konstapel.bundlesEnabled" . }}
+{{- $b := .Values.bundles }}
+# OCI bundle sources (docs/policy-bundles.md, "RBAC and informers"): read
+# access in the release namespace only, every object by name. The sources
+# ConfigMap is the only watched object; its list and watch carry the field
+# selector metadata.name=<name>, which is what lets the API server authorize
+# them by resourceNames. Referenced objects are read with get and never
+# listed or watched. An empty resourceNames list would grant every object of
+# the kind, so a rule is rendered only when its list is non-empty.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-controller-bundles
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch]
+    resourceNames: [{{ $b.sourcesConfigMap | quote }}]
+  {{- with $b.referencedConfigMaps }}
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
+    resourceNames:
+      {{- range . }}
+      - {{ . | quote }}
+      {{- end }}
+  {{- end }}
+  {{- with $b.referencedSecrets }}
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames:
+      {{- range . }}
+      - {{ . | quote }}
+      {{- end }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: konstapel-controller-bundles
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: konstapel-controller-bundles
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+{{- end }}

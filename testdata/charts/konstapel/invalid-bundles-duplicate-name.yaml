@@ -1,0 +1,4 @@
+# expect: referencedSecrets': items at 0 and 1 are equal
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedSecrets: [acme-registry, acme-registry]

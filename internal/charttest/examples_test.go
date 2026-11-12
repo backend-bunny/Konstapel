@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -52,6 +54,16 @@ func TestDocumentedExamples(t *testing.T) {
 			}
 			if find(docs, "Issuer", "konstapel-ca") != nil || find(docs, "Certificate", "konstapel-ca") != nil {
 				t.Error("platform issuer still renders the chart CA")
+			}
+		},
+		"oci-bundles.yaml": func(t *testing.T, docs []map[string]any) {
+			role := find(docs, "Role", "konstapel-controller-bundles")
+			if want := bundleRules([]string{"acme-registry-ca"}, []string{"acme-registry", "acme-bundle-signing-key"}); role == nil || !reflect.DeepEqual(role["rules"], any(want)) {
+				t.Errorf("bundle Role %v", role)
+			}
+			args := at(find(docs, "Deployment", "konstapel-controller"), "spec", "template", "spec", "containers", 0, "args").([]any)
+			if !slices.Contains(args, any("--bundle-sources-configmap="+sourcesCM)) {
+				t.Errorf("bundles not enabled: %v", args)
 			}
 		},
 		"development.yaml": func(t *testing.T, docs []map[string]any) {

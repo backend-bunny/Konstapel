@@ -1,0 +1,4 @@
+# expect: referencedConfigMaps/0': minLength
+bundles:
+  sourcesConfigMap: konstapel-bundle-sources
+  referencedConfigMaps: [""]
