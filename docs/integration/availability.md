@@ -24,7 +24,7 @@ marked unavailable.
 | Election | on in every mode, including one replica | `--leader-elect` (default `true`; only in-process tests turn it off) |
 | Lease duration / renew deadline / retry period | `15s` / `10s` / `2s` | `--leader-election-lease-duration`, `--leader-election-renew-deadline`, `--leader-election-retry-period` |
 | Release on cancel | off: the Lease expires instead of being released while shutdown may still be draining | — |
-| RBAC | Lease get/list/watch/create/update/patch/delete in `konstapel-system` only (generated Role) | — |
+| RBAC | Lease `get`/`update` of `konstapel-controller-leader-election` and Lease `create` (not restrictable by name), in `konstapel-system` only (generated Role); see [Controller ServiceAccount boundary](../charts.md#controller-serviceaccount-boundary) | — |
 
 - **Shared Lease.** Every replica and every supported runtime revision of an
   installation uses the same Lease. Its name has no pod name, image or chart
@@ -354,13 +354,14 @@ plane, so losing a worker removes Konstapel replicas but not the engine.
 | Case | What must hold |
 | --- | --- |
 | Placement | both controller and both download replicas ready, on different workers (preferred anti-affinity); one Lease holder |
+| Lease under the chart Role | any earlier Lease is deleted before install, and a controller creates it under the chart's grants (Lease `get`/`update` by name, `create`); for longer than a lease duration the holder keeps it and renews it while the other replica contends; `LeaderElection` Events are written; impersonated requests and SubjectAccessReviews of the ServiceAccount allow exactly those grants and refuse Lease `list`/`watch`/`patch`/`delete`, other Leases and other namespaces; no controller log, current or previous, shows a refused Lease request (also after the rolling upgrade, restart and leader loss below) |
 | Disruption budget | one voluntary eviction proceeds; a second, before its replacement is ready, is refused (`429`) |
-| Rolling upgrade | a pod-template change replaces both controllers while at least two stay ready |
+| Rolling upgrade | a pod-template change replaces both controllers while at least two stay ready; a new replica takes the Lease the gracefully stopped one did not release |
 | Constrained surge | with every worker cordoned, the surge pod stays `Pending`; both old replicas keep serving and the rollout is visibly incomplete until capacity returns |
 | Preferred separation | with one worker cordoned, a replaced replica co-locates with the other and becomes ready (separation is never required) |
 | Development values | `docs/examples/charts/development.yaml`: one replica, no controller PodDisruptionBudget, and a drain of the single replica proceeds |
-| Controller outage | with the controller scaled to zero, Kyverno keeps enforcing the delivered policies and downloads keep serving |
-| Leader pod loss | a force-deleted leader is replaced: the other replica takes the Lease (about 16–20 s in tests) and reconciles a new binding generation |
+| Controller outage | with the controller scaled to zero, Kyverno keeps enforcing the delivered policies and downloads keep serving; scaled back to two, a new process takes over the stale Lease (a new holder, one more transition) and renews it under contention |
+| Leader pod loss | a force-deleted leader is replaced: the other replica takes the Lease (about 16–20 s in tests; exactly one more transition) and reconciles a new binding generation |
 | Leader loss during an S3 outage | after capture, with S3 paused, the leader pod is force-deleted. The run stays `Publishing` (uncertain access, never `CaptureLost`) while S3 is down. The capture lived only in that pod's staging volume, so once S3 returns the run ends as a truthful `CaptureLost`, and the next run publishes under a new identity |
 | Node loss | the leader's worker container is stopped. The replica on the other worker takes the Lease (about 19–21 s) and reconciles, and the download replica there serves the package |
 

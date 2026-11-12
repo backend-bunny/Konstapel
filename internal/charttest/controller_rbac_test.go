@@ -192,3 +192,75 @@ func TestRuntimeChartControllerSecretConfigMapAccess(t *testing.T) {
 		})
 	}
 }
+
+// leaseGrants are the grants on coordination.k8s.io Leases, sorted and
+// de-duplicated.
+func leaseGrants(gs []grant) []string {
+	var out []string
+	for _, g := range gs {
+		if g.resource == "coordination.k8s.io/leases" {
+			out = append(out, g.String())
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
+// The effective Lease access of the controller ServiceAccount is exactly
+// what the pinned client-go LeaseLock does with the one leader-election
+// Lease (docs/charts.md, "Controller ServiceAccount boundary"): get and
+// update of that Lease by name (acquire, renew, take over after expiry), and
+// create (the first candidate), which RBAC cannot restrict by name. Nothing
+// lists, watches, patches or deletes Leases, other Leases are neither read
+// nor written, and no ClusterRole grants Leases.
+func TestRuntimeChartControllerLeaseAccess(t *testing.T) {
+	const lease = "konstapel-controller-leader-election"
+	for name, set := range map[string][]string{
+		"bundles off": nil,
+		"bundles on":  {"bundles.sourcesConfigMap=" + sourcesCM, "bundles.referencedConfigMaps={registry-ca}", "bundles.referencedSecrets={registry-cred,org-key}"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)
+			if err != nil {
+				t.Fatal(out)
+			}
+			gs := controllerGrants(t, docs)
+			want := []string{
+				"konstapel-system coordination.k8s.io/leases create <any>",
+				"konstapel-system coordination.k8s.io/leases get " + lease,
+				"konstapel-system coordination.k8s.io/leases update " + lease,
+			}
+			if got := leaseGrants(gs); !reflect.DeepEqual(got, want) {
+				t.Fatalf("effective Lease grants\n got %q\nwant %q", got, want)
+			}
+			const r = "coordination.k8s.io/leases"
+			for _, q := range []struct {
+				ns, verb, name string
+				want           bool
+			}{
+				{controllerNS, "get", lease, true},
+				{controllerNS, "update", lease, true},
+				{controllerNS, "create", "", true},
+				{controllerNS, "get", "other-lease", false},
+				{controllerNS, "update", "other-lease", false},
+				{controllerNS, "get", "", false},
+				{controllerNS, "list", "", false},
+				{controllerNS, "list", lease, false},
+				{controllerNS, "watch", "", false},
+				{controllerNS, "watch", lease, false},
+				{controllerNS, "patch", lease, false},
+				{controllerNS, "delete", lease, false},
+				{controllerNS, "deletecollection", "", false},
+				{"default", "get", lease, false},
+				{"default", "update", lease, false},
+				{"default", "create", "", false},
+				{"kube-system", "get", lease, false},
+				{"", "list", "", false},
+			} {
+				if got := allowed(gs, q.ns, r, q.verb, q.name); got != q.want {
+					t.Errorf("%s leases %s %q: allowed=%v, want %v", q.ns, q.verb, q.name, got, q.want)
+				}
+			}
+		})
+	}
+}

@@ -145,9 +145,12 @@ rules:
   - leases
   verbs:
   - create
-  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resourceNames:
+  - konstapel-controller-leader-election
+  resources:
+  - leases
+  verbs:
   - get
-  - list
-  - patch
   - update
-  - watch

@@ -7,6 +7,12 @@ package controller
 // one control plane running Kyverno and two workers for Konstapel). Every
 // case runs against the packaged image under the chart's ServiceAccount:
 //   - placement, Lease holder and two ready replicas of each Deployment;
+//   - the Lease lifecycle under the chart's minimal Lease grants (get and
+//     update of the named Lease, create): creation on a fresh install,
+//     renewal under contention, takeover after graceful replacement, a
+//     restart from zero replicas and abrupt leader loss, election Events,
+//     no refused Lease request in any controller log, and the
+//     ServiceAccount's allowed/refused Lease requests;
 //   - PodDisruptionBudget refusal of an availability-breaking eviction;
 //   - a rolling upgrade that never drops below two ready controllers, and a
 //     surge blocked by missing capacity that keeps both serving;
@@ -33,6 +39,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -40,6 +47,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -58,7 +67,12 @@ func TestLiveHelmAvailability(t *testing.T) {
 		t.Fatalf("need two workload nodes (KONSTAPEL_CLUSTER_WORKERS=2), have %d", len(nodes.Items))
 	}
 
-	// Install both charts with operator TLS.
+	// Install both charts with operator TLS. A Lease left by an earlier
+	// installation is removed first, so the chart's controllers create it
+	// under the chart Role.
+	if err := l.c.Delete(l.ctx, &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: LeaderElectionID}}); err != nil && !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
 	caPEM := l.installCharts(ns, repo, digest)
 
 	// 1. Placement: two ready replicas of each Deployment, on both workers
@@ -66,6 +80,23 @@ func TestLiveHelmAvailability(t *testing.T) {
 	ctrl := l.readyPods(ns, "controller", 2)
 	dl := l.readyPods(ns, "download", 2)
 	leader := l.leaderPod(ns, "")
+
+	// 1a. Lease lifecycle under the chart's reduced Lease grants (get/update
+	// of the named Lease, create): a controller created the Lease, the
+	// holder renews it while the other replica contends, the election's
+	// Events are written, and nothing logged a refused Lease request. The
+	// ServiceAccount boundary is checked against the API server.
+	created := l.lease(ns)
+	if created == nil || transitions(created) != 0 {
+		t.Fatalf("Lease after a fresh install: %s", toJSON(created))
+	}
+	held := l.leaseHeld(ns)
+	l.eventually("LeaderElection Event for the holder", func() (bool, string) {
+		return l.electionEvent(ns, *l.lease(ns).Spec.HolderIdentity), ""
+	})
+	reviews := l.leaseBoundary(ns)
+	l.noLeaseDenials(ns)
+	l.record("lease", map[string]any{"created": toJSON(created.Spec), "held": held, "reviews": reviews})
 	placement := map[string]string{}
 	for _, p := range append(ctrl, dl...) {
 		placement[p.Name] = p.Spec.NodeName
@@ -154,6 +185,13 @@ func TestLiveHelmAvailability(t *testing.T) {
 	if minReady < 2 {
 		t.Fatalf("ready controllers dropped to %d during the rolling upgrade", minReady)
 	}
+	// Graceful replacement does not release the Lease: a new replica takes
+	// it over (get and update) once the old holder's Lease expires.
+	upgraded := l.leaderPod(ns, "")
+	if before[upgraded] {
+		t.Fatalf("Lease still held by replaced pod %s", upgraded)
+	}
+	l.noLeaseDenials(ns)
 	l.record("rolling-upgrade", map[string]any{"minReadyDuringRollout": minReady, "replaced": len(after)})
 
 	// 3b. Constrained surge: with no schedulable capacity the surge pod
@@ -238,15 +276,28 @@ func TestLiveHelmAvailability(t *testing.T) {
 	if code, sum := download(l.portForward(ns, "svc/konstapel-download", 443)); code != http.StatusOK || sum != run.Status.Publication.PackageSHA256 {
 		t.Fatalf("download without a controller: %d", code)
 	}
+	stale := l.lease(ns)
 	l.scaleDeployment(ns, "konstapel-controller", 2)
-	l.record("controller-outage", map[string]any{"enforcement": "retained", "download": "served"})
+	// Restart: new processes take over the Lease the stopped ones left.
+	restarted := l.leaderPod(ns, "")
+	if cur := l.lease(ns); *cur.Spec.HolderIdentity == *stale.Spec.HolderIdentity || transitions(cur) <= transitions(stale) {
+		t.Fatalf("Lease after a restart from zero replicas:\n before %s\n after %s", toJSON(stale.Spec), toJSON(cur.Spec))
+	}
+	l.leaseHeld(ns)
+	l.noLeaseDenials(ns)
+	l.record("controller-outage", map[string]any{"enforcement": "retained", "download": "served", "restartedLeader": restarted})
 
 	// 5. Abrupt leader failure: the follower takes the Lease and reconciles.
 	leader = l.leaderPod(ns, "")
+	prior := l.lease(ns)
 	start := time.Now()
 	l.forceDelete(ns, leader)
 	successor := l.leaderPod(ns, leader)
 	took := time.Since(start)
+	if cur := l.lease(ns); transitions(cur) != transitions(prior)+1 {
+		t.Fatalf("Lease takeover after leader loss:\n before %s\n after %s", toJSON(prior.Spec), toJSON(cur.Spec))
+	}
+	l.noLeaseDenials(ns)
 	got = l.binding(b.Name)
 	got.Spec.Mode = v1alpha1.ModeAudit
 	if err := l.c.Update(l.ctx, got); err != nil {
@@ -657,4 +708,182 @@ func (l *live) downloadPackage(addr, ns, operator string, caPEM []byte, runUID s
 	hc := &http.Client{Timeout: 3 * time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "konstapel-download.konstapel-system.svc"}}}
 	code, body := fetch(l.t, hc, "https://"+addr+"/v1/assessmentruns/"+runUID+"/download", l.token(ns, operator, downloadAudience))
 	return code, fmt.Sprintf("%x", sha256.Sum256(body))
+}
+
+// lease reads the leader-election Lease (nil when absent).
+func (l *live) lease(ns string) *coordinationv1.Lease {
+	l.t.Helper()
+	lease := &coordinationv1.Lease{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: LeaderElectionID}, lease); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		l.t.Fatal(err)
+	}
+	return lease
+}
+
+// transitions is the Lease's recorded leader transition count.
+func transitions(lease *coordinationv1.Lease) int32 {
+	if lease == nil || lease.Spec.LeaseTransitions == nil {
+		return 0
+	}
+	return *lease.Spec.LeaseTransitions
+}
+
+// leaseHeld checks, for longer than one lease duration, that the current
+// holder keeps the Lease while two controllers contend for it: the holder,
+// its acquisition time and the transition count stay fixed, and the renew
+// time advances past the point where an unrenewed Lease would have expired.
+func (l *live) leaseHeld(ns string) map[string]any {
+	l.t.Helper()
+	leader := l.leaderPod(ns, "")
+	l.readyPods(ns, "controller", 2)
+	first := l.lease(ns)
+	end := time.Now().Add(DefaultLeaseDuration + 2*DefaultRenewDeadline)
+	var cur *coordinationv1.Lease
+	for time.Now().Before(end) {
+		time.Sleep(DefaultRetryPeriod)
+		cur = l.lease(ns)
+		if cur == nil || *cur.Spec.HolderIdentity != *first.Spec.HolderIdentity || transitions(cur) != transitions(first) ||
+			!cur.Spec.AcquireTime.Equal(first.Spec.AcquireTime) {
+			l.t.Fatalf("Lease changed while its holder ran under contention:\n first %s\n now %s", toJSON(first.Spec), toJSON(cur))
+		}
+	}
+	renewed := cur.Spec.RenewTime.Sub(first.Spec.RenewTime.Time)
+	if renewed < DefaultLeaseDuration {
+		l.t.Fatalf("holder %s renewed the Lease by only %s over %s: %s", leader, renewed, DefaultLeaseDuration+2*DefaultRenewDeadline, toJSON(cur.Spec))
+	}
+	return map[string]any{"holder": *cur.Spec.HolderIdentity, "renewedBy": renewed.String(), "transitions": transitions(cur)}
+}
+
+// noLeaseDenials fails when any controller container (current or previous)
+// logged a refused Lease request: client-go logs every failed get, create
+// or update of the Lease.
+func (l *live) noLeaseDenials(ns string) {
+	l.t.Helper()
+	cs, err := kubernetes.NewForConfig(l.cfg)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	var pods corev1.PodList
+	if err := l.c.List(l.ctx, &pods, client.InNamespace(ns), client.MatchingLabels{"app.kubernetes.io/component": "controller"}); err != nil {
+		l.t.Fatal(err)
+	}
+	for _, p := range pods.Items {
+		for _, previous := range []bool{false, true} {
+			out, err := cs.CoreV1().Pods(ns).GetLogs(p.Name, &corev1.PodLogOptions{Previous: previous}).DoRaw(l.ctx)
+			if err != nil {
+				continue // no previous container, or the pod is gone
+			}
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.Contains(line, "leases.coordination.k8s.io") && strings.Contains(line, "forbidden") {
+					l.t.Errorf("controller %s (previous=%v) was refused Lease access: %s", p.Name, previous, line)
+				}
+			}
+		}
+	}
+}
+
+// leaseBoundary checks the controller ServiceAccount's Lease access against
+// the API server, by impersonation and SubjectAccessReview: get and update
+// of the leader-election Lease and create are allowed; every other Lease
+// verb, every other Lease, and every other namespace is refused.
+func (l *live) leaseBoundary(ns string) map[string]bool {
+	t := l.t
+	t.Helper()
+	sa := l.saClient(ns, "konstapel-controller").CoordinationV1()
+	dry := []string{metav1.DryRunAll}
+	forbidden := func(what string, err error) {
+		t.Helper()
+		if !apierrors.IsForbidden(err) {
+			t.Errorf("%s as the controller: %v, want Forbidden", what, err)
+		}
+	}
+	cur, err := sa.Leases(ns).Get(l.ctx, LeaderElectionID, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get of the leader-election Lease as the controller: %v", err)
+	}
+	if _, err := sa.Leases(ns).Update(l.ctx, cur, metav1.UpdateOptions{DryRun: dry}); err != nil {
+		t.Errorf("update of the leader-election Lease as the controller: %v", err)
+	}
+	probe := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "konstapel-lease-probe"}}
+	if _, err := sa.Leases(ns).Create(l.ctx, probe, metav1.CreateOptions{DryRun: dry}); err != nil {
+		t.Errorf("create of a Lease as the controller: %v", err)
+	}
+	_, err = sa.Leases(ns).List(l.ctx, metav1.ListOptions{})
+	forbidden("Lease list", err)
+	_, err = sa.Leases(ns).List(l.ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + LeaderElectionID})
+	forbidden("field-selected Lease list", err)
+	_, err = sa.Leases(ns).Watch(l.ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + LeaderElectionID})
+	forbidden("field-selected Lease watch", err)
+	_, err = sa.Leases(ns).Patch(l.ctx, LeaderElectionID, types.MergePatchType, []byte(`{}`), metav1.PatchOptions{DryRun: dry})
+	forbidden("Lease patch", err)
+	forbidden("Lease delete", sa.Leases(ns).Delete(l.ctx, LeaderElectionID, metav1.DeleteOptions{DryRun: dry}))
+	_, err = sa.Leases(ns).Get(l.ctx, "konstapel-other-lease", metav1.GetOptions{})
+	forbidden("get of another Lease", err)
+	_, err = sa.Leases("kube-system").Get(l.ctx, "kube-scheduler", metav1.GetOptions{})
+	forbidden("get of a kube-system Lease", err)
+	_, err = sa.Leases("default").Create(l.ctx, &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: LeaderElectionID}}, metav1.CreateOptions{DryRun: dry})
+	forbidden("Lease create in another namespace", err)
+
+	admin, err := kubernetes.NewForConfig(l.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviews := map[string]bool{}
+	for _, q := range []struct {
+		namespace, verb, name string
+		want                  bool
+	}{
+		{ns, "get", LeaderElectionID, true},
+		{ns, "update", LeaderElectionID, true},
+		{ns, "create", "", true},
+		{ns, "get", "konstapel-other-lease", false},
+		{ns, "update", "konstapel-other-lease", false},
+		{ns, "get", "", false},
+		{ns, "list", "", false},
+		{ns, "list", LeaderElectionID, false},
+		{ns, "watch", "", false},
+		{ns, "watch", LeaderElectionID, false},
+		{ns, "patch", LeaderElectionID, false},
+		{ns, "delete", LeaderElectionID, false},
+		{ns, "deletecollection", "", false},
+		{"default", "get", LeaderElectionID, false},
+		{"default", "update", LeaderElectionID, false},
+		{"default", "create", "", false},
+		{"kube-system", "update", "kube-controller-manager", false},
+		{"", "list", "", false},
+		{"", "watch", "", false},
+	} {
+		r, err := admin.AuthorizationV1().SubjectAccessReviews().Create(l.ctx, &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:   "system:serviceaccount:" + ns + ":konstapel-controller",
+			Groups: []string{"system:serviceaccounts", "system:serviceaccounts:" + ns, "system:authenticated"},
+			ResourceAttributes: &authorizationv1.ResourceAttributes{Namespace: q.namespace, Group: "coordination.k8s.io", Resource: "leases",
+				Verb: q.verb, Name: q.name},
+		}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		what := fmt.Sprintf("%s leases %s %q", q.namespace, q.verb, q.name)
+		reviews[what] = r.Status.Allowed
+		if r.Status.Allowed != q.want {
+			t.Errorf("SubjectAccessReview %s: allowed=%v, want %v", what, r.Status.Allowed, q.want)
+		}
+	}
+	return reviews
+}
+
+// electionEvent reports whether the election recorded a LeaderElection
+// Event about the Lease for holder: the recorder's Event writes work.
+func (l *live) electionEvent(ns, holder string) bool {
+	var events corev1.EventList
+	_ = l.c.List(l.ctx, &events, client.InNamespace(ns))
+	for _, e := range events.Items {
+		if e.Reason == "LeaderElection" && e.InvolvedObject.Kind == "Lease" && e.InvolvedObject.Name == LeaderElectionID &&
+			strings.HasPrefix(e.Message, holder+" ") {
+			return true
+		}
+	}
+	return false
 }
