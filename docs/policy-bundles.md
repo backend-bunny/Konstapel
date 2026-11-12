@@ -274,16 +274,18 @@ sources:
 This is the configuration contract and its validation. The registry adapter
 and the signature verifier below use it as libraries.
 [Central configuration and watches](#central-configuration-and-watches)
-describes the component that reads the ConfigMap at run time; it is not wired
-into the controller yet.
+describes the component that reads the ConfigMap at run time; the controller
+uses it when bundle sources are enabled (see
+[Controller wiring](#controller-wiring)).
 
 ## Registry retrieval
 
 [`internal/bundle/registry`](../internal/bundle/registry) retrieves one pinned
 bundle and the proofs attached to it, using ORAS Go (`oras.land/oras-go/v2`
 v2.7.0) for the OCI distribution protocol and its standard registry
-challenge/token handling. It is **not yet wired into the controller**: nothing
-calls it at runtime, and it is not linked into the shipped binaries. Its unit
+challenge/token handling. The controller uses it when bundle sources are enabled
+(see [Controller wiring](#controller-wiring)); it is linked into the controller
+image since that change. Its unit
 tests use an in-process fake registry serving real `bundle.Build` bytes; the
 compatibility suite (`scripts/registry-compat.sh`, see
 [Real-registry compatibility](#real-registry-compatibility)) runs it against
@@ -527,8 +529,8 @@ turns a source's `credentialSecret` and `ca` references into what the
 retrieval adapter consumes: `Provider` implements both
 `registry.CredentialProvider` and `registry.TransportProvider`, and
 `kubeaccess.NewClient(provider, opts)` builds a `registry.Client` bound to it.
-It is **not wired into the controller yet** (task 5.1 adds the watches and
-calls) and, like the adapter, is not linked into the shipped binaries. Node
+The controller uses it when bundle sources are enabled (see
+[Controller wiring](#controller-wiring)). Node
 or kubelet pull credentials are never used, and nothing is pulled through image
 volumes, loader Jobs or a `docker`/helper process.
 
@@ -864,8 +866,8 @@ registry adapter retrieved were signed by the publisher the source rule names,
 for exactly the pinned manifest digest. It uses sigstore-go
 (`github.com/sigstore/sigstore-go` v1.3.0) and verifies **offline**: it never
 contacts a transparency log, Fulcio, a timestamp authority or a TUF repository.
-Like the adapter it is **not yet wired into the controller** and is not linked
-into the shipped binaries.
+Like the adapter it is used by the controller when bundle sources are enabled
+(see [Controller wiring](#controller-wiring)).
 
 `Verifier.VerifyProofs(ctx, source, result)` verifies the required signature
 and SLSA provenance of one `registry.Result` and returns both, or a typed
@@ -1006,8 +1008,8 @@ from a running controller.
 
 [`internal/bundle/verify`](../internal/bundle/verify) also applies the
 provenance policy and produces receipts and recheck material. Like the
-signature verifier it is **not wired into the controller** and is not linked
-into the shipped binaries.
+signature verifier it is used by the controller when bundle sources are
+enabled (see [Controller wiring](#controller-wiring)).
 
 `Verifier.Accept(ctx, source, result)` is the whole acceptance check of one
 retrieved subject: `VerifyProofs` (signature and SLSA provenance under the
@@ -1432,9 +1434,9 @@ verified, immutable tree on local disk that rendering and the assessment
 producer will read, retains the verification evidence beside it, and pins
 entries with leases. Package `internal/bundle/resolve` composes retrieval,
 the cache, the [verifier](#receipts-and-recheck) and in-memory acceptance
-records into one resolution of a pinned digest. Both are **not wired into
-the controller yet**: nothing in the shipped binaries links them, no volume is
-mounted for the cache, and nothing calls the resolver.
+records into one resolution of a pinned digest. The controller builds both when
+bundle sources are enabled (see [Controller wiring](#controller-wiring)); the
+chart does not mount a cache volume yet.
 
 A cache entry is never an authorization. It proves only that the stored bytes
 are the ones the manifest digest names and that they passed the archive policy,
@@ -1879,8 +1881,8 @@ seam the profile, binding and exception-admission code already consume through
 `LocalContent`. It owns no transport, trust or caching: `resolve.Resolver`
 decides whether the pinned digest may be used now, the content cache supplies
 the integrity-checked bytes, and targeting keeps rendering, names and
-revisions. It is not linked into the shipped binaries yet; the controller
-wiring is a later step (see [what is wired next](#what-is-wired-next)).
+revisions. The controller serves it through a router that keeps the vendored
+bundle on `LocalContent` (see [Controller wiring](#controller-wiring)).
 
 ### Mapping
 
@@ -2008,25 +2010,19 @@ its own state. A pin keeps bytes; it never authorizes later use, which every
 `Content` call re-decides.
 
 Each `Content` call re-verifies the cache entry twice (once in the resolver,
-once to read the files), which costs a full layer scan; a memo keyed by the
-handle and guarded by `Resolver.Confirm` is a possible optimization for the
-controller wiring if admission latency needs it.
+once to read the files), which costs a full layer scan. The controller's router
+memoizes results guarded by `Resolver.Confirm` (see
+[Memo](#memo-and-the-adoption-guard)).
 
 ### What is wired next
 
-Done since: `internal/bundle/sources.Watcher` implements `Revisions` from the
-central ConfigMap and the referenced objects, and the profile and binding
-reconcilers map `ContentError` classes to detailed conditions and requeues and
-accept `content.ValidateParameters` (see
-[Central configuration and watches](#central-configuration-and-watches)).
-
-The controller wiring, still not done: build the `Resolver`, cache,
-`OCIContent`, `kubeaccess.Provider` and `sources.Watcher` in the manager and pass
-`OCIContent` (or a source that routes the vendored bundle to `LocalContent`) as
-`Options.Content`; register the watcher, its trigger and the single-object
-ConfigMap cache; set `ValidateParameters`; grant the RBAC listed below in the
-chart; pin desired, applied and assessment content and re-establish the pins
-after a restart.
+Done: `internal/bundle/sources.Watcher` implements `Revisions` from the central
+ConfigMap and the referenced objects, the profile and binding reconcilers map
+`ContentError` classes to detailed conditions and requeues and accept
+`content.ValidateParameters`, and the controller builds the whole stack behind
+a flag (see [Controller wiring](#controller-wiring)). Still to do (stage 2b-ii):
+the chart (RBAC below, cache volume, values), live acceptance and the upgrade
+and rollback tests.
 
 ### What has and has not been verified
 
@@ -2070,17 +2066,187 @@ classifier does not identify the notice. It is a classification problem, not a
 missing license. Every other added module is identified (Apache-2.0, MIT,
 BSD-2-Clause or BSD-3-Clause).
 
-The proposed handling, for the wiring change that first links the package: an
-explicit override table in `go-notices.py` keyed by exact module path and
-version, giving the SPDX identifier (`Apache-2.0`), the sha256 of the module's
-own `LICENSE` and the reason. Those modules are passed to `go-licenses` with
-`--ignore`; their `LICENSE` is copied from the checksum-verified module archive
-(`go mod download`) and must match the recorded sha256, the full Apache-2.0 text
-is shipped alongside it, and the bundled-sources entry records the override.
-A version bump or a changed file fails the build until the entry is reviewed,
-and the check for unknown licenses stays in force for every other module. It
-is not implemented here because nothing shipped links these modules yet, so
-the image build could not exercise it.
+This is now implemented in `scripts/image/go-notices.py` (see
+[Container images](images.md#published-evidence) for how to review a version
+bump): an override table keyed by exact module path and version gives the SPDX
+identifier (`Apache-2.0`), the sha256 of the module's own `LICENSE` and the
+reason. Exactly those modules are passed to `go-licenses` with `--ignore`; their
+`LICENSE` is copied from the module archive after the archive's `h1:` hash is
+recomputed and compared with `go.sum`, it must match the recorded sha256, the
+full Apache-2.0 text (`scripts/image/licenses/Apache-2.0.txt`, itself pinned)
+is shipped beside it as `LICENSE-Apache-2.0.txt`, and the bundled-sources
+entry records the override (`licenseOverride`). A version bump or a changed
+file fails the build until the entry is reviewed, a module that only shares an
+override's path prefix fails too (`--ignore` matches prefixes), and the script
+itself fails on any other module whose license `go-licenses report` lists as
+unknown or not at all (`go-licenses report` exits 0 in that case).
+
+The reviewed `LICENSE` hashes (each `h1:` matched `go.sum`):
+
+| Module | Version | `LICENSE` sha256 |
+| --- | --- | --- |
+| `github.com/in-toto/in-toto-golang` | v0.11.0 | `b5c26c8a2ad6dd7cac6646e470a32ee42d23c36124caac4e66c989b6545b2a44` |
+| `github.com/in-toto/attestation` | v1.2.0 | `b3a6ac899861c2c28a1abd5c7ea8733fefaed6938d730e099c42671386032aeb` |
+| `github.com/cyberphone/json-canonicalization` | v0.0.0-20241213102144-19d51d7fe467 | `6821faaddedf2d78c95bb6d98b127e9e616097afd2f6bcc34389f000d13ab12d` |
+
+IMAGE_RESULTS_PLACEHOLDER
+
+## Controller wiring
+
+`konstapel controller` builds the bundle machinery only when
+`--bundle-sources-configmap` is set. **It is off by default**: without the
+flag no cache directory is created, no informer, watcher, trigger or pinner
+runs, no Secret or ConfigMap is read and no extra RBAC is used, and the
+vendored bundle is served by `LocalContent` exactly as before.
+
+### Flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--bundle-sources-configmap` | empty (off) | Name of the [central sources ConfigMap](#central-source-configuration) in the controller namespace (`POD_NAMESPACE`). Setting it enables OCI bundle content. |
+| `--bundle-cache-dir` | none; required when enabled | Absolute, writable directory for the [content cache](#safe-materialization-and-the-content-cache), owned by this process only. |
+| `--bundle-cache-capacity` | `1Gi` (the cache default) | Cache capacity as a Kubernetes quantity; it must hold at least one maximal entry. |
+| `--bundle-refresh-interval` | `30s` | How often referenced Secrets and ConfigMaps are re-read; at most `5m`. |
+
+The namespace comes from `POD_NAMESPACE`, as for the other namespaced
+features. Startup fails with a clear error when the feature is enabled without
+a namespace or cache directory, with a relative directory, an invalid name,
+capacity or interval, and when any of the other bundle flags is given without
+`--bundle-sources-configmap`. It also fails when the cache cannot be opened:
+an unwritable directory, or another process holding its `.lock`.
+
+The controller's version is set at build time from `VERSION`
+(`-ldflags -X main.version`, `scripts/build.sh`) and used for the
+[compatibility check](#compatibility). A development build without it reports
+`dev`, which is not SemVer: startup still succeeds and logs the problem, every
+OCI bundle is then a `Config` content error, and the vendored bundle is
+unaffected.
+
+### Router
+
+One `stack.Router` instance is `Options.Content` for every consumer: the
+profile, binding and assessment reconcilers and the exception admission
+webhooks.
+
+- The vendored bundle name (`konstapel-vendored`) is always served by
+  `LocalContent`, with or without the feature. Its digest is the sha256 of
+  `content/SHA256SUMS`. That name is reserved for the image's own content: a
+  source of that name in the ConfigMap is never consulted, so a profile naming
+  the vendored bundle keeps working unchanged and its digest is never
+  confused with an OCI manifest digest.
+- Every other name is resolved by `OCIContent` (the OCI manifest digest) when
+  the feature is enabled. When it is not, the result is a
+  `*targeting.ContentError` of class `Config` ("no source is configured: OCI
+  bundle sources are not enabled in this controller") that still
+  `Is(ErrContentUnavailable)`: profiles report `ContentUnavailable` as before,
+  now with the class in the message, and are not retried on a timer.
+
+### Construction
+
+When enabled, the controller builds, in this order: a
+`kubeaccess.ClientReader` over the manager's **uncached** API reader restricted
+to the controller namespace (objects are read by name with `get`); a
+`kubeaccess.Provider` (refresh interval as its object cache bound) and the
+registry client from `kubeaccess.NewClient`, with the provider as transport and
+credential source; `verify.New` over the same reader; `resolve.NewAcceptances`;
+`content.Compatibility{Controller: <version>}` with the default provider
+allowlist; the `sources.Watcher` reading the ConfigMap from a dedicated cache
+(`sources.ConfigMapCacheOptions`: that namespace, field selector
+`metadata.name=<name>`) with `ConfigMapHandler` on its informer; then the cache
+(`cache.Open`, with `OnRemove` dropping the removed digest's acceptances), the
+resolver (`Revisions` = the Watcher, `Compatible` = the compatibility check)
+and `OCIContent`. The cache is opened last, so a configuration error creates
+nothing on disk. Both reconcilers get `ValidateParameters` (it is a no-op for
+`LocalContent`, so it is set whether or not the feature is on).
+
+### Runnables and leader election
+
+| Runnable | Runs on | Why |
+| --- | --- | --- |
+| ConfigMap cache | every replica | the Watcher needs it everywhere (a cache built with per-object options does not declare this itself, so it is wrapped) |
+| Watcher | every replica, after the ConfigMap cache synced | admission webhooks resolve content on every replica; until the first sync the configuration is "not loaded yet" and only OCI content is unavailable |
+| Trigger | the leader | it feeds the profile controller (`EnqueueRequestForObject`) and the binding controller (the profile-to-bindings map) through `source.Channel`, besides their existing watches |
+| Pinner | every replica | each replica has its own cache and serves webhooks, so it pins what it may serve |
+
+If the ConfigMap cannot be listed (the RBAC is missing), the Watcher never
+starts and OCI content stays a `Config` error; nothing else waits for it.
+
+### Pins
+
+The Pinner keeps cache leases for what cluster state needs, so that content is
+not evicted while it is desired, applied or assessed. Each pass computes the
+set from cluster objects and applies set semantics per holder and owner: it
+acquires missing pins (`OCIContent.Pin`, which resolves under the current
+acceptance) and releases stale ones.
+
+| Holder | Owner | From |
+| --- | --- | --- |
+| `profile` | `profile/<name>` | every ComplianceProfile's `spec.bundle` |
+| `applied` | `binding/<binding>` | the `bundle` and `bundle-digest` annotations of the engine policies Konstapel manages (read uncached by label). Binding status records only the last resolved profile digest, not what is applied, so the applied policies are the authority. An engine API that is not served means nothing is applied. |
+| `assessment` | `run/<name>` | for every AssessmentRun that may still snapshot (no phase yet, `Pending`, `Collecting`, `Exporting`), its binding's profile `spec.bundle` |
+
+The vendored bundle is never pinned (it is not in the cache). A holder whose
+state cannot be read in a pass keeps its pins; a pin that fails (registry down,
+no source) is retried on the next pass. Passes run at startup, on every
+profile, binding and AssessmentRun event (which only kicks a coalescing
+channel) and every minute, in the Pinner's own goroutine: reconciles never
+wait for it. Leases live in memory, so a restarted process re-pins from cluster
+state on its first pass; with retained evidence this works with the registry
+down. Stopping releases every pin. A pin keeps bytes only; every use is still
+decided by `Content`.
+
+### Memo and the adoption guard
+
+**Adoption guard (TOCTOU).** Between the binding reconciler's read of content
+for rendering and its apply, trust can be revoked, the source removed or the
+entry evicted. The router implements `Confirm(ref)`: `Resolver.Confirm`, an
+in-memory check that an acceptance for exactly that name and digest exists
+under the revisions current now (nil for the vendored bundle). The binding
+reconciler adds it to `Delivery.Current`, the snapshot check `Delivery.Sync`
+runs before its first write and again before any delete, so a withdrawn
+acceptance stops the Sync as a stale snapshot: nothing new is written,
+nothing is deleted, applied policies stay, and the binding resolves again
+after a second. What remains is the time between that check and the API
+write, the same window the snapshot check itself has.
+
+**Memo.** The admission webhook and every reconcile call `Content`, which
+costs two full layer scans (about a second for the official bundle). The
+router memoizes successful OCI results per name and digest (at most 16
+entries, deep-copied on store and on every hit) and serves an entry only if
+`Confirm` passes at that moment; otherwise the entry is dropped and `Content`
+runs. Every invalidation (a source, rule, trust or compatibility change, the
+configuration becoming unavailable, an entry removed by eviction or found
+corrupt through `OnRemove`) removes or re-keys the acceptance, so the memo
+cannot serve content past an invalidation, and content for a digest is fully
+determined by its verified bytes. One difference remains by design: a memo hit
+does not re-hash the files on disk, so on-disk corruption is noticed on the
+next miss rather than on that call; the memo only ever serves the copy read
+from verified bytes. Failed and cancelled calls are never memoized or served.
+
+### What has and has not been verified
+
+Unit tests (`-race`, repeated, also with `-cpu 1`, no sleeps for ordering) in
+`internal/bundle/stack`, `internal/controller` and `cmd/konstapel` cover the
+flags and their combinations, options validation, construction failures
+(nothing on disk for a disabled or invalid configuration, a held lock, an
+unwritable directory), a development version, the router (vendored content and
+errors identical to `LocalContent`, OCI routing, the disabled `Config` error,
+the memo and its bound, deep copies, cancellation), the `OnRemove` wiring, the
+wiring added to the manager (runnables, leader semantics, the dedicated
+ConfigMap cache options, the Trigger feeding both channels, the Watcher waiting
+for its cache, parameter validators), the binding's adoption guard, the Pinner
+(set semantics, unknown holders, retries, restart, events, release on stop),
+pins against a real cache under capacity pressure, and the cluster-state pin
+set. End-to-end tests run the real stack (the Watcher over a fake API server,
+the real verifier and cache, the Cosign-signed fixture bundle behind a fake
+registry) under the real profile and binding reconcilers: an OCI profile
+resolves and renders, trust revocation keeps the applied policy and reports
+`ContentUnavailable`, recovery creates no duplicate, a revocation between the
+render and the write is refused, and pins survive a restart with the registry
+down. Not verified: anything in a cluster, the chart, the real registry client
+against a real registry from the controller (the registry and kubeaccess
+packages' own suites cover it), and the field-selected watch against a real API
+server.
 
 ## Central configuration and watches
 
@@ -2088,8 +2254,8 @@ the image build could not exercise it.
 the [central source configuration](#central-source-configuration). Its
 `Watcher` implements the resolver's `Revisions` and keeps them current; the
 profile and binding reconcilers report the outcome. It is built from injected
-readers and is **not wired into the controller yet**: nothing here is linked
-into the shipped binaries (see [what stage 2 wires](#what-the-manager-wiring-adds)).
+readers; the controller builds it when bundle sources are enabled (see
+[Controller wiring](#controller-wiring)).
 
 ### Atomic revisions
 
@@ -2278,16 +2444,8 @@ and no parameter check on profiles.
 
 ### What the manager wiring adds
 
-Stage 2b, not done here: build the cache, `kubeaccess.Provider` and registry
-client, `verify.Verifier`, `resolve.Acceptances` and `Resolver`, and
-`content.OCIContent`; build `sources.New` with the single-object ConfigMap
-cache (`cache.New(cfg, sources.ConfigMapCacheOptions(ns, name))`, added to the
-manager, `ConfigMapHandler` on its ConfigMap informer), the uncached object
-reader, the provider as `Transport` and `Compatibility.Revision`; add the
-`Watcher` and its `Trigger` (two channels, wired as `source.Channel` into the
-profile and binding controllers); set `ValidateParameters` on both
-reconcilers; add the flags, the chart RBAC above, the cache volume and the
-`go-notices` override; and run live acceptance.
+Done; see [Controller wiring](#controller-wiring). The chart RBAC above, the
+cache volume and live acceptance are stage 2b-ii.
 
 ### What has and has not been verified
 
@@ -2416,9 +2574,10 @@ devbox run -- go run ./cmd/bundlerelease verify -name <name> -commit <sha>
 
 `cmd/bundlerelease` is a build tool; it is not part of the controller image,
 and the packages it uses for publication, signing and release verification
-(`internal/bundle/publish`, `internal/bundle/sign`, `internal/bundle/release`,
-`internal/bundle/registry`, `internal/bundle/verify`) are not linked into the
-shipped binaries. `internal/bundle/sign` is the only code that executes Cosign.
+(`internal/bundle/publish`, `internal/bundle/sign`, `internal/bundle/release`)
+are not linked into the shipped binaries; the controller links only the
+consumer side (`internal/bundle/registry`, `internal/bundle/verify` and the
+packages in [Controller wiring](#controller-wiring)). `internal/bundle/sign` is the only code that executes Cosign.
 
 ### Signing and provenance of the published digest
 
