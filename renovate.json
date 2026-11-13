@@ -166,6 +166,59 @@
     },
     {
       "matchManagers": [
+        "gomod",
+        "devbox"
+      ],
+      "matchDepNames": [
+        "go",
+        "golang"
+      ],
+      "description": "Temporary: Devbox's package index stops at Go 1.27.3, so hold the go.mod directive and the devbox.json pin there (they already share the Go toolchain group). Remove together with the golang.org/x/crypto rule when Devbox indexes Go 1.27.4",
+      "allowedVersions": "<1.27.4"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "golang.org/x/crypto"
+      ],
+      "description": "Temporary: x/crypto v0.59.0 imports crypto/mldsa, absent from Go 1.27.3. Remove with the Go toolchain hold when Devbox indexes Go 1.27.4, then bump toolchain and x/crypto in one PR",
+      "allowedVersions": "<0.59.0"
+    },
+    {
+      "matchDepNames": [
+        "ghcr.io/sigstore/rekor/rekor-server"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "description": "Upstream publishes bogus v99.x test tags; follow only the real v1 release series",
+      "allowedVersions": "/^v1\\./"
+    },
+    {
+      "matchDepNames": [
+        "docker.io/library/postgres"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "description": "The Sigstore test stack keeps PGDATA on tmpfs and was verified on PostgreSQL 17 (18 changed the data directory layout); raising the major requires re-running the opt-in stack suite",
+      "allowedVersions": "/^17\\..*-alpine$/"
+    },
+    {
+      "matchDepNames": [
+        "ghcr.io/sigstore/scaffolding/trillian_log_server",
+        "ghcr.io/sigstore/scaffolding/trillian_log_signer"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "description": "Image tags must equal the github.com/google/trillian version in go.sum (task deps:check), but that module is transitive and absent from go.mod so Renovate cannot group it; bump module, both images and run the stack suite manually",
+      "enabled": false
+    },
+    {
+      "matchManagers": [
         "github-actions"
       ],
       "groupName": "GitHub Actions",

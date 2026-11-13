@@ -201,6 +201,37 @@ check. Runtime or C2P updates also require all `acceptance-live (<group>)` and
 evidence but does not replace the required CI gate. The `checks` job
 alone does not prove live compatibility.
 
+### Renovate rules for the Sigstore test stack
+
+The `KONSTAPEL_SIGSTORE_*_IMAGE` pins in `scripts/runtime.env` have extra rules
+in `renovate.json`. Patch and minor updates of nginx, PostgreSQL 17, Fulcio, the
+timestamp server and Rekor remain allowed.
+
+- Rekor (`ghcr.io/sigstore/rekor/rekor-server`) is limited to `v1.x`; upstream
+  publishes bogus `v99.x` test tags.
+- PostgreSQL (`docker.io/library/postgres`) is limited to `17.x-alpine`. The
+  stack keeps PGDATA on tmpfs and was verified on 17; PostgreSQL 18 changed the
+  data directory layout. To raise the major, change the pin and the
+  `allowedVersions` rule together and re-run the opt-in stack suite
+  (`KONSTAPEL_SIGSTORE_STACK=1`, registry-compat).
+- The Trillian log server and signer images have updates disabled. `deps:check`
+  requires their tag to equal the `github.com/google/trillian` version in
+  `go.sum`, because the suite loads that module's PostgreSQL schema. The module
+  is transitive (not in `go.mod`), so Renovate cannot group it with the images.
+  To bump: update the module version (for example `go get
+  github.com/google/trillian@<v>` or via the dependency that requires it), set
+  both image tags and digests to that version, run `task deps:check`, and run
+  the opt-in stack suite.
+
+### Temporary Go toolchain holds
+
+Devbox's package index currently stops at Go 1.27.3. Two rules in `renovate.json`
+keep Renovate from opening unusable PRs: the `go.mod` directive and the
+`devbox.json` `go@` pin (already one "Go toolchain" group) are held below 1.27.4,
+and `golang.org/x/crypto` is held below 0.59.0 because that release imports
+`crypto/mldsa`, which Go 1.27.3 lacks. Remove these two rules when Devbox
+indexes Go 1.27.4 and bump toolchain + x/crypto in one PR.
+
 Renovate excludes vendored content, historical evidence, and OpenSpec artifacts.
 Refresh policies, mappings, and NIST content through their reviewed content-update
 workflow, with new provenance/checksums and relevant assessments. Do not rewrite
