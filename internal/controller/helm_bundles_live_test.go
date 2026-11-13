@@ -203,7 +203,7 @@ func startOBRegistry(t *testing.T, l *live) obRegistry {
 			t.Fatal(err)
 		}
 	}
-	if out, err := exec.Command("docker", "run", "-d", "--name", r.name, "-p", "127.0.0.1::5000", "-v", dir+":/certs:ro",
+	if out, err := exec.Command("docker", "run", "-d", "--name", r.name, "--label", liveContainerLabel(), "-p", "127.0.0.1::5000", "-v", dir+":/certs:ro",
 		"-e", "REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt", "-e", "REGISTRY_HTTP_TLS_KEY=/certs/server.key",
 		"-e", "REGISTRY_AUTH=htpasswd", "-e", "REGISTRY_AUTH_HTPASSWD_REALM=konstapel-live", "-e", "REGISTRY_AUTH_HTPASSWD_PATH=/certs/htpasswd",
 		image).CombinedOutput(); err != nil {

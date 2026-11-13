@@ -54,7 +54,7 @@ func startS3(t *testing.T, l *live) *s3store.Publisher {
 	}
 	secret := func() string { b := make([]byte, 12); _, _ = rand.Read(b); return hex.EncodeToString(b) }
 	access, key, name := secret(), secret(), "konstapel-live-s3-"+secret()[:8]
-	if out, err := exec.Command("docker", "run", "-d", "--name", name, "-p", "127.0.0.1::9000",
+	if out, err := exec.Command("docker", "run", "-d", "--name", name, "--label", liveContainerLabel(), "-p", "127.0.0.1::9000",
 		"-e", "RUSTFS_ACCESS_KEY="+access, "-e", "RUSTFS_SECRET_KEY="+key, image, "/data").CombinedOutput(); err != nil {
 		t.Fatalf("start S3 service: %v %s", err, out)
 	}

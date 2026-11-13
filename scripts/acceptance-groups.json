@@ -81,5 +81,14 @@
       "TestLiveHelmDurableRecovery",
       "TestLiveHelmAvailability"
     ]
+  },
+  "bundles": {
+    "core": false,
+    "exceptionAdmission": false,
+    "release": false,
+    "goTests": [
+      "TestLiveBundlesOfficial",
+      "TestLiveBundlesOrganization"
+    ]
   }
 }
