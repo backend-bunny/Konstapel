@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -235,7 +236,7 @@ func (rc *runCluster) report(at time.Time) {
 	if len(list.Items) != 1 {
 		rc.t.Fatalf("want one engine policy, have %d", len(list.Items))
 	}
-	rc.reportFor(list.Items[0].GetName(), at)
+	rc.reportFor(at, list.Items[0].GetName())
 }
 
 // finish advances the run past its collection timeout until it is done.
@@ -285,22 +286,24 @@ func (rc *runCluster) pkg(run *v1alpha1.AssessmentRun) (string, publication.Desc
 	return dir, d
 }
 
-// requireBundleExport fails unless the package is an assessment exported
-// from exactly the frozen bundle ref, verifiable offline.
+// requireBundleExport fails unless the package is an assessment whose
+// applied content includes the frozen bundle ref, verifiable offline; it
+// returns ref's packaged frozen copy.
 func requireBundleExport(t *testing.T, dir string, d publication.Descriptor, ref v1alpha1.BundleReference) *bundle.Frozen {
 	t.Helper()
 	if d.PackageKind != publication.KindAssessment {
 		t.Fatalf("package %s: %+v", d.PackageKind, d.Diagnostic)
 	}
-	f, err := bundle.ReadFrozen(dir)
+	c := appliedRevision(t, d, ref)
+	f, err := bundle.ReadFrozen(filepath.Join(dir, filepath.FromSlash(c.Path)))
 	if err != nil {
 		t.Fatalf("package does not carry the frozen bundle: %v", err)
 	}
 	if f.Identity.Name != ref.Name || f.Identity.Digests.OCI != ref.Digest {
 		t.Fatalf("packaged %s@%s, want %s@%s", f.Identity.Name, f.Identity.Digests.OCI, ref.Name, ref.Digest)
 	}
-	if c := d.Revisions.Content; c == nil || !c.Frozen || c.ManifestDigest != ref.Digest || c.SourceRule == "" || c.TrustRevision == "" || c.VerifiedAt == nil {
-		t.Fatalf("content revision %+v", d.Revisions.Content)
+	if !c.Frozen || c.SourceRule == "" || c.TrustRevision == "" || c.VerifiedAt == nil {
+		t.Fatalf("content revision %+v", c)
 	}
 	if err := collector.VerifyPackage(dir); err != nil {
 		t.Fatal(err)
@@ -319,8 +322,24 @@ func requireBundleExport(t *testing.T, dir string, d publication.Descriptor, ref
 	return f
 }
 
+// appliedRevision is ref's entry in the descriptor's applied content.
+func appliedRevision(t *testing.T, d publication.Descriptor, ref v1alpha1.BundleReference) publication.ContentRevision {
+	t.Helper()
+	rc := d.Revisions.Content
+	if rc == nil {
+		t.Fatal("the descriptor records no content")
+	}
+	for _, a := range rc.Applied {
+		if a.Bundle == ref.Name && a.ManifestDigest == ref.Digest {
+			return a
+		}
+	}
+	t.Fatalf("%s@%s is not applied content: %+v", ref.Name, ref.Digest, rc)
+	return publication.ContentRevision{}
+}
+
 // requireCrafted fails unless the package's OSCAL is the crafted bundle's.
-func requireCrafted(t *testing.T, dir string) {
+func requireCrafted(t *testing.T, dir string, ref v1alpha1.BundleReference) {
 	t.Helper()
 	read := func(p string) string {
 		b, err := os.ReadFile(filepath.Join(dir, p))
@@ -333,12 +352,12 @@ func requireCrafted(t *testing.T, dir string) {
 	if !strings.Contains(ssp, `"`+bundletest.Statement+`"`) || strings.Contains(ssp, `"`+bundletest.VendoredStatement+`"`) || !strings.Contains(ar, bundletest.Rationale) {
 		t.Fatal("the exported mapping is not the bundle's (vendored content substituted)")
 	}
-	if !strings.Contains(read(assessment.NIST+"NIST_SP-800-53_rev5_catalog.json"), bundletest.CatalogTitle) {
+	if !strings.Contains(read(publication.ContentPath(ref.Digest)+"/"+assessment.NIST+"NIST_SP-800-53_rev5_catalog.json"), bundletest.CatalogTitle) {
 		t.Fatal("the packaged catalog is not the bundle's")
 	}
 }
 
-func requireDiagnostic(t *testing.T, rc *runCluster, run *v1alpha1.AssessmentRun, reason, detail string) {
+func requireDiagnostic(t *testing.T, rc *runCluster, run *v1alpha1.AssessmentRun, reason, detail string) publication.Descriptor {
 	t.Helper()
 	dir, d := rc.pkg(run)
 	if d.PackageKind != publication.KindDiagnostic || d.Diagnostic == nil || d.Diagnostic.Reason != reason || !strings.Contains(d.Diagnostic.Message, detail) {
@@ -347,14 +366,18 @@ func requireDiagnostic(t *testing.T, rc *runCluster, run *v1alpha1.AssessmentRun
 	if run.Status.Summary == nil || run.Status.Summary.Export != v1alpha1.ExportState(publication.ExportDiagnostic) {
 		t.Fatalf("run summary %+v", run.Status.Summary)
 	}
-	for _, p := range []string{"assessment-results.json", "content", bundle.FrozenDir} {
+	for _, p := range []string{"assessment-results.json", "content", bundle.FrozenDir, "bundles"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); !os.IsNotExist(err) {
 			t.Fatalf("diagnostic package contains %s", p)
 		}
 	}
-	if c := d.Revisions.Content; c == nil || c.Bundle != rc.ref.Name || c.ManifestDigest != rc.ref.Digest {
-		t.Fatalf("diagnostic does not identify the bundle: %+v", c)
+	c := d.Revisions.Content
+	if c == nil || !slices.ContainsFunc(c.Applied, func(a publication.ContentRevision) bool {
+		return a.Bundle == rc.ref.Name && a.ManifestDigest == rc.ref.Digest && !a.Frozen
+	}) {
+		t.Fatalf("diagnostic does not identify the applied bundle: %+v", c)
 	}
+	return d
 }
 
 // craftedWorld is a real cache holding the crafted bundle, served by the
@@ -461,7 +484,7 @@ func TestOCIRunExportsFrozenBundle(t *testing.T) {
 				run = rc.finish(run.Name)
 				dir, d := rc.pkg(run)
 				requireBundleExport(t, dir, d, w.ref())
-				requireCrafted(t, dir)
+				requireCrafted(t, dir, w.ref())
 				// Evidence keeps its own meaning: a live content change
 				// during collection leaves the observation unresolved (it
 				// is never attributed across it); a change after closure
@@ -519,7 +542,7 @@ func TestOCIRunUnfrozenContentIsDiagnostic(t *testing.T) {
 		run = rc.finish(run.Name)
 		dir, d := rc.pkg(run)
 		requireBundleExport(t, dir, d, w.ref())
-		requireCrafted(t, dir)
+		requireCrafted(t, dir, w.ref())
 	})
 }
 
@@ -545,7 +568,7 @@ func TestOCIRunLostFrozenContentIsDiagnostic(t *testing.T) {
 			rc := newRunCluster(t, w.router(), w.ref())
 			rc.deliver()
 			run := rc.start()
-			if err := damage(filepath.Join(rc.staging, string(run.UID), "frozen-bundle")); err != nil {
+			if err := damage(filepath.Join(rc.staging, string(run.UID), "frozen-bundles", strings.TrimPrefix(w.ref().Digest, "sha256:"))); err != nil {
 				t.Fatal(err)
 			}
 			run = rc.finish(run.Name)
@@ -589,7 +612,7 @@ func TestOCIRunSignedBundleSurvivesRevocationAndLoss(t *testing.T) {
 			dir, d := rc.pkg(run)
 			f := requireBundleExport(t, dir, d, w.Ref())
 			if f.Identity.Receipt.Signer.Kind != bundle.SignerPublicKey || f.Identity.Receipt.Signer.KeyFingerprint != w.Fix.FPOrg ||
-				f.Identity.Receipt.Provenance.Repository == "" || d.Revisions.Content.TrustRevision != f.Identity.Receipt.TrustRevision {
+				f.Identity.Receipt.Provenance.Repository == "" || appliedRevision(t, d, w.Ref()).TrustRevision != f.Identity.Receipt.TrustRevision {
 				t.Fatalf("the frozen verification context is not the signed fixture's: %+v", f.Identity.Receipt)
 			}
 		})

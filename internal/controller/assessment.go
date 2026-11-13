@@ -227,9 +227,20 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 }
 
 // snapshotContent is snapshot that also returns the bundle the binding's
-// profile selected when it was read (nil without a profile), which is the
-// content a run of the capture must be exported from even when nothing in
-// it resolved.
+// profile selected when it was read (nil without a profile): the desired
+// content a run records beside the content its contributions were applied
+// from, and the content its plan names when nothing was applied.
+//
+// Subjects are the desired contributions whose engine policies are
+// delivered and verify against the desired content, plus every other
+// engine policy of the binding that is still applied (a previous revision
+// enforcing while an update rolls out, or after a failed update): its
+// contribution is read from the policy (targeting.AppliedEvidence) and
+// verified against the content of the bundle it names when that content
+// resolves. Applied content that does not resolve keeps its subjects
+// unverified and is recorded as a limitation; a run then cannot freeze it
+// and reports its package export-unavailable instead of substituting other
+// content.
 func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (_ collector.CaptureV2, _ []string, _ time.Duration, selected *v1alpha1.BundleReference, _ error) {
 	maxAge := 2 * time.Hour
 	if b.Spec.Assessment != nil && b.Spec.Assessment.MaxEvidenceAge != "" {
@@ -304,6 +315,10 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 		contributions = append(contributions, br.Contributions...)
 	}
 	sources := collector.SourcesOf(slices.Collect(maps.Values(content))...)
+	desired := map[string]bool{}
+	for _, s := range subjects {
+		desired[s.EnginePolicy] = true
+	}
 	kept := subjects[:0]
 	unusable := map[string]string{}
 	var used []targeting.Contribution
@@ -332,6 +347,16 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 		kept = append(kept, s)
 	}
 	subjects = kept
+	applied, appliedUsed, appliedLimits, err := r.appliedSubjects(ctx, rendered, desired, in.Namespaces, unusable)
+	if err != nil {
+		return collector.CaptureV2{}, nil, 0, nil, err
+	}
+	limits = append(limits, appliedLimits...)
+	if len(applied) > 0 {
+		subjects = append(subjects, applied...)
+		targeting.SortSubjects(subjects)
+		used = append(used, appliedUsed...)
+	}
 	for _, p := range sortedKeys(unusable) {
 		msg := "engine policy " + p + " is not delivered"
 		if unusable[p] == "EnginePolicyDrift" {
@@ -406,6 +431,61 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 	capture.Reports = reports
 	capture.Contributions = used
 	return capture, limits, maxAge, selected, nil
+}
+
+// appliedSubjects derives the subjects of the binding's applied engine
+// policies that are not desired subjects (desired names every engine policy
+// a desired subject expects, delivered or not). Each policy's contribution
+// is read from the policy and, when the bundle it names resolves, verified
+// against that bundle's source; a policy that does not verify, or does not
+// identify its contribution, is unusable (EnginePolicyDrift) and never
+// assessed. A bundle that does not resolve leaves its policies' subjects
+// unverified with a limitation: their run reports the content unavailable.
+func (r *AssessmentReconciler) appliedSubjects(ctx context.Context, rendered []assessment.Object, desired map[string]bool, namespaces []targeting.Namespace,
+	unusable map[string]string) ([]targeting.EvidenceSubject, []targeting.Contribution, []string, error) {
+	var subjects []targeting.EvidenceSubject
+	var used []targeting.Contribution
+	var limits []string
+	resolved := map[v1alpha1.BundleReference]*targeting.Content{}
+	failed := map[v1alpha1.BundleReference]bool{}
+	for _, p := range rendered {
+		name := assessment.Str(assessment.At(p, "metadata", "name"))
+		if desired[name] {
+			continue
+		}
+		c, ss, err := targeting.AppliedEvidence(p, namespaces)
+		if err != nil || c.Cluster != r.Cluster {
+			unusable[name] = "EnginePolicyDrift"
+			continue
+		}
+		ref := v1alpha1.BundleReference{Name: c.BundleName, Digest: c.BundleDigest}
+		bc, ok := resolved[ref]
+		if !ok && !failed[ref] {
+			bc, err = r.Content.Content(ctx, ref)
+			switch {
+			case err == nil:
+				resolved[ref] = bc
+			case ctx.Err() != nil:
+				return nil, nil, nil, ctx.Err()
+			default:
+				failed[ref] = true
+				limits = append(limits, fmt.Sprintf("applied bundle %s@%s does not resolve, so its engine policies cannot be verified and a run cannot freeze it: %s", ref.Name, ref.Digest, contentMessage(err)))
+			}
+		}
+		if bc != nil {
+			src, ok := bc.Policies[c.Policy]
+			if !ok || len(ss) > 0 && src.SourceDigest != ss[0].SourceDigest || collector.VerifyEnginePolicy(p, c, src) != nil {
+				unusable[name] = "EnginePolicyDrift"
+				continue
+			}
+		}
+		if len(ss) == 0 {
+			continue // its selector matches no namespace now
+		}
+		subjects = append(subjects, ss...)
+		used = append(used, c)
+	}
+	return subjects, used, limits, nil
 }
 
 // evaluate builds the current-evidence status for b at time now.

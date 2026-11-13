@@ -10,7 +10,8 @@ resolves it centrally and verifies it before use.
 > is released, signed and verifiable. The controller resolves, verifies and
 > caches bundles by digest and serves them to profiles when central bundle
 > sources are enabled (off by default; see [charts](charts.md)); assessment
-> runs of an OCI bundle export from the bundle's own frozen content. A
+> runs export from the frozen content of the bundles their policies were
+> applied from, and record the desired bundle and any difference. A
 > reproducible end-to-end example is the
 > [Audit walkthrough](integration/bundle-audit-walkthrough.md). Remaining work
 > is tracked in the `add-policy-bundle-distribution` OpenSpec change; live
@@ -2552,69 +2553,109 @@ decided by `Content`.
 
 ### Assessment runs freeze their bundle
 
-An assessment run of an OCI bundle never exports from the image's vendored
-content. When the run starts, the run reconciler determines the bundle its
-capture was resolved against (the one every subject and contribution names,
-or the profile's selection when nothing resolved; more than one is a
-mismatch) and calls `Router.Freeze`:
+An assessment run's content is the set of bundles its contributions were
+*applied* from, keyed by manifest digest. The applied bundle of a
+contribution is the `bundle` and `bundle-digest` annotation of its engine
+policy: every engine policy of the binding that is delivered and verifies
+is assessed, including a previous revision still enforcing while an update
+rolls out (see the
+[assessment contract](integration/assessment-contract.md#capture-revisions-correlation-and-engine-limits)).
+The profile's selection, the *desired* bundle, is recorded separately; it is
+the run's content only when nothing was applied (the plan then names every
+mapping of it). Desired or vendored content is never substituted for applied
+content.
 
-- the vendored bundle is reported as vendored and not copied; the run exports
-  from the runtime's content root exactly as before (vendored packages are
-  unchanged);
+When the run starts, the run reconciler freezes each OCI bundle of the set
+with `Router.Freeze`:
+
+- the vendored bundle is reported as vendored and not copied. A run whose
+  applied and desired content is only the vendored bundle stages nothing
+  and exports from the runtime's content root exactly as before (vendored
+  packages are unchanged). A vendored member of any other run is packaged
+  from the runtime's content root when its digest is this image's, and is
+  `ContentUnavailable` (at start) or `ContentLost` (at export) otherwise;
 - any other name is resolved exactly as `Content` resolves it (current source
   rule, trust and compatibility) under an `assessment` lease
   (owner `assessment-freeze/<n>`), and `OCIContent.Freeze` copies the
   digest-checked manifest and layer out of the cache with
-  `bundle.WriteFrozen`. The lease is released before `Freeze` returns.
+  `bundle.WriteFrozen`. The lease is held from resolution until the copy is
+  written, so the entry cannot be evicted mid-freeze, and is released before
+  `Freeze` returns. Applied bundles are also pinned while applied (the
+  `applied` holder of the [pins](#pins)).
 
-The frozen directory in the run's staging area holds `bundle/manifest.json`,
-`bundle/layer.tar.gz`, `bundle/bundle.json`, `bundle/identity.json`
-(`bundle.FrozenIdentity`: name, version, the four digests, source,
-compatibility verdict and the verification receipt the content was resolved
-under) and the layer's payload. `bundle.ReadFrozen` re-derives the layer,
-descriptor and every `content/` file from the manifest digest and rejects any
-difference, missing or extra file.
+Each copy is staged at `frozen-bundles/<hex digest>/` in the run's staging
+area and holds `bundle/manifest.json`, `bundle/layer.tar.gz`,
+`bundle/bundle.json`, `bundle/identity.json` (`bundle.FrozenIdentity`: name,
+version, the four digests, source, compatibility verdict and the verification
+receipt the content was resolved under) and the layer's payload.
+`bundle.ReadFrozen` re-derives the layer, descriptor and every `content/`
+file from the manifest digest and rejects any difference, missing or extra
+file. The staged `content.json` (version 2) records the desired bundle and
+every member with its failure, if any; a record of another version is
+`ContentLost`.
 
-Export and every replay of an interrupted export read only that copy, after
-`ReadFrozen`. The OSCAL is derived from the bundle's own component
-definitions (its declared OSCAL entry points), policies, catalog and profile;
-with nothing in scope, the plan names every mapping of the bundle, never the
-vendored first-loop check. The bundle's OSCAL schemas must be byte-identical
-to the controller's, which validate every input and output. The package
-carries the bundle's `content/` and the `bundle/` proofs, the assessment
-results name the bundle (`bundle-name`, `bundle-version`, `bundle-digest`,
-`bundle-content-digest` and a link to `bundle/identity.json`), and the
-descriptor records `revisions.content` (see the
+Export and every replay of an interrupted export read only those copies,
+after `ReadFrozen`. Each bundle yields its own OSCAL result, derived from its
+own component definitions (its declared OSCAL entry points), policies,
+catalog and profile for the observations of the contributions applied from
+it; the plan joins the bundles' plans. Overlapping old and new revisions of a
+policy in one run are therefore attributed to their own bundle identities and
+never collapsed. The bundles' OSCAL schemas must be byte-identical to the
+controller's, which validate every input and output. The package carries
+each bundle's `content/` and `bundle/` proofs under `bundles/<hex digest>/`
+(one copy of content per applied bundle; the official bundle's content is a
+few hundred kilobytes), the controller's schemas at `content/schemas/`, and
+results that name each bundle (`bundle-name`, `bundle-version`,
+`bundle-digest`, `bundle-content-digest`, `mapping-sha256` on each result,
+and links to each `identity.json`). The descriptor records
+`revisions.content` with `applied`, `desired` and the explicit
+`differences` (see the
 [assessment contract](integration/assessment-contract.md#package-export)).
-Cache eviction, registry loss or trust revocation after the run started do
-not affect its package; the live change still affects evidence collected
-afterwards (the configuration change is recorded and the observation is not
-attributed across it).
+`collector.VerifyPackage` and `s3store.ValidatePackage` verify every packaged
+bundle. Cache eviction, registry loss or trust revocation after the run
+started do not affect its package; the live change still affects evidence
+collected afterwards (the configuration change is recorded and the
+observation is not attributed across it).
 
-Content that cannot be frozen at start (no source configured, untrusted,
-incompatible, missing from cache and registry) is retried once more when the
-collection window closes, always for the bundle recorded at start; if it is
-still unavailable the package is a `Diagnostic` with reason
-`ContentUnavailable` and the classified detail. A frozen copy lost or altered
-before export is `ContentLost` and is never re-resolved. A capture naming
-another bundle is `ContentMismatch`, and a bundle the controller cannot export
-(different OSCAL schemas, no component definition, a check without a mapping)
-is `ContentIncompatible` or `ExportFailed`. None of them contains OSCAL.
+Applied content that cannot be frozen at start (no source configured,
+untrusted, incompatible, missing from cache and registry) is retried once
+more when the collection window closes, always for the members recorded at
+start; if any applied bundle is still unavailable, the package is a
+`Diagnostic` with reason `ContentUnavailable` and each failed bundle's
+classified detail, even when the desired bundle is available. A frozen copy
+lost or altered before export is `ContentLost` and is never re-resolved. A
+capture naming a bundle the run did not freeze is `ContentMismatch`, and a
+bundle the controller cannot export (different OSCAL schemas, no component
+definition, a check without a mapping) is `ContentIncompatible` or
+`ExportFailed`. None of them contains OSCAL.
 
-Verified by `internal/bundle/stack/assessment_export_test.go`: the real
-binding, assessment and run reconcilers with a crafted bundle whose catalog
-and mapping differ from the vendored content (stored in a real cache, served
-by the real `OCIContent` and router), with eviction, trust revocation, both,
-and a replayed export after each; the Cosign-signed fixture through the
-complete stack with trust revoked and with cache and registry lost; every
-unfrozen-content class; and lost or edited frozen copies. Removing the frozen
-path (exporting from the vendored root) fails every one of these tests.
+Verified by `internal/bundle/stack/assessment_export_test.go` and
+`internal/bundle/stack/applied_content_test.go`: the real binding, assessment
+and run reconcilers over the complete stack with the signed revisions A, B
+(same key, tightened rules) and C (rotated key). An update A→B while A
+remains applied packages and exports A and records B as desired with both
+differences, after cache eviction with registry loss and after trust
+revocation, with and without a replayed export; unavailable A (evicted with
+the registry down at start and closure, A alone lost from the registry while
+B resolves, A untrusted while C is desired and trusted) is a
+`ContentUnavailable` diagnostic, and A restored before closure is exported;
+overlapping A and B policies are both frozen and packaged, with one result
+per bundle, and replay after cache and registry loss; a removed or edited
+copy of either is `ContentLost`; vendored runs are unchanged, and a vendored
+policy still applied while the profile moved to an OCI bundle exports the
+vendored content. The crafted bundle whose catalog and mapping differ from the
+vendored content covers eviction, revocation, every unfrozen-content class
+and lost or edited copies. `internal/bundle/content`
+`TestFreezeLeasesEntryUntilCopied` checks the freeze lease. Freezing the
+desired instead of the applied bundle, collapsing overlapping revisions,
+substituting the desired bundle or dropping a failed member, and releasing the
+freeze lease before copying each fail these tests.
 
-Not covered here: the run records the bundle its capture resolved (the
-desired profile's), and the applied engine policies' bundle digests remain in
-the capture's engine policies; there is no dedicated test of a run whose
-applied bundle differs from the desired one. Retained signature and
-attestation bytes are not packaged; the receipt records their digests.
+Not covered: retained signature and attestation bytes are not packaged; the
+receipt records their digests. A desired bundle's policy that is delivered
+but never becomes engine-ready is assessed as an applied contribution
+(missing evidence) beside the revision still enforcing. The generated
+context SSP imports only the first bundle's profile.
 
 ### Memo and the adoption guard
 
@@ -2977,8 +3018,9 @@ is unit-tested in `internal/bundle/content`); keyless signatures in the
 cluster (the fixture is public-key signed; the
 [Audit walkthrough](integration/bundle-audit-walkthrough.md) does run the
 official keyless bundle in a cluster, by hand); and bearer-token registries.
-Assessment export of an OCI-bundle run uses the run's frozen bundle content,
-not the image's vendored tree (see
+Assessment export of an OCI-bundle run uses the frozen content of each
+bundle its contributions were applied from, not the image's vendored tree
+(see
 [Assessment runs freeze their bundle](#assessment-runs-freeze-their-bundle)).
 
 ## Create and package a bundle

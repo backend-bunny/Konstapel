@@ -144,13 +144,27 @@ Kubernetes 1.36 or later; the current acceptance node image is pinned in
 - the run reference (cluster ID, binding UID, run UID)
 - the package kind: `Assessment` or `Diagnostic`
 - the frozen scope and its SHA-256
-- the binding configuration, enforcement, and mapping revisions, and for a run
-  of an OCI bundle `revisions.content`: the bundle name and manifest digest,
-  whether its frozen content is packaged (`frozen`, required for an
-  assessment package), and when it was frozen its version, content and archive
-  digests, source revision, and the source rule and trust revisions and time
-  of the verification it was resolved under. Vendored runs omit it, so their
-  descriptors are unchanged
+- the binding configuration, enforcement, and mapping revisions, and, unless
+  the run's content was only the image's vendored bundle (applied and
+  desired), `revisions.content`:
+  - `applied`: every bundle a contribution assessed by the run was applied
+    from (the bundle and bundle-digest annotations of its engine policies),
+    sorted by manifest digest. Each entry has the bundle name and manifest
+    digest (for the vendored bundle the sha256 of its `content/SHA256SUMS`,
+    with `vendored: true`), whether its content is packaged (`frozen`, with
+    its package `path` `bundles/<hex digest>`; required for every applied
+    bundle of an assessment package), and for frozen OCI content its version,
+    content and archive digests, source revision, and the source rule and
+    trust revisions and time of the verification it was resolved under;
+  - `desired`: the bundle the binding's profile selected when the run
+    started. It is packaged only when nothing was applied (the bundle the
+    plan names);
+  - `differences`: `DesiredNotApplied` for a desired bundle no assessed
+    contribution was applied from, and `AppliedNotDesired` for every applied
+    bundle that is not the desired one. They are derived from `applied` and
+    `desired`, and `Validate` rejects any other value.
+
+  Vendored runs omit `revisions.content`, so their descriptors are unchanged
 - the capture window
 - evidence counts, and outcome counts kept separately
 - the producer and its validation checks
@@ -503,6 +517,23 @@ This is the comparison delivery uses to decide a policy is current.
 - At runtime, a live engine policy that differs from the render of the
   verified content (drift, for example a hand edit) yields no evidence. It
   counts as stale scope `EnginePolicyDrift` until delivery repairs it.
+- **Applied contributions.** Subjects are the desired contributions whose
+  engine policies are delivered and verify, plus every other engine policy
+  of the binding that is still applied (a previous revision enforcing while
+  an update rolls out, or after a failed update or revocation).
+  `targeting.AppliedEvidence` reads such a policy's contribution from its
+  labels, annotations and namespace selector (binding generation and
+  exception settings are not recorded on engine policies and stay empty),
+  and its subjects are the namespaces its own selector matches now. It is
+  verified like any other policy against the content of the bundle it names;
+  one that does not verify, or does not identify its contribution, is
+  `EnginePolicyDrift`. When that bundle does not resolve under current trust,
+  its subjects stay unverified with a limitation, and a run cannot freeze
+  the bundle, so its package is a `ContentUnavailable` diagnostic. The
+  existing attribution rules are unchanged: any stale scope of the binding
+  observed during collection (for example a desired policy not yet
+  delivered) still records a configuration change, so its observations are
+  `Unresolved` rather than attributed.
 - In packages, `collector.VerifyPackage` rebuilds the sources from the
   packaged `content/`: `content/SHA256SUMS` must hash to every contribution's
   pinned bundle digest, and every listed file must match its sum. Export runs
@@ -510,11 +541,18 @@ This is the comparison delivery uses to decide a policy is current.
   `Diagnostic` package. A changed policy expression or source digest
   therefore cannot be legitimized by recomputing the capture's or the
   descriptor's own hashes.
-- A package of an OCI bundle run carries the frozen bundle instead:
-  `bundle/manifest.json` must hash to every subject's and contribution's
-  bundle digest, and the layer it names must unpack to exactly the packaged
-  `content/` files (`bundle.ReadFrozen`); the policy sources come from that
-  layer.
+- A package with a content set carries one directory per bundle instead,
+  `bundles/<hex of the manifest digest>/`: an OCI bundle's frozen copy
+  (`bundle/manifest.json` must hash to the directory's digest, and the layer
+  it names must unpack to exactly the packaged `content/` files,
+  `bundle.ReadFrozen`), or the vendored `content/` tree, whose `SHA256SUMS`
+  must hash to the directory's digest. Every subject and contribution must
+  name a packaged bundle and every packaged bundle must be named by one
+  (except the desired bundle alone when nothing was applied); the policy
+  sources come from those bundles. `collector.VerifyContent` (run by export
+  and by `s3store.ValidatePackage`) checks that exactly the descriptor's
+  packaged entries are present and that each frozen identity is the recorded
+  one.
 - Limitation: a verifier cannot recompute `EnforcementRevision` from a
   recorded contribution, because the contribution does not carry the binding
   enforcement epoch. The revision is bound through the engine policy name and
@@ -543,16 +581,33 @@ This is the comparison delivery uses to decide a policy is current.
   becomes `Diagnostic` with reason `ExportFailed` and the error message.
   Evidence completeness and outcome counts are recorded unchanged: export
   state is separate from evidence.
-- **OCI bundle runs.** The run's bundle is frozen when the run starts and
-  export (and any replay) uses only that copy: its component definitions,
-  policies, catalog and profile, validated against the controller's own
-  OSCAL schemas, which the bundle must carry byte-identical. The package adds
-  the `bundle/` proofs (manifest, layer, descriptor, `identity.json` with the
-  verification receipt) and the results name the bundle. Content that could
-  not be frozen, a lost or altered frozen copy, a capture naming another
-  bundle, and an incompatible bundle produce a `Diagnostic` with reason
+- **Runs with a content set.** The run's content is the set of bundles its
+  contributions were applied from, keyed by manifest digest; the desired
+  bundle is recorded beside it and is the content only when nothing was
+  applied. Each OCI bundle of the set is frozen when the run starts (retried
+  once at closure) and export (and any replay) uses only those copies. Each
+  bundle yields its own OSCAL result, derived from that bundle's component
+  definitions, policies, catalog and profile for the observations of the
+  contributions applied from it, and named by its `bundle-name`,
+  `bundle-digest` (and for OCI content `bundle-version`,
+  `bundle-content-digest`) and `mapping-sha256` result properties; the plan
+  joins the bundles' plans, and the context SSP imports the first bundle's
+  profile. Overlapping old and new revisions of a policy therefore stay
+  attributed to their own bundles and are never collapsed. Within a bundle,
+  overlapping contributions keep the rule above. With one bundle the results'
+  metadata also names it, as before. Every document is validated against the
+  controller's own OSCAL schemas, which every frozen bundle must carry
+  byte-identical, and the package carries those schemas at
+  `content/schemas/`. Each bundle's content (and `bundle/` proofs with
+  `identity.json` and the verification receipt) is packaged under its
+  directory, so a package grows by one copy of content per applied bundle.
+  Content that could not be frozen, a lost or altered frozen copy, vendored
+  content of another image, a capture naming a bundle the run did not freeze,
+  and an incompatible bundle produce a `Diagnostic` with reason
   `ContentUnavailable`, `ContentLost`, `ContentMismatch`, or
-  `ContentIncompatible`. Vendored content is never substituted. See
+  `ContentIncompatible`; one unavailable applied bundle makes the whole
+  package a Diagnostic. Desired or vendored content is never substituted for
+  applied content. See
   [policy bundles](../policy-bundles.md#assessment-runs-freeze-their-bundle).
 - **Always present:** `capture.json`, `evaluation.json` (per-observation states
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is

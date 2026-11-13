@@ -360,23 +360,41 @@ echo "$(kubectl get assessmentrun "$RUN" -o jsonpath='{.status.publication.packa
 mkdir "$W/package" && tar -xzf "$W/package.tar.gz" -C "$W/package"
 jq '.revisions.content' "$W/package/descriptor.json"
 jq -e --arg d "$DIGEST" --arg c "$CONTENT" --arg b "$BUNDLE" \
-  '.revisions.content | .bundle == $b and .manifestDigest == $d and .contentDigest == $c and .frozen' "$W/package/descriptor.json"
-echo "sha256:$(sha256sum < "$W/package/bundle/manifest.json" | cut -d' ' -f1)"
+  '.revisions.content | (.applied | length) == 1 and (.applied[0] | .bundle == $b and .manifestDigest == $d and .contentDigest == $c and .frozen)
+   and .desired.manifestDigest == $d and (.differences // [] | length) == 0' "$W/package/descriptor.json"
+echo "sha256:$(sha256sum < "$W/package/bundles/${DIGEST#sha256:}/bundle/manifest.json" | cut -d' ' -f1)"
 ```
+
+The run assessed the policy applied from the bundle the profile selects, so
+`applied` holds that one bundle, packaged under `bundles/<hex digest>/`,
+`desired` names the same bundle, and there are no `differences`. (The output
+below was recorded before `revisions.content` gained `applied`, `desired`
+and `differences`; it is shown in the current shape with the recorded
+values.)
 
 ```text
 /…/out/walkthrough/package.tar.gz: OK
 {
-  "bundle": "konstapel-privileged-containers",
-  "manifestDigest": "sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8",
-  "frozen": true,
-  "version": "0.1.0",
-  "contentDigest": "sha256:791b6e4a006101c5dd676e3c005bd4452d14892554d7c7f336171eace33457c8",
-  "archiveDigest": "sha256:82a3f787a42544e3f84f38b008d84880db59881b5721302653872741ee2e1da5",
-  "sourceRevision": "863f4853151bb342a46eefa57c31cb2d46e17cff",
-  "sourceRule": "sha256:0812f19fc13d0ff42bba7420c2111c81ca9a87dbe11740be79c7e56f5184dcd8",
-  "trustRevision": "sha256:6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66",
-  "verifiedAt": "2026-11-12T19:08:25.382557553Z"
+  "applied": [
+    {
+      "bundle": "konstapel-privileged-containers",
+      "manifestDigest": "sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8",
+      "frozen": true,
+      "path": "bundles/1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8",
+      "version": "0.1.0",
+      "contentDigest": "sha256:791b6e4a006101c5dd676e3c005bd4452d14892554d7c7f336171eace33457c8",
+      "archiveDigest": "sha256:82a3f787a42544e3f84f38b008d84880db59881b5721302653872741ee2e1da5",
+      "sourceRevision": "863f4853151bb342a46eefa57c31cb2d46e17cff",
+      "sourceRule": "sha256:0812f19fc13d0ff42bba7420c2111c81ca9a87dbe11740be79c7e56f5184dcd8",
+      "trustRevision": "sha256:6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66",
+      "verifiedAt": "2026-11-12T19:08:25.382557553Z"
+    }
+  ],
+  "desired": {
+    "bundle": "konstapel-privileged-containers",
+    "manifestDigest": "sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8",
+    "frozen": false
+  }
 }
 true
 sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8

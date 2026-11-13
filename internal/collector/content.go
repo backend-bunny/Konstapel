@@ -7,15 +7,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/bundle"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
 // Diagnostic reasons for content that cannot back an assessment export. A
-// run of an OCI bundle never exports OSCAL from any content but its frozen
-// bundle; these reasons replace it with an explicit diagnostic.
+// run that is not purely vendored never exports OSCAL from any content but
+// its own content set (each applied bundle's frozen copy); these reasons
+// replace it with an explicit diagnostic.
 const (
 	// ReasonContentUnavailable: the run's bundle could not be resolved and
 	// frozen when the run started or while it collected (not configured,
@@ -27,8 +30,9 @@ const (
 	// ReasonContentIncompatible: the frozen bundle cannot be exported by this
 	// controller (different OSCAL schemas, no component definition, ...).
 	ReasonContentIncompatible = "ContentIncompatible"
-	// ReasonContentMismatch: the capture references a bundle other than the
-	// frozen one.
+	// ReasonContentMismatch: the capture references a bundle the run did
+	// not freeze, or the run froze an applied bundle the capture does not
+	// assess.
 	ReasonContentMismatch = "ContentMismatch"
 )
 
@@ -51,44 +55,94 @@ func contentFailure(reason, format string, a ...any) *ContentFailure {
 // reads them from the package.
 var trustedSchemas = []string{"content/schemas/oscal-1.1.3.json", "content/schemas/oscal-1.2.3.json"}
 
-// contentFor returns the content set to export from and the root whose
-// schemas validate the outputs. For a frozen bundle it also checks that the
-// capture assessed exactly that bundle.
-func contentFor(req ExportRequest) (assessment.ContentSet, string, error) {
-	if req.Bundle == nil {
-		return assessment.Shipped, req.Root, nil
-	}
-	if req.TrustedRoot == "" {
-		return assessment.ContentSet{}, "", contentFailure(ReasonContentIncompatible, "no trusted content root is configured to validate frozen bundle content")
-	}
-	id := req.Bundle.Identity
-	if err := captureUses(req.Capture, id.Name, id.Digests.OCI); err != nil {
-		return assessment.ContentSet{}, "", err
-	}
-	for _, p := range trustedSchemas {
-		want, err := os.ReadFile(filepath.Join(req.TrustedRoot, filepath.FromSlash(p)))
-		if err != nil {
-			return assessment.ContentSet{}, "", err
-		}
-		got, err := os.ReadFile(filepath.Join(req.Root, filepath.FromSlash(p)))
-		if err != nil || !bytes.Equal(got, want) {
-			return assessment.ContentSet{}, "", contentFailure(ReasonContentIncompatible, "%s@%s: %s is missing or differs from the controller's schema", id.Name, id.Version, p)
-		}
-	}
-	set, err := FrozenContentSet(req.Bundle)
-	if err != nil {
-		return assessment.ContentSet{}, "", err
-	}
-	return set, req.TrustedRoot, nil
+// RunContent is the content set of a run that is not purely vendored
+// (see publication.RunContent): one member per applied bundle, or the
+// desired bundle alone when nothing was applied. Desired is recorded beside
+// the members and never stands in for them.
+type RunContent struct {
+	Desired *v1alpha1.BundleReference
+	// DesiredVendored marks Desired as the image's vendored bundle.
+	DesiredVendored bool
+	// Members are sorted by manifest digest.
+	Members []ContentMember
+	// Failure is a run-level content failure (an unreadable content
+	// record). It, or any member's failure, makes the package a Diagnostic.
+	Failure *ContentFailure
 }
 
-// captureUses requires every subject and contribution of c to name exactly
-// bundle name@digest.
-func captureUses(c CaptureV2, name, digest string) error {
-	check := func(what, n, d string) error {
-		if n != name || d != digest {
-			return contentFailure(ReasonContentMismatch, "%s references %s@%s, but the run froze %s@%s", what, n, d, name, digest)
+// ContentMember is one bundle of a run's content set.
+type ContentMember struct {
+	Ref v1alpha1.BundleReference
+	// Applied: contributions the run assesses were applied from it.
+	// Otherwise it is the desired bundle the plan names (nothing applied).
+	Applied bool
+	// Vendored: the image's vendored content tree at Root (Shipped set).
+	Vendored bool
+	// Root is the member's content root: its frozen directory (Frozen set),
+	// or the image's content root for the vendored member. Empty on failure.
+	Root   string
+	Frozen *bundle.Frozen
+	// Failure is why the member's content is unavailable or lost.
+	Failure *ContentFailure
+}
+
+// Path is the member's package directory.
+func (m ContentMember) Path() string { return publication.ContentPath(m.Ref.Digest) }
+
+// failure is the run's content failure: the run-level one, or every
+// failed member's, reported under the first member's reason.
+func (rc *RunContent) failure() *ContentFailure {
+	if rc.Failure != nil {
+		return rc.Failure
+	}
+	var first *ContentFailure
+	var msgs []string
+	for _, m := range rc.Members {
+		if m.Failure == nil {
+			continue
 		}
+		if first == nil {
+			first = m.Failure
+		}
+		msgs = append(msgs, m.Failure.Message)
+	}
+	if first == nil {
+		return nil
+	}
+	return &ContentFailure{Reason: first.Reason, Message: strings.Join(msgs, "; ")}
+}
+
+// memberContent returns a member's content set and checks that a frozen
+// bundle carries the controller's own OSCAL schemas.
+func memberContent(m ContentMember, trustedRoot string) (assessment.ContentSet, error) {
+	if m.Vendored {
+		return assessment.Shipped, nil
+	}
+	id := m.Frozen.Identity
+	for _, p := range trustedSchemas {
+		want, err := os.ReadFile(filepath.Join(trustedRoot, filepath.FromSlash(p)))
+		if err != nil {
+			return assessment.ContentSet{}, err
+		}
+		got, err := os.ReadFile(filepath.Join(m.Root, filepath.FromSlash(p)))
+		if err != nil || !bytes.Equal(got, want) {
+			return assessment.ContentSet{}, contentFailure(ReasonContentIncompatible, "%s@%s: %s is missing or differs from the controller's schema", id.Name, id.Version, p)
+		}
+	}
+	return FrozenContentSet(m.Frozen)
+}
+
+// captureUses requires every subject and contribution of c to name an
+// applied member, and every applied member to be named by one: the run's
+// content is exactly the content its contributions were applied from.
+func captureUses(c CaptureV2, applied map[v1alpha1.BundleReference]bool) error {
+	named := map[v1alpha1.BundleReference]bool{}
+	check := func(what, n, d string) error {
+		ref := v1alpha1.BundleReference{Name: n, Digest: d}
+		if !applied[ref] {
+			return contentFailure(ReasonContentMismatch, "%s references %s@%s, which the run did not freeze", what, n, d)
+		}
+		named[ref] = true
 		return nil
 	}
 	for _, s := range c.Subjects {
@@ -99,6 +153,11 @@ func captureUses(c CaptureV2, name, digest string) error {
 	for _, x := range c.Contributions {
 		if err := check("contribution "+x.Policy, x.BundleName, x.BundleDigest); err != nil {
 			return err
+		}
+	}
+	for ref := range applied {
+		if !named[ref] {
+			return contentFailure(ReasonContentMismatch, "the run froze %s@%s, but the capture assesses nothing applied from it", ref.Name, ref.Digest)
 		}
 	}
 	return nil
@@ -134,22 +193,43 @@ func FrozenContentSet(f *bundle.Frozen) (assessment.ContentSet, error) {
 	return set, nil
 }
 
-// contentRevision is the descriptor's record of the run's OCI bundle; nil
-// for vendored runs.
-func contentRevision(req ExportRequest, kind publication.PackageKind) *publication.ContentRevision {
-	if b := req.Bundle; b != nil {
-		id := b.Identity
-		r := &publication.ContentRevision{Bundle: id.Name, ManifestDigest: id.Digests.OCI, Frozen: kind == publication.KindAssessment,
-			Version: id.Version, ContentDigest: id.Digests.Content, ArchiveDigest: id.Digests.Archive, SourceRevision: id.Digests.Revision,
-			SourceRule: id.Receipt.SourceRule, TrustRevision: id.Receipt.TrustRevision}
-		if !id.Receipt.VerifiedAt.IsZero() {
-			at := id.Receipt.VerifiedAt.UTC()
-			r.VerifiedAt = &at
+// contentRevision is the descriptor's record of the run's content set; nil
+// for vendored runs. Members are packaged (Frozen, with their path) only
+// in an assessment package.
+func contentRevision(req ExportRequest, kind publication.PackageKind) *publication.RunContent {
+	rc := req.Content
+	if rc == nil {
+		return nil
+	}
+	out := &publication.RunContent{Applied: []publication.ContentRevision{}}
+	var plan *publication.ContentRevision
+	for _, m := range rc.Members {
+		r := publication.ContentRevision{Bundle: m.Ref.Name, ManifestDigest: m.Ref.Digest, Vendored: m.Vendored}
+		if kind == publication.KindAssessment {
+			r.Frozen, r.Path = true, m.Path()
 		}
-		return r
+		if f := m.Frozen; f != nil {
+			id := f.Identity
+			r.Version, r.ContentDigest, r.ArchiveDigest, r.SourceRevision = id.Version, id.Digests.Content, id.Digests.Archive, id.Digests.Revision
+			r.SourceRule, r.TrustRevision = id.Receipt.SourceRule, id.Receipt.TrustRevision
+			if !id.Receipt.VerifiedAt.IsZero() {
+				at := id.Receipt.VerifiedAt.UTC()
+				r.VerifiedAt = &at
+			}
+		}
+		if m.Applied {
+			out.Applied = append(out.Applied, r)
+		} else {
+			plan = &r
+		}
 	}
-	if ref := req.ContentRef; ref != nil {
-		return &publication.ContentRevision{Bundle: ref.Name, ManifestDigest: ref.Digest}
+	if d := rc.Desired; d != nil {
+		if plan != nil && plan.Bundle == d.Name && plan.ManifestDigest == d.Digest {
+			out.Desired = plan
+		} else {
+			out.Desired = &publication.ContentRevision{Bundle: d.Name, ManifestDigest: d.Digest, Vendored: rc.DesiredVendored}
+		}
 	}
-	return nil
+	out.Differences = publication.ContentDifferences(out.Applied, out.Desired)
+	return out
 }
