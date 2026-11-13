@@ -383,6 +383,9 @@ func (h *Hub) gather(now time.Time) []prometheus.Metric {
 					gauge("konstapel_binding_oldest_evaluation_timestamp_seconds", ts(*v.p.oldest), n, view)
 				}
 			}
+			if b.Current != nil && b.Current.ValidUntil != nil {
+				gauge("konstapel_binding_current_evidence_expiry_timestamp_seconds", ts(*b.Current.ValidUntil), n)
+			}
 			if r := b.LatestClosed; r != nil {
 				gauge("konstapel_binding_snapshot_collection_started_timestamp_seconds", ts(r.CollectionStarted), n)
 				gauge("konstapel_binding_last_closed_timestamp_seconds", ts(r.Closed), n)

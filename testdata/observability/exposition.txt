@@ -51,6 +51,9 @@ konstapel_binding_condition{binding="example",condition="Resolved",status="unkno
 # HELP konstapel_binding_created_timestamp_seconds Creation time of the current binding object with this name.
 # TYPE konstapel_binding_created_timestamp_seconds gauge
 konstapel_binding_created_timestamp_seconds{binding="example"} 0
+# HELP konstapel_binding_current_evidence_expiry_timestamp_seconds When the oldest attributable current evidence exceeds the evidence-age limit; from then on the current view is unknown until re-evaluated.
+# TYPE konstapel_binding_current_evidence_expiry_timestamp_seconds gauge
+konstapel_binding_current_evidence_expiry_timestamp_seconds{binding="example"} 0
 # HELP konstapel_binding_last_closed_timestamp_seconds Closure time of the latest full-binding run, including incomplete and diagnostic closures.
 # TYPE konstapel_binding_last_closed_timestamp_seconds gauge
 konstapel_binding_last_closed_timestamp_seconds{binding="example"} 0

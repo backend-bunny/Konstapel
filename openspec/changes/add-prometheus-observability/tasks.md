@@ -73,3 +73,11 @@ integration boundaries.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
 - [ ] 6.3 Exercise restart/leader transition, certificate/token rotation and binding deletion/recreation in the integrated deployment; retain evidence of bounded authorization revocation, correct gauge/counter behavior and continued controller work, then run the repository's applicable checks.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
+
+## Workflow follow-up
+
+- Native warning count: add a warning count to the assessment summary
+  (assessment API/CRD `OutcomeCounts` + `continuous-assessments` spec) and a
+  `warn` catalog state; not required for 0.2.0. Until then a Kyverno `warn` is
+  counted once as `unknown` and stays distinct in retained observations and
+  OSCAL (`result` warning, `source-outcome` warn).
