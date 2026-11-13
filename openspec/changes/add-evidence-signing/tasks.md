@@ -2,13 +2,13 @@
 
 ## 1. Establish the signer and interoperability contract
 
-- [ ] 1.1 Add a focused Go signer interface and Secret-key adapter using maintained Sigstore/Cosign libraries, ECDSA P-256/SHA-256, standard Cosign key encoding, and SPKI fingerprints; verify valid keys, wrong passwords, mismatched public keys, unsupported algorithms, and sanitized failures with disposable-key tests.
+- [x] 1.1 Add a focused Go signer interface and Secret-key adapter using maintained Sigstore/Cosign libraries, ECDSA P-256/SHA-256, standard Cosign key encoding, and SPKI fingerprints; verify valid keys, wrong passwords, mismatched public keys, unsupported algorithms, and sanitized failures with disposable-key tests.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 1.2 Produce a standard message-signature bundle for exact archive bytes and pin its supported library/schema version; verify Go-generated output using Devbox's pinned Cosign with networking disabled, including wrong-key, changed-byte, malformed-bundle, and double-hashing regressions.
+- [x] 1.2 Produce a standard message-signature bundle for exact archive bytes and pin its supported library/schema version; verify Go-generated output using Devbox's pinned Cosign with networking disabled, including wrong-key, changed-byte, malformed-bundle, and double-hashing regressions.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 1.3 Document supported key fields, algorithm, bundle version, and the explicit no-transparency-log verification contract; execute the documented verification command in the interoperability tests and prove no public signing service or ambient identity is used.
+- [x] 1.3 Document supported key fields, algorithm, bundle version, and the explicit no-transparency-log verification contract; execute the documented verification command in the interoperability tests and prove no public signing service or ambient identity is used.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.4 Integrate new Go dependencies through the existing module/image workflows; verify module locks, image smoke checks, SBOM/license inventory and attestation inputs while keeping runtime signing in Go without adding Cosign or a shell to the controller image.
+- [x] 1.4 Integrate new Go dependencies through the existing module/image workflows; verify module locks, image smoke checks, SBOM/license inventory and attestation inputs while keeping runtime signing in Go without adding Cosign or a shell to the controller image.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 2. Add central destination configuration and Secret access
