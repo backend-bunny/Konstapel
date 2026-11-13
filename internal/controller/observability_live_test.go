@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -48,10 +49,12 @@ func liveSeries(t *testing.T, hub *observability.Hub) map[string]float64 {
 func TestLiveObservability(t *testing.T) {
 	l := newLive(t)
 	l.installCRDs()
-	l.setNamespace("observe-prod", "production")
+	// A label value of its own: earlier tests leave other production
+	// namespaces behind, and the target count is asserted exactly.
+	l.setNamespace("observe-only", "observability")
 	p := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "observe-baseline"},
 		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: content.Name, Digest: digest(t)}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
-	b := bindingObj("observe-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "production"})
+	b := bindingObj("observe-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "observability"})
 	for _, o := range []client.Object{p, b} {
 		o.SetUID("")
 		o.SetGeneration(0)
@@ -62,6 +65,7 @@ func TestLiveObservability(t *testing.T) {
 	t.Cleanup(func() {
 		_ = l.c.Delete(context.Background(), &v1alpha1.ComplianceBinding{ObjectMeta: metav1.ObjectMeta{Name: b.Name}})
 		_ = l.c.Delete(context.Background(), &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: p.Name}})
+		_ = l.c.Delete(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "observe-only"}})
 	})
 
 	hub, err := observability.NewHub(observability.Options{Enabled: []observability.Domain{observability.DomainTargeting, observability.DomainEvidenceStorage}})
