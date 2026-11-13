@@ -72,6 +72,12 @@
 
 - Review against the evidence-signing spec and archive only after implementation
   and required CI acceptance are complete.
+- Add an admin-initiated re-sign for runs that ended with `SigningFailed` and
+  retained their staged archive (design section 4, group 3 note), owned by
+  this change's group 4/5 work. It reuses the run's recorded signing intent
+  and pinned key, cannot change the archive, the run's identity, or its
+  retention, and is authorized for platform administrators only. Until then,
+  the retained archive is kept until its expiry and is not re-signed.
 - Propose a separate follow-up for OpenBao/Vault Transit and AWS KMS keys. Keep
   their credentials, service behavior, key versions, and compatibility tests out
   of this change's implementation checklist.
