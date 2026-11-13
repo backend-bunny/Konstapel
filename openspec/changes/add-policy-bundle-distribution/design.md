@@ -278,9 +278,16 @@ and a test CA for keyless checks. Real keyless Cosign output is covered by
 checked-in proofs from GitHub Actions and the first official bundle release
 against the public-good root, plus an opt-in network test (`publicinterop` build
 tag) that retrieves that release anonymously and verifies it under the official
-source configuration, refusing other identities. A full isolated Sigstore stack
-(Fulcio, Rekor) is not deployed; consequently Cosign CLI keyless output under
-isolated roots remains unverified and task 3.5 stays open for that gap.
+source configuration, refusing other identities. Protocol compatibility under
+isolated roots is shown separately by an opt-in disposable Sigstore stack
+(`KONSTAPEL_SIGSTORE_STACK=1 scripts/registry-compat.sh`): pinned Fulcio, Rekor
+v1 on Trillian, a timestamp authority and test OIDC issuers, through which the
+pinned Cosign signs keylessly via the release signer; the unchanged production
+verifier accepts the result under the generated root and exact test identity,
+and refuses wrong issuers, identities and subjects and missing or invalid
+signing-time evidence, and still accepts it after the certificate has expired.
+The isolated stack proves protocol compatibility; the public-good proofs and
+network test prove public trust-root compatibility.
 
 Record verification time, source/trust revision, signer identity or key
 fingerprint, trusted-root identity, proof/attestation hashes and predicate

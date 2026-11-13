@@ -3,9 +3,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/runtime.env
 
-for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE" "$KONSTAPEL_REGISTRY_IMAGE" "$KONSTAPEL_REGISTRY_API_IMAGE"; do
+sigstore_images=("$KONSTAPEL_SIGSTORE_FULCIO_IMAGE" "$KONSTAPEL_SIGSTORE_REKOR_IMAGE" "$KONSTAPEL_SIGSTORE_TRILLIAN_SERVER_IMAGE"
+  "$KONSTAPEL_SIGSTORE_TRILLIAN_SIGNER_IMAGE" "$KONSTAPEL_SIGSTORE_DB_IMAGE" "$KONSTAPEL_SIGSTORE_TSA_IMAGE" "$KONSTAPEL_SIGSTORE_OIDC_IMAGE")
+for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE" "$KONSTAPEL_REGISTRY_IMAGE" "$KONSTAPEL_REGISTRY_API_IMAGE" "${sigstore_images[@]}"; do
   if [[ ! $image =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[a-f0-9]{64}$ ]]; then
     echo "Runtime image must include a tag and complete SHA-256 digest: $image" >&2
+    exit 1
+  fi
+done
+
+# The isolated Sigstore suite loads the PostgreSQL schema of the Trillian
+# module go.sum pins; both Trillian images must run that same version.
+trillian=$(go list -mod=readonly -m -f '{{.Version}}' github.com/google/trillian)
+for image in "$KONSTAPEL_SIGSTORE_TRILLIAN_SERVER_IMAGE" "$KONSTAPEL_SIGSTORE_TRILLIAN_SIGNER_IMAGE"; do
+  if [[ $image != *":$trillian@sha256:"* ]]; then
+    echo "Trillian image $image must match github.com/google/trillian $trillian (go.sum)" >&2
     exit 1
   fi
 done

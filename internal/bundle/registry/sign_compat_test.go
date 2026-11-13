@@ -7,9 +7,10 @@ package registry_test
 // against the real registries of TestRegistryCompat: the distribution
 // registry (referrers tag schema, which Cosign maintains itself, as on
 // ghcr.io) and Zot (referrers API, htpasswd writes and anonymous reads).
-// Keyless signing needs GitHub's OIDC token and the public Sigstore services
-// and is not exercised here: Cosign runs offline (no transparency log, no
-// signing configuration) with outbound HTTP(S) routed to a closed port.
+// Here Cosign runs offline (no transparency log, no signing configuration)
+// with outbound HTTP(S) routed to a closed port. Keyless signing, which needs
+// an OIDC token, Fulcio, Rekor and a timestamp authority, is exercised against
+// a disposable Sigstore instance in keyless_stack_compat_test.go.
 
 import (
 	"context"
