@@ -6,12 +6,10 @@ vocabularies, availability and reset semantics) and the **projection rules**
 that turn owner state into those families. The controller registers the
 families in controller-runtime's metrics registry, next to its retained
 reconciliation, workqueue, client, Go and process collectors, and serves them
-on `--metrics-bind-address` (disabled by default). Targeting, evidence storage
-and (with bundle sources enabled) bundle resolution publish projections; see
-[Producers](#producers). The **assessment domain is not wired yet** and is
-exposed as `konstapel_observation_enabled{domain="assessment"} 0`, so binding
-assessment summaries are absent rather than fabricated. Authenticated serving
-(group 3), Helm integration (group 4) and starter alerts (group 5) come later.
+on `--metrics-bind-address` (disabled by default). Targeting, assessment,
+evidence storage and, with bundle sources enabled, bundle resolution publish
+projections; see [Producers](#producers). Authenticated serving (group 3), Helm
+integration (group 4) and starter alerts (group 5) come later.
 
 ## Rules of the contract
 
@@ -164,6 +162,7 @@ values.
 | Domain | Source | Notes |
 | --- | --- | --- |
 | `targeting` | ComplianceBindings in the manager cache; the capability monitor's cached `PolicyDelivery` and `Assessment` results | A Condition or `targetCount` observed for an older generation is `unknown` or absent. A capability that cannot be checked (`DependencyUnavailable`) is `unknown`. A missing API or denied access is `false`. Policy delivery and assessment reporting are reported separately, so reporting can be unavailable while delivery works. |
+| `assessment` | ComplianceBindings and AssessmentRuns in the manager cache | Current view: `status.assessment.current`, including the owner's `oldestEvaluation` and `nextExpiry`. Latest closed view: the binding object's latest closed full-binding run with its own summary and window. Interval, evidence-age limit and collection timeout are the binding's effective settings; a binding whose settings do not parse is left out. Due time: `schedule.outstandingSince`, or else the first scheduled time after the newest scheduled run (which may already have passed while another run held the slot). It is absent while the binding has never been planned. Overdue means `time() > due + collection timeout + grace`. |
 | `evidence_storage` | AssessmentRun records in the manager cache, including runs whose binding was deleted | See the backlog table below. |
 | `bundle_resolution` | The bundle sources Watcher | Ready while the Watcher's latest Sync read its configuration within two refresh intervals plus one read timeout. A missing or invalid sources ConfigMap is still a successful read; it shows up in profile Conditions, not here. |
 

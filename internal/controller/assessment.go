@@ -248,13 +248,9 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 // still rolling out, as opposed to an update whose previous revision keeps
 // enforcing and is assessed meanwhile.
 func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (_ collector.CaptureV2, _ []string, _ time.Duration, selected *v1alpha1.BundleReference, awaiting bool, _ error) {
-	maxAge := 2 * time.Hour
-	if b.Spec.Assessment != nil && b.Spec.Assessment.MaxEvidenceAge != "" {
-		d, err := time.ParseDuration(string(b.Spec.Assessment.MaxEvidenceAge))
-		if err != nil || d <= 0 {
-			return collector.CaptureV2{}, nil, 0, nil, false, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
-		}
-		maxAge = d
+	maxAge, err := bindingMaxEvidenceAge(b)
+	if err != nil {
+		return collector.CaptureV2{}, nil, 0, nil, false, err
 	}
 	var limits []string
 	if b.Spec.EnforcementEpoch == 0 {
@@ -526,7 +522,7 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 		limits = append(limits, fmt.Sprintf("%d of %d expected observations lack attributable evidence (missing %d, rejected %d, unresolved %d)",
 			n, ev.Evidence.Expected, ev.Evidence.Missing, ev.Evidence.Rejected, ev.Evidence.Unresolved))
 	}
-	cur := &v1alpha1.CurrentEvidence{EvaluatedAt: metav1.NewTime(now), Limitations: boundLimitations(limits)}
+	cur := &v1alpha1.CurrentEvidence{EvaluatedAt: metav1.NewTime(now), Limitations: boundLimitations(limits), OldestEvaluation: metaTime(ev.OldestEvaluated())}
 	cur.Evidence = v1alpha1.EvidenceSummary{Completeness: v1alpha1.EvidenceCompleteness(ev.Evidence.Completeness), Expected: int32(ev.Evidence.Expected),
 		Attributable: int32(ev.Evidence.Attributable), Missing: int32(ev.Evidence.Missing), Rejected: int32(ev.Evidence.Rejected),
 		Unresolved: int32(ev.Evidence.Unresolved), StaleScopes: int32(ev.Evidence.StaleScopes)}
@@ -744,4 +740,25 @@ func destinationForRun(c client.Client) handler.EventHandler {
 		}
 		return nil
 	})
+}
+
+// metaTime converts an optional time to its API form.
+func metaTime(t *time.Time) *metav1.Time {
+	if t == nil {
+		return nil
+	}
+	v := metav1.NewTime(*t)
+	return &v
+}
+
+// bindingMaxEvidenceAge is the binding's effective evidence-age limit.
+func bindingMaxEvidenceAge(b *v1alpha1.ComplianceBinding) (time.Duration, error) {
+	if b.Spec.Assessment == nil || b.Spec.Assessment.MaxEvidenceAge == "" {
+		return 2 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(string(b.Spec.Assessment.MaxEvidenceAge))
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("binding %s: maxEvidenceAge %q", b.Name, b.Spec.Assessment.MaxEvidenceAge)
+	}
+	return d, nil
 }

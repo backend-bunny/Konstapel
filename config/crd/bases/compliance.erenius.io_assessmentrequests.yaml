@@ -268,6 +268,14 @@ spec:
                     - Diagnostic
                     - CaptureLost
                     type: string
+                  oldestEvaluation:
+                    description: |-
+                      oldestEvaluation is the source evaluation time of the oldest
+                      attributable observation: when the engine evaluated it, never a
+                      collection, upload or report-update time. Absent when no observation
+                      is attributable, and on summaries recorded before this field existed.
+                    format: date-time
+                    type: string
                   outcomes:
                     description: |-
                       OutcomeCounts preserves check dispositions separately from completeness.

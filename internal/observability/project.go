@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
@@ -77,14 +79,23 @@ func outcomesFromStatus(o v1alpha1.OutcomeCounts) publication.OutcomeCounts {
 		AcceptedRisk: int(o.AcceptedRisk), NotApplicable: int(o.NotApplicable), Unknown: int(o.Unknown)}
 }
 
+func timeOf(t *metav1.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := t.Time
+	return &v
+}
+
 // CurrentFromStatus adapts a binding's status.assessment.current. Free-text
-// limitations are not carried. The status does not record the oldest source
-// evaluation, so that series stays absent.
+// limitations are not carried. The oldest source evaluation is the owner's
+// recorded one; it is absent for summaries recorded before the owner
+// recorded it, and never derived from the expiry.
 func CurrentFromStatus(c *v1alpha1.CurrentEvidence) *CurrentView {
 	if c == nil {
 		return nil
 	}
-	v := &CurrentView{Summary: Summary{Evidence: evidenceFromStatus(c.Evidence), Outcomes: outcomesFromStatus(c.Outcomes)}}
+	v := &CurrentView{Summary: Summary{Evidence: evidenceFromStatus(c.Evidence), Outcomes: outcomesFromStatus(c.Outcomes), OldestEvaluated: timeOf(c.OldestEvaluation)}}
 	if c.NextExpiry != nil {
 		t := c.NextExpiry.Time
 		v.ValidUntil = &t
@@ -104,6 +115,7 @@ func ClosedFromRun(r *v1alpha1.AssessmentRun) (*ClosedRun, bool) {
 		c.InventoryUnknown = true
 	} else {
 		c.Evidence, c.Outcomes = evidenceFromStatus(s.Evidence), outcomesFromStatus(s.Outcomes)
+		c.OldestEvaluated = timeOf(s.OldestEvaluation)
 	}
 	return c, true
 }

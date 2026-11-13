@@ -173,7 +173,24 @@ func (r *AssessmentReconciler) releaseFinished(ctx context.Context, prev *v1alph
 	}
 	out := prev.DeepCopy()
 	out.ActiveRun = nil
+	if met := scheduledMet(run); !met.IsZero() && out.OutstandingSince != nil && !out.OutstandingSince.After(met) {
+		out.OutstandingSince = nil
+	}
 	return out, nil
+}
+
+// scheduledMet is the scheduled time a finished scheduled run met: the
+// time it serves when it closed with an assessment export (complete or
+// incomplete), whatever happened to publication. A diagnostic, a lost
+// capture, a run that never closed, and manual or namespace runs meet
+// nothing. Only finished runs are considered.
+func scheduledMet(run *v1alpha1.AssessmentRun) time.Time {
+	t := run.Spec.Trigger
+	if run.UID == "" || !runDone(run) || t == nil || t.Type != v1alpha1.TriggerScheduled || t.ScheduledTime == nil ||
+		run.Status.Summary == nil || run.Status.Summary.Export != v1alpha1.ExportState(publication.ExportAssessment) {
+		return time.Time{}
+	}
+	return t.ScheduledTime.UTC()
 }
 
 // adoptFirstScheduledRun anchors a schedule that has no persisted anchor at
@@ -201,6 +218,9 @@ func adoptFirstScheduledRun(st schedule.State, b *v1alpha1.ComplianceBinding, ru
 	if first != nil {
 		at := first.Spec.Trigger.ScheduledTime.UTC()
 		st.Anchor, st.Interval, st.LastScheduled, st.Active = at, interval, at, first.Name
+		if st.Outstanding.IsZero() {
+			st.Outstanding = at
+		}
 	}
 	return st, first
 }
@@ -266,7 +286,7 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 			latest = &v1alpha1.RunReference{Name: adopted.Name, UID: string(adopted.UID)}
 		}
 	}
-	activeDone, activeUID := false, ""
+	activeDone, activeUID, activeMet := false, "", time.Time{}
 	if st.Active != "" {
 		run := &v1alpha1.AssessmentRun{}
 		switch err := r.reader().Get(ctx, client.ObjectKey{Name: st.Active}, run); {
@@ -275,7 +295,7 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		case err != nil:
 			return prev, latest, time.Time{}, "", err
 		default:
-			activeDone, activeUID = runDone(run), string(run.UID)
+			activeDone, activeUID, activeMet = runDone(run), string(run.UID), scheduledMet(run)
 		}
 	}
 	var pending []schedule.Pending
@@ -291,7 +311,7 @@ func (r *AssessmentReconciler) plan(ctx context.Context, b *v1alpha1.ComplianceB
 		return prev, latest, time.Time{}, "", err
 	}
 	pending = append(pending, requests...)
-	d := schedule.Plan(schedule.Input{Now: now, BindingName: b.Name, BindingUID: string(b.UID), Interval: interval, State: st, ActiveDone: activeDone, Pending: pending, MaxQueue: r.Runtime.MaxQueue})
+	d := schedule.Plan(schedule.Input{Now: now, BindingName: b.Name, BindingUID: string(b.UID), Interval: interval, State: st, ActiveDone: activeDone, ActiveMet: activeMet, Pending: pending, MaxQueue: r.Runtime.MaxQueue})
 	for _, rej := range d.Rejected {
 		if err := r.setRequest(ctx, rej.Namespace, rej.Name, rej.UID, func(s *v1alpha1.AssessmentRequestStatus) {
 			s.Phase = v1alpha1.RequestRejected
@@ -970,6 +990,7 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())
 	}
 	sum := publication.SummaryToAPI(publication.Summarize(d, publication.Status{Phase: publication.PhasePending}))
+	sum.OldestEvaluation = metaTime(ev.OldestEvaluated())
 	closed := metav1.NewTime(now)
 	run.Status.Window.Closed = &closed
 	run.Status.Summary = &sum
@@ -1057,6 +1078,9 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 		run.Status.Summary.Export = v1alpha1.ExportState(publication.ExportAssessment)
 		if d, err := publication.LoadDescriptor(filepath.Join(r.staging(run), "package")); err == nil {
 			sum := publication.SummaryToAPI(publication.Summarize(d, st))
+			// The descriptor does not carry the oldest source evaluation;
+			// keep the one recorded at closure.
+			sum.OldestEvaluation = run.Status.Summary.OldestEvaluation
 			run.Status.Summary = &sum
 		}
 	}

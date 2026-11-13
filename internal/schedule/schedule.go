@@ -48,6 +48,37 @@ type State struct {
 	// MissedTotal counts every missed scheduled time, including those whose
 	// gap summaries were dropped by MaxGaps.
 	MissedTotal int `json:"missedTotal,omitempty"`
+	// Outstanding is the earliest scheduled time, including missed times
+	// coalesced into a later run, not yet met by a scheduled run that
+	// closed with an assessment export; zero when nothing is outstanding.
+	// It only observes the schedule: no decision reads it.
+	Outstanding time.Time `json:"outstanding,omitzero"`
+}
+
+// Due is the earliest scheduled obligation not yet met: Outstanding when
+// set, otherwise the first scheduled time after the newest scheduled run,
+// which may already have passed while the slot was held. It is zero for a
+// schedule that has never been planned.
+func (st State) Due() time.Time {
+	switch {
+	case !st.Outstanding.IsZero():
+		return st.Outstanding
+	case st.Anchor.IsZero():
+		return time.Time{}
+	case st.LastScheduled.IsZero() || st.Interval <= 0:
+		return st.Anchor
+	}
+	return latestDue(st.Anchor, st.Interval, st.LastScheduled).Add(st.Interval)
+}
+
+// Met records that the scheduled run for scheduled time at closed with an
+// assessment export: every obligation up to at is met, including missed
+// times it caught up on.
+func (st State) Met(at time.Time) State {
+	if !st.Outstanding.IsZero() && !st.Outstanding.After(at) {
+		st.Outstanding = time.Time{}
+	}
+	return st
 }
 
 // Pending is one queued manual run or namespace request.
@@ -87,7 +118,10 @@ type Input struct {
 	State       State
 	// ActiveDone reports that State.Active finished or failed, releasing the slot.
 	ActiveDone bool
-	Pending    []Pending
+	// ActiveMet is the scheduled time of State.Active when it is a
+	// scheduled run that closed with an assessment export; zero otherwise.
+	ActiveMet time.Time
+	Pending   []Pending
 	// MaxQueue bounds pending namespace requests per binding; 0 means 100.
 	MaxQueue int
 }
@@ -112,6 +146,9 @@ func Plan(in Input) Decision {
 	st.Gaps = slices.Clone(st.Gaps)
 	if in.ActiveDone {
 		st.Active = ""
+		if !in.ActiveMet.IsZero() {
+			st = st.Met(in.ActiveMet)
+		}
 	}
 	d := Decision{}
 
@@ -159,15 +196,20 @@ func Plan(in Input) Decision {
 	}
 
 	if due != nil && st.Active == "" {
+		earliest := *due
 		if !st.LastScheduled.IsZero() {
 			first := st.LastScheduled.Add(st.Interval)
 			if missed := int(due.Sub(first) / st.Interval); missed > 0 {
+				earliest = first
 				st.Gaps = append(st.Gaps, Gap{From: first, To: due.Add(-st.Interval), Missed: missed})
 				st.MissedTotal += missed
 				if len(st.Gaps) > MaxGaps {
 					st.Gaps = st.Gaps[len(st.Gaps)-MaxGaps:]
 				}
 			}
+		}
+		if st.Outstanding.IsZero() {
+			st.Outstanding = earliest
 		}
 		st.LastScheduled = *due
 		t := Trigger{Kind: Scheduled, ScheduledTime: *due}

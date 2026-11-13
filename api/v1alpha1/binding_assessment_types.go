@@ -74,6 +74,15 @@ type AssessmentSchedule struct {
 	LastScheduled *metav1.Time `json:"lastScheduled,omitempty"`
 	// +optional
 	NextDue *metav1.Time `json:"nextDue,omitempty"`
+	// outstandingSince is the earliest scheduled time, including missed
+	// times coalesced into a later run, whose obligation has not yet been
+	// met by a scheduled run that closed with an assessment export
+	// (complete or incomplete). A diagnostic or lost capture does not meet
+	// it; manual and namespace runs never do. Absent when nothing is
+	// outstanding. It is an observation of the schedule and never changes
+	// when runs start.
+	// +optional
+	OutstandingSince *metav1.Time `json:"outstandingSince,omitempty"`
 	// activeRun holds the binding's single run slot.
 	// +optional
 	ActiveRun *RunReference `json:"activeRun,omitempty"`
@@ -107,6 +116,13 @@ type CurrentEvidence struct {
 	// nextExpiry is when the oldest attributable evidence becomes stale.
 	// +optional
 	NextExpiry *metav1.Time `json:"nextExpiry,omitempty"`
+	// oldestEvaluation is the source evaluation time of the oldest
+	// attributable observation: when the engine evaluated it, never a
+	// collection, upload or report-update time. Absent when no observation
+	// is attributable, and on status recorded before this field existed.
+	// +optional
+	OldestEvaluation *metav1.Time `json:"oldestEvaluation,omitempty"`
+
 	// limitations explain why evidence is incomplete, most significant first.
 	// +optional
 	// +listType=atomic

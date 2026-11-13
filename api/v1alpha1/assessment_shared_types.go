@@ -120,6 +120,12 @@ type AssessmentSummary struct {
 	Evidence EvidenceSummary `json:"evidence"`
 	Outcomes OutcomeCounts   `json:"outcomes"`
 	Export   ExportState     `json:"export"`
+	// oldestEvaluation is the source evaluation time of the oldest
+	// attributable observation: when the engine evaluated it, never a
+	// collection, upload or report-update time. Absent when no observation
+	// is attributable, and on summaries recorded before this field existed.
+	// +optional
+	OldestEvaluation *metav1.Time `json:"oldestEvaluation,omitempty"`
 }
 
 // PublicationPhase is the publication lifecycle. Only Committed denotes

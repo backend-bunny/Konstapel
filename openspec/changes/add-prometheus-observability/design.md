@@ -203,6 +203,25 @@ If the scheduler's initial shared contract lacks the required watermark, extend
 its bounded status through that owner; do not infer it from last scrape/upload
 time or implement another scheduler in metrics code.
 
+The owner's status initially lacked both watermarks, so this change adds them
+through the owner (spec delta `continuous-assessments`):
+
+- `oldestEvaluation` on current evidence and on run (and request)
+  summaries: the source evaluation time of the oldest attributable observation,
+  computed by the collector from evaluated results. Closed runs record it at
+  closure and keep it through publication; the frozen package descriptor is
+  unchanged. The field sits beside the evidence counts, not inside them, so
+  the API evidence summary stays identical to the descriptor's. It is never derived from `nextExpiry - maxEvidenceAge`, and is
+  absent on summaries recorded before it existed.
+- `schedule.outstandingSince`: the earliest scheduled time, including missed
+  times, not yet met by a scheduled run that closed with an assessment export.
+  A diagnostic or lost capture does not meet it; publication failure after an
+  export does (publication is reported separately). The scheduler sets it when
+  it starts a scheduled run and clears it when such a run finishes; no
+  scheduling decision reads it. The metric's due time is
+  `outstandingSince`, or else the first scheduled time after the newest
+  scheduled run, which may already have passed while the slot was held.
+
 Add `konstapel_operation_attempts_total{operation,result}` and
 `konstapel_operation_duration_seconds{operation,result}` for bundle resolution,
 evidence publication and cleanup. Operations/results are fixed enums. Each

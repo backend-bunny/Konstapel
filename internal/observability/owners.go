@@ -8,6 +8,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/schedule"
 )
 
 // conditionStatus reads a binding Condition for its current generation. A
@@ -104,4 +105,29 @@ func StorageFrom(runs []v1alpha1.AssessmentRun, now time.Time) StorageSnapshot {
 		}
 	}
 	return s
+}
+
+// AssessmentSettings are a binding's effective assessment configuration.
+type AssessmentSettings struct {
+	Interval, MaxEvidenceAge, CollectionTimeout time.Duration
+}
+
+// BindingAssessmentFrom projects one binding's assessment state: its
+// current evidence, the latest closed full-binding run of this binding
+// object among runs, its effective settings, and the scheduler's earliest
+// unmet scheduled obligation. A binding never planned (scheduling
+// disabled or not yet reconciled) has no due time.
+func BindingAssessmentFrom(b *v1alpha1.ComplianceBinding, runs []v1alpha1.AssessmentRun, settings AssessmentSettings) BindingAssessment {
+	out := BindingAssessment{Binding: BindingRef{Name: b.Name, UID: string(b.UID)},
+		LatestClosed: LatestClosed(string(b.UID), runs),
+		Interval:     settings.Interval, MaxEvidenceAge: settings.MaxEvidenceAge, CollectionTimeout: settings.CollectionTimeout}
+	if a := b.Status.Assessment; a != nil {
+		out.Current = CurrentFromStatus(a.Current)
+		if st, err := schedule.FromStatus(a.Schedule); err == nil {
+			if due := st.Due(); !due.IsZero() {
+				out.Due = &due
+			}
+		}
+	}
+	return out
 }
