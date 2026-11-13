@@ -5,9 +5,10 @@ policy content: Kyverno policies, their tests, and the OSCAL/C2P mappings to
 NIST controls. A profile references a bundle by name and digest; the controller
 resolves it centrally and verifies it before use.
 
-> **Status.** The first official bundle,
-> [`konstapel-privileged-containers` 0.1.0](#first-official-release-konstapel-privileged-containers-010),
-> is released, signed and verifiable. The controller resolves, verifies and
+> **Status.** Two official bundles are released, signed and verifiable:
+> [`konstapel-privileged-containers` 0.1.0](#first-official-release-konstapel-privileged-containers-010)
+> and `konstapel-linux-hardening` 0.1.0 (requires Konstapel 0.2.0 or later;
+> see [Second bundle](#second-bundle-konstapel-linux-hardening)). The controller resolves, verifies and
 > caches bundles by digest and serves them to profiles when central bundle
 > sources are enabled (off by default; see [charts](charts.md)); assessment
 > runs export from the frozen content of the bundles their policies were
@@ -145,7 +146,7 @@ licenses, provenance, the pinned NIST catalog and Moderate profile, the OSCAL
 satisfaction). Tests build it from this repository and check, on the unpacked
 payload: the packaged checksums verify and agree with `content/SHA256SUMS`, the
 AC-6 mapping and descriptor inventory correspond, and the upstream Kyverno
-fixtures pass. The bundle is defined but **not published**.
+fixtures pass. The bundle is published as [0.1.0](#first-official-release-konstapel-privileged-containers-010).
 
 ### Second bundle: `konstapel-linux-hardening`
 
@@ -3426,8 +3427,10 @@ path, and keyless release signing for that bundle are not part of this group.
 4. `task check` builds and verifies every `bundles/*/definition.json`, so a
    malformed definition fails there rather than at release time.
 
-The produced layout can be inspected with any OCI tool. It is not signed and
-not published, and Konstapel cannot yet consume it.
+The produced layout can be inspected with any OCI tool. A locally packaged
+layout is neither signed nor published; the controller consumes only bundles it
+retrieves by digest from a registry and verifies under a publisher rule (see
+[Release a bundle](#release-a-bundle)).
 
 ## Release a bundle
 
