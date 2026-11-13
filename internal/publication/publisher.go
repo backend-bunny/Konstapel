@@ -33,7 +33,34 @@ var (
 	// handed to an operator: Konstapel issues no further remote operations
 	// there and serves no downloads.
 	ErrOrphaned = errors.New("evidence destination handed off to an operator")
+	// ErrSignatureRequired means a Required signing intent has no stored,
+	// verified signature for the staged archive, so nothing is committed.
+	// It is never permission to commit unsigned.
+	ErrSignatureRequired = errors.New("a verified signature is required before commit")
+	// ErrUnsupportedRecord means a durable publication record has an
+	// unknown kind, version, format, or field. It is never read as an
+	// older (for example unsigned) record.
+	ErrUnsupportedRecord = errors.New("unsupported publication record")
 )
+
+// SigningMode is a publication's frozen signing mode.
+type SigningMode string
+
+const (
+	SigningDisabled SigningMode = "Disabled"
+	SigningRequired SigningMode = "Required"
+)
+
+// Signing is the frozen signing intent a publication must satisfy. A nil
+// *Signing is a Disabled intent.
+type Signing struct {
+	Mode SigningMode
+	// PublicKeyPEM is the intent's pinned public key (Required). The
+	// publisher verifies the stored signature with it before committing.
+	PublicKeyPEM []byte
+	// KeyFingerprint is the pinned key's fingerprint (Required).
+	KeyFingerprint string
+}
 
 // StageRequest hands a frozen, validated package directory to the publisher.
 type StageRequest struct {
@@ -55,6 +82,10 @@ type Staged struct {
 type PublishRequest struct {
 	Staged    Staged
 	Retention Retention
+	// Signing is the run's frozen signing intent; nil is Disabled. Under a
+	// Required intent the publisher commits only a stored signature that
+	// verifies with the pinned key, and never accepts an unsigned commit.
+	Signing *Signing
 }
 
 // Publisher is the storage boundary. Every method is idempotent for a run:
@@ -80,6 +111,14 @@ type Publisher interface {
 	// archive, and leaves anything whose ownership by this run cannot be
 	// established. It is idempotent and safe to retry.
 	CleanupAttempts(ctx context.Context, run RunRef) error
+	// StoreSignature stores a run's signature bundle for the staged archive
+	// once. The first durable bundle wins: if one exists, it is returned
+	// unchanged and bundle is discarded. The caller verifies the returned
+	// bytes before relying on them.
+	StoreSignature(ctx context.Context, run RunRef, bundle []byte) ([]byte, Signature, error)
+	// ReadSignature returns the run's stored signature bundle, or
+	// ErrNotFound. It never needs a private key.
+	ReadSignature(ctx context.Context, run RunRef) ([]byte, Signature, error)
 	// Open returns the committed archive of a run with its committed status,
 	// for a verified download. An uncommitted run is ErrNotFound, an expired
 	// one ErrExpired, and a committed archive that cannot be read before

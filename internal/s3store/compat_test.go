@@ -8,6 +8,7 @@ package s3store
 // mode, probes each, and records the results.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -264,6 +265,78 @@ func TestPublisherRoundTrip(t *testing.T) {
 			v, err := c.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(d.Bucket), Prefix: aws.String(p.runPrefix(run))})
 			if err == nil && (len(v.Versions) > 0 || len(v.DeleteMarkers) > 0) {
 				t.Fatalf("owned versions survived deletion: %d versions, %d markers", len(v.Versions), len(v.DeleteMarkers))
+			}
+		})
+	}
+}
+
+// TestSignedPublisherRoundTrip runs the signed commit protocol against the
+// real S3-compatible service: the signature object is created once with
+// If-None-Match (a second, different bundle loses), the commit gate commits
+// the verified pair as a SignedPublicationCommit, a new leader recovers the
+// same signed receipt, and attempt cleanup keeps the signature.
+func TestSignedPublisherRoundTrip(t *testing.T) {
+	endpoint := os.Getenv("KONSTAPEL_S3_ENDPOINT")
+	requireTestOwned(t, endpoint)
+	creds := &StaticCredentials{AccessKeyID: os.Getenv("KONSTAPEL_S3_ACCESS_KEY"), SecretAccessKey: os.Getenv("KONSTAPEL_S3_SECRET_KEY")}
+	if endpoint == "" || creds.AccessKeyID == "" {
+		t.Fatal("KONSTAPEL_S3_ENDPOINT and credentials are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	for _, mode := range []Versioning{Unversioned, Enabled, Suspended} {
+		t.Run(string(mode), func(t *testing.T) {
+			d := Destination{ID: "compat", Endpoint: endpoint, Bucket: "konstapel-compat-" + lower(mode), Region: "us-east-1",
+				Prefix: "konstapel-test/signed", Addressing: AddressingPath, CredentialSecret: &SecretRef{Name: "compat"}, DevelopmentFixture: true}
+			c, err := NewClient(ctx, d, creds)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := &Publisher{Client: c, Dest: d, Now: time.Now}
+			if _, err := p.Ready(ctx); err != nil {
+				t.Fatal(err)
+			}
+			run := testRun
+			run.RunUID = "signed-" + lower(mode)
+			dir := filepath.Join(t.TempDir(), "pkg")
+			if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), dir, run); err != nil {
+				t.Fatal(err)
+			}
+			s, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			signer := testSigner(t)
+			req := publication.PublishRequest{Staged: s, Retention: retention("1h"), Signing: requiredBy(signer)}
+			if _, err := p.Publish(ctx, req); !errors.Is(err, publication.ErrSignatureRequired) {
+				t.Fatalf("committed without a signature: %v", err)
+			}
+			first, second := signStaged(t, signer, s), signStaged(t, signer, s)
+			if got, _, err := p.StoreSignature(ctx, run, first); err != nil || !bytes.Equal(got, first) {
+				t.Fatalf("store: %v", err)
+			}
+			if got, _, err := p.StoreSignature(ctx, run, second); err != nil || !bytes.Equal(got, first) {
+				t.Fatalf("a second bundle replaced the first: %v", err)
+			}
+			r, err := p.Publish(ctx, req)
+			if err != nil || r.Signature == nil || r.Signature.KeyFingerprint != signer.PublicKey().Fingerprint {
+				t.Fatalf("signed publish: %+v %v", r.Signature, err)
+			}
+			leader := &Publisher{Client: c, Dest: d, Now: time.Now}
+			if got, err := leader.Publish(ctx, req); err != nil || !reflect.DeepEqual(got, r) {
+				t.Fatalf("recovered signed receipt differs: %v", err)
+			}
+			if _, err := leader.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h")}); !errors.Is(err, publication.ErrConflict) {
+				t.Fatalf("an unsigned intent accepted the signed commit: %v", err)
+			}
+			if err := p.CleanupAttempts(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+			if b, _, err := p.ReadSignature(ctx, run); err != nil || !bytes.Equal(b, first) {
+				t.Fatalf("signature after attempt cleanup: %v", err)
+			}
+			if st, err := p.Inspect(ctx, run); err != nil || st.Signature == nil || st.Validate() != nil {
+				t.Fatalf("inspect: %v", err)
 			}
 		})
 	}

@@ -27,6 +27,14 @@ const (
 	// ReasonDestinationOrphaned ends a run whose destination was handed off
 	// to an operator before its publication committed.
 	ReasonDestinationOrphaned = "DestinationOrphaned"
+	// ReasonSigningPending: the run's Required signing intent is not yet
+	// satisfied (key unavailable or signature not yet stored); publication
+	// retries within the publish timeout and never commits unsigned.
+	ReasonSigningPending = "SigningPending"
+	// ReasonSigningFailed ends a run whose Required signing intent could not
+	// be satisfied within the publish timeout. Evidence and outcomes are
+	// unchanged; nothing unsigned was committed.
+	ReasonSigningFailed = "SigningFailed"
 )
 
 // BindingReference names a cluster-scoped ComplianceBinding.
@@ -125,7 +133,7 @@ type Availability string
 type CleanupState string
 
 // ObjectRole identifies an owned storage object's purpose.
-// +kubebuilder:validation:Enum=archive;manifest;staging
+// +kubebuilder:validation:Enum=archive;manifest;staging;signature
 type ObjectRole string
 
 // SecretReference names a credential Secret; status never holds its value.
@@ -249,4 +257,28 @@ type PublicationStatus struct {
 	Cleanup      PublicationCleanup `json:"cleanup"`
 	// +optional
 	Failure *PublicationFailure `json:"failure,omitempty"`
+	// signature is the committed detached signature; set only for a
+	// publication committed under a Required signing intent.
+	// +optional
+	Signature *PublicationSignature `json:"signature,omitempty"`
+}
+
+// PublicationSignature references a committed publication's signature
+// bundle (package.sigstore.json) and the key that made it.
+type PublicationSignature struct {
+	// +kubebuilder:validation:MaxLength=1024
+	Key string `json:"key"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	VersionID string `json:"versionID,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	SHA256 string `json:"sha256"`
+	// +kubebuilder:validation:Minimum=1
+	Size int64 `json:"size"`
+	// +kubebuilder:validation:MaxLength=128
+	MediaType string `json:"mediaType"`
+	// +kubebuilder:validation:MaxLength=64
+	Algorithm string `json:"algorithm"`
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	KeyFingerprint string `json:"keyFingerprint"`
 }

@@ -26,6 +26,6 @@ done
 docker image inspect "$KONSTAPEL_S3_IMAGE" --format '{{json .RepoDigests}}' > "$out/s3-image.json"
 KONSTAPEL_S3_ENDPOINT=$endpoint KONSTAPEL_S3_ACCESS_KEY=$access KONSTAPEL_S3_SECRET_KEY=$secret \
 KONSTAPEL_S3_OUTPUT=$out KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE \
-  go test -mod=readonly -tags s3compat -count=1 -run '^(TestCompatibility|TestPublisherRoundTrip)$' -v ./internal/s3store/ > "$out/s3-compat.log" 2>&1 \
+  go test -mod=readonly -tags s3compat -count=1 -run '^(TestCompatibility|TestPublisherRoundTrip|TestSignedPublisherRoundTrip)$' -v ./internal/s3store/ > "$out/s3-compat.log" 2>&1 \
   || { tail -40 "$out/s3-compat.log" >&2; exit 1; }
 echo "S3 compatibility suite passed against $KONSTAPEL_S3_IMAGE; results in $out/s3-compat.json"

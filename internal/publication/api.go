@@ -34,6 +34,9 @@ func ToAPI(s Status) v1alpha1.PublicationStatus {
 	if f := s.Failure; f != nil {
 		out.Failure = &v1alpha1.PublicationFailure{Reason: f.Reason, Message: f.Message, Retryable: f.Retryable, At: metav1.NewTime(f.At)}
 	}
+	if g := s.Signature; g != nil {
+		out.Signature = &v1alpha1.PublicationSignature{Key: g.Key, VersionID: g.VersionID, SHA256: g.SHA256, Size: g.Size, MediaType: g.MediaType, Algorithm: g.Algorithm, KeyFingerprint: g.KeyFingerprint}
+	}
 	return out
 }
 
@@ -63,6 +66,9 @@ func FromAPI(s v1alpha1.PublicationStatus) Status {
 	}
 	if f := s.Failure; f != nil {
 		out.Failure = &Failure{Reason: f.Reason, Message: f.Message, Retryable: f.Retryable, At: f.At.UTC()}
+	}
+	if g := s.Signature; g != nil {
+		out.Signature = &Signature{Key: g.Key, VersionID: g.VersionID, SHA256: g.SHA256, Size: g.Size, MediaType: g.MediaType, Algorithm: g.Algorithm, KeyFingerprint: g.KeyFingerprint}
 	}
 	return out
 }

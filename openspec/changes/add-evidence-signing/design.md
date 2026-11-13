@@ -199,8 +199,12 @@ The names follow the existing patterns. Kubernetes status is additive
 `apiVersion` and `kind`, like the commit manifest (`PublicationCommit`) and the
 package descriptor. Each new field is optional with `omitempty`, so an
 unsigned publication writes exactly the bytes it writes today: the commit
-manifest, the receipt, and `AssessmentRun.status` (checked against goldens
-captured before the change).
+manifest, the receipt, the publication status, and its
+`AssessmentRun.status.publication` form, checked against goldens captured
+before the change. The only addition to an unsigned run is
+`status.signingIntent` with `mode: Disabled`. It records that the run was
+prepared unsigned, so a later Required policy cannot apply retroactively.
+Runs prepared before this change have no intent and stay unsigned.
 
 | Record | Unsigned (unchanged) | Signed (new) |
 | --- | --- | --- |

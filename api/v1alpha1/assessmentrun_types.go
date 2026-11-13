@@ -153,6 +153,12 @@ type AssessmentRunStatus struct {
 	// Absent for runs that use the controller's legacy file destination.
 	// +optional
 	Destination *DestinationPin `json:"destination,omitempty"`
+	// signingIntent is the signing policy frozen when publication was first
+	// prepared. It is written once and never removed; publication commits
+	// only what it requires. Absent for runs prepared before evidence
+	// signing existed (unsigned).
+	// +optional
+	SigningIntent *SigningIntent `json:"signingIntent,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -170,6 +176,7 @@ type AssessmentRunStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Evidence",type=string,JSONPath=`.status.summary.evidence.completeness`
 // +kubebuilder:printcolumn:name="Publication",type=string,JSONPath=`.status.publication.phase`
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.signingIntent) || (has(self.status) && has(self.status.signingIntent))",message="status.signingIntent is never removed"
 type AssessmentRun struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -190,4 +197,74 @@ type AssessmentRunList struct {
 
 func init() {
 	SchemeBuilder.Register(&AssessmentRun{}, &AssessmentRunList{})
+}
+
+// SigningIntent is a run's frozen publication signing policy (see
+// docs/integration/evidence-signing.md). The controller records it once from
+// an authoritative read of the pinned destination, after the archive is
+// staged and before any commit attempt. Later destination edits and key
+// rotation never change it.
+// +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode && self.destinationUID == oldSelf.destinationUID && self.destinationGeneration == oldSelf.destinationGeneration && self.archiveSha256 == oldSelf.archiveSha256 && self.preparedAt == oldSelf.preparedAt",message="a signing intent is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.secretName) == has(oldSelf.secretName) && (!has(self.secretName) || self.secretName == oldSelf.secretName)",message="a signing intent's key Secret is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.key) || (has(self.key) && self.key == oldSelf.key)",message="a signing intent's pinned key is set once and never changes"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Required' ? has(self.secretName) : (!has(self.secretName) && !has(self.key))",message="Required intents name their key Secret; Disabled intents have no key"
+type SigningIntent struct {
+	// mode is Disabled or Required, from the destination's spec.signing
+	// (absent is Disabled).
+	// +required
+	Mode SigningMode `json:"mode"`
+	// destinationUID and destinationGeneration identify the destination
+	// configuration the policy was read from.
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	DestinationUID string `json:"destinationUID"`
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	DestinationGeneration int64 `json:"destinationGeneration"`
+	// secretName is the signing key Secret in the controller namespace
+	// (Required only).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	SecretName string `json:"secretName,omitempty"`
+	// key is the public identity pinned at the first successful key load.
+	// A Required intent prepared while its key was unavailable has none
+	// until then; any later load must yield this same key.
+	// +optional
+	Key *SigningKey `json:"key,omitempty"`
+	// archiveSha256 is the digest of the staged archive the intent covers.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	ArchiveSHA256 string `json:"archiveSha256"`
+	// preparedAt is when the intent was recorded.
+	// +required
+	PreparedAt metav1.Time `json:"preparedAt"`
+}
+
+// SigningKey is public signing key material and its provenance. It never
+// holds private key bytes or the key password.
+type SigningKey struct {
+	// fingerprint is "sha256:" and the hex SHA-256 of the DER
+	// SubjectPublicKeyInfo.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	Fingerprint string `json:"fingerprint"`
+	// algorithm is the key's signing algorithm (ecdsa-sha2-256-nistp256).
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	Algorithm string `json:"algorithm"`
+	// publicKey is the PEM public key, retained to verify the signature.
+	// +required
+	// +kubebuilder:validation:MaxLength=4096
+	PublicKey string `json:"publicKey"`
+	// secretUID and secretResourceVersion record which Secret object the key
+	// was first read from (provenance only).
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	SecretUID string `json:"secretUID,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	SecretResourceVersion string `json:"secretResourceVersion,omitempty"`
+	// pinnedAt is when the key was pinned.
+	// +required
+	PinnedAt metav1.Time `json:"pinnedAt"`
 }

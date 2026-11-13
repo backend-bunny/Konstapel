@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -29,6 +30,9 @@ const (
 	OpDelete  Op = "Delete"
 	OpCleanup Op = "CleanupAttempts"
 	OpOpen    Op = "Open"
+	// OpStoreSignature and OpReadSignature are the signature object calls.
+	OpStoreSignature Op = "StoreSignature"
+	OpReadSignature  Op = "ReadSignature"
 )
 
 type fault struct {
@@ -55,8 +59,11 @@ type Publisher struct {
 	// DurableStaging controls whether staged bytes survive Restart.
 	DurableStaging bool
 	records        map[string]*record
-	faults         map[Op][]fault
-	calls          map[Op]int
+	// signatures are durable signature objects by publication ID; like the
+	// S3 object, the first stored bundle wins and survives restarts.
+	signatures map[string][]byte
+	faults     map[Op][]fault
+	calls      map[Op]int
 }
 
 var _ publication.Publisher = (*Publisher)(nil)
@@ -68,6 +75,7 @@ func New(clock func() time.Time) *Publisher {
 		destination:    publication.Destination{ID: "fake", Endpoint: "memory://fake", Bucket: "evidence", Prefix: "konstapel/"},
 		DurableStaging: true,
 		records:        map[string]*record{},
+		signatures:     map[string][]byte{},
 		faults:         map[Op][]fault{},
 		calls:          map[Op]int{},
 	}
@@ -207,11 +215,20 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 		return publication.Receipt{}, publication.ErrConflict
 	}
 	if r.receipt != nil {
+		if err := checkSigning(r.receipt.Signature, req.Signing); err != nil {
+			return publication.Receipt{}, err
+		}
 		return *r.receipt, lost(f, nil)
 	}
 	d, err := req.Retention.ParseDuration()
 	if err != nil {
 		return publication.Receipt{}, err
+	}
+	var sig *publication.Signature
+	if sg := req.Signing; sg != nil && sg.Mode == publication.SigningRequired {
+		if sig, err = p.requireSignature(r.staged, sg); err != nil {
+			return publication.Receipt{}, err
+		}
 	}
 	at := p.now().UTC().Truncate(time.Second)
 	id := r.staged.PublicationID
@@ -219,7 +236,7 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 		PublicationID: id, Destination: p.destination,
 		Commit:           publication.Commit{ManifestKey: p.destination.Prefix + id + "/commit.json", ManifestVersionID: "v1", ArchiveKey: p.destination.Prefix + id + "/attempts/1/package.tar", ArchiveVersionID: "v1"},
 		DescriptorSHA256: r.staged.DescriptorSHA256, PackageSHA256: r.staged.PackageSHA256, PackageSize: r.staged.PackageSize,
-		PublishedAt: at, Retention: req.Retention, ExpiresAt: at.Add(d),
+		PublishedAt: at, Retention: req.Retention, ExpiresAt: at.Add(d), Signature: sig,
 	}
 	r.receipt = &rc
 	return rc, lost(f, nil)
@@ -350,3 +367,89 @@ func (p *Publisher) Corrupt(run publication.RunRef, archive []byte) {
 }
 
 func sha256Of(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
+
+func (p *Publisher) signatureRef(id string, b []byte) publication.Signature {
+	return publication.Signature{Key: p.destination.Prefix + id + "/" + evidencesign.BundleFileName, VersionID: "v1",
+		SHA256: hex.EncodeToString(sha256Of(b)), Size: int64(len(b)), MediaType: evidencesign.BundleMediaType}
+}
+
+// StoreSignature stores the run's bundle once; an existing bundle wins.
+func (p *Publisher) StoreSignature(ctx context.Context, run publication.RunRef, bundle []byte) ([]byte, publication.Signature, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, err := p.enter(ctx, OpStoreSignature)
+	if err != nil {
+		return nil, publication.Signature{}, err
+	}
+	if len(bundle) == 0 || len(bundle) > evidencesign.MaxBundleBytes {
+		return nil, publication.Signature{}, fmt.Errorf("signature bundle is %d bytes", len(bundle))
+	}
+	id := run.PublicationID()
+	if _, ok := p.signatures[id]; !ok {
+		p.signatures[id] = bytes.Clone(bundle)
+	}
+	b := bytes.Clone(p.signatures[id])
+	return b, p.signatureRef(id, b), lost(f, nil)
+}
+
+// ReadSignature returns the stored bundle or ErrNotFound.
+func (p *Publisher) ReadSignature(ctx context.Context, run publication.RunRef) ([]byte, publication.Signature, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, err := p.enter(ctx, OpReadSignature); err != nil {
+		return nil, publication.Signature{}, err
+	}
+	b, ok := p.signatures[run.PublicationID()]
+	if !ok {
+		return nil, publication.Signature{}, publication.ErrNotFound
+	}
+	return bytes.Clone(b), p.signatureRef(run.PublicationID(), b), nil
+}
+
+// SetSignature replaces a stored bundle (nil removes it), modeling
+// tampering or loss of the signature object.
+func (p *Publisher) SetSignature(run publication.RunRef, bundle []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if bundle == nil {
+		delete(p.signatures, run.PublicationID())
+		return
+	}
+	p.signatures[run.PublicationID()] = bytes.Clone(bundle)
+}
+
+// requireSignature is the same commit gate as the S3 publisher's.
+func (p *Publisher) requireSignature(s publication.Staged, sg *publication.Signing) (*publication.Signature, error) {
+	pub, err := evidencesign.ParsePublicKey(sg.PublicKeyPEM)
+	if err != nil || pub.Fingerprint != sg.KeyFingerprint {
+		return nil, fmt.Errorf("%w: the intent's public key does not match its fingerprint", publication.ErrSignatureRequired)
+	}
+	digest, err := evidencesign.ParseArchiveDigest(s.PackageSHA256)
+	if err != nil {
+		return nil, err
+	}
+	b, ok := p.signatures[s.PublicationID]
+	if !ok {
+		return nil, fmt.Errorf("%w: no stored signature", publication.ErrSignatureRequired)
+	}
+	if _, err := evidencesign.Verify(b, digest, pub); err != nil {
+		return nil, fmt.Errorf("%w: the stored signature does not verify: %v", publication.ErrSignatureRequired, err)
+	}
+	ref := p.signatureRef(s.PublicationID, b)
+	ref.Algorithm, ref.KeyFingerprint = pub.Algorithm, pub.Fingerprint
+	return &ref, nil
+}
+
+// checkSigning refuses an existing commit that does not match the intent.
+func checkSigning(existing *publication.Signature, sg *publication.Signing) error {
+	required := sg != nil && sg.Mode == publication.SigningRequired
+	switch {
+	case required && existing == nil:
+		return fmt.Errorf("an unsigned commit exists for a Required signing intent: %w: %w", publication.ErrSignatureRequired, publication.ErrConflict)
+	case !required && existing != nil:
+		return fmt.Errorf("a signed commit exists for a Disabled signing intent: %w", publication.ErrConflict)
+	case required && existing.KeyFingerprint != sg.KeyFingerprint:
+		return fmt.Errorf("the commit is signed by another key: %w: %w", publication.ErrSignatureRequired, publication.ErrConflict)
+	}
+	return nil
+}

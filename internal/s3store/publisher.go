@@ -283,22 +283,40 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 	if s.PublicationID != s.Run.PublicationID() {
 		return publication.Receipt{}, publication.ErrConflict
 	}
-	if m, head, err := p.readManifest(ctx, s.Run); err == nil {
-		return p.receipt(m, head, s)
+	if m, sig, head, err := p.readCommit(ctx, s.Run); err == nil {
+		if err := checkCommitSigning(sig, req.Signing); err != nil {
+			return publication.Receipt{}, err
+		}
+		return p.receipt(m, sig, head, s)
 	} else if !errors.Is(err, publication.ErrNotFound) {
 		return publication.Receipt{}, err
 	}
 	if _, err := req.Retention.ParseDuration(); err != nil {
 		return publication.Receipt{}, err
 	}
+	if sg := req.Signing; sg != nil && sg.Mode != publication.SigningRequired && sg.Mode != publication.SigningDisabled {
+		return publication.Receipt{}, fmt.Errorf("%w: signing mode %q", publication.ErrUnsupportedRecord, sg.Mode)
+	}
 	a, err := p.stagedAttempt(ctx, s)
 	if err != nil {
 		return publication.Receipt{}, err
 	}
-	m := manifest{APIVersion: publication.APIVersion, Kind: "PublicationCommit", PublicationID: s.PublicationID, Run: s.Run,
+	m := manifest{APIVersion: publication.APIVersion, Kind: kindCommit, PublicationID: s.PublicationID, Run: s.Run,
 		DescriptorSHA256: s.DescriptorSHA256, ArchiveKey: a.ArchiveKey, ArchiveVersionID: a.ArchiveVersionID,
 		PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, Retention: req.Retention}
 	body, _ := json.Marshal(m)
+	// Commit gate: a Required intent commits only a stored signature that
+	// verifies for this archive under the pinned key. There is no unsigned
+	// fallback.
+	if sg := req.Signing; sg != nil && sg.Mode == publication.SigningRequired {
+		sig, err := p.requireSignature(ctx, s, sg)
+		if err != nil {
+			return publication.Receipt{}, err
+		}
+		body, _ = json.Marshal(signedManifest{APIVersion: publication.APIVersion, Kind: kindSignedCommit, PublicationID: s.PublicationID,
+			Subject: commitSubject{Run: s.Run, DescriptorSHA256: s.DescriptorSHA256, ArchiveKey: a.ArchiveKey, ArchiveVersionID: a.ArchiveVersionID,
+				PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize}, Retention: req.Retention, Signature: sig})
+	}
 	sum := sha256.Sum256(body)
 	_, err = p.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(p.commitKey(s.Run)), Body: bytes.NewReader(body),
 		ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(sum[:])), ContentLength: aws.Int64(int64(len(body))), IfNoneMatch: aws.String("*")})
@@ -306,11 +324,14 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 		return publication.Receipt{}, fmt.Errorf("%w: commit: %v", publication.ErrUnavailable, sanitize(err))
 	}
 	// Whether this attempt won or another did, the stored commit decides.
-	m, head, err := p.readManifest(ctx, s.Run)
+	m, sig, head, err := p.readCommit(ctx, s.Run)
 	if err != nil {
 		return publication.Receipt{}, err
 	}
-	return p.receipt(m, head, s)
+	if err := checkCommitSigning(sig, req.Signing); err != nil {
+		return publication.Receipt{}, err
+	}
+	return p.receipt(m, sig, head, s)
 }
 
 // stagedAttempt finds the verified attempt holding the staged content.
@@ -346,27 +367,37 @@ func (p *Publisher) stagedAttempt(ctx context.Context, s publication.Staged) (at
 
 func (p *Publisher) commitKey(run publication.RunRef) string { return p.runPrefix(run) + "commit.json" }
 
+// readManifest returns the run's commit with the fields both kinds share.
 func (p *Publisher) readManifest(ctx context.Context, run publication.RunRef) (manifest, *s3.HeadObjectOutput, error) {
+	m, _, head, err := p.readCommit(ctx, run)
+	return m, head, err
+}
+
+// readCommit reads and strictly decodes the run's commit of either kind.
+func (p *Publisher) readCommit(ctx context.Context, run publication.RunRef) (manifest, *commitSignature, *s3.HeadObjectOutput, error) {
 	key := p.commitKey(run)
 	b, err := p.read(ctx, key, "")
 	if err != nil {
-		return manifest{}, nil, err
+		return manifest{}, nil, nil, err
 	}
-	var m manifest
-	if err := json.Unmarshal(b, &m); err != nil || m.Run != run {
-		return manifest{}, nil, fmt.Errorf("commit %s is not this run's publication: %w", key, publication.ErrConflict)
+	m, sig, err := decodeCommit(b)
+	if err != nil {
+		return manifest{}, nil, nil, fmt.Errorf("commit %s: %w", key, err)
+	}
+	if m.Run != run {
+		return manifest{}, nil, nil, fmt.Errorf("commit %s is not this run's publication: %w", key, publication.ErrConflict)
 	}
 	head, err := p.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(key)})
 	if err != nil {
-		return manifest{}, nil, fmt.Errorf("%w: head commit: %v", publication.ErrUnavailable, sanitize(err))
+		return manifest{}, nil, nil, fmt.Errorf("%w: head commit: %v", publication.ErrUnavailable, sanitize(err))
 	}
-	return m, head, nil
+	return m, sig, head, nil
 }
 
 // receipt derives the receipt from the stored commit: publishedAt is the
 // commit object's immutable server time, and expiry uses the retention
 // recorded at the first commit, never the retry's clock or retention.
-func (p *Publisher) receipt(m manifest, head *s3.HeadObjectOutput, s publication.Staged) (publication.Receipt, error) {
+func (p *Publisher) receipt(m manifest, sig *commitSignature, head *s3.HeadObjectOutput, s publication.Staged) (publication.Receipt, error) {
 	if m.PackageSHA256 != s.PackageSHA256 || m.DescriptorSHA256 != s.DescriptorSHA256 {
 		return publication.Receipt{}, fmt.Errorf("run committed different content: %w", publication.ErrConflict)
 	}
@@ -386,12 +417,15 @@ func (p *Publisher) receipt(m manifest, head *s3.HeadObjectOutput, s publication
 	if p.Dest.CredentialSecret != nil {
 		r.Destination.CredentialRef = &publication.SecretRef{Name: p.Dest.CredentialSecret.Name}
 	}
+	if sig != nil {
+		r.Signature = sig.ref()
+	}
 	return r, r.Validate()
 }
 
 // Inspect reports publication state from storage.
 func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (publication.Status, error) {
-	m, head, err := p.readManifest(ctx, run)
+	m, sig, head, err := p.readCommit(ctx, run)
 	if errors.Is(err, publication.ErrNotFound) {
 		if _, rerr := p.Recover(ctx, run); rerr == nil {
 			return publication.Status{Phase: publication.PhaseUploading, PublicationID: run.PublicationID(), Availability: publication.AvailabilityUnavailable,
@@ -402,7 +436,7 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 	if err != nil {
 		return publication.Status{}, err
 	}
-	r, err := p.receipt(m, head, publication.Staged{PackageSHA256: m.PackageSHA256, DescriptorSHA256: m.DescriptorSHA256})
+	r, err := p.receipt(m, sig, head, publication.Staged{PackageSHA256: m.PackageSHA256, DescriptorSHA256: m.DescriptorSHA256})
 	if err != nil {
 		return publication.Status{}, err
 	}
