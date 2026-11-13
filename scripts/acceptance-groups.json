@@ -6,6 +6,7 @@
     "goTests": [
       "TestLiveDelivery",
       "TestLiveManager",
+      "TestLiveObservability",
       "TestLiveEnforcementEpoch",
       "TestLiveTargetingWorkflow",
       "TestLiveHardeningAdmission",

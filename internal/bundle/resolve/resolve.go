@@ -73,6 +73,12 @@ type Config struct {
 	Compatible  Compatible
 	// Now stamps acceptances; nil means time.Now.
 	Now func() time.Time
+	// Observe, when set, is told the outcome (nil on success) and wall-clock
+	// duration of every completed resolution attempt: one that rechecks
+	// retained evidence, retrieves, or fails before either. Reuse under a
+	// current acceptance and malformed requests are not attempts. It must
+	// not block.
+	Observe func(err error, d time.Duration)
 }
 
 // Resolver resolves pinned bundle digests. It is safe for concurrent use.
@@ -113,6 +119,18 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // pinned by a new lease that the caller must release (Release) when it
 // finishes or advances. On error no lease is held.
 func (r *Resolver) Resolve(ctx context.Context, req Request) (bundle.ResolvedContent, error) {
+	start := time.Now()
+	var reused bool
+	h, err := r.resolve(ctx, req, &reused)
+	if r.cfg.Observe != nil && !reused && !errors.Is(err, ErrRequest) {
+		r.cfg.Observe(err, time.Since(start))
+	}
+	return h, err
+}
+
+// resolve implements Resolve; reused reports a successful adoption under a
+// current acceptance.
+func (r *Resolver) resolve(ctx context.Context, req Request, reused *bool) (bundle.ResolvedContent, error) {
 	if req.Name == "" || !digestPattern.MatchString(req.Digest) {
 		return bundle.ResolvedContent{}, fmt.Errorf("%w: name %q and digest %q", ErrRequest, req.Name, req.Digest)
 	}
@@ -145,7 +163,9 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (bundle.ResolvedCon
 	var reuse error
 	if entry != nil {
 		if acc, ok := r.cfg.Acceptances.Lookup(t.Key); ok {
-			return r.adopt(t, entry, acc, lease) // (1)
+			h, err := r.adopt(t, entry, acc, lease) // (1)
+			*reused = err == nil
+			return h, err
 		}
 		acc, err := r.recheck(ctx, t, src, entry) // (2)
 		switch {

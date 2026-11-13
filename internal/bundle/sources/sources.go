@@ -121,6 +121,8 @@ type Options struct {
 	Interval time.Duration
 	// ReadTimeout bounds the reads of one Sync; zero means DefaultReadTimeout.
 	ReadTimeout time.Duration
+	// Now stamps Sync attempts (LastSync); nil means time.Now.
+	Now func() time.Time
 }
 
 // State describes the configuration the Watcher serves now.
@@ -185,8 +187,14 @@ type Watcher struct {
 
 	syncMu sync.Mutex // serializes Sync
 
-	mu  sync.RWMutex // guards cur
+	mu  sync.RWMutex // guards cur and last
 	cur snapshot
+	// last is the most recent completed Sync: when it started and whether
+	// it read the configuration.
+	last struct {
+		at time.Time
+		ok bool
+	}
 
 	pendingMu sync.Mutex
 	pending   map[string]bool
@@ -222,6 +230,9 @@ func New(opts Options) (*Watcher, error) {
 	if opts.ReadTimeout == 0 {
 		opts.ReadTimeout = DefaultReadTimeout
 	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
 	return &Watcher{
 		opts: opts, compat: opts.Compatibility,
 		cur:     snapshot{state: State{Reason: "not loaded yet"}},
@@ -238,6 +249,17 @@ func (w *Watcher) State() State {
 	s := w.cur.state
 	s.Sources.Sources = slices.Clone(s.Sources.Sources)
 	return s
+}
+
+// LastSync reports when the most recent completed Sync started and whether
+// it read the configuration (a missing or invalid ConfigMap is read
+// successfully; a failed read is not). The zero time means no Sync has
+// completed. It describes the Watcher's own synchronization, not whether
+// the configuration is available.
+func (w *Watcher) LastSync() (at time.Time, ok bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.last.at, w.last.ok
 }
 
 // Source implements resolve.Revisions.
@@ -314,12 +336,17 @@ func (w *Watcher) Sync(ctx context.Context) (Change, error) {
 	ctx, cancel := context.WithTimeout(ctx, w.opts.ReadTimeout)
 	defer cancel()
 
+	started := w.opts.Now()
 	next, err := w.load(ctx)
 	if err != nil {
+		w.mu.Lock()
+		w.last.at, w.last.ok = started, false
+		w.mu.Unlock()
 		return Change{}, err
 	}
 
 	w.mu.Lock()
+	w.last.at, w.last.ok = started, true
 	old := w.cur
 	ch := diff(old, next)
 	next.state.Revision = old.state.Revision
