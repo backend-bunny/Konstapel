@@ -226,16 +226,85 @@ Verified for this definition:
   are delivered in `Deny` and `Audit` and real admission requests are decided
   for the privileged check and all four hardening checks.
 
-Not verified:
+The released bundle (keyless-signed by the `bundle-release` workflow) with
+the released 0.2.0 image and charts is covered in
+[Verified against the released 0.2.0 controller](#verified-against-the-released-020-controller).
 
-- The packaged controller image and chart with this bundle. That needs a
-  controller built at 0.2.0 or later; re-run the
-  [Audit walkthrough](integration/bundle-audit-walkthrough.md) path with it
-  after the 0.2.0 release.
-- Keyless signing by the `bundle-release` workflow for this name (the bundle
-  is not released; only the privileged bundle's release exercised it).
-- The hardening change's exception lifecycle (its tasks 5.x) and the combined
-  expanded-assessment acceptance (6.x) remain open.
+Not verified: the hardening change's exception lifecycle (its tasks 5.x) and
+the combined expanded-assessment acceptance (6.x) remain open.
+
+#### Verified against the released 0.2.0 controller
+
+On 2026-11-13 the released artifacts were run together by hand on a
+disposable kind cluster (`scripts/environment.sh`, kind node `v1.37.0`,
+Kyverno chart 3.9.2), following the
+[Audit walkthrough](integration/bundle-audit-walkthrough.md) with the
+released image and charts in place of a local build. No CI workflow repeats
+this run.
+
+| Artifact | Digest |
+| --- | --- |
+| Controller image (release notes v0.2.0; the runtime chart's default) | `ghcr.io/backend-bunny/konstapel@sha256:4312dfd017ea963f23b02146921c8e3649b33b431ce408a51e6dbbfdf894a239` |
+| CRD chart 0.2.0 | `ghcr.io/backend-bunny/charts/konstapel-crds@sha256:b919fc9d07aee63559d756724c56dd0e0a33ef2fe87a38673ebad58000ae4a35` |
+| Runtime chart 0.2.0 | `ghcr.io/backend-bunny/charts/konstapel@sha256:68c186d6a5a509aff9a7429b3a1ac59b1c288c53322a3b4acc253c5245dd2911` |
+| `konstapel-privileged-containers` 0.1.0 | `ghcr.io/backend-bunny/bundles/konstapel-privileged-containers@sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8` |
+| `konstapel-linux-hardening` 0.1.0 (source `c8a4ec8`, content `sha256:fa46e726523e4625a065519da71c6211876cdb860044d4841514aa76657d2542`) | `ghcr.io/backend-bunny/bundles/konstapel-linux-hardening@sha256:9f7eb0c411a48abac34d6fdf626bd9a7b3deb5fc4874add9e3427109450b27e3` |
+
+Passed:
+
+- **Artifacts, read anonymously.** Cosign verified the image signature, and
+  both charts' signatures and `chart-inputs/v1` attestations, under the
+  release identities in [Releases](releases.md). `helm pull` by digest
+  produced archives matching the release notes' SHA-256 values. Cosign and
+  `bundlerelease verify-release` (`status=complete`) verified both bundles.
+- **Installation.** Both charts were installed from those pulled archives,
+  with `docs/examples/charts/development.yaml`, `download.enabled=false` and
+  `bundles.sourcesConfigMap` naming a ConfigMap that holds
+  `bundles/official-sources.yaml` unchanged. There was no image override:
+  the kind node pulled the controller from `ghcr.io` by the chart's default
+  digest. The image's `org.opencontainers.image.version` label is `0.2.0`.
+- **Resolution and delivery.** Each profile pinned its bundle by name and
+  digest and reached `Resolved=True`. The hardening bundle (minimum `0.2.0`)
+  was not `Incompatible`. An `Audit` and a `Deny` binding per bundle, each
+  selecting its own namespace, reached `EngineReady=True`. The privileged
+  bundle delivered 1 policy per binding and the hardening bundle 5. Each
+  policy was rendered in its binding's mode and annotated with the bundle
+  name and release digest.
+- **Admission.** Under `Deny`, a compliant Pod was admitted and a privileged
+  Pod was rejected, for both bundles. Under the hardening `Deny` binding,
+  each of the four hardening violations was rejected by its own policy
+  only. Under `Audit`, every violation was admitted, and a privileged Pod and
+  a Pod violating all five checks ran.
+- **Assessment.** This used the hardening `Audit` binding. The run reached
+  `Completed`, and its publication `Committed`; the package matched the
+  receipt checksum. All five checks recorded `fail` for the violating Pod.
+  The descriptor's `applied` and `desired` bundle, the packaged
+  `manifest.json` and the OSCAL `bundle-name`, `bundle-digest` and
+  `bundle-content-digest` all equal the release. The findings for
+  `ac-6_smt`, `cm-6_smt.b` and `cm-7_smt.b` were `not-satisfied`.
+  - Evidence was `Incomplete`: 7 results expected, 5 attributable,
+    2 missing. The missing results are the second validations of
+    `disallow-capabilities-strict` and `restrict-seccomp-strict`. Kyverno
+    reports only the first failing validation of a policy, so this is the
+    documented behaviour in
+    [Background assessment and rollout](integration/linux-hardening.md#background-assessment-and-rollout-tasks-4446),
+    not a defect.
+- **Controller.** The controller restarted 0 times. Its log has no version
+  line; the version is shown by the image label and by the hardening
+  bundle's `0.2.0` minimum passing.
+
+Not tested:
+
+- `gh attestation verify` without a GitHub login: the CLI exits with
+  "gh auth login" before verifying. It passed with an authenticated CLI.
+- The download server and `certManager` TLS mode, two replicas, and the
+  PodDisruptionBudget.
+- An assessment run of the privileged bundle on this controller (the
+  [walkthrough](integration/bundle-audit-walkthrough.md) covers it on a
+  `main` build).
+- A hardening run with `Complete` evidence.
+- Private mirrors, upgrades from 0.1.0, and bundle digest upgrades or
+  rollbacks.
 
 ## Content validation
 
@@ -3786,7 +3855,9 @@ any tag or upload, as designed.
 
 [Walkthrough: audit with the official signed bundle](integration/bundle-audit-walkthrough.md)
 uses this release end to end on a disposable cluster, from the sources
-ConfigMap to an assessment package naming this digest.
+ConfigMap to an assessment package naming this digest. The released 0.2.0
+controller and charts consume it too; see
+[Verified against the released 0.2.0 controller](#verified-against-the-released-020-controller).
 
 Its private mirror is verified through the production verifier in
 [Official release and its private mirror](#official-release-and-its-private-mirror).
