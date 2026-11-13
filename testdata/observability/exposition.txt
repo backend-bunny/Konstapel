@@ -1,0 +1,216 @@
+# HELP konstapel_binding_assessment_checks Expected check instances per display state; the states sum to the view's known inventory.
+# TYPE konstapel_binding_assessment_checks gauge
+konstapel_binding_assessment_checks{binding="example",state="accepted_risk",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="accepted_risk",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="error",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="error",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="fail",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="fail",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="missing",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="missing",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="out_of_scope",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="out_of_scope",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="pass",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="pass",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="rejected",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="rejected",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="skip",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="skip",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="unknown",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="unknown",view="latest_closed"} 0
+konstapel_binding_assessment_checks{binding="example",state="unresolved",view="current"} 0
+konstapel_binding_assessment_checks{binding="example",state="unresolved",view="latest_closed"} 0
+# HELP konstapel_binding_assessment_complete 1 when every expected observation in the view is attributable, otherwise 0.
+# TYPE konstapel_binding_assessment_complete gauge
+konstapel_binding_assessment_complete{binding="example",view="current"} 0
+konstapel_binding_assessment_complete{binding="example",view="latest_closed"} 0
+# HELP konstapel_binding_assessment_interval_seconds Effective scheduled assessment cadence.
+# TYPE konstapel_binding_assessment_interval_seconds gauge
+konstapel_binding_assessment_interval_seconds{binding="example"} 0
+# HELP konstapel_binding_assessment_status One-hot summary availability per view: known, no_targets, no_assessment or unknown.
+# TYPE konstapel_binding_assessment_status gauge
+konstapel_binding_assessment_status{binding="example",status="known",view="current"} 0
+konstapel_binding_assessment_status{binding="example",status="known",view="latest_closed"} 0
+konstapel_binding_assessment_status{binding="example",status="no_assessment",view="current"} 0
+konstapel_binding_assessment_status{binding="example",status="no_assessment",view="latest_closed"} 0
+konstapel_binding_assessment_status{binding="example",status="no_targets",view="current"} 0
+konstapel_binding_assessment_status{binding="example",status="no_targets",view="latest_closed"} 0
+konstapel_binding_assessment_status{binding="example",status="unknown",view="current"} 0
+konstapel_binding_assessment_status{binding="example",status="unknown",view="latest_closed"} 0
+# HELP konstapel_binding_collection_timeout_seconds Configured collection limit, used with the overdue grace period.
+# TYPE konstapel_binding_collection_timeout_seconds gauge
+konstapel_binding_collection_timeout_seconds{binding="example"} 0
+# HELP konstapel_binding_condition One-hot binding condition state: 1 for the current status of Resolved and EngineReady.
+# TYPE konstapel_binding_condition gauge
+konstapel_binding_condition{binding="example",condition="EngineReady",status="false"} 0
+konstapel_binding_condition{binding="example",condition="EngineReady",status="true"} 0
+konstapel_binding_condition{binding="example",condition="EngineReady",status="unknown"} 0
+konstapel_binding_condition{binding="example",condition="Resolved",status="false"} 0
+konstapel_binding_condition{binding="example",condition="Resolved",status="true"} 0
+konstapel_binding_condition{binding="example",condition="Resolved",status="unknown"} 0
+# HELP konstapel_binding_created_timestamp_seconds Creation time of the current binding object with this name.
+# TYPE konstapel_binding_created_timestamp_seconds gauge
+konstapel_binding_created_timestamp_seconds{binding="example"} 0
+# HELP konstapel_binding_last_closed_timestamp_seconds Closure time of the latest full-binding run, including incomplete and diagnostic closures.
+# TYPE konstapel_binding_last_closed_timestamp_seconds gauge
+konstapel_binding_last_closed_timestamp_seconds{binding="example"} 0
+# HELP konstapel_binding_max_evidence_age_seconds Effective evidence-age limit.
+# TYPE konstapel_binding_max_evidence_age_seconds gauge
+konstapel_binding_max_evidence_age_seconds{binding="example"} 0
+# HELP konstapel_binding_oldest_evaluation_timestamp_seconds Oldest attributable source evaluation time in the view.
+# TYPE konstapel_binding_oldest_evaluation_timestamp_seconds gauge
+konstapel_binding_oldest_evaluation_timestamp_seconds{binding="example",view="current"} 0
+konstapel_binding_oldest_evaluation_timestamp_seconds{binding="example",view="latest_closed"} 0
+# HELP konstapel_binding_scheduled_due_timestamp_seconds Earliest outstanding scheduled due time, or the next due time when none is outstanding.
+# TYPE konstapel_binding_scheduled_due_timestamp_seconds gauge
+konstapel_binding_scheduled_due_timestamp_seconds{binding="example"} 0
+# HELP konstapel_binding_snapshot_collection_started_timestamp_seconds Collection start of the latest closed full-binding run.
+# TYPE konstapel_binding_snapshot_collection_started_timestamp_seconds gauge
+konstapel_binding_snapshot_collection_started_timestamp_seconds{binding="example"} 0
+# HELP konstapel_binding_target_namespaces Known number of target namespaces, even when content is unresolved.
+# TYPE konstapel_binding_target_namespaces gauge
+konstapel_binding_target_namespaces{binding="example"} 0
+# HELP konstapel_capability_condition One-hot prerequisite state of an enabled capability.
+# TYPE konstapel_capability_condition gauge
+konstapel_capability_condition{capability="assessment",status="false"} 0
+konstapel_capability_condition{capability="assessment",status="true"} 0
+konstapel_capability_condition{capability="assessment",status="unknown"} 0
+konstapel_capability_condition{capability="exceptions",status="false"} 0
+konstapel_capability_condition{capability="exceptions",status="true"} 0
+konstapel_capability_condition{capability="exceptions",status="unknown"} 0
+konstapel_capability_condition{capability="policy_delivery",status="false"} 0
+konstapel_capability_condition{capability="policy_delivery",status="true"} 0
+konstapel_capability_condition{capability="policy_delivery",status="unknown"} 0
+# HELP konstapel_cleanup_blocked Retained packages whose deletion is blocked and needs action.
+# TYPE konstapel_cleanup_blocked gauge
+konstapel_cleanup_blocked 0
+# HELP konstapel_cleanup_oldest_expiry_timestamp_seconds Expiry of the oldest package with pending or blocked cleanup.
+# TYPE konstapel_cleanup_oldest_expiry_timestamp_seconds gauge
+konstapel_cleanup_oldest_expiry_timestamp_seconds 0
+# HELP konstapel_cleanup_pending Retained packages past expiry whose deletion is not yet confirmed.
+# TYPE konstapel_cleanup_pending gauge
+konstapel_cleanup_pending 0
+# HELP konstapel_observation_enabled 1 when the observation domain's feature is enabled and expected to report, 0 when disabled.
+# TYPE konstapel_observation_enabled gauge
+konstapel_observation_enabled{domain="assessment"} 0
+konstapel_observation_enabled{domain="bundle_resolution"} 0
+konstapel_observation_enabled{domain="evidence_storage"} 0
+konstapel_observation_enabled{domain="targeting"} 0
+# HELP konstapel_observation_ready 1 when this replica holds an enabled domain's synchronized leader projection within its maximum age, otherwise 0.
+# TYPE konstapel_observation_ready gauge
+konstapel_observation_ready{domain="assessment"} 0
+konstapel_observation_ready{domain="bundle_resolution"} 0
+konstapel_observation_ready{domain="evidence_storage"} 0
+konstapel_observation_ready{domain="targeting"} 0
+# HELP konstapel_observation_updated_timestamp_seconds Unix time the owner produced the domain's current projection from synchronized state.
+# TYPE konstapel_observation_updated_timestamp_seconds gauge
+konstapel_observation_updated_timestamp_seconds{domain="assessment"} 0
+konstapel_observation_updated_timestamp_seconds{domain="bundle_resolution"} 0
+konstapel_observation_updated_timestamp_seconds{domain="evidence_storage"} 0
+konstapel_observation_updated_timestamp_seconds{domain="targeting"} 0
+# HELP konstapel_operation_attempts_total Completed attempts of a bounded operation; each retry is a separate attempt.
+# TYPE konstapel_operation_attempts_total counter
+konstapel_operation_attempts_total{operation="bundle_resolution",result="failure"} 0
+konstapel_operation_attempts_total{operation="bundle_resolution",result="success"} 0
+konstapel_operation_attempts_total{operation="evidence_cleanup",result="failure"} 0
+konstapel_operation_attempts_total{operation="evidence_cleanup",result="success"} 0
+konstapel_operation_attempts_total{operation="evidence_publication",result="failure"} 0
+konstapel_operation_attempts_total{operation="evidence_publication",result="success"} 0
+# HELP konstapel_operation_duration_seconds Duration of completed attempts of a bounded operation.
+# TYPE konstapel_operation_duration_seconds histogram
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="failure",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="bundle_resolution",result="failure"} 0
+konstapel_operation_duration_seconds_count{operation="bundle_resolution",result="failure"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="bundle_resolution",result="success",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="bundle_resolution",result="success"} 0
+konstapel_operation_duration_seconds_count{operation="bundle_resolution",result="success"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="failure",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="evidence_cleanup",result="failure"} 0
+konstapel_operation_duration_seconds_count{operation="evidence_cleanup",result="failure"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_cleanup",result="success",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="evidence_cleanup",result="success"} 0
+konstapel_operation_duration_seconds_count{operation="evidence_cleanup",result="success"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="failure",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="evidence_publication",result="failure"} 0
+konstapel_operation_duration_seconds_count{operation="evidence_publication",result="failure"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="0.05"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="0.1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="0.25"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="0.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="1"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="2.5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="5"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="10"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="30"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="60"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="120"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="300"} 0
+konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="+Inf"} 0
+konstapel_operation_duration_seconds_sum{operation="evidence_publication",result="success"} 0
+konstapel_operation_duration_seconds_count{operation="evidence_publication",result="success"} 0
+# HELP konstapel_publication_failed Closed runs whose publication currently fails and needs action.
+# TYPE konstapel_publication_failed gauge
+konstapel_publication_failed 0
+# HELP konstapel_publication_pending Closed runs whose evidence package is not yet committed and is still being attempted.
+# TYPE konstapel_publication_pending gauge
+konstapel_publication_pending 0
