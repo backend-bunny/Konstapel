@@ -173,7 +173,7 @@
         "go",
         "golang"
       ],
-      "description": "Temporary: Devbox's package index stops at Go 1.27.3, so hold the go.mod directive and the devbox.json pin there (they already share the Go toolchain group). Remove together with the golang.org/x/crypto rule when Devbox indexes Go 1.27.4",
+      "description": "Temporary: Devbox's package index stops at Go 1.27.3, so hold the go.mod directive and the devbox.json pin there (they already share the Go toolchain group). Remove together with the go-licenses holds below when Devbox indexes Go 1.27.4",
       "allowedVersions": "<1.27.4"
     },
     {
@@ -183,8 +183,78 @@
       "matchDepNames": [
         "golang.org/x/crypto"
       ],
-      "description": "Temporary: x/crypto v0.59.0 imports crypto/mldsa, absent from Go 1.27.3. Remove with the Go toolchain hold when Devbox indexes Go 1.27.4, then bump toolchain and x/crypto in one PR",
-      "allowedVersions": "<0.59.0"
+      "description": "Temporary (Go toolchain hold): x/crypto v0.58.0+ ships ssh/mldsa.go importing crypto/mldsa, which the Go 1.26-built Devbox go-licenses cannot load (task image:build fails); v0.59.0 also fails on Go 1.27.3. See docs/development.md 'Temporary Go toolchain holds'",
+      "allowedVersions": "<0.58.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/sigstore/sigstore"
+      ],
+      "description": "Temporary (Go toolchain hold): v1.11.0+ imports crypto/mldsa in pkg/cryptoutils; same go-licenses failure",
+      "allowedVersions": "<1.11.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/sigstore/sigstore-go"
+      ],
+      "description": "Temporary (Go toolchain hold): sigstore-go v1.4.0 requires rekor v1.5.5, which requires trillian v1.8.0, but task deps:check pins both Trillian images to the go.sum version (v1.7.3); hold until the Trillian images move to v1.8.0 with live acceptance",
+      "allowedVersions": "<1.4.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/sigstore/rekor"
+      ],
+      "description": "Temporary (Go toolchain hold): rekor v1.5.5 requires trillian v1.8.0 (coupled to sigstore-go v1.4.0; see that hold)",
+      "allowedVersions": "<=1.5.3"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/sigstore/rekor-tiles/v2"
+      ],
+      "description": "Temporary (Go toolchain hold): rekor-tiles v2.4.0 is coupled to sigstore-go v1.4.0 and rekor v1.5.5 (see the sigstore-go hold)",
+      "allowedVersions": "<2.4.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/sigstore/timestamp-authority/v2"
+      ],
+      "description": "Temporary (Go toolchain hold): timestamp-authority v2.2.0 is coupled to sigstore-go v1.4.0 and rekor v1.5.5 (see the sigstore-go hold)",
+      "allowedVersions": "<2.2.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/prometheus/common"
+      ],
+      "description": "Temporary (Go toolchain hold): v0.74.0 requires x/net v0.62, which requires x/crypto v0.58 (see the x/crypto hold)",
+      "allowedVersions": "<0.74.0"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "golang.org/x/net"
+      ],
+      "description": "Temporary (Go toolchain hold): x/net v0.61.0+ requires x/crypto v0.58.0 (see the x/crypto hold)",
+      "allowedVersions": "<0.61.0"
     },
     {
       "matchDepNames": [
