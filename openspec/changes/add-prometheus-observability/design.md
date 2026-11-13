@@ -122,14 +122,23 @@ The aggregation unit is one logical check/sub-validation against one expected
 resource state within a binding contribution, as defined by the assessment owner.
 Deduplicate report/exception references at that boundary; distinct bindings
 remain distinct contributions. Do not interpret a sum across bindings as unique
-workloads or satisfied controls. Use fixed mutually exclusive display states:
-`pass`, `fail`, `accepted_risk`, `error`, `warn`, `skip`, `unknown`, `stale`, and
-`out_of_scope`. Their projection consumes the owner's normalized outcome,
-applicability, evidence usability and risk attribution, with a documented table:
+workloads or satisfied controls. Use fixed mutually exclusive display states
+taken from the owner's normalized summary (`OutcomeCounts` and
+`EvidenceSummary`): `pass`, `fail`, `error`, `skip`, `accepted_risk`,
+`out_of_scope` (owner `notApplicable`), `unknown` (an attributable but
+unrecognized outcome; the owner folds `warn` into it), `missing`, `rejected`
+(including evidence older than `maxEvidenceAge`) and `unresolved`. The owner
+does not separate `warn` or age-only rejection, so the earlier `warn` and
+`stale` states are not exposed; adding them requires the assessment owner to
+record them first. A summary with stale (unresolved) scopes has a partially
+unknown inventory and is `unknown`. Their projection consumes the owner's
+normalized outcome, applicability, evidence usability and risk attribution,
+with a documented table:
 
 - Known non-applicability is out_of_scope, never passing coverage.
-- Unestablished inventory, correlation or risk attribution is unknown; evidence
-  rejected for age is stale. Neither can authorize an accepted-risk or pass count.
+- Unestablished inventory makes the view unknown; unestablished correlation is
+  unresolved and evidence rejected for age is rejected. None can authorize an
+  accepted-risk or pass count.
 - An attributable, valid acceptance is accepted_risk regardless of whether the
   underlying engine reported pass or skip; the raw result remains in evidence.
 - Remaining attributable ordinary results map to their explicit outcome; an

@@ -11,10 +11,12 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/controller"
+	"github.com/backend-bunny/Konstapel/internal/observability"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -115,6 +117,16 @@ func runController(args []string) error {
 		return fmt.Errorf("evidence destination: %w", err)
 	}
 	controller.ConfigureAssessments(rt)
+	// The metric contract is served next to controller-runtime's collectors.
+	// No owner domain publishes projections yet, so every domain is
+	// reported disabled rather than healthy.
+	hub, err := observability.NewHub(observability.Options{})
+	if err != nil {
+		return err
+	}
+	if err := ctrlmetrics.Registry.Register(hub); err != nil {
+		return fmt.Errorf("register metrics: %w", err)
+	}
 	// Readiness fails from the termination signal on, while shutdown drains.
 	ctx := ctrl.SetupSignalHandler()
 	mgr, err := controller.NewManager(cfg, controller.Options{
@@ -132,6 +144,7 @@ func runController(args []string) error {
 		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),
 		LocalBundle:             VendoredBundle,
 		Bundles:                 bundles,
+		Observability:           hub,
 	})
 	if err != nil {
 		return err
