@@ -225,12 +225,38 @@ timestamp server and Rekor remain allowed.
 
 ### Temporary Go toolchain holds
 
-Devbox's package index currently stops at Go 1.27.3. Two rules in `renovate.json`
-keep Renovate from opening unusable PRs: the `go.mod` directive and the
-`devbox.json` `go@` pin (already one "Go toolchain" group) are held below 1.27.4,
-and `golang.org/x/crypto` is held below 0.59.0 because that release imports
-`crypto/mldsa`, which Go 1.27.3 lacks. Remove these two rules when Devbox
-indexes Go 1.27.4 and bump toolchain + x/crypto in one PR.
+Devbox's package index currently stops at Go 1.27.3, and the Devbox `go-licenses`
+is built with Go 1.26, whose standard library lacks `crypto/mldsa`. Rules in
+`renovate.json` keep Renovate from opening PRs that cannot pass `task check` or
+`task image:build`:
+
+- The `go.mod` directive and the `devbox.json` `go@` pin (one "Go toolchain"
+  group) are held below 1.27.4.
+- `golang.org/x/crypto` is held below 0.58.0 (`ssh/mldsa.go` imports
+  `crypto/mldsa`), `github.com/sigstore/sigstore` below 1.11.0 (`pkg/cryptoutils`
+  imports it), and `golang.org/x/net` below 0.61.0 and
+  `github.com/prometheus/common` below 0.74.0 (they require x/crypto 0.58 or
+  newer). go-licenses fails to load these packages, so `image:build` fails.
+- `github.com/sigstore/sigstore-go` is held below 1.4.0, with its coupled
+  `rekor` (up to 1.5.3), `rekor-tiles/v2` (below 2.4.0) and
+  `timestamp-authority/v2` (below 2.2.0). sigstore-go 1.4.0 requires rekor
+  1.5.5, which requires Trillian 1.8.0, while `task deps:check` pins both
+  Trillian images to the version in `go.sum`.
+
+To lift the holds, once Devbox indexes Go 1.27.4 (or ships a `go-licenses`
+built with Go 1.27):
+
+1. Set `go@1.27.4` in `devbox.json`, regenerate `devbox.lock` with Devbox, and
+   set the `go.mod` directive.
+2. Bump the held set together: x/crypto 0.59.0 or newer, sigstore/sigstore
+   1.11.x, prometheus/common 0.74.0, x/net 0.62.0 and its x/sys, x/term and
+   x/text, then `go mod tidy`.
+3. Bump sigstore-go 1.4.0 with rekor 1.5.5, rekor-tiles 2.4.0 and
+   timestamp-authority 2.2.0, and move both Trillian images (tag and digest in
+   `scripts/runtime.env`) to Trillian 1.8.0; run the opt-in Sigstore stack
+   suite and the live acceptance groups.
+4. Run `task check`, `task image:build` and `task image:test`, then remove the
+   holds from `renovate.json` and this section.
 
 Renovate excludes vendored content, historical evidence, and OpenSpec artifacts.
 Refresh policies, mappings, and NIST content through their reviewed content-update
