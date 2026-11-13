@@ -72,6 +72,22 @@ Cosign expects, not the textual hex digest accidentally hashed again. Use a
 standard Sigstore bundle version supported by the pinned verifier; pin and test
 the exact library/schema compatibility in implementation.
 
+Implemented contract (`internal/evidencesign`, group 1): the signer interface
+takes a raw 32-byte archive SHA-256 (never hex text) and returns the bundle,
+its digest, media type, algorithm `ecdsa-sha2-256-nistp256`, and key fingerprint
+`sha256:<hex of DER SPKI>`. The Secret adapter decrypts with the same
+securesystemslib `encrypted` package Cosign uses (both `ENCRYPTED SIGSTORE` and
+`ENCRYPTED COSIGN` PEM types), takes the password byte for byte, and signs via
+sigstore's ECDSA signer over that digest. The bundle is Sigstore bundle v0.3
+(`messageSignature` plus Cosign's public-key hint, base64 SHA-256 of the DER
+key) with no certificate, log entry, or timestamp. Konstapel writes one
+canonical JSON form; its internal verifier accepts only that form, requires
+the hint to name the caller's trusted key, then verifies with sigstore-go.
+Cosign-written bundles differ only in protojson spacing and are an auditor
+concern, not a stored input. Pinned and interoperability-tested with Devbox
+Cosign v3.1.3, sigstore-go v1.3.0, sigstore v1.10.8, and securesystemslib
+v0.11.0; these were already controller dependencies, so no module was added.
+
 Use direct controller-namespace Secret reads with bounded memory lifetime; avoid
 cluster-wide private-key caches and persistent private-key copies. Grant only
 necessary namespace-scoped read access, use narrowly scoped watches where needed,
