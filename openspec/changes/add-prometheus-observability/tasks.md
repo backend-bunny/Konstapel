@@ -8,15 +8,15 @@ integration boundaries.
 
 ## 1. Metric contract and pure projections
 
-- [ ] 1.1 Add the documented metric catalog with names, types, units, enum labels, source availability and reset semantics; verify exposition fixtures have no framework/control dimensions and equivalent alternative-catalog metadata produces the same contract.
+- [x] 1.1 Add the documented metric catalog with names, types, units, enum labels, source availability and reset semantics; verify exposition fixtures have no framework/control dimensions and equivalent alternative-catalog metadata produces the same contract.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.2 Define immutable owner-snapshot interfaces and readiness/enabled/validity projections; test unsynchronized startup, stalled producers, disabled domains, expired validity and known-zero versus missing-data behavior with an injected clock.
+- [x] 1.2 Define immutable owner-snapshot interfaces and readiness/enabled/validity projections; test unsynchronized startup, stalled producers, disabled domains, expired validity and known-zero versus missing-data behavior with an injected clock.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 1.3 Implement per-binding current/latest-closed summary projections using the assessment owner's normalized fixtures; verify all display states, inventory totals, zero targets, incomplete/diagnostic runs and namespace-only requests without introducing a second report normalizer.
+- [x] 1.3 Implement per-binding current/latest-closed summary projections using the assessment owner's normalized fixtures; verify all display states, inventory totals, zero targets, incomplete/diagnostic runs and namespace-only requests without introducing a second report normalizer.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.4 Add UID-aware deletion/recreation and owner/replica filtering; test binding name reuse, leader loss/acquisition, source reconstruction and preservation of source/closure times across repeated scrapes.
+- [x] 1.4 Add UID-aware deletion/recreation and owner/replica filtering; test binding name reuse, leader loss/acquisition, source reconstruction and preservation of source/closure times across repeated scrapes.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 1.5 Register custom collectors in the existing metrics registry and promote the Prometheus client dependency when imported; verify no duplicate upstream collectors, bounded series count as workload/history fixtures grow, and no credential or free-text label leakage.
+- [x] 1.5 Register custom collectors in the existing metrics registry and promote the Prometheus client dependency when imported; verify no duplicate upstream collectors, bounded series count as workload/history fixtures grow, and no credential or free-text label leakage.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 1.6 Document query examples, projection freshness, historical-view limitations and safe aggregation; verify those examples against fixtures and include projection/exposition checks in the existing test/check workflows.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->

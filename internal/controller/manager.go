@@ -39,6 +39,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/exception"
+	"github.com/backend-bunny/Konstapel/internal/observability"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -148,6 +149,11 @@ type Options struct {
 	// Bundles configures OCI bundle sources; the zero value is disabled and
 	// constructs nothing.
 	Bundles stack.Options
+	// Observability holds the owner projections served as Prometheus
+	// metrics. Its leadership term follows this manager's election. The
+	// caller registers it once per process in the metrics registry. Nil
+	// adds nothing.
+	Observability *observability.Hub
 }
 
 // Scheme returns the scheme the manager uses.
@@ -212,6 +218,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 			}
 			return nil
 		}); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Observability != nil {
+		if err := mgr.Add(observability.Leadership{Hub: opts.Observability}); err != nil {
 			return nil, err
 		}
 	}
