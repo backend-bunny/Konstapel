@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
 )
@@ -142,5 +144,28 @@ func TestPutUnderSetgidRoot(t *testing.T) {
 	}))
 	if _, err := c.Get(bg(), a.ManifestDigest); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The Linux hardening bundle (five policies, variants, fixtures) also stores
+// and reads back through the cache, passing the default content check.
+func TestHardeningBundleRoundTrip(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "bundles/konstapel-linux-hardening/definition.json"))
+	must(t, err)
+	def, err := bundle.LoadDefinition(raw)
+	must(t, err)
+	def.Source.Revision = strings.Repeat("c", 40)
+	a, err := bundle.Build(def, os.DirFS(repoRoot), time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
+	must(t, err)
+	c := newEnv(t).open(t, Config{})
+	got, err := c.Put(bg(), a.Manifest, a.Layer)
+	must(t, err)
+	if got.Digest != a.ManifestDigest || got.ContentDigest != a.Descriptor.ContentDigest() {
+		t.Fatalf("identities: %+v", got)
+	}
+	must(t, got.Descriptor.VerifyPayload(got.FS()))
+	again, err := c.Get(bg(), a.ManifestDigest)
+	if err != nil || again.Dir != got.Dir || len(again.Descriptor.Policies) != 5 {
+		t.Fatalf("Get: %+v %v", again, err)
 	}
 }

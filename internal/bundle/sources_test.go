@@ -40,8 +40,21 @@ func loadOfficial(t *testing.T) Sources {
 
 func TestExampleSourcesAreValid(t *testing.T) {
 	off := loadOfficial(t)
-	if len(off.Sources) != 1 || off.Sources[0].Publisher.Type != SignerKeyless || off.Sources[0].CredentialSecret != nil {
-		t.Fatalf("official example: %+v", off)
+	// One keyless rule per released bundle, all with the same identity and
+	// builder (the release workflow on main).
+	if len(off.Sources) != 2 || off.Sources[0].Name != "konstapel-linux-hardening" || off.Sources[1].Name != "konstapel-privileged-containers" {
+		t.Fatalf("official sources must be one rule per released bundle: %+v", off)
+	}
+	for _, s := range off.Sources {
+		if s.Publisher.Type != SignerKeyless || s.CredentialSecret != nil {
+			t.Fatalf("official rule %s: %+v", s.Name, s)
+		}
+		if s.Repository != "ghcr.io/backend-bunny/bundles/"+s.Name {
+			t.Errorf("official rule %s repository %s", s.Name, s.Repository)
+		}
+		if s.Publisher.Identity != off.Sources[0].Publisher.Identity {
+			t.Errorf("official rule %s identity differs from the others", s.Name)
+		}
 	}
 	org := loadExample(t, "organization.yaml")
 	if len(org.Sources) != 2 || org.Sources[0].Name != "acme-baseline" {

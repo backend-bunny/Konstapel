@@ -147,6 +147,44 @@ payload: the packaged checksums verify and agree with `content/SHA256SUMS`, the
 AC-6 mapping and descriptor inventory correspond, and the upstream Kyverno
 fixtures pass. The bundle is defined but **not published**.
 
+### Second bundle: `konstapel-linux-hardening`
+
+`bundles/konstapel-linux-hardening/definition.json` (version `0.1.0`) assembles
+the Linux workload hardening bundle by build-time reference to sources other
+changes own; it adds no policy and copies nothing into `bundles/`. It ships five
+logical checks, each with one rule and check ID equal to its policy name:
+`disallow-privileged-containers` (the first loop's vendored upstream policy),
+and the owned local variants under `content/linux-hardening/variants/` of
+`disallow-privilege-escalation`, `disallow-capabilities-strict`,
+`require-run-as-nonroot` and `restrict-seccomp-strict`. The unmodified upstream
+originals, `variants.json`, `sources.json`, licenses and notices ship as
+provenance (role `upstream`, never `policy`). Scope is `os: ["linux"]` only: the
+variants exclude an explicit `spec.os.name: windows` and treat a missing OS with
+the Linux rules, a configuration convention that does not attest the node OS.
+
+Tests ship beside what they exercise: the retained upstream CLI suites under
+`content/upstream/kyverno/` and the variant suites from `testdata/linux-hardening/`
+at `tests/linux-hardening/` (same depth, so their `../../../content/...` policy
+references resolve unchanged; the rendered-binding suite stays with targeting).
+Two Component Definitions ship: the first loop's AC-6 mapping and the
+hardening change's bounded AC-6/CM-6/CM-7 mappings (partial technical evidence
+only), over the same pinned NIST catalog and Moderate profile.
+
+`internal/bundle/hardening_test.go` builds it twice (identical digests), runs
+`ValidateContent`, and compares the policy inventory, rule and check IDs, variant
+sources and digests, scope, mappings and shipped suites against the hardening
+change's accepted inputs written out in the test, so an omitted or extra policy,
+a Windows scope or a mistyped check ID fails. The pinned Kyverno CLI runs every
+shipped suite on the unpacked payload. `bundles/official-sources.yaml` carries
+its own publisher rule, as the release workflow requires one per name.
+
+Build and inspect locally from a clean checkout (nothing is published):
+
+```sh
+devbox run -- scripts/bundles/package.sh konstapel-linux-hardening /tmp/hardening-bundle
+jq . /tmp/hardening-bundle/package.json
+```
+
 ## Content validation
 
 `bundle.ValidateContent` checks an unpacked payload's declarative content. It

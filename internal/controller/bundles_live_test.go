@@ -319,7 +319,17 @@ func TestLiveBundlesOfficial(t *testing.T) {
 	}
 	wrong := official
 	wrong.Sources = append([]bundle.BundleSource(nil), official.Sources...)
-	wrong.Sources[0].Publisher.Identity = strings.Replace(official.Sources[0].Publisher.Identity, "@refs/heads/main", "@refs/heads/not-main", 1)
+	// Alter the rule of the bundle this test consumes, not whichever is first.
+	wi := -1
+	for i, src := range wrong.Sources {
+		if src.Name == "konstapel-privileged-containers" {
+			wi = i
+		}
+	}
+	if wi < 0 {
+		t.Fatal("bundles/official-sources.yaml has no konstapel-privileged-containers rule")
+	}
+	wrong.Sources[wi].Publisher.Identity = strings.Replace(official.Sources[wi].Publisher.Identity, "@refs/heads/main", "@refs/heads/not-main", 1)
 	wrongYAML, err := yaml.Marshal(wrong)
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +349,7 @@ func TestLiveBundlesOfficial(t *testing.T) {
 	s.binding("bo-deny", p.Name, v1alpha1.ModeDeny)
 	untrusted := l.waitProfile(p.Name, v1alpha1.ReasonContentUnavailable, "(Untrusted)")
 	l.baNothingDelivered("bo-deny", v1alpha1.ReasonContentUnavailable)
-	l.record("official-wrong-identity", map[string]any{"identity": wrong.Sources[0].Publisher.Identity, "profile": untrusted, "delivered": "nothing; privileged Pod admitted"})
+	l.record("official-wrong-identity", map[string]any{"identity": wrong.Sources[wi].Publisher.Identity, "profile": untrusted, "delivered": "nothing; privileged Pod admitted"})
 
 	// 2. The checked-in official rule, verbatim: delivered in Deny and Audit.
 	l.obApply(cm(string(raw)))

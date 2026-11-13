@@ -13,6 +13,15 @@ version: 1
 sources:
   # Anonymous pull, keyless signing by the dedicated bundle-release workflow
   # on main, using the built-in Sigstore public-good root.
+  - name: konstapel-linux-hardening
+    repository: ghcr.io/backend-bunny/bundles/konstapel-linux-hardening
+    publisher:
+      type: keyless
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
+      provenance:
+        sourceRepository: https://github.com/backend-bunny/Konstapel
+        builder: https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
   - name: konstapel-privileged-containers
     repository: ghcr.io/backend-bunny/bundles/konstapel-privileged-containers
     publisher:
