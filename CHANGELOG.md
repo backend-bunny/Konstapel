@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.2.0](https://github.com/backend-bunny/Konstapel/compare/v0.1.0...v0.2.0) (2026-11-13)
+
+
+### Features
+
+* **assessment:** export OCI-bundle runs from their frozen bundle ([#235](https://github.com/backend-bunny/Konstapel/issues/235)) ([566c831](https://github.com/backend-bunny/Konstapel/commit/566c8312cbec26cd0bd052490def41b620316e54))
+* **assessment:** freeze and export each run's applied bundle content ([#244](https://github.com/backend-bunny/Konstapel/issues/244)) ([78e3e32](https://github.com/backend-bunny/Konstapel/commit/78e3e3246573ee6f13f849f0800e87b8353a26dc))
+* **bundle:** acceptance, leases, eviction and retained proofs (tasks 4.2-4.4) ([#222](https://github.com/backend-bunny/Konstapel/issues/222)) ([75e339a](https://github.com/backend-bunny/Konstapel/commit/75e339a66cbf16708af5e935a6876122d89c484e))
+* **bundle:** add bounded digest/referrer registry retrieval (2.2) ([#208](https://github.com/backend-bunny/Konstapel/issues/208)) ([7a5aac9](https://github.com/backend-bunny/Konstapel/commit/7a5aac93e8c0a947e05f9723b45ff8d5b5d5157b))
+* **bundle:** add policy bundle descriptor and OCI layout contract ([#200](https://github.com/backend-bunny/Konstapel/issues/200)) ([94b9cff](https://github.com/backend-bunny/Konstapel/commit/94b9cfff4c2d61a44925b7bd80ba0e84a0ebd150))
+* **bundle:** add the bundles:package workflow and authoring docs ([#203](https://github.com/backend-bunny/Konstapel/issues/203)) ([02c3c1b](https://github.com/backend-bunny/Konstapel/commit/02c3c1b768c82c504a79f612971f619c58dfa4df))
+* **bundle:** assemble the Linux hardening bundle by reference to owned content ([#247](https://github.com/backend-bunny/Konstapel/issues/247)) ([c6f1233](https://github.com/backend-bunny/Konstapel/commit/c6f1233c04f4ed1a25b588382592c8c71474e2fe))
+* **bundle:** build and unpack bundle archives deterministically ([#201](https://github.com/backend-bunny/Konstapel/issues/201)) ([1ead7d4](https://github.com/backend-bunny/Konstapel/commit/1ead7d4c2fb5ee0f72ea115ee47819d2e130d92d))
+* **bundle:** builder-record provenance, exact keyless rules, Linux-only scope ([#237](https://github.com/backend-bunny/Konstapel/issues/237)) ([0873755](https://github.com/backend-bunny/Konstapel/commit/087375554c995a06ec88f2405c362f1cf504e90a))
+* **bundle:** central source watcher and detailed content conditions (tasks 5.1/5.3 core) ([#227](https://github.com/backend-bunny/Konstapel/issues/227)) ([a1525f4](https://github.com/backend-bunny/Konstapel/commit/a1525f4db9a5aaf8bc52c98a99660c3b7ecb15f4))
+* **bundle:** define the central bundle source configuration ([#207](https://github.com/backend-bunny/Konstapel/issues/207)) ([3cfaf8c](https://github.com/backend-bunny/Konstapel/commit/3cfaf8ca60711b977ec863f5ee629fa6d3427fc3))
+* **bundle:** define the first policy bundle, konstapel-privileged-containers ([#202](https://github.com/backend-bunny/Konstapel/issues/202)) ([80dd9b4](https://github.com/backend-bunny/Konstapel/commit/80dd9b4df8b9d0bad570af5660c04e26b6f80d0b))
+* **bundle:** freeze tested bundles and publish them write-once (task 6.2) ([#218](https://github.com/backend-bunny/Konstapel/issues/218)) ([834c259](https://github.com/backend-bunny/Konstapel/commit/834c259212c1f11d41faf42b81f361a7f7107e53))
+* **bundle:** Helm chart wiring and live acceptance for OCI bundles (stage 2b-ii) ([#230](https://github.com/backend-bunny/Konstapel/issues/230)) ([b6170bf](https://github.com/backend-bunny/Konstapel/commit/b6170bf11dc34216d70557ba08e0a233ba1f09c0))
+* **bundle:** isolated extraction and atomic digest cache (tasks 4.1, 4.2) ([#221](https://github.com/backend-bunny/Konstapel/issues/221)) ([119879b](https://github.com/backend-bunny/Konstapel/commit/119879bbd99ba6eee10887e5d93128f9c6d73776))
+* **bundle:** mirror published bundles with their proofs (task 6.5) ([#228](https://github.com/backend-bunny/Konstapel/issues/228)) ([907c97d](https://github.com/backend-bunny/Konstapel/commit/907c97dad9ff91aee559f5b83a5e48da1b62acda))
+* **bundle:** per-source token realm allowlist for registry credentials ([#236](https://github.com/backend-bunny/Konstapel/issues/236)) ([1670415](https://github.com/backend-bunny/Konstapel/commit/167041552af8db38da8ac98d9812b017b0e5a04a))
+* **bundle:** publish the resolved-content handle and receipt contract ([#205](https://github.com/backend-bunny/Konstapel/issues/205)) ([7bbe9ab](https://github.com/backend-bunny/Konstapel/commit/7bbe9abab35663c3331370763706ee7e18527253))
+* **bundle:** referrers tag-schema fallback and real-registry fixture (task 2.4) ([#209](https://github.com/backend-bunny/Konstapel/issues/209)) ([5adf4a1](https://github.com/backend-bunny/Konstapel/commit/5adf4a18dca928f081eab8bbccb46fc0b05c079a))
+* **bundle:** reject Docker Hub aliases at configuration load ([#239](https://github.com/backend-bunny/Konstapel/issues/239)) ([ad9f088](https://github.com/backend-bunny/Konstapel/commit/ad9f088d086acba2eed1e040b0477817eef9f440))
+* **bundle:** render release notes and announce verified bundle releases ([#220](https://github.com/backend-bunny/Konstapel/issues/220)) ([8e88506](https://github.com/backend-bunny/Konstapel/commit/8e88506a0808890ce6f7e4c849fc5321d648c3de))
+* **bundle:** Secret-backed registry credentials and custom CAs (task 2.3) ([#211](https://github.com/backend-bunny/Konstapel/issues/211)) ([264d60d](https://github.com/backend-bunny/Konstapel/commit/264d60d80094e8c8703fedcea0754d2b380b21f9))
+* **bundle:** sign, attest and verify released bundle digests (task 6.3) ([#219](https://github.com/backend-bunny/Konstapel/issues/219)) ([e3136c9](https://github.com/backend-bunny/Konstapel/commit/e3136c95e9882c988b18a1a5e8efd39c52ab2520))
+* **bundle:** validate and tag independent bundle releases ([#206](https://github.com/backend-bunny/Konstapel/issues/206)) ([24c2cdf](https://github.com/backend-bunny/Konstapel/commit/24c2cdfcb5264af0bc88d9e4a149564f44010620))
+* **bundle:** validate bundle content, references and parameters ([#204](https://github.com/backend-bunny/Konstapel/issues/204)) ([5e94982](https://github.com/backend-bunny/Konstapel/commit/5e9498230d1398b7bc532106da1936d0676b6888))
+* **bundle:** verified OCI content source for targeting (task 5.2 core) ([#226](https://github.com/backend-bunny/Konstapel/issues/226)) ([28ba4ba](https://github.com/backend-bunny/Konstapel/commit/28ba4baef39456c0d0d908076df551e16f5e31da))
+* **bundle:** verify bundle provenance and persist recheckable receipts (tasks 3.3, 3.4) ([#215](https://github.com/backend-bunny/Konstapel/issues/215)) ([2e10c16](https://github.com/backend-bunny/Konstapel/commit/2e10c168b45bbb539e06f2998ed2272690d565a3))
+* **bundle:** verify publisher signatures offline (tasks 3.1, 3.2) ([#214](https://github.com/backend-bunny/Konstapel/issues/214)) ([591d6fe](https://github.com/backend-bunny/Konstapel/commit/591d6fea5e6517bffc906540cec1e94c3def738a))
+* **bundle:** wire verified OCI bundle content into the controller (default off) ([#229](https://github.com/backend-bunny/Konstapel/issues/229)) ([24f0bd7](https://github.com/backend-bunny/Konstapel/commit/24f0bd77ee3a36ad8931ca36c072d44627df9eb2))
+* **evidence:** add Secret-key evidence signer and offline verification contract ([#255](https://github.com/backend-bunny/Konstapel/issues/255)) ([046cbb8](https://github.com/backend-bunny/Konstapel/commit/046cbb8ce839ae86cc0c3d958f7cc50cc8682a32))
+* **observability:** metric catalog contract and leader-scoped projections (add-prometheus-observability 1.1-1.5) ([#252](https://github.com/backend-bunny/Konstapel/issues/252)) ([bf1f048](https://github.com/backend-bunny/Konstapel/commit/bf1f0486e4d57aec08be18cb6efc4d16435988ae))
+* **observability:** reconcile check states with the assessment owner (warn/stale replacements) ([#259](https://github.com/backend-bunny/Konstapel/issues/259)) ([aae2c66](https://github.com/backend-bunny/Konstapel/commit/aae2c66c26600d6957e633e4a2cd481d57eb3487))
+
+
+### Bug Fixes
+
+* **bundle:** require Konstapel 0.2.0 for the hardening bundle and accept it live over OCI ([#262](https://github.com/backend-bunny/Konstapel/issues/262)) ([c8a4ec8](https://github.com/backend-bunny/Konstapel/commit/c8a4ec89df236ed3c50f1abcc7fc794f8fd3d5bc))
+* **deps:** update go modules ([#197](https://github.com/backend-bunny/Konstapel/issues/197)) ([07570f8](https://github.com/backend-bunny/Konstapel/commit/07570f81d99a83a02ecf8540934e194534979ec9))
+* **deps:** update module github.com/go-jose/go-jose/v4 to v4.1.6 [security] ([#216](https://github.com/backend-bunny/Konstapel/issues/216)) ([58a666e](https://github.com/backend-bunny/Konstapel/commit/58a666e31f641705d331d53b93b86deafb9b020d))
+* **rbac:** audit controller Secret/ConfigMap access, drop unused ConfigMap list ([#234](https://github.com/backend-bunny/Konstapel/issues/234)) ([458886d](https://github.com/backend-bunny/Konstapel/commit/458886de273ab2ccf84d94b0086c987f5739fde3))
+* **rbac:** limit controller Lease access to the leader-election Lease ([#238](https://github.com/backend-bunny/Konstapel/issues/238)) ([ed4ed58](https://github.com/backend-bunny/Konstapel/commit/ed4ed580bdfa3e88d6f55d00176cfa84f5cec757))
+
+
+### Build and Image
+
+* **deps:** update dependency jetify-com/devbox to v0.20.0 ([#198](https://github.com/backend-bunny/Konstapel/issues/198)) ([4c737fd](https://github.com/backend-bunny/Konstapel/commit/4c737fd417a61caf43fca3ecf75a601d78f68d41))
+* **deps:** update development tools ([#233](https://github.com/backend-bunny/Konstapel/issues/233)) ([8b9fb4d](https://github.com/backend-bunny/Konstapel/commit/8b9fb4defd493bc177d32f1b064a64946c334b85))
+
 ## 0.1.0 (2026-11-09)
 
 
