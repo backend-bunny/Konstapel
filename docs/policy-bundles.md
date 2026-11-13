@@ -509,8 +509,9 @@ disposable, test-owned containers of two digest-pinned registries from
 | anonymous, and one requiring htpasswd credentials to write but allowing anonymous reads (a public `ghcr.io` package's access model) | `KONSTAPEL_REGISTRY_API_IMAGE` (Zot v2.1.23) | OCI 1.1 referrers API |
 
 Random credentials are generated per run. The Go test starts and removes its
-containers itself; the script also removes anything still carrying the run's
-label and fails if a container remains. Evidence, in
+containers (with their anonymous volumes) and networks itself; the script also
+removes anything still carrying the run's label and fails if a container or
+network remains or if a Docker volume appeared during the run. Evidence, in
 `OUTPUT_DIR/registry-compat.json` and `registry-images.json`, records both
 registries' versions and image digests, the Docker, ORAS Go and Go versions, and
 every case. It verifies:
@@ -570,7 +571,11 @@ every case. It verifies:
   official keyless release read anonymously from `ghcr.io` and its private
   mirror through the production verifier, the mirror refusals and the
   organization commands; see
-  [Official release and its private mirror](#official-release-and-its-private-mirror).
+  [Official release and its private mirror](#official-release-and-its-private-mirror);
+- with `KONSTAPEL_SIGSTORE_STACK=1` (otherwise recorded as `skip`): real Cosign
+  keyless signing through a disposable Sigstore instance and its verification
+  under an isolated test root; see
+  [Isolated keyless Sigstore stack](#isolated-keyless-sigstore-stack).
 
 Why two registries: the first run of this suite found that neither the
 reference registry nor `ghcr.io` (the planned official registry) serves the
@@ -1100,8 +1105,10 @@ order, and the first that verifies is used; none at all is
   lists certificate transparency logs, as the public-good root does, an
   embedded SCT that verifies under one of them is also required. The leaf
   must be valid, and chain to the root, at **every** authenticated time, and no
-  time may lie more than five minutes after the verifier's clock. The present
-  time plays no part: a short-lived certificate that expired after a valid
+  time may lie more than five minutes after the verifier's clock. sigstore-go
+  counts at most one RFC 3161 timestamp per authority, the first in the bundle
+  that verifies; a later one from the same authority is ignored, not
+  authenticated. The present time plays no part: a short-lived certificate that expired after a valid
   signing event verifies, while one whose only times are missing,
   unauthenticated, from an authority outside the root, or outside its validity
   fails. A log's unsigned integrated time (inclusion proof only) is not used.
@@ -1126,9 +1133,8 @@ and materials on the already verified statement without verifying again.
 - The provenance policy, receipts and recheck are described in
   [Provenance verification](#provenance-verification).
 - Signing, trust-root maintenance and publisher rotation are documented in
-  [Signing, trust roots and rotation](#signing-trust-roots-and-rotation). A
-  keyless proof made by the Cosign CLI under an isolated Sigstore stack has
-  not been verified (task 3.5 stays open, see that section).
+  [Signing, trust roots and rotation](#signing-trust-roots-and-rotation),
+  including Cosign CLI keyless output made through an isolated Sigstore stack.
 - Public-key rules accept one ECDSA P-256 key; keyless certificates whose only
   identity is an otherName SAN are not accepted.
 
@@ -1173,10 +1179,16 @@ fails the run):
   way, with the same negatives. Run on 2026-11-12: passed (referrers through
   the tag schema).
 
-Not verified: a keyless proof made by the Cosign CLI with an isolated Fulcio
-and Rekor (3.5), a private Sigstore deployment's real trusted root (custom
-roots are tested with sigstore-go's virtual instance and with the public-good
-root referenced as an object), and use from a running controller.
+- Isolated Sigstore stack (opt-in, Docker): Cosign CLI keyless output made
+  through real Fulcio, Rekor v1 and timestamp-authority servers under a
+  generated test root, verified and refused as listed in
+  [Isolated keyless Sigstore stack](#isolated-keyless-sigstore-stack).
+
+Not verified: a production private Sigstore deployment's trusted root (custom
+roots are tested with the isolated stack's generated root, sigstore-go's
+virtual instance and the public-good root referenced as an object), signed
+certificate timestamps from a CT log under a custom root, and use from a
+running controller.
 
 ## Provenance verification
 
@@ -1651,6 +1663,120 @@ already applied stay in place and are reported as stale, never silently
 withdrawn (see the targeting design); removing enforcement is an explicit
 administrator action.
 
+### Isolated keyless Sigstore stack
+
+The keyless method is also exercised end to end without the public instance:
+the pinned Cosign signs through a disposable, test-owned Sigstore instance and
+the unchanged production verifier checks the result under that instance's
+generated root. This proves **protocol compatibility** (what Cosign v3.1.3
+sends and receives from Fulcio, Rekor and a timestamp authority, and what the
+Go verifier accepts from it). It says nothing about the public-good trust
+root; **public trust-root compatibility** is what the official release fixtures,
+the `publicinterop` test and the `KONSTAPEL_NETWORK_INTEROP` mirror cases check
+(see [Signature verification](#what-has-and-has-not-been-verified-1)).
+
+Run it, holding no other Docker workload, with:
+
+```sh
+devbox run -- env KONSTAPEL_SIGSTORE_STACK=1 scripts/registry-compat.sh /tmp/registry-compat-$(date +%s)
+```
+
+It is part of the [real-registry compatibility](#real-registry-compatibility)
+suite, so the same command also runs the registry cases; the results are in
+`registry-compat.json` (cases prefixed `keyless stack:`) and
+`sigstore-stack.json` (component versions, signing and expiry times) in the
+output directory. `KONSTAPEL_SIGSTORE_STACK=fast` skips only the expiry cases.
+A full run takes about 12 minutes, almost all of it waiting for the real Fulcio
+certificates (10 minutes) to expire; `fast` takes under a minute after the image
+pulls. It needs Docker on Linux amd64, the pinned Devbox Cosign, about 1.1 GB
+of images and about 150 MB of memory for the instance; after the pulls it needs no network
+access. It is opt-in and not run in CI (CI only vets the `registrycompat` build
+tag), because it needs Docker and the expiry wait.
+
+The instance, all from digest-pinned `KONSTAPEL_SIGSTORE_*` images in
+`scripts/runtime.env` on one labelled Docker network:
+
+| Component | Image | Configuration |
+| --- | --- | --- |
+| Fulcio | `ghcr.io/sigstore/fulcio` v1.10.0 | ephemeral in-memory CA; trusts exactly the two test issuers (`email` identities); no CT log |
+| Rekor v1 | `ghcr.io/sigstore/rekor/rekor-server` v1.6.1 | in-memory signer, retrieve API off |
+| Trillian log server and signer | `ghcr.io/sigstore/scaffolding/trillian_log_{server,signer}` v1.7.3 | PostgreSQL storage; schema from the `github.com/google/trillian` module that `go.sum` pins (`task deps:check` requires the image tags to equal it) |
+| Database | `postgres` 17.7-alpine | data on tmpfs |
+| Timestamp authority | `ghcr.io/sigstore/timestamp-server` v2.2.0 | in-memory signer, NTP monitoring off |
+| Test OIDC issuers | `nginx` 1.31.1-alpine | serves only the discovery documents and JWKS of `https://issuer-a.test` and `https://issuer-b.test` over TLS from a throwaway CA |
+
+The test generates the issuers' signing keys and signs their ID tokens itself;
+private keys and tokens never enter a container or the output directory. It
+fetches the Fulcio chain, the Rekor key and the timestamp chain from the
+running services and builds `trusted_root.json` and the signing configuration
+with the pinned Cosign (`cosign trusted-root create`, `cosign signing-config
+create`), without the public instance's defaults. Signing uses
+`internal/bundle/sign` in keyless mode through `publish.Publish` and
+`publish.Completer`, exactly as `bundlerelease` does, with the token in
+`SIGSTORE_ID_TOKEN`; its Cosign binary is a test wrapper that adds
+`--signing-config` and `--trusted-root` for this instance to `sign` and
+`attest`. Cosign's non-loopback HTTP(S) goes to a closed port, so nothing
+reaches the public instance. The verifier reads the generated root through a
+rule's `trustRoot` (a ConfigMap in an in-memory object reader) and the real
+clock; no verifier option or check differs from production. The resulting
+proofs have the official release's shape: a DSSE `cosign sign` statement or
+SLSA attestation, a Rekor v1 `dsse` entry with an inclusion proof and a signed
+entry timestamp, and one RFC 3161 timestamp.
+
+Cases (all through `release.VerifyRelease` or `CheckRelease` under a
+`keyless` rule with the generated root, `https://issuer-a.test` and
+`bundle-release@konstapel.example.test`):
+
+- **Valid:** on the distribution registry (tag schema) and on Zot (referrers
+  API, htpasswd writes, anonymous reads), the release verifies with the
+  publication record; the receipt names the keyless signer, the root's digest
+  and ConfigMap, the source and builder revisions, and evidence kinds
+  `log-integrated-time`, `rfc3161-timestamp` and `transparency-log`. The same
+  proofs are refused under the embedded public-good root.
+- **Wrong issuer:** a real certificate for the same identity from the other
+  issuer Fulcio trusts, and rules naming the other issuer or a near miss
+  (trailing slash, suffix, prefix, case) are `ErrSigner`.
+- **Wrong identity:** a real certificate for another identity at the same
+  issuer, and rules naming a prefix, a suffix, a case variant or another
+  identity are `ErrSigner`.
+- **Wrong subject:** the valid proofs attached unchanged as referrers of another
+  bundle digest are listed for it and refused with `ErrSubject`.
+- **Signing-time and log evidence:** removing the signed entry timestamp and the
+  RFC 3161 timestamp (inclusion proof kept) is `ErrSigningTime`; no log entry,
+  a changed integrated time, a tampered signed entry timestamp, a tampered
+  inclusion proof and a root with another Rekor key are `ErrTransparency`; a
+  tampered RFC 3161 timestamp without a signed entry timestamp, and a root
+  without the timestamp authority, are `ErrSigningTime`. With the signed entry
+  timestamp removed, the RFC 3161 timestamp alone is accepted.
+- **Expired certificate:** after waiting until every leaf certificate has
+  expired, the release still verifies with the real clock, because its signing
+  times are authenticated and inside the certificate's validity, and the
+  receipt from before expiry rechecks as `valid`. The expired certificate is
+  refused without signing-time evidence, with only a fresh RFC 3161 timestamp
+  obtained after expiry, and when that timestamp precedes the original one; a
+  post-expiry timestamp placed after the original one is ignored as a second
+  timestamp from the same authority.
+
+Each group was checked against a scratch edit of the production verifier that
+removes the corresponding check, then reverted: without the issuer comparison
+(and sigstore-go's identity policy) every wrong-issuer case is accepted;
+without the identity comparison every wrong-identity case is accepted; with
+sigstore-go's current time instead of authenticated signing times, every
+missing or invalid signing-time case is accepted; and with a check that the
+certificate is still valid now, the expired-certificate release is refused.
+Without the subject binding (statement check, sigstore-go's digest check and
+the provenance stage's defensive check) the moved proofs are still refused, but
+only because the attested source commit is not the other bundle's, so the
+case, which requires `ErrSubject`, fails.
+
+What the stack does not show: a CT log and SCTs (Fulcio runs without one, so
+the generated root lists none and the verifier requires none; SCT checks are
+covered by the public-good proofs and the virtual instance), Rekor v2 entries
+(Cosign v3.1.3 chose Rekor v1 for the official release too), an intermediate
+CA, GitHub-style workflow identities (the test issuers certify email
+identities; GitHub identities are covered by the public-good proofs), and a
+production private Sigstore deployment.
+
 ### What has and has not been verified
 
 Coverage of the two methods (task 3.5):
@@ -1658,21 +1784,16 @@ Coverage of the two methods (task 3.5):
 | Path | Isolated, deterministic | Real public instance |
 | --- | --- | --- |
 | Public key | pinned Cosign v3.1.3 CLI output with generated test keys, offline, against a disposable registry (`testdata/cosign`, `testdata/provenance`, `testdata/release`), and the CLI driven by `bundlerelease` in the registry-compatibility suite; no verification check disabled | not applicable |
-| Keyless | sigstore-go's virtual Sigstore and a test CA as isolated roots, with Go-made proofs (`keyless_test.go`); no check disabled | pinned Cosign CLI output from GitHub Actions against the public-good root: the application image proofs and the official bundle release, offline, and the opt-in live test against `ghcr.io` |
+| Keyless | pinned Cosign v3.1.3 CLI output through a disposable Sigstore instance (Fulcio, Rekor v1, timestamp authority, test OIDC issuers) under its generated root, through the release signer and the production verifier ([Isolated keyless Sigstore stack](#isolated-keyless-sigstore-stack)); sigstore-go's virtual Sigstore and a test CA with Go-made proofs (`keyless_test.go`); no check disabled | pinned Cosign CLI output from GitHub Actions against the public-good root: the application image proofs and the official bundle release, offline, and the opt-in live test against `ghcr.io` |
 
 Verified also: the embedded root's hash against the live signed TUF targets
 metadata (checked independently on 2026-11-11, targets v14), and real Cosign
-output verifying after its leaf certificates expired.
+output verifying after its leaf certificates expired, both from the public
+instance and from the isolated stack with the real clock.
 
-Not verified, and why task 3.5 stays open: **Cosign CLI output made against
-isolated keyless test roots.** The Cosign CLI only signs keylessly through a
-Fulcio and a Rekor (and optionally a timestamp authority), so that path needs
-an isolated Sigstore stack, which was deliberately not deployed: the CLI's
-keyless output format is covered by the real public-good proofs, and the
-verifier's checks against an isolated root are covered with Go-made proofs.
-The remaining gap is exactly the combination of the two. Also not verified: the
-rotation steps end to end (only their building blocks are tested), and anything
-that runs in the controller.
+Not verified: the rotation steps end to end (only their building blocks are
+tested), the limits of the isolated stack listed above, and anything that runs
+in the controller.
 
 ## Organization publication and mirroring
 

@@ -183,7 +183,7 @@ func startRegistryWith(t *testing.T, image, run string, p pki, htpasswd string, 
 		args = append(args, "serve", "/certs/config.json")
 	}
 	docker(t, args...)
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-fv", name).Run() })
 	port := docker(t, "port", name, "5000/tcp")
 	port = port[strings.LastIndex(port, ":")+1:]
 	r := regInstance{host: "127.0.0.1:" + port, name: name}
@@ -577,8 +577,13 @@ func TestRegistryCompat(t *testing.T) {
 		CAPEM: p.caPEM, OtherCAPEM: otherPKI.caPEM, User: user, Pass: pass,
 		Record: record, Skip: skip, CheckFetched: checkFetched,
 	}
+	// Each case gets its own deadline: the keyless Sigstore stack case waits
+	// for real certificate expiry, which must not eat into later cases.
 	for _, c := range CompatCases {
+		caseCtx, caseCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		env.Ctx = caseCtx
 		c(t, env)
+		caseCancel()
 	}
 
 	writeCompatEvidence(t, image, apiImage, run, records)
@@ -630,7 +635,7 @@ func writeCompatEvidence(t *testing.T, image, apiImage, run string, records []co
 		"layout":         "Sigstore bundle v0.3 referrers (see docs/policy-bundles.md): listed through the OCI referrers tag schema on registryImage (no referrers API) and through the referrers API on apiRegistryImage",
 		"authentication": "anonymous and htpasswd (basic), directly and through kubeaccess (dockerconfigjson Secret, rotation, CA ConfigMap); bearer-token service not covered",
 		"publication":    "internal/bundle/publish write-once publication: anonymous-write distribution registry (tag schema) and Zot with htpasswd writes and anonymous reads (referrers API); recovery through a fault-injecting TLS proxy; anonymous read-back failure against the htpasswd distribution registry",
-		"signing":        "internal/bundle/sign (pinned Cosign CLI, key mode, no transparency log, outbound HTTP(S) to a closed port) through publish.Completer: digest-only signatures and SLSA provenance for missing kinds only, recovery, refusal of another subject; release.VerifyRelease anonymously under a test public-key rule; keyless (GitHub OIDC) not covered",
+		"signing":        "internal/bundle/sign (pinned Cosign CLI, key mode, no transparency log, outbound HTTP(S) to a closed port) through publish.Completer: digest-only signatures and SLSA provenance for missing kinds only, recovery, refusal of another subject; release.VerifyRelease anonymously under a test public-key rule; keyless signing through a disposable Sigstore instance with KONSTAPEL_SIGSTORE_STACK (sigstore-stack.json), otherwise recorded as skip",
 		"official":       "with KONSTAPEL_NETWORK_INTEROP=1: the official keyless release read anonymously from ghcr.io, verified directly, mirrored with mirror.Mirror and bundlerelease mirror into the htpasswd Zot and distribution registries and verified there through the production verifier (and Cosign) under bundles/official-sources.yaml with only the location changed; otherwise recorded as skip",
 		"tls":            "throwaway CAs (a second, unrelated one for the per-source trust case), verification always on", "cases": records,
 	}

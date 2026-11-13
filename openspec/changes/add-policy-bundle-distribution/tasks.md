@@ -46,7 +46,7 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 3.4 Persist bounded verification receipts and the material needed for rechecking under current trust; test reconstruction without accepting a receipt as its own authority and validate that credentials are excluded from the serialized result.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
-- [ ] 3.5 Document both signing methods, official trust-root maintenance and publisher rotation; verify pinned Cosign CLI output is accepted by the Go verifier for both methods using isolated test roots/keys and no disabled verification checks.
+- [x] 3.5 Document both signing methods, official trust-root maintenance and publisher rotation; verify pinned Cosign CLI output is accepted by the Go verifier for both methods using isolated test roots/keys and no disabled verification checks.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 4. Safe materialization and bounded caching

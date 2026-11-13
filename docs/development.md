@@ -49,7 +49,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task lint` | Check Go formatting, `go vet`, generated API files, Helm chart metadata, versions and values-schema fixtures (`scripts/charts/check.sh`), and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
-| `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
+| `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, agreement of the isolated Sigstore stack's Trillian images with the go.sum Trillian module, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
 | `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. `GROUP=bundles` is the policy-bundle acceptance that the `add-policy-bundle-distribution` change calls `bundles:acceptance` ([bundle acceptance](policy-bundles.md#bundle-acceptance)); it is a group of this task, not a separate task. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
