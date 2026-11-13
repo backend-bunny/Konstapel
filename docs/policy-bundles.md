@@ -3068,7 +3068,23 @@ fails, never skips, when the registry cannot be reached.
 | Cleanup | Every test removes its bindings, profiles, namespaces, sources objects and registry container, then asserts that each is gone and no managed policy of its bindings remains; after the cluster is deleted the task asserts that no cluster and no container labelled for it remain | The group leaves nothing behind on success or failure (a leftover fails the run) |
 
 Hand-broken checks (run locally against a disposable cluster, not committed):
-HAND_BREAKS
+each of these, applied by hand, made the group fail at the step named:
+
+- Signature verification skipped (both sigstore-go checks in
+  `internal/bundle/verify` ignored): the wrong-key bundle resolves, and the
+  invalid-signature step times out waiting for `Untrusted`.
+- `Deny` rendered as `Audit` (`internal/targeting/render.go`): the official
+  `Deny` binding's policy is not the `Deny` rendering; with that test check
+  also removed, the admission check fails because the privileged Pod is
+  admitted.
+- Kept policies reported ready while the configuration does not resolve
+  (`engineCondition` in `internal/controller/binding.go`): the cold-cache step
+  times out waiting for `StaleRevision`.
+
+The "not kept" step proves that no *usable* rejected content stays (bytes
+with retained evidence that a later rule could recheck offline). A
+resolver that stored rejected bytes without their proofs would still pass it;
+`internal/bundle/resolve` unit tests own that ordering.
 
 **What it does not prove.** The controller here is in-process, not the
 packaged image (the `charts` group covers that path with the organization
