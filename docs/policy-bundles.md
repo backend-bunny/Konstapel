@@ -185,6 +185,58 @@ devbox run -- scripts/bundles/package.sh konstapel-linux-hardening /tmp/hardenin
 jq . /tmp/hardening-bundle/package.json
 ```
 
+#### Minimum controller release
+
+The definition declares `compatibility.konstapel: "0.2.0"`. Konstapel v0.1.0
+(2026-11-09) predates OCI bundle consumption, which landed on `main` on
+2026-11-12, so no 0.1.x controller can consume any bundle. 0.2.0 is the first
+controller release that will contain it; a lower minimum would claim a
+compatibility that no released controller has.
+
+The released `konstapel-privileged-containers` 0.1.0
+(`sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8`)
+declares minimum `0.1.0`. That is inaccurate in the same way: no 0.1.x
+controller can consume it. The release is immutable and is not changed; its
+low minimum is harmless, because every controller that can read bundles at
+all (0.2.0 and later) also satisfies it.
+
+A controller reports a bundle whose minimum exceeds its own version as
+`ContentUnavailable` with class `Incompatible` ("requires Konstapel 0.2.0 or
+later; this controller is 0.1.0") and delivers nothing from it
+([Compatibility](#compatibility)). The controller's version comes from
+`VERSION` through `-ldflags -X main.version` (`scripts/build.sh`); a plain
+`go build` keeps `dev`, which rejects every OCI bundle as a configuration
+error. Until release-please releases 0.2.0, `VERSION` on `main` is `0.1.0`, so
+a build of `main` judges this bundle `Incompatible` while it still resolves the
+privileged bundle. `TestRepositoryBundleMinimums`
+(`internal/bundle/content`) pins both outcomes for 0.1.0, 0.2.0-rc.1, 0.2.0
+and a later patch.
+
+#### Release readiness
+
+Verified for this definition:
+
+- Build, reproducibility, content validation, inventory, variant digests,
+  mappings and every shipped Kyverno CLI suite (above), and a cache round trip.
+- `TestLiveBundlesHardening` in the [bundles acceptance](#bundle-acceptance)
+  group: the bundle built from the checkout, signed with a per-run test key
+  and served from a disposable TLS registry, through the production verifier,
+  the in-process controller and the pinned Kyverno. A controller at 0.1.0
+  reports it `Incompatible` and delivers nothing; at 0.2.0 all five policies
+  are delivered in `Deny` and `Audit` and real admission requests are decided
+  for the privileged check and all four hardening checks.
+
+Not verified:
+
+- The packaged controller image and chart with this bundle. That needs a
+  controller built at 0.2.0 or later; re-run the
+  [Audit walkthrough](integration/bundle-audit-walkthrough.md) path with it
+  after the 0.2.0 release.
+- Keyless signing by the `bundle-release` workflow for this name (the bundle
+  is not released; only the privileged bundle's release exercised it).
+- The hardening change's exception lifecycle (its tasks 5.x) and the combined
+  expanded-assessment acceptance (6.x) remain open.
+
 ## Content validation
 
 `bundle.ValidateContent` checks an unpacked payload's declarative content. It
@@ -2444,7 +2496,10 @@ All rules must hold; each failure is one reason in the verdict:
   controller's version under SemVer 2.0.0 precedence, ignoring build metadata.
   A pre-release precedes its release: controller `0.2.0-rc.1` accepts
   minimums up to `0.2.0-rc.1` (and every `0.1.x`) but not `0.2.0`. A
-  controller version that is not SemVer is a configuration error.
+  controller version that is not SemVer is a configuration error. A bundle
+  whose minimum exceeds the controller's version is `ContentUnavailable` with
+  class `Incompatible` and delivers nothing; the repository's bundles declare
+  the minimums in [Minimum controller release](#minimum-controller-release).
 - every declared OSCAL version is supported: `1.1.3` (authored component
   definitions) and `1.2.3` (the NIST documents).
 - `scope.os` is exactly `linux`: Konstapel supports only namespaced Linux
@@ -3197,16 +3252,17 @@ task acceptance GROUP=bundles OUTPUT=/absolute/fresh/path
 ```
 
 It creates the disposable kind cluster with the pinned Kyverno
-(`scripts/environment.sh`), runs `TestLiveBundlesOfficial` and
-`TestLiveBundlesOrganization` (`internal/controller/bundles_live_test.go`)
-sequentially, tears the cluster down and then checks that no cluster and no
+(`scripts/environment.sh`), runs `TestLiveBundlesOfficial`,
+`TestLiveBundlesOrganization` and `TestLiveBundlesHardening`
+(`internal/controller/bundles_live_test.go`) sequentially, tears the cluster down and then checks that no cluster and no
 test-labelled container is left. CI runs it as `acceptance-live (bundles)` on
 every PR that is not prose-only, and on every main push. The controller runs
 in-process from the checkout with bundle sources enabled, exactly as
 `cmd/konstapel` wires it (`--bundle-sources-configmap`, an empty cache
-directory, a 5 s refresh interval, the controller version from `VERSION`).
-Admission is real: a server-side dry-run privileged Pod is sent to the API
-server and Kyverno decides it. The packaged image and chart over the same
+directory, a 5 s refresh interval, the controller version from `VERSION`;
+the hardening case sets it explicitly, see below).
+Admission is real: server-side dry-run Pods are sent to the API server and
+Kyverno decides them. The packaged image and chart over the same
 content are `TestLiveHelmBundles` in the `charts` group
 ([above](#helm-installation-and-live-acceptance)).
 
@@ -3224,6 +3280,8 @@ fails, never skips, when the registry cannot be reached.
 | Cold-cache failure | The controller restarts with an empty cache while the registry is paused; a new `Deny` binding is created; the registry returns | The profile reports `ContentUnavailable`; kept policies stay but every binding is `EngineReady=False/StaleRevision` (not reported healthy); the new binding gets no policy and a privileged Pod is admitted there; after the registry returns everything resolves with the same policies |
 | Credential rotation | The credential Secret's password is revoked and the controller restarts with an empty cache, then the Secret is rotated to another registry user without a restart | A revoked credential fails a cold fetch (`ContentUnavailable`) while applied policies stay (stale); the rotated credential is read within the refresh interval and used (the registry log shows the new user) and the same policies become ready |
 | Trust revocation and recovery | The key Secret and rule move to another key, then back | `ContentUnavailable (Untrusted)`, applied policies stay (stale) and keep enforcing, a new binding gets nothing; restoring trust recovers all of them with the same policies |
+| Linux hardening bundle, below its minimum | `bundles/konstapel-linux-hardening` built from the checkout at `HEAD`, signed and attested with a per-run in-memory test key (`bundletest.Signer`; no key file) and pushed to a disposable TLS + htpasswd registry; a public-key rule with a provenance rule; the controller version set to `0.1.0`; a profile of all five policies pinned by digest and a `Deny` binding | The verified content is `ContentUnavailable (Incompatible)` with "requires Konstapel 0.2.0 or later"; nothing is delivered and privileged and root Pods are admitted |
+| Linux hardening bundle, Deny and Audit | The controller restarted with an empty cache at the bundle's declared minimum (`0.2.0`); the same `Deny` binding and an `Audit` binding | Both bindings are ready with all five policies, each the binding mode's rendering annotated with the bundle name and digest, and binding status names the digest. Under `Deny` a compliant Pod is admitted, a privileged Pod is rejected by the privileged policy and each of the four hardening violations is rejected by its own policy only; under `Audit` all of them are admitted, repeatedly |
 | Cleanup | Every test removes its bindings, profiles, namespaces, sources objects and registry container, then asserts that each is gone and no managed policy of its bindings remains; after the cluster is deleted the task asserts that no cluster and no container labelled for it remain | The group leaves nothing behind on success or failure (a leftover fails the run) |
 
 Hand-broken checks (run locally against a disposable cluster, not committed):
@@ -3239,6 +3297,22 @@ each of these, applied by hand, made the group fail at the step named:
 - Kept policies reported ready while the configuration does not resolve
   (`engineCondition` in `internal/controller/binding.go`): the cold-cache step
   times out waiting for `StaleRevision`.
+- Minimum-version check skipped (`compat.go` `Check`): the hardening case times
+  out waiting for `Incompatible` at 0.1.0.
+- One of the hardening bundle's five policies not delivered (dropped in the
+  bundle content mapping): the hardening case fails on the delivered policy
+  count.
+- `Deny` rendered as `Audit` for this bundle: the hardening case fails on the
+  delivered rendering; with that check also removed, on admission of the
+  privileged Pod.
+
+The hardening case sets the controller version itself, because `VERSION` on
+`main` stays `0.1.0` until release-please releases 0.2.0, the first release
+with bundle support (see
+[Minimum controller release](#minimum-controller-release)). It proves the
+bundle content and the controller code on `main` at the version the bundle
+requires, not a released controller: consumers need a 0.2.0 controller, and
+the packaged-image path is to be re-verified with it after that release.
 
 The "not kept" step proves that no *usable* rejected content stays (bytes
 with retained evidence that a later rule could recheck offline). A
@@ -3254,7 +3328,9 @@ refuses bytes that do not match their digest), so tampering is modeled as a
 different subject or a modified proof. A real credential revocation on the
 registry side is modeled by a wrong password; bearer-token registries, keyless
 signatures under a private trust root and the `Audit` assessment path of these
-bindings are not part of this group.
+bindings are not part of this group. The hardening case covers delivery and admission only: its
+exception lifecycle, background assessment and OSCAL export through the OCI
+path, and keyless release signing for that bundle are not part of this group.
 
 ## Create and package a bundle
 

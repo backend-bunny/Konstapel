@@ -525,6 +525,55 @@ func TestCompatibilityRevision(t *testing.T) {
 	}
 }
 
+// The repository's bundle definitions against controller releases. The
+// hardening bundle requires 0.2.0, the first release that consumes OCI
+// bundles; the released privileged bundle declares 0.1.0 and keeps resolving
+// on every controller that can consume bundles (docs/policy-bundles.md,
+// "Second bundle").
+func TestRepositoryBundleMinimums(t *testing.T) {
+	t.Parallel()
+	descriptor := func(name string) *bundle.Descriptor {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "bundles", name, "definition.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def, err := bundle.LoadDefinition(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		def.Source.Revision = strings.Repeat("c", 40)
+		a, err := bundle.Build(def, os.DirFS(repoRoot), time.Date(2026, 11, 13, 8, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a.Descriptor
+	}
+	privileged, hardening := descriptor("konstapel-privileged-containers"), descriptor("konstapel-linux-hardening")
+	for _, c := range []struct {
+		controller         string
+		privileged, harden string // "" compatible, else a substring of the single reason
+	}{
+		{"0.1.0", "", "requires Konstapel 0.2.0 or later; this controller is 0.1.0"},
+		{"0.2.0-rc.1", "", "requires Konstapel 0.2.0 or later; this controller is 0.2.0-rc.1"},
+		{"0.2.0", "", ""},
+		{"0.2.1+abc", "", ""},
+	} {
+		for _, b := range []struct {
+			d    *bundle.Descriptor
+			want string
+		}{{privileged, c.privileged}, {hardening, c.harden}} {
+			v := Compatibility{Controller: c.controller}.Check(b.d)
+			switch {
+			case b.want == "" && (!v.Compatible || len(v.Reasons) != 0):
+				t.Errorf("%s on controller %s: %+v, want compatible", b.d.Name, c.controller, v)
+			case b.want != "" && (v.Compatible || len(v.Reasons) != 1 || !strings.Contains(v.Reasons[0], b.want)):
+				t.Errorf("%s on controller %s: %+v, want one reason containing %q", b.d.Name, c.controller, v, b.want)
+			}
+		}
+	}
+}
+
 // Incompatibility through the real resolver: never adopted, classified, and
 // the controller's compatibility change takes effect without a restart.
 func TestIncompatibleEndToEnd(t *testing.T) {
