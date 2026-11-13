@@ -53,7 +53,10 @@ class LoggingTests(unittest.TestCase):
         self.stub("scripts/image/build.sh", "echo image-build")
         # crictl reports kind's import alias; ctr names the image by digest.
         self.stub("bin/docker", 'if [[ $* == *crictl* ]]; then echo \'{"status":{"repoDigests":["docker.io/library/import@sha256:abc"]}}\'; '
-                  'elif [[ $* == *" ctr "* ]]; then echo "tagged ${*: -1}"; else echo "prepared-userns $2"; fi')
+                  'elif [[ $* == *" ctr "* ]]; then echo "tagged ${*: -1}"; '
+                  # Teardown verification lists containers labelled for the cluster.
+                  'elif [[ $1 == ps ]]; then echo "$*" >> "$PWD/docker-ps.log"; [[ -z ${LEFTOVER:-} ]] || echo "$LEFTOVER"; '
+                  'elif [[ $1 == rm ]]; then echo "removed ${*: -1}" >> "$PWD/docker-rm.log"; else echo "prepared-userns $2"; fi')
 
     def test_acceptance_streams_stages_and_keeps_logs(self):
         self.setup_acceptance()
@@ -68,6 +71,31 @@ class LoggingTests(unittest.TestCase):
             self.assertIn(marker, (self.out / filename).read_text())
         self.assertIn("Running live targeting", (self.out / "progress.log").read_text())
         self.assertTrue(json.loads((self.out / "acceptance-result.json").read_text())["passed"])
+
+    def test_teardown_verification_fails_on_leftovers(self):
+        self.setup_acceptance()
+        result = self.run_script("acceptance.sh", self.out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("label=konstapel.acceptance=konstapel-assessment-log-test", (self.repo / "docker-ps.log").read_text())
+        self.assertIn("teardown verified", (self.out / "teardown.log").read_text())
+
+        out = self.repo / "output-leftover"
+        result = self.run_script("acceptance.sh", out, LEFTOVER="abc123")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("leftover test-owned containers: abc123", (out / "teardown.log").read_text())
+        self.assertIn("removed abc123", (self.repo / "docker-rm.log").read_text())
+        self.assertFalse(json.loads((out / "acceptance-result.json").read_text())["passed"])
+
+        # A cluster that is still listed after the delete step fails the run.
+        out = self.repo / "output-cluster"
+        self.stub("scripts/environment.sh", 'echo "environment-$1"; if [[ $1 == delete ]]; then touch "$PWD/deleted"; fi')
+        self.stub("bin/kind", 'if [[ $1 == get && $2 == clusters && -e $PWD/deleted ]]; then echo konstapel-assessment-log-test; fi; '
+                  'if [[ $1 == get && $2 == nodes ]]; then echo stub-control-plane; fi')
+        result = self.run_script("acceptance.sh", out)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("environment-delete", result.stdout)
+        self.assertIn("leftover kind cluster: konstapel-assessment-log-test", (out / "teardown.log").read_text())
+        self.assertNotIn("teardown verified", (out / "teardown.log").read_text())
 
     def test_runner_failure_survives_tee_and_teardown(self):
         self.setup_acceptance()
