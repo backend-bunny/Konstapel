@@ -96,8 +96,9 @@ as a pass.
 #### Scenario: An engine reports a warning
 
 - **WHEN** the engine reports a warning result for an expected check
-- **THEN** the check is counted as `unknown`, neither passing nor failing
-- **AND** the raw warning outcome remains in the assessment evidence
+- **THEN** the check is counted exactly once, as `unknown`, never as a pass, failure or accepted risk
+- **AND** the raw warning outcome remains distinguishable in the retained evidence and the OSCAL output
+- **AND** `unknown` is documented to include unsupported warning outcomes, so it is not interpreted solely as missing evidence
 - **AND** counts describe check instances rather than satisfied controls
 
 #### Scenario: No targets or no reliable inventory

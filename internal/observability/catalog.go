@@ -75,8 +75,10 @@ var (
 	// (scope changed or results conflict).
 	//
 	// There is no warn or stale state. A Kyverno warn result (a policy
-	// annotated policies.kyverno.io/scored: "false") is counted by the owner
-	// as unknown: never pass or fail. Stale evidence is rejected when the
+	// annotated policies.kyverno.io/scored: "false") is counted once by the
+	// owner as unknown: never pass, fail or accepted risk. unknown therefore
+	// includes unsupported warning outcomes and is not only missing evidence;
+	// the raw outcome stays in the retained evaluation and in OSCAL. Stale evidence is rejected when the
 	// owner evaluates it; until then the current view becomes unknown at the
 	// owner's next expiry, which
 	// konstapel_binding_current_evidence_expiry_timestamp_seconds exposes.

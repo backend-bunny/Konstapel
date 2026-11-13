@@ -107,7 +107,7 @@ renames it and never reclassifies engine results:
 | `pass`, `fail`, `error`, `skip` | `outcomes` | Attributable engine outcome |
 | `accepted_risk` | `outcomes.acceptedRisk` | Attributable, valid accepted risk; never a pass |
 | `out_of_scope` | `outcomes.notApplicable` | Known non-applicability; never a pass |
-| `unknown` | `outcomes.unknown` | Attributable outcome the owner does not distinguish, including Kyverno `warn` |
+| `unknown` | `outcomes.unknown` | Attributable outcome the owner does not distinguish, including unsupported warning outcomes such as Kyverno `warn`. Not missing evidence (that is `missing`). |
 | `missing` | `evidence.missing` | No matching result |
 | `rejected` | `evidence.rejected` | Matching results, none usable (including older than `maxEvidenceAge`) |
 | `unresolved` | `evidence.unresolved` | Scope changed during collection or results conflict |
@@ -125,7 +125,13 @@ There is no `warn` or `stale` state:
   when it renders policies, so organization bundles can produce warnings; the
   vendored content does not. The assessment owner keeps the raw `warn` in the
   observation and the OSCAL export but counts it as `unknown` in its summary,
-  so the metric does too: never a pass, never a failure.
+  so the metric does too. It is counted once, never as a pass, a failure or an
+  accepted risk. `unknown` therefore includes unsupported warning outcomes and
+  must not be read as missing evidence alone. To find the warnings, look at the
+  raw outcome in the package's retained `evaluation.json` (observation
+  `outcome: warn`) or in OSCAL (subject `result` property `warning`,
+  `source-outcome` property `warn`). A native warning count is a tracked
+  follow-up; it is not required for 0.2.0.
 - **Stale evidence.** Evidence older than `maxEvidenceAge` is never a current
   pass. The owner counts it as `rejected` when it evaluates. Between
   evaluations the current view becomes `unknown` at the owner's next expiry,

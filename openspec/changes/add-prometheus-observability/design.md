@@ -138,8 +138,14 @@ state; their replacements are:
   not. The continuous assessment owner keeps the raw `warn` on the observation
   and in the OSCAL export (`ResultWarning`, `source-outcome`), but its summary
   counts it as `outcomes.unknown`. The metric therefore counts it as
-  `unknown`: never pass, never fail. A distinct `warn` state requires the
-  owner to add a warning count to its summary first.
+  `unknown`: counted once, never pass, fail or accepted risk. `unknown`
+  therefore includes unsupported warning outcomes and must not be read as
+  missing evidence alone (that is `missing`). Find warnings through the raw
+  outcome in the retained observation (`evaluation.json`) or in OSCAL (subject
+  `result` warning, `source-outcome` warn).
+- **Follow-up: native warning count.** Add a warning count to the assessment
+  summary (assessment API/CRD `OutcomeCounts` + `continuous-assessments` spec)
+  and a `warn` catalog state; not required for 0.2.0.
 - **stale.** Stale current evidence is never a current pass. When the owner
   evaluates, aged results are `rejected`. Between evaluations the current view
   becomes `unknown` at the owner's next expiry, and

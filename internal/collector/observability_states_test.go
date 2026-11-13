@@ -1,14 +1,20 @@
 package collector
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
 	clocktesting "k8s.io/utils/clock/testing"
 
+	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/observability"
 )
 
@@ -99,10 +105,10 @@ func TestStalePassNeverCountsAsCurrentPass(t *testing.T) {
 	}
 }
 
-// Kyverno reports warn for a failing policy annotated
-// policies.kyverno.io/scored: "false". The owner keeps the raw outcome on
-// the observation and counts it as unknown: never pass, never fail.
-func TestWarnOutcomeIsUnknown(t *testing.T) {
+// warnCapture reports Kyverno warn for one expected check and pass for the
+// others. Kyverno reports warn for a failing policy annotated
+// policies.kyverno.io/scored: "false".
+func warnCapture(t *testing.T) (CaptureV2, string) {
 	c := freshCapture(t)
 	warned := c.Expected[0].Key()
 	c.Reports = reportsAt(c, c.Window.Started.Add(time.Minute), func(e Expected) string {
@@ -111,21 +117,140 @@ func TestWarnOutcomeIsUnknown(t *testing.T) {
 		}
 		return "pass"
 	})
+	return c, warned
+}
+
+// A warning stays a distinct warning in the retained evaluation and in the
+// OSCAL output: never a pass, a failure or an accepted risk.
+func TestWarnSurvivesRetainedEvidenceAndOSCAL(t *testing.T) {
+	c, warned := warnCapture(t)
 	ev := evaluate(t, c, nil, maxAge)
-	for _, o := range ev.Observations {
-		if o.Key == warned && (o.State != Attributable || o.Outcome != "warn") {
-			t.Fatalf("raw warn not retained: %+v", o)
+	req := exportReq(t, c, ev, repo(t))
+	d, err := Export(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := d.Outcomes; o.Unknown != 1 || o.Pass != 2 || o.Fail != 0 || o.AcceptedRisk != 0 || o.Error != 0 || o.Skip != 0 {
+		t.Fatalf("descriptor outcomes %+v", o)
+	}
+
+	// Retained evaluation: the raw outcome is kept on its observation.
+	var retained Evaluation
+	if err := assessment.Read(filepath.Join(req.Out, "evaluation.json"), &retained); err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, o := range retained.Observations {
+		if o.Key == warned {
+			found++
+			if o.State != Attributable || o.Outcome != "warn" {
+				t.Errorf("retained observation %+v", o)
+			}
 		}
 	}
-	s := currentSeries(t, ev, c.Window.Closed)
-	if n, _ := checks(s, "unknown"); n != 1 {
-		t.Errorf("warn counted as %v unknown", n)
+	if found != 1 {
+		t.Fatalf("warned observation retained %d times", found)
 	}
-	if p, _ := checks(s, "pass"); p != 2 {
-		t.Errorf("passes %v, want 2", p)
+
+	// OSCAL: a warning result with its source outcome, and no
+	// not-satisfied finding.
+	r := firstResult(t, req.Out)
+	results := map[string]int{}
+	for _, s := range subjects(r) {
+		res, _ := prop(s, "result")
+		results[res]++
+		if res == "warning" {
+			if src, _ := prop(s, "source-outcome"); src != "warn" {
+				t.Errorf("warning subject lacks source-outcome warn: %v", s)
+			}
+		}
 	}
-	if f, _ := checks(s, "fail"); f != 0 {
-		t.Errorf("warn counted as %v failures", f)
+	if results["warning"] != 1 || results["pass"] != 2 || results["fail"] != 0 || len(results) != 2 {
+		t.Errorf("OSCAL subject results %v", results)
+	}
+	findings, _ := r["findings"].([]any)
+	for _, f := range findings {
+		if st := assessment.Str(assessment.At(assessment.Map(f), "target", "status", "state")); st == "not-satisfied" {
+			t.Errorf("a warning produced a not-satisfied finding: %v", f)
+		}
+	}
+}
+
+// In summaries and metrics a warning is counted exactly once, as unknown,
+// in both the current and the latest closed view.
+func TestWarnCountsOnceAsUnknown(t *testing.T) {
+	c, _ := warnCapture(t)
+	ev := evaluate(t, c, nil, maxAge)
+	if o := ev.Outcomes; o.Unknown != 1 || o.Pass != 2 || o.Fail != 0 || o.AcceptedRisk != 0 {
+		t.Fatalf("owner outcomes %+v", o)
+	}
+	req := exportReq(t, c, ev, repo(t))
+	d, err := Export(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, ok := observability.ClosedFromDescriptor(d)
+	if !ok {
+		t.Fatal("binding package is not a closed run")
+	}
+	clk := clocktesting.NewFakePassiveClock(c.Window.Closed)
+	hub, err := observability.NewHub(observability.Options{Enabled: []observability.Domain{observability.DomainAssessment}, Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	term := hub.Acquire()
+	cur := &observability.CurrentView{Summary: observability.Summary{Evidence: ev.Evidence, Outcomes: ev.Outcomes}, ValidUntil: ev.NextExpiry}
+	if err := hub.PublishAssessment(term, c.Window.Closed, observability.AssessmentSnapshot{Bindings: []observability.BindingAssessment{
+		{Binding: observability.BindingRef{Name: "b", UID: "uid-b"}, Current: cur, LatestClosed: closed}}}); err != nil {
+		t.Fatal(err)
+	}
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(hub)
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	enc := expfmt.NewEncoder(&text, expfmt.NewFormat(expfmt.TypeTextPlain))
+	for _, f := range families {
+		if err := enc.Encode(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every exposed checks sample, parsed from the exposition text.
+	type key struct{ view, state string }
+	samples := map[key]float64{}
+	lines := map[key]int{}
+	sample := regexp.MustCompile(`^konstapel_binding_assessment_checks\{binding="b",state="([a-z_]+)",view="([a-z_]+)"\} (\S+)$`)
+	for _, line := range strings.Split(text.String(), "\n") {
+		if m := sample.FindStringSubmatch(line); m != nil {
+			v, err := strconv.ParseFloat(m[3], 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			k := key{m[2], m[1]}
+			samples[k] += v
+			lines[k]++
+		}
+	}
+	for _, view := range []string{"current", "latest_closed"} {
+		total := 0.0
+		for _, state := range observability.CheckStates {
+			k := key{view, state}
+			if lines[k] != 1 {
+				t.Errorf("%s/%s exposed %d times", view, state, lines[k])
+			}
+			total += samples[k]
+		}
+		want := map[string]float64{"unknown": 1, "pass": 2, "fail": 0, "accepted_risk": 0, "error": 0, "skip": 0}
+		for state, n := range want {
+			if samples[key{view, state}] != n {
+				t.Errorf("%s/%s = %v, want %v", view, state, samples[key{view, state}], n)
+			}
+		}
+		if total != float64(len(c.Expected)) {
+			t.Errorf("%s: checks total %v, want the %d expected checks counted once", view, total, len(c.Expected))
+		}
 	}
 }
 
