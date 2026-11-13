@@ -1,0 +1,668 @@
+{
+  "name": "konstapel-linux-hardening",
+  "version": "0.1.0",
+  "source": {
+    "repository": "https://github.com/backend-bunny/Konstapel"
+  },
+  "policies": [
+    {
+      "name": "disallow-privileged-containers",
+      "path": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+      "checks": [
+        {
+          "ruleID": "disallow-privileged-containers",
+          "checkID": "disallow-privileged-containers"
+        }
+      ]
+    },
+    {
+      "name": "disallow-privilege-escalation",
+      "path": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+      "checks": [
+        {
+          "ruleID": "disallow-privilege-escalation",
+          "checkID": "disallow-privilege-escalation"
+        }
+      ]
+    },
+    {
+      "name": "disallow-capabilities-strict",
+      "path": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+      "checks": [
+        {
+          "ruleID": "disallow-capabilities-strict",
+          "checkID": "disallow-capabilities-strict"
+        }
+      ]
+    },
+    {
+      "name": "require-run-as-nonroot",
+      "path": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+      "checks": [
+        {
+          "ruleID": "require-run-as-nonroot",
+          "checkID": "require-run-as-nonroot"
+        }
+      ]
+    },
+    {
+      "name": "restrict-seccomp-strict",
+      "path": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+      "checks": [
+        {
+          "ruleID": "restrict-seccomp-strict",
+          "checkID": "restrict-seccomp-strict"
+        }
+      ]
+    }
+  ],
+  "scope": {
+    "workloads": [
+      "Pod",
+      "ReplicationController",
+      "Deployment",
+      "StatefulSet",
+      "DaemonSet",
+      "ReplicaSet",
+      "Job",
+      "CronJob"
+    ],
+    "os": [
+      "linux"
+    ]
+  },
+  "compatibility": {
+    "provider": "konstapel-kyverno/v1",
+    "konstapel": "0.1.0"
+  },
+  "oscal": [
+    {
+      "path": "content/component-definition.json",
+      "version": "1.1.3"
+    },
+    {
+      "path": "content/linux-hardening/component-definition.json",
+      "version": "1.1.3"
+    },
+    {
+      "path": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+      "version": "1.2.3"
+    },
+    {
+      "path": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json",
+      "version": "1.2.3"
+    }
+  ],
+  "include": [
+    {
+      "from": "LICENSE",
+      "to": "LICENSE",
+      "role": "license"
+    },
+    {
+      "from": "NOTICE",
+      "to": "NOTICE",
+      "role": "license"
+    },
+    {
+      "generate": "sha256sums",
+      "to": "content/SHA256SUMS",
+      "role": "checksums"
+    },
+    {
+      "from": "content/component-definition.json",
+      "to": "content/component-definition.json",
+      "role": "component-definition"
+    },
+    {
+      "from": "content/linux-hardening/component-definition.json",
+      "to": "content/linux-hardening/component-definition.json",
+      "role": "component-definition"
+    },
+    {
+      "from": "content/linux-hardening/sources.json",
+      "to": "content/linux-hardening/sources.json",
+      "role": "upstream"
+    },
+    {
+      "from": "content/linux-hardening/variants.json",
+      "to": "content/linux-hardening/variants.json",
+      "role": "upstream"
+    },
+    {
+      "from": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+      "to": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+      "to": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+      "to": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+      "to": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/provenance.json",
+      "to": "content/provenance.json",
+      "role": "provenance"
+    },
+    {
+      "from": "content/schemas/oscal-1.1.3.json",
+      "to": "content/schemas/oscal-1.1.3.json",
+      "role": "schema"
+    },
+    {
+      "from": "content/schemas/oscal-1.2.3.json",
+      "to": "content/schemas/oscal-1.2.3.json",
+      "role": "schema"
+    },
+    {
+      "from": "content/upstream/kyverno/LICENSE",
+      "to": "content/upstream/kyverno/LICENSE",
+      "role": "license"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/chainsaw-test.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/chainsaw-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/ephemeral-rbac.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/ephemeral-rbac.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/pod-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/pod-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/pod-good.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/pod-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/podcontroller-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/podcontroller-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/podcontroller-good.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/podcontroller-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/policy-ready.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.chainsaw-test/policy-ready.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-controllers/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-controllers/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-controllers/resources.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-controllers/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/exception-resources.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/exception-resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/exceptions.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/exceptions.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test-exceptions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/adding-capabilities-strict.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/adding-capabilities-strict.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/resource.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/.kyverno-test/resource.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/artifacthub-pkg.yml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/artifacthub-pkg.yml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "to": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/chainsaw-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/chainsaw-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/ephemeral-rbac.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/ephemeral-rbac.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/pod-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/pod-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/pod-good.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/pod-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/podcontroller-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/podcontroller-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/podcontroller-good.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/podcontroller-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/policy-ready.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.chainsaw-test/policy-ready.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-controllers/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-controllers/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-controllers/resources.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-controllers/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/exception-resources.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/exception-resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/exceptions.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/exceptions.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test-exceptions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test/resource.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/.kyverno-test/resource.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/artifacthub-pkg.yml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/artifacthub-pkg.yml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privilege-escalation/disallow-privilege-escalation.yaml",
+      "to": "content/upstream/kyverno/disallow-privilege-escalation/disallow-privilege-escalation.yaml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/chainsaw-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/chainsaw-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/ephemeral-rbac.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/ephemeral-rbac.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-good.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/pod-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-bad.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-good.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/podcontroller-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/policy-ready.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test/policy-ready.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/resources.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-controllers/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exception-resources.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exception-resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exceptions.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/exceptions.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test-exceptions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/resource.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/.kyverno-test/resource.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/artifacthub-pkg.yml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/artifacthub-pkg.yml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+      "to": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/chainsaw-test.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/chainsaw-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/ephemeral-rbac.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/ephemeral-rbac.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/pod-bad.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/pod-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/pod-good.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/pod-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/podcontroller-bad.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/podcontroller-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/podcontroller-good.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/podcontroller-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/policy-ready.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.chainsaw-test/policy-ready.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-controllers/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-controllers/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-controllers/resources.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-controllers/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/exception-resources.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/exception-resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/exceptions.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/exceptions.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-exceptions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-regressions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-regressions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-regressions/resources.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test-regressions/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test/resource.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/.kyverno-test/resource.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/artifacthub-pkg.yml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/artifacthub-pkg.yml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/require-run-as-nonroot/require-run-as-nonroot.yaml",
+      "to": "content/upstream/kyverno/require-run-as-nonroot/require-run-as-nonroot.yaml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/chainsaw-test.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/chainsaw-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/ephemeral-rbac.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/ephemeral-rbac.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/pod-bad.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/pod-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/pod-good.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/pod-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/podcontroller-bad.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/podcontroller-bad.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/podcontroller-good.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/podcontroller-good.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/policy-ready.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.chainsaw-test/policy-ready.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-controllers/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-controllers/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-controllers/resources.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-controllers/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/exception-resources.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/exception-resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/exceptions.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/exceptions.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test-exceptions/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test/kyverno-test.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test/resource.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/.kyverno-test/resource.yaml",
+      "role": "test"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/artifacthub-pkg.yml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/artifacthub-pkg.yml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "to": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/nist/LICENSE.md",
+      "to": "content/upstream/nist/LICENSE.md",
+      "role": "license"
+    },
+    {
+      "from": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json",
+      "to": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+      "to": "content/upstream/nist/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+      "role": "upstream"
+    },
+    {
+      "from": "content/upstream/kyverno/LICENSE",
+      "to": "licenses/kyverno-LICENSE",
+      "role": "license"
+    },
+    {
+      "from": "content/upstream/nist/LICENSE.md",
+      "to": "licenses/nist-LICENSE.md",
+      "role": "license"
+    },
+    {
+      "from": "testdata/linux-hardening/capabilities/kyverno-test.yaml",
+      "to": "tests/linux-hardening/capabilities/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/capabilities/resources.yaml",
+      "to": "tests/linux-hardening/capabilities/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/escalation/kyverno-test.yaml",
+      "to": "tests/linux-hardening/escalation/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/escalation/resources.yaml",
+      "to": "tests/linux-hardening/escalation/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/forms/kyverno-test.yaml",
+      "to": "tests/linux-hardening/forms/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/forms/resources.yaml",
+      "to": "tests/linux-hardening/forms/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/nonroot/resources.yaml",
+      "to": "tests/linux-hardening/nonroot/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/nonroot/upstream/kyverno-test.yaml",
+      "to": "tests/linux-hardening/nonroot/upstream/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/nonroot/variant/kyverno-test.yaml",
+      "to": "tests/linux-hardening/nonroot/variant/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/seccomp/kyverno-test.yaml",
+      "to": "tests/linux-hardening/seccomp/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/seccomp/resources.yaml",
+      "to": "tests/linux-hardening/seccomp/resources.yaml",
+      "role": "test"
+    }
+  ]
+}
