@@ -88,7 +88,8 @@
     "release": false,
     "goTests": [
       "TestLiveBundlesOfficial",
-      "TestLiveBundlesOrganization"
+      "TestLiveBundlesOrganization",
+      "TestLiveBundlesHardening"
     ]
   }
 }

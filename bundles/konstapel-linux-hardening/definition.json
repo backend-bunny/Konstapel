@@ -73,7 +73,7 @@
   },
   "compatibility": {
     "provider": "konstapel-kyverno/v1",
-    "konstapel": "0.1.0"
+    "konstapel": "0.2.0"
   },
   "oscal": [
     {

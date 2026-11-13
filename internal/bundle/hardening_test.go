@@ -268,8 +268,11 @@ func TestHardeningBundleScope(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("workloads %v, want %v", got, want)
 	}
-	if a.Descriptor.Compatibility.Provider != "konstapel-kyverno/v1" {
-		t.Fatalf("compatibility %+v", a.Descriptor.Compatibility)
+	// 0.2.0 is the first controller release that consumes OCI bundles at all
+	// (docs/policy-bundles.md, "Second bundle"); an earlier minimum would
+	// claim a compatibility no released controller has.
+	if a.Descriptor.Compatibility.Provider != "konstapel-kyverno/v1" || a.Descriptor.Compatibility.Konstapel != "0.2.0" {
+		t.Fatalf("compatibility %+v, want konstapel-kyverno/v1 and minimum Konstapel 0.2.0", a.Descriptor.Compatibility)
 	}
 }
 

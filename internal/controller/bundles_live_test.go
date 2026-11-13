@@ -27,7 +27,14 @@ package controller
 //     outage reports ContentUnavailable, delivers nothing new and marks kept
 //     policies stale; a revoked credential fails a cold fetch and the rotated
 //     one recovers it without a restart; trust revocation and recovery.
-// Both verify that every object and container they created is gone.
+//   - TestLiveBundlesHardening builds bundles/konstapel-linux-hardening from
+//     this checkout, signs it with a per-run in-memory test key and serves it
+//     from the same kind of disposable registry: a controller at 0.1.0 (below
+//     the bundle's minimum) reports it Incompatible and delivers nothing; a
+//     controller at the declared minimum delivers all five policies in Deny
+//     and Audit, and Kyverno decides the privileged check and the four
+//     hardening checks on real admission requests.
+// All verify that every object and container they created is gone.
 
 import (
 	"context"
@@ -55,6 +62,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/bundletest"
 	"github.com/backend-bunny/Konstapel/internal/bundle/registry"
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -76,10 +84,17 @@ func (l *live) startBundleManager(ns, cacheDir string) (stop func()) {
 	if err != nil {
 		l.t.Fatal(err)
 	}
+	return l.startBundleManagerAt(ns, cacheDir, strings.TrimSpace(string(ver)))
+}
+
+// startBundleManagerAt is startBundleManager with an explicit controller
+// version for the compatibility check.
+func (l *live) startBundleManagerAt(ns, cacheDir, version string) (stop func()) {
+	l.t.Helper()
 	mgr, err := NewManager(l.cfg, Options{Content: content, LocalBundle: content.Name, MetricsAddr: "0", ProbeAddr: "0",
 		EnginePoll: 2 * time.Second, SkipControllerNameValidation: true,
 		Bundles: stack.Options{SourcesConfigMap: obSourcesCM, Namespace: ns, CacheDir: cacheDir,
-			RefreshInterval: 5 * time.Second, ControllerVersion: strings.TrimSpace(string(ver))}})
+			RefreshInterval: 5 * time.Second, ControllerVersion: version}})
 	if err != nil {
 		l.t.Fatal(err)
 	}
@@ -645,4 +660,265 @@ func TestLiveBundlesOrganization(t *testing.T) {
 	recovered("trust recovery")
 	afterTrust := l.baDelivered("ba-revoked", f.subject, v1alpha1.ModeDeny)
 	l.record("trust-revocation", map[string]any{"revoked": revoked, "newBinding": "unresolved, no policy", "recovered": afterTrust})
+}
+
+const (
+	bhBundle     = "konstapel-linux-hardening"
+	bhDefinition = "../../bundles/" + bhBundle + "/definition.json"
+	// bhBuilder is the test builder identity the per-run provenance names.
+	bhBuilder = "https://ci.example.test/konstapel/hardening-acceptance@refs/heads/main"
+	// bhBelowMinimum is the last controller release without OCI bundle
+	// support, below the bundle's declared minimum.
+	bhBelowMinimum = "0.1.0"
+)
+
+// bhChecks are the bundle's five policies: the privileged check and the four
+// hardening checks.
+var bhChecks = append([]string{"disallow-privileged-containers"}, hzChecks...)
+
+// bhBuild builds the hardening bundle from this checkout at HEAD.
+func bhBuild(t *testing.T) (*bundle.Archive, string) {
+	t.Helper()
+	raw, err := os.ReadFile(bhDefinition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := bundle.LoadDefinition(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := exec.Command("git", "-C", "../..", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	def.Source.Revision = strings.TrimSpace(string(head))
+	a, err := bundle.Build(def, os.DirFS("../.."), time.Date(2026, 11, 13, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a, def.Source.Revision
+}
+
+// bhSource is the publisher rule for the hardening bundle at repository: the
+// per-run public key in obKeySecret, the registry CA and credential.
+func bhSource(repository, fingerprint, sourceRepo string) bundle.BundleSource {
+	return bundle.BundleSource{Name: bhBundle, Repository: repository,
+		CredentialSecret: &bundle.ObjectRef{Name: obCredSecret},
+		CA:               &bundle.ObjectRef{Kind: bundle.KindConfigMap, Name: obCAConfig},
+		Publisher: bundle.Publisher{Type: bundle.SignerPublicKey, PublicKey: &bundle.ObjectRef{Kind: bundle.KindSecret, Name: obKeySecret, Key: "cosign.pub"},
+			KeyFingerprint: fingerprint, Provenance: bundle.ProvenanceRule{SourceRepository: sourceRepo, Builder: bhBuilder}}}
+}
+
+// bhPush pushes the signed subject and its proofs with the retrieval
+// adapter's own session.
+func bhPush(t *testing.T, l *live, r obRegistry, src bundle.BundleSource, res *registry.Result) {
+	t.Helper()
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{RootCAs: r.pool, MinVersion: tls.VersionTLS12}
+	c, err := registry.NewClient(registry.Options{Transport: tr, Credentials: obCreds{Username: "reader-a", Password: r.users["reader-a"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Open(l.ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	push := func(mediaType string, b []byte, manifest bool) {
+		d := ocispec.Descriptor{MediaType: mediaType, Digest: godigest.FromBytes(b), Size: int64(len(b))}
+		if manifest {
+			err = s.Err("push manifest", s.Repository.Manifests().Push(l.ctx, d, strings.NewReader(string(b))))
+		} else {
+			err = s.Err("push blob", s.Repository.Blobs().Push(l.ctx, d, strings.NewReader(string(b))))
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", src.Repository, err)
+		}
+	}
+	push(bundle.EmptyConfigMediaType, []byte("{}"), false)
+	push(bundle.LayerMediaType, res.Layer, false)
+	push(ocispec.MediaTypeImageManifest, res.Manifest, true)
+	for _, p := range res.Proofs {
+		push(p.BundleMediaType, p.Bundle, false)
+		push(ocispec.MediaTypeImageManifest, p.Manifest, true)
+	}
+}
+
+// bhDelivered checks that binding has exactly the bundle's five policies, each
+// the mode's rendering of digest, and returns them by logical policy.
+func (l *live) bhDelivered(binding, digest string, mode v1alpha1.EnforcementMode) map[string]string {
+	l.t.Helper()
+	b := l.waitReady(binding, 1)
+	if b.Status.Profile == nil || b.Status.Profile.BundleDigest != digest {
+		l.t.Fatalf("%s status does not name the bundle digest %s: %s", binding, digest, toJSON(b.Status))
+	}
+	pols := l.hzPolicyNames(binding)
+	if len(pols) != len(bhChecks) {
+		l.t.Fatalf("%s delivered %d policies, want the bundle's %d: %v", binding, len(pols), len(bhChecks), pols)
+	}
+	for _, c := range bhChecks {
+		name, ok := pols[c]
+		if !ok {
+			l.t.Fatalf("%s: %s not delivered: %v", binding, c, pols)
+		}
+		pol := l.policy(name)
+		actions, _, _ := unstructured.NestedStringSlice(pol.Object, "spec", "validationActions")
+		if a := pol.GetAnnotations(); a[targeting.AnnotationBundleDigest] != digest || a[targeting.AnnotationBundle] != bhBundle ||
+			len(actions) != 1 || actions[0] != string(mode) {
+			l.t.Fatalf("%s: %s is not the %s rendering of %s@%s: %v %v", binding, name, mode, bhBundle, digest, a, actions)
+		}
+	}
+	return pols
+}
+
+// bhPrivileged is a Pod that violates only the privileged check among the
+// fields the API server allows together with privileged: true (which
+// requires allowPrivilegeEscalation not to be false, so the escalation check
+// also rejects it).
+func bhPrivileged(ns string) client.Object {
+	sc := hzSecurityContext()
+	t := true
+	sc.Privileged, sc.AllowPrivilegeEscalation = &t, &t
+	return hzWorkload("Pod", ns, "bh-privileged", hzPodSpec(sc, nil))
+}
+
+func bhViolating(ns, check string) client.Object {
+	sc := hzSecurityContext()
+	hzViolate(sc, check)
+	return hzWorkload("Pod", ns, "bh-violates", hzPodSpec(sc, nil))
+}
+
+func TestLiveBundlesHardening(t *testing.T) {
+	l := newLive(t)
+	l.installCRDs()
+	s := newBAScenario(l)
+	reg := startOBRegistry(t, l)
+	s.containers = append(s.containers, reg.name)
+
+	a, revision := bhBuild(t)
+	digest := a.ManifestDigest
+	minimum := a.Descriptor.Compatibility.Konstapel
+	if minimum == bhBelowMinimum {
+		t.Fatalf("the hardening bundle declares minimum %s; the negative case needs a lower controller", minimum)
+	}
+	// A per-run key that exists only in memory; nothing is written to disk.
+	signer, err := bundletest.NewSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const repoPath = "org/hardening/" + bhBundle
+	src := bhSource(reg.host+"/"+repoPath, signer.Fingerprint, a.Descriptor.Source.Repository)
+	res, err := signer.Result(a, src.Repository, bhBuilder, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bhPush(t, l, reg, src, res)
+	l.record("published", map[string]any{"bundle": bhBundle, "version": a.Descriptor.Version, "digest": digest,
+		"contentDigest": a.Descriptor.ContentDigest(), "sourceRevision": revision, "minimum": minimum, "proofs": len(res.Proofs)})
+
+	const ns = "konstapel-bundles-hardening"
+	s.namespace(ns)
+	for _, o := range []client.Object{
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: obCAConfig}, Data: map[string]string{"ca.crt": string(reg.caPEM)}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: obCredSecret}, Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{corev1.DockerConfigJsonKey: obDockerConfig(reg.host, "reader-a", reg.users["reader-a"])}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: obKeySecret}, Data: map[string][]byte{"cosign.pub": signer.PublicKey}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: obSourcesCM}, Data: map[string]string{"sources.yaml": obSourcesYAML(t, src)}},
+	} {
+		l.obApply(o)
+	}
+
+	// 1. A controller below the bundle's minimum: the verified content is
+	// Incompatible and nothing is delivered.
+	var stopMu sync.Mutex
+	stop := l.startBundleManagerAt(ns, t.TempDir(), bhBelowMinimum)
+	t.Cleanup(func() {
+		s.teardown()
+		stopMu.Lock()
+		defer stopMu.Unlock()
+		stop()
+	})
+	s.namespace("bh-deny")
+	s.namespace("bh-audit")
+	p := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "bh-hardening"},
+		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: bhBundle, Digest: digest}}}
+	for _, c := range bhChecks {
+		p.Spec.Policies = append(p.Spec.Policies, v1alpha1.ProfilePolicy{Name: c})
+	}
+	if err := l.c.Create(l.ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	s.profiles = append(s.profiles, p.Name)
+	s.binding("bh-deny", p.Name, v1alpha1.ModeDeny)
+	incompatible := l.waitProfile(p.Name, v1alpha1.ReasonContentUnavailable, "(Incompatible)")
+	if want := "requires Konstapel " + minimum + " or later; this controller is " + bhBelowMinimum; !strings.Contains(incompatible, want) {
+		t.Fatalf("profile message %q does not say %q", incompatible, want)
+	}
+	l.baNothingDelivered("bh-deny", v1alpha1.ReasonContentUnavailable)
+	if err := l.c.Create(l.ctx, bhViolating("bh-deny", "require-run-as-nonroot"), client.DryRunAll); err != nil {
+		t.Fatalf("a root Pod was denied although nothing was delivered: %v", err)
+	}
+	l.record("below-minimum", map[string]any{"controller": bhBelowMinimum, "profile": incompatible, "delivered": "nothing; privileged and root Pods admitted"})
+
+	// 2. A controller at the bundle's declared minimum. VERSION stays below it
+	// until release-please releases 0.2.0, so this case sets the version
+	// explicitly: it proves the content and controller code on main, not a
+	// released image (docs/policy-bundles.md, "Bundle acceptance").
+	stopMu.Lock()
+	stop()
+	stop = l.startBundleManagerAt(ns, t.TempDir(), minimum)
+	stopMu.Unlock()
+	resolved := l.waitProfile(p.Name, "Resolved", "")
+	if want := fmt.Sprintf("%d policies resolve in %s@%s", len(bhChecks), bhBundle, digest); !strings.Contains(resolved, want) {
+		t.Fatalf("profile message %q does not say %q", resolved, want)
+	}
+	deny := l.bhDelivered("bh-deny", digest, v1alpha1.ModeDeny)
+	s.binding("bh-audit", p.Name, v1alpha1.ModeAudit)
+	audit := l.bhDelivered("bh-audit", digest, v1alpha1.ModeAudit)
+	l.record("delivered", map[string]any{"controller": minimum, "profile": resolved, "deny": deny, "audit": audit})
+
+	// Deny: compliant admitted; each hardening check rejects its own
+	// violation; a privileged Pod is rejected by the privileged check.
+	compliant := hzWorkload("Pod", "bh-deny", "bh-compliant", hzPodSpec(hzSecurityContext(), hzSecurityContext()))
+	l.eventually("compliant Pod admitted in Deny", func() (bool, string) {
+		err := l.c.Create(l.ctx, compliant.DeepCopyObject().(client.Object), client.DryRunAll)
+		return err == nil, fmt.Sprint(err)
+	})
+	var privMsg string
+	l.eventually("privileged Pod denied by "+deny["disallow-privileged-containers"], func() (bool, string) {
+		err := l.c.Create(l.ctx, bhPrivileged("bh-deny"), client.DryRunAll)
+		if err == nil {
+			return false, "admitted"
+		}
+		privMsg = err.Error()
+		return strings.Contains(privMsg, deny["disallow-privileged-containers"]), privMsg
+	})
+	l.record("denied", map[string]any{"case": "Pod/disallow-privileged-containers", "message": privMsg})
+	for _, c := range hzChecks {
+		l.expectDenied("Pod/"+c, l.c.Create(l.ctx, bhViolating("bh-deny", c), client.DryRunAll), deny, c)
+	}
+
+	// Audit: every violation and the compliant Pod are admitted, repeatedly.
+	for i := 0; i < 3; i++ {
+		for name, o := range map[string]client.Object{"compliant": hzWorkload("Pod", "bh-audit", "bh-compliant", hzPodSpec(hzSecurityContext(), nil)),
+			"privileged": bhPrivileged("bh-audit")} {
+			if err := l.c.Create(l.ctx, o, client.DryRunAll); err != nil {
+				t.Fatalf("Audit denied the %s Pod: %v", name, err)
+			}
+		}
+		for _, c := range hzChecks {
+			if err := l.c.Create(l.ctx, bhViolating("bh-audit", c), client.DryRunAll); err != nil {
+				t.Fatalf("Audit denied a Pod violating %s: %v", c, err)
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	l.record("audit-admitted", map[string]any{"binding": "bh-audit", "cases": append([]string{"compliant", "privileged"}, hzChecks...)})
+
+	for _, b := range []string{"bh-deny", "bh-audit"} {
+		st := l.binding(b).Status
+		if st.Profile == nil || st.Profile.BundleDigest != digest || st.ConfigurationRevision == "" {
+			t.Fatalf("%s status lacks the bundle identity: %s", b, toJSON(st))
+		}
+	}
+	l.record("status", map[string]any{"bh-deny": *l.binding("bh-deny").Status.Profile, "bh-audit": *l.binding("bh-audit").Status.Profile})
 }
