@@ -34,6 +34,25 @@ cleanup() {
     stage 'Collecting cluster diagnostics and tearing down the disposable environment' || true
     kind export logs --name "$KONSTAPEL_CLUSTER_NAME" "$out/kind-logs" 2>&1 | tee "$out/kind-export.log" || true
     scripts/environment.sh delete "$kubeconfig" "$out/environment" 2>&1 | tee "$out/teardown.log" || { [[ $code != 0 ]] || code=1; }
+    # Prove the teardown: the cluster and every container a live test
+    # labelled for it (liveContainerLabel) are gone. A leftover fails the run
+    # and is then removed.
+    clean=true
+    if kind get clusters 2>/dev/null | rg -Fxq "$KONSTAPEL_CLUSTER_NAME"; then
+      echo "leftover kind cluster: $KONSTAPEL_CLUSTER_NAME" | tee -a "$out/teardown.log"; clean=false
+    fi
+    if ! leftover=$(docker ps -aq --filter "label=konstapel.acceptance=$KONSTAPEL_CLUSTER_NAME"); then
+      echo 'cannot list test-owned containers' | tee -a "$out/teardown.log"; clean=false; leftover=
+    fi
+    if [[ -n $leftover ]]; then
+      echo "leftover test-owned containers: $(echo $leftover)" | tee -a "$out/teardown.log"; clean=false
+      docker rm -f $leftover >/dev/null 2>&1 || true
+    fi
+    if [[ $clean == true ]]; then
+      echo "teardown verified: no cluster $KONSTAPEL_CLUSTER_NAME and no container labelled for it" | tee -a "$out/teardown.log"
+    elif [[ $code == 0 ]]; then
+      code=1
+    fi
   fi
   jq -n --arg group "$group" --argjson exitCode "$code" '{group:$group,passed:($exitCode==0),exitCode:$exitCode}' > "$out/acceptance-result.json"
   if [[ $code == 0 ]]; then

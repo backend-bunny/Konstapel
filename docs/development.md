@@ -51,7 +51,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
 | `task deps:check` | Validate Renovate configuration, Devbox lock entries, Go version agreement, image digest format, chart checksum, and chart/CLI version agreement. |
 | `task check` | Run all the preceding checks and build, in the same order as CI. |
-| `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. |
+| `task acceptance OUTPUT=/absolute/fresh/path [GROUP=all]` | Run full acceptance by default, or one named CI group, in a disposable kind cluster and retain evidence. `GROUP=bundles` is the policy-bundle acceptance that the `add-policy-bundle-distribution` change calls `bundles:acceptance` ([bundle acceptance](policy-bundles.md#bundle-acceptance)); it is a group of this task, not a separate task. |
 | `task test:failures OUTPUT=/absolute/fresh/path` | Exercise missing-evidence and unexpected-admission failure paths. |
 | `task charts:package OUT=/fresh/path IMAGE_DIGEST=sha256:…` | From a clean checkout, package both charts with the runtime chart defaulting to that image digest, and freeze them with `publication.json` ([Helm charts](charts.md#release-packaging-and-publication)). |
 | `task charts:acceptance OUTPUT=/fresh/path ARCHIVES=/path IMAGE=ghcr.io/backend-bunny/konstapel@sha256:…` | From a clean checkout, run every release-required acceptance group (`"release": true`: `charts` and `availability`) in turn, each on its own disposable cluster, on those exact archives with every node pulling that image by digest. Writes `chart-acceptance.json` only if every required test passed, binding the per-test results to the frozen inputs. |
@@ -95,8 +95,9 @@ Per-change OpenSpec `.openspec.yaml` metadata and documentation outside the
 allowlisted paths currently require acceptance too.
 Only superseded PR runs are cancelled; main runs remain available for publication.
 
-The `acceptance-live` matrix runs four groups concurrently, each on its own
-runner with its own disposable kind cluster and test-owned S3 services:
+The `acceptance-live` matrix runs every group in `scripts/acceptance-groups.json`
+concurrently, each on its own runner with its own disposable kind cluster and
+test-owned S3 and registry services:
 
 | Group | Coverage |
 | --- | --- |
@@ -106,6 +107,7 @@ runner with its own disposable kind cluster and test-owned S3 services:
 | `recovery` | Kyverno outages and assessment/publication faults |
 | `capabilities` | Engine API and permission loss and recovery without a controller restart |
 | `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving), and OCI policy bundles from a disposable TLS registry (chart RBAC, watches, revocation, follower pins, upgrade and rollback); installs cert-manager and builds the image |
+| `bundles` | OCI policy bundles on an in-process controller: the official keyless release read anonymously from `ghcr.io` and the organization-key fixture from a disposable TLS registry, each in Audit and Deny; unsigned, wrong-key and tampered bundles; warm-cache outage, cold-cache failure, credential rotation, trust revocation and recovery ([bundle acceptance](policy-bundles.md#bundle-acceptance)); needs network access to `ghcr.io` and fails without it |
 | `availability` | The Helm-installed image on a multi-node cluster (two workers): placement, PDB, rolling and capacity-blocked upgrades, co-location, development values, controller outage, leader pod and node loss, and leader loss during an S3 outage; builds the image |
 
 `scripts/acceptance-groups.json` defines the matrix and Go test selection. The
@@ -152,6 +154,10 @@ CI uploads test-owned evidence as `acceptance-evidence-<group>`, excluding kubec
 compiled test binaries, rendered chart manifests, and node logs. The task tears
 down its cluster and test service on success or failure; teardown errors fail
 the task and remain in its logs.
+After teardown the task checks that the kind cluster is gone and that no
+container a live test labelled `konstapel.acceptance=<cluster name>` (test S3,
+fault proxy and registry services) remains; a leftover fails the run, is
+listed in `teardown.log` and is then removed.
 CI checks that execution did not modify dependency locks. The setup action caches
 Nix packages and Go downloads/build outputs; it does not use a separate Go version
 or download an independently selected Kyverno CLI.

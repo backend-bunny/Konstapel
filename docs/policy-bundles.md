@@ -15,7 +15,8 @@ resolves it centrally and verifies it before use.
 > reproducible end-to-end example is the
 > [Audit walkthrough](integration/bundle-audit-walkthrough.md). Remaining work
 > is tracked in the `add-policy-bundle-distribution` OpenSpec change; live
-> acceptance of the full official and organization matrix is not finished.
+> acceptance of the official and organization matrix is the `bundles`
+> acceptance group ([bundle acceptance](#bundle-acceptance)).
 
 ## OCI layout
 
@@ -3014,14 +3015,87 @@ mode fix fails step 3.
 so no admission path on a non-leader exists to test); a profile digest
 upgrade to a different, semantically changed signed bundle (only one signed
 subject exists as a fixture; the revision advance by another manifest digest
-is unit-tested in `internal/bundle/content`); keyless signatures in the
-cluster (the fixture is public-key signed; the
-[Audit walkthrough](integration/bundle-audit-walkthrough.md) does run the
-official keyless bundle in a cluster, by hand); and bearer-token registries.
+is unit-tested in `internal/bundle/content`); keyless signatures on the
+packaged controller (the fixture is public-key signed; the official keyless
+bundle runs on an in-process controller in the
+[`bundles` group](#bundle-acceptance), and on the packaged one by hand in the
+[Audit walkthrough](integration/bundle-audit-walkthrough.md)); and
+bearer-token registries.
 Assessment export of an OCI-bundle run uses the frozen content of each
 bundle its contributions were applied from, not the image's vendored tree
 (see
 [Assessment runs freeze their bundle](#assessment-runs-freeze-their-bundle)).
+
+## Bundle acceptance
+
+The `add-policy-bundle-distribution` change names a `bundles:acceptance`
+workflow. In this repository it is the `bundles` group of the one acceptance
+task, not a task of its own (the Taskfile keeps one acceptance workflow with
+groups; see [development](development.md#commands)):
+
+```sh
+task acceptance GROUP=bundles OUTPUT=/absolute/fresh/path
+```
+
+It creates the disposable kind cluster with the pinned Kyverno
+(`scripts/environment.sh`), runs `TestLiveBundlesOfficial` and
+`TestLiveBundlesOrganization` (`internal/controller/bundles_live_test.go`)
+sequentially, tears the cluster down and then checks that no cluster and no
+test-labelled container is left. CI runs it as `acceptance-live (bundles)` on
+every PR that is not prose-only, and on every main push. The controller runs
+in-process from the checkout with bundle sources enabled, exactly as
+`cmd/konstapel` wires it (`--bundle-sources-configmap`, an empty cache
+directory, a 5 s refresh interval, the controller version from `VERSION`).
+Admission is real: a server-side dry-run privileged Pod is sent to the API
+server and Kyverno decides it. The packaged image and chart over the same
+content are `TestLiveHelmBundles` in the `charts` group
+([above](#helm-installation-and-live-acceptance)).
+
+The group needs anonymous HTTPS access to `ghcr.io`. It checks it first and
+fails, never skips, when the registry cannot be reached.
+
+| Scenario | What the test does | What it proves |
+| --- | --- | --- |
+| Official content, Deny and Audit | The sources ConfigMap holds [`bundles/official-sources.yaml`](../bundles/official-sources.yaml) verbatim; a profile pins the first official release `sha256:1a2ca25a…f88f8`; a `Deny` and an `Audit` binding select one namespace each | The released keyless bundle verifies in a cluster under the checked-in rule and Sigstore public-good root, is delivered with the binding's action, a privileged Pod is rejected under `Deny` and admitted (repeatedly) under `Audit` |
+| Official content, wrong signer | The same rule with the identity changed to `@refs/heads/not-main`, before the verbatim rule | A real keyless signature by another identity is `ContentUnavailable (Untrusted)`, delivers nothing, and a privileged Pod is admitted; changing the rule to the right identity then delivers |
+| Organization content, Deny and Audit | The organization-key fixture (`internal/bundle/verify/testdata/provenance`) on a disposable TLS + htpasswd registry, `Deny` and `Audit` bindings | As for official content, for the public-key method and a private authenticated registry |
+| Invalid signatures | With an empty cache, a `Deny` binding over: the subject without proofs (unsigned); signed and attested by another key (wrong key); the organization signature with one bit flipped (tampered signature); another subject carrying the valid proofs re-attached (tampered content) | Each is `ContentUnavailable (Untrusted)` on the profile and binding, no policy exists for the binding and a privileged Pod is admitted |
+| Rejected content is not kept | After the wrong-key attempt, with the registry paused, the rule is changed to trust that other key | The profile is `ContentUnavailable (ContentUnavailable)`: a rejected fetch left nothing in the cache that a later rule could recheck offline |
+| Warm-cache outage | The registry is paused after delivery; a new `Deny` binding is created | Verified cached content keeps serving: the profile stays `Resolved`, existing bindings stay ready with the same policies, and the new binding is delivered and denies |
+| Cold-cache failure | The controller restarts with an empty cache while the registry is paused; a new `Deny` binding is created; the registry returns | The profile reports `ContentUnavailable`; kept policies stay but every binding is `EngineReady=False/StaleRevision` (not reported healthy); the new binding gets no policy and a privileged Pod is admitted there; after the registry returns everything resolves with the same policies |
+| Credential rotation | The credential Secret's password is revoked and the controller restarts with an empty cache, then the Secret is rotated to another registry user without a restart | A revoked credential fails a cold fetch (`ContentUnavailable`) while applied policies stay (stale); the rotated credential is read within the refresh interval and used (the registry log shows the new user) and the same policies become ready |
+| Trust revocation and recovery | The key Secret and rule move to another key, then back | `ContentUnavailable (Untrusted)`, applied policies stay (stale) and keep enforcing, a new binding gets nothing; restoring trust recovers all of them with the same policies |
+| Cleanup | Every test removes its bindings, profiles, namespaces, sources objects and registry container, then asserts that each is gone and no managed policy of its bindings remains; after the cluster is deleted the task asserts that no cluster and no container labelled for it remain | The group leaves nothing behind on success or failure (a leftover fails the run) |
+
+Hand-broken checks (run locally against a disposable cluster, not committed):
+each of these, applied by hand, made the group fail at the step named:
+
+- Signature verification skipped (both sigstore-go checks in
+  `internal/bundle/verify` ignored): the wrong-key bundle resolves, and the
+  invalid-signature step times out waiting for `Untrusted`.
+- `Deny` rendered as `Audit` (`internal/targeting/render.go`): the official
+  `Deny` binding's policy is not the `Deny` rendering; with that test check
+  also removed, the admission check fails because the privileged Pod is
+  admitted.
+- Kept policies reported ready while the configuration does not resolve
+  (`engineCondition` in `internal/controller/binding.go`): the cold-cache step
+  times out waiting for `StaleRevision`.
+
+The "not kept" step proves that no *usable* rejected content stays (bytes
+with retained evidence that a later rule could recheck offline). A
+resolver that stored rejected bytes without their proofs would still pass it;
+`internal/bundle/resolve` unit tests own that ordering.
+
+**What it does not prove.** The controller here is in-process, not the
+packaged image (the `charts` group covers that path with the organization
+fixture, including follower pins, upgrade and rollback). Only one released
+official digest exists, so a digest upgrade between official releases is not
+exercised; registry content is never tampered with in place (a registry
+refuses bytes that do not match their digest), so tampering is modeled as a
+different subject or a modified proof. A real credential revocation on the
+registry side is modeled by a wrong password; bearer-token registries, keyless
+signatures under a private trust root and the `Audit` assessment path of these
+bindings are not part of this group.
 
 ## Create and package a bundle
 

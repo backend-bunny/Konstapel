@@ -396,3 +396,14 @@ func TestLiveManager(t *testing.T) {
 	l.eventually("cleanup", func() (bool, string) { return len(l.managedPolicies()) == 0, toJSON(l.managedPolicies()) })
 	l.record("passed", map[string]any{})
 }
+
+// liveContainerLabel labels a container a live test starts with the
+// disposable cluster it belongs to (KONSTAPEL_CLUSTER_NAME, set by
+// scripts/acceptance.sh), so the acceptance teardown can prove none is left.
+func liveContainerLabel() string {
+	name := os.Getenv("KONSTAPEL_CLUSTER_NAME")
+	if name == "" {
+		name = "unnamed"
+	}
+	return "konstapel.acceptance=" + name
+}

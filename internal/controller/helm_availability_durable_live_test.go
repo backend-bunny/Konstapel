@@ -562,7 +562,7 @@ func (l *live) startFaultProxy(t *testing.T) *faultProxy {
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
 	name := "konstapel-live-s3fault-" + hex.EncodeToString(suffix)
-	if out, err := exec.Command("docker", "run", "-d", "--name", name, "--network", "kind", "-p", "127.0.0.1::9100",
+	if out, err := exec.Command("docker", "run", "-d", "--name", name, "--label", liveContainerLabel(), "--network", "kind", "-p", "127.0.0.1::9100",
 		"-v", bin+":/s3fault:ro", "--entrypoint", "/s3fault", image, "-backend", l.s3Container+":9000").CombinedOutput(); err != nil {
 		t.Fatalf("start the fault proxy: %v %s", err, out)
 	}
