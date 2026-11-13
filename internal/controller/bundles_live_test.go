@@ -173,10 +173,10 @@ func (s *baScenario) remove(bindings, profiles []string) {
 // teardown removes everything while the manager runs; call it from a
 // cleanup registered after the manager's.
 func (s *baScenario) teardown() {
-	s.remove(s.bindings, s.profiles)
 	for _, n := range s.namespaces {
 		_ = s.l.c.Delete(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: n}})
 	}
+	s.remove(s.bindings, s.profiles)
 }
 
 func (s *baScenario) verifyClean() {
@@ -492,7 +492,8 @@ func TestLiveBundlesOrganization(t *testing.T) {
 		stop = l.startBundleManager(ns, t.TempDir())
 	}
 	t.Cleanup(func() {
-		l.pause(reg.name, false)
+		// The registry may or may not be paused when a step fails.
+		_ = exec.Command("docker", "unpause", reg.name).Run()
 		s.teardown()
 		stopMu.Lock()
 		defer stopMu.Unlock()
