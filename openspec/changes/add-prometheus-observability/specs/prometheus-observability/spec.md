@@ -73,15 +73,31 @@ workload checks or complete evidence.
 ### Requirement: Honest current assessment summaries
 
 Per-binding current summaries SHALL derive from the assessment capability's
-expected inventory and dispositions. They SHALL distinguish ordinary passes,
-violations, accepted risks, evaluation errors/warnings/skips, stale or unknown
-evidence, and out-of-scope checks. Completeness and no-target scope SHALL remain
-separate, and neither accepted risk nor missing evidence SHALL count as a pass.
+expected inventory and its normalized dispositions, without reclassifying engine
+results. Each expected check instance SHALL be counted in exactly one of these
+states: `pass`, `fail`, `error`, `skip`, `accepted_risk`, `out_of_scope` (known
+non-applicability), `unknown` (an attributable outcome the assessment capability
+does not distinguish, including an engine warning), `missing` (no matching
+result), `rejected` (matching results without usable evidence, including
+evidence older than the evidence-age limit) and `unresolved` (scope changed
+during collection or results conflict). A summary whose inventory cannot be
+fully established, or whose counts are inconsistent, SHALL omit these counts.
+An accepted risk SHALL be counted once, as accepted risk, whatever its raw
+outcome. Completeness and no-target scope SHALL remain separate, and neither
+accepted risk nor missing, rejected, unresolved or warning evidence SHALL count
+as a pass.
 
 #### Scenario: Aggregate mixed evidence
 
-- **WHEN** a binding has passing, violating, excepted, stale and out-of-scope check instances
+- **WHEN** a binding has passing, violating, excepted, missing, age-rejected, unresolved and out-of-scope check instances
 - **THEN** counts preserve those distinctions without multiplying subjects through duplicate reports or exception references
+- **AND** the counts of a fully established inventory sum to its expected check instances
+
+#### Scenario: An engine reports a warning
+
+- **WHEN** the engine reports a warning result for an expected check
+- **THEN** the check is counted as `unknown`, neither passing nor failing
+- **AND** the raw warning outcome remains in the assessment evidence
 - **AND** counts describe check instances rather than satisfied controls
 
 #### Scenario: No targets or no reliable inventory
@@ -101,7 +117,8 @@ full-binding summary, and newer incomplete runs SHALL remain visible.
 #### Scenario: Evidence ages after a complete snapshot
 
 - **WHEN** previously usable observations exceed the binding's evidence-age limit
-- **THEN** current monitoring exposes staleness independently of the snapshot interval
+- **THEN** current monitoring exposes staleness independently of the snapshot interval: the current evidence expiry time stays queryable, the current summary becomes unknown at that time, and a later evaluation counts the aged observations as rejected
+- **AND** previously passing observations are never counted as current passes once they are stale
 - **AND** the historical snapshot remains identifiable as historical rather than refreshed by a scrape
 
 #### Scenario: A newer run is incomplete or fails export

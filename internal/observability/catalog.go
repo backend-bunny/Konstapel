@@ -69,10 +69,17 @@ var (
 	// publication.EvidenceSummary for the rest), renamed to label tokens; the
 	// projection never reclassifies raw engine results. Attributable
 	// observations are pass, fail, error, skip, accepted_risk, out_of_scope
-	// (the owner's NotApplicable) or unknown (an unrecognized engine outcome,
-	// including warn). The rest are missing, rejected (matching results exist
-	// but none is usable, including evidence older than maxEvidenceAge) or
-	// unresolved (scope changed or results conflict).
+	// (the owner's NotApplicable) or unknown (an unrecognized engine outcome).
+	// The rest are missing, rejected (matching results exist but none is
+	// usable, including evidence older than maxEvidenceAge) or unresolved
+	// (scope changed or results conflict).
+	//
+	// There is no warn or stale state. A Kyverno warn result (a policy
+	// annotated policies.kyverno.io/scored: "false") is counted by the owner
+	// as unknown: never pass or fail. Stale evidence is rejected when the
+	// owner evaluates it; until then the current view becomes unknown at the
+	// owner's next expiry, which
+	// konstapel_binding_current_evidence_expiry_timestamp_seconds exposes.
 	CheckStates     = []string{"pass", "fail", "error", "skip", "accepted_risk", "out_of_scope", "unknown", "missing", "rejected", "unresolved"}
 	operationValues = []string{"bundle_resolution", "evidence_publication", "evidence_cleanup"}
 	resultValues    = []string{"success", "failure"}
@@ -135,6 +142,9 @@ var Catalog = []Metric{
 	{Name: "konstapel_binding_oldest_evaluation_timestamp_seconds", Type: Gauge, Unit: "seconds", Labels: []Label{binding, view}, Domain: DomainAssessment,
 		Help:         "Oldest attributable source evaluation time in the view.",
 		Availability: "Only while the view's status is known and its owner records an attributable source evaluation time.", Reset: bindingLifetime},
+	{Name: "konstapel_binding_current_evidence_expiry_timestamp_seconds", Type: Gauge, Unit: "seconds", Labels: []Label{binding}, Domain: DomainAssessment,
+		Help:         "When the oldest attributable current evidence exceeds the evidence-age limit; from then on the current view is unknown until re-evaluated.",
+		Availability: "While the assessment projection is fresh and ready and the owner records a next expiry for current evidence, including after it has passed.", Reset: bindingLifetime},
 	{Name: "konstapel_binding_snapshot_collection_started_timestamp_seconds", Type: Gauge, Unit: "seconds", Labels: []Label{binding}, Domain: DomainAssessment,
 		Help:         "Collection start of the latest closed full-binding run.",
 		Availability: "Only after a full-binding run has closed.", Reset: bindingLifetime},

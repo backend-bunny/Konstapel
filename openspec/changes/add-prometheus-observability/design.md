@@ -102,6 +102,7 @@ The initial binding metric catalog has these families:
 | `konstapel_binding_assessment_checks` | Gauge, binding/view/state | Count of independently identified check instances |
 | `konstapel_binding_assessment_complete` | Gauge, binding/view | Evidence completeness when a known nonempty summary exists |
 | `konstapel_binding_oldest_evaluation_timestamp_seconds` | Gauge, binding/view | Oldest attributable source evaluation in that view, absent if none |
+| `konstapel_binding_current_evidence_expiry_timestamp_seconds` | Gauge, binding | Owner's next expiry of current evidence; the bounded freshness signal |
 | `konstapel_binding_snapshot_collection_started_timestamp_seconds` | Gauge, binding | Actual collection start of the latest closed full-binding run, absent if none |
 | `konstapel_binding_last_closed_timestamp_seconds` | Gauge, binding | Closure of the latest full-binding run, including incomplete/diagnostic closure |
 | `konstapel_binding_assessment_interval_seconds` | Gauge, binding | Effective configured cadence |
@@ -125,20 +126,42 @@ remain distinct contributions. Do not interpret a sum across bindings as unique
 workloads or satisfied controls. Use fixed mutually exclusive display states
 taken from the owner's normalized summary (`OutcomeCounts` and
 `EvidenceSummary`): `pass`, `fail`, `error`, `skip`, `accepted_risk`,
-`out_of_scope` (owner `notApplicable`), `unknown` (an attributable but
-unrecognized outcome; the owner folds `warn` into it), `missing`, `rejected`
-(including evidence older than `maxEvidenceAge`) and `unresolved`. The owner
-does not separate `warn` or age-only rejection, so the earlier `warn` and
-`stale` states are not exposed; adding them requires the assessment owner to
-record them first. A summary with stale (unresolved) scopes has a partially
-unknown inventory and is `unknown`. Their projection consumes the owner's
-normalized outcome, applicability, evidence usability and risk attribution,
-with a documented table:
+`out_of_scope` (owner `notApplicable`), `unknown` (an attributable outcome the
+owner does not distinguish), `missing`, `rejected` (including evidence older
+than `maxEvidenceAge`) and `unresolved`. The catalog has no `warn` or `stale`
+state; their replacements are:
+
+- **warn.** Kyverno reports `warn` for a failing policy annotated
+  `policies.kyverno.io/scored: "false"` (confirmed with the pinned Kyverno CLI
+  1.19.2 on a ValidatingPolicy). Rendering keeps source annotations, so
+  organization bundles can produce it; the vendored and official content does
+  not. The continuous assessment owner keeps the raw `warn` on the observation
+  and in the OSCAL export (`ResultWarning`, `source-outcome`), but its summary
+  counts it as `outcomes.unknown`. The metric therefore counts it as
+  `unknown`: never pass, never fail. A distinct `warn` state requires the
+  owner to add a warning count to its summary first.
+- **stale.** Stale current evidence is never a current pass. When the owner
+  evaluates, aged results are `rejected`. Between evaluations the current view
+  becomes `unknown` at the owner's next expiry, and
+  `konstapel_binding_current_evidence_expiry_timestamp_seconds` keeps that
+  deadline queryable before and after it passes (`time() >= expiry` means the
+  current evidence is stale). `rejected` does not separate age from other
+  unusable evidence; the owner's per-observation reasons do.
+
+State precedence for one view, most conservative first: current evidence
+expired, inventory lost, stale (unresolved) scope, inconsistent counts, no
+targets, known. Only `no_targets` and `known` expose counts. Later query
+examples (1.6), rules and their fixtures (5.x) must use these ten states and the
+expiry gauge, and must not reference `warn` or `stale` states. Their
+projection consumes the owner's normalized outcome, applicability, evidence
+usability and risk attribution, with a documented table:
 
 - Known non-applicability is out_of_scope, never passing coverage.
 - Unestablished inventory makes the view unknown; unestablished correlation is
   unresolved and evidence rejected for age is rejected. None can authorize an
   accepted-risk or pass count.
+- An accepted risk is counted once; a summary whose counts would also include
+  its raw outcome does not add up and is withheld as unknown.
 - An attributable, valid acceptance is accepted_risk regardless of whether the
   underlying engine reported pass or skip; the raw result remains in evidence.
 - Remaining attributable ordinary results map to their explicit outcome; an

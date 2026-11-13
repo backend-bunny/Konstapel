@@ -107,14 +107,32 @@ renames it and never reclassifies engine results:
 | `pass`, `fail`, `error`, `skip` | `outcomes` | Attributable engine outcome |
 | `accepted_risk` | `outcomes.acceptedRisk` | Attributable, valid accepted risk; never a pass |
 | `out_of_scope` | `outcomes.notApplicable` | Known non-applicability; never a pass |
-| `unknown` | `outcomes.unknown` | Attributable but unrecognized outcome (including `warn`) |
+| `unknown` | `outcomes.unknown` | Attributable outcome the owner does not distinguish, including Kyverno `warn` |
 | `missing` | `evidence.missing` | No matching result |
 | `rejected` | `evidence.rejected` | Matching results, none usable (including older than `maxEvidenceAge`) |
 | `unresolved` | `evidence.unresolved` | Scope changed during collection or results conflict |
 
-The current view comes from the binding's current evidence and becomes
-`unknown` at the owner's next evidence expiry until the owner re-evaluates;
-republishing the same summary does not extend it. The `latest_closed` view
+The status follows a fixed precedence, most conservative first: current
+evidence expired, inventory lost, stale (unresolved) scope, counts that do not
+add up, no targets, known. An accepted risk is counted once, whatever the
+engine reported; a summary that would also count its raw outcome is withheld
+as `unknown`.
+
+There is no `warn` or `stale` state:
+
+- **Warnings.** Kyverno reports `warn` for a failing policy annotated
+  `policies.kyverno.io/scored: "false"`. Konstapel keeps source annotations
+  when it renders policies, so organization bundles can produce warnings; the
+  vendored content does not. The assessment owner keeps the raw `warn` in the
+  observation and the OSCAL export but counts it as `unknown` in its summary,
+  so the metric does too: never a pass, never a failure.
+- **Stale evidence.** Evidence older than `maxEvidenceAge` is never a current
+  pass. The owner counts it as `rejected` when it evaluates. Between
+  evaluations the current view becomes `unknown` at the owner's next expiry,
+  and `konstapel_binding_current_evidence_expiry_timestamp_seconds` keeps that
+  time queryable. `time() >= konstapel_binding_current_evidence_expiry_timestamp_seconds`
+  means the binding's current evidence is stale. Republishing the same summary
+  does not extend the expiry. The `latest_closed` view
 is the latest closed full-binding run of the current binding object,
 including incomplete and diagnostic closures, selected by closure time.
 Namespace-scope request runs never replace it and publication state does not
@@ -143,6 +161,7 @@ unknown one is absent.
 | `konstapel_binding_assessment_checks` | gauge | `binding`<br>`view` (current, latest_closed)<br>`state` (pass, fail, error, skip, accepted_risk, out_of_scope, unknown, missing, rejected, unresolved) | Expected check instances per display state; the states sum to the view's known inventory. | Only while the view's status is known or no_targets (all zero); omitted when the inventory is unknown or the current view expired. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
 | `konstapel_binding_assessment_complete` | gauge | `binding`<br>`view` (current, latest_closed) | 1 when every expected observation in the view is attributable, otherwise 0. | Only while the view's status is known (a nonempty inventory). | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
 | `konstapel_binding_oldest_evaluation_timestamp_seconds` | gauge, seconds | `binding`<br>`view` (current, latest_closed) | Oldest attributable source evaluation time in the view. | Only while the view's status is known and its owner records an attributable source evaluation time. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
+| `konstapel_binding_current_evidence_expiry_timestamp_seconds` | gauge, seconds | `binding` | When the oldest attributable current evidence exceeds the evidence-age limit; from then on the current view is unknown until re-evaluated. | While the assessment projection is fresh and ready and the owner records a next expiry for current evidence, including after it has passed. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
 | `konstapel_binding_snapshot_collection_started_timestamp_seconds` | gauge, seconds | `binding` | Collection start of the latest closed full-binding run. | Only after a full-binding run has closed. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
 | `konstapel_binding_last_closed_timestamp_seconds` | gauge, seconds | `binding` | Closure time of the latest full-binding run, including incomplete and diagnostic closures. | Only after a full-binding run has closed. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
 | `konstapel_binding_assessment_interval_seconds` | gauge, seconds | `binding` | Effective scheduled assessment cadence. | Only while the domain's projection is fresh and ready; absent otherwise. | Per binding UID: removed when the binding is deleted; a recreated name starts without old values. |
