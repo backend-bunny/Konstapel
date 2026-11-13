@@ -435,6 +435,12 @@ commands behind their callers. Add only two distinct recurring public workflows,
 `bundles:package` and `bundles:acceptance`; signing, referrer lookup, summary
 rendering and publication helpers are not separate public tasks. Document the
 interface and pin any added CLI tools in Devbox. Go libraries remain in go.mod.
+`bundles:package` is a Task task. `bundles:acceptance` is implemented as the
+`bundles` group of the existing acceptance task (`task acceptance
+GROUP=bundles`, a CI matrix group like the others) rather than a separate
+Task task: the repository's Taskfile rules keep one acceptance workflow with
+groups and forbid per-feature wrappers. The workflow name in this change is
+kept; the documentation states the mapping.
 
 Acceptance uses an authenticated TLS OCI registry with referrers and recorded
 versions, plus the existing disposable Kyverno cluster for profile integration.

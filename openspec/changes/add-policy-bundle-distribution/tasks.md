@@ -104,8 +104,9 @@ All work follows the ownership boundaries in [design.md](design.md).
 
 ## 8. End-to-end acceptance
 
-- [ ] 8.1 Add the documented `bundles:acceptance` workflow over the existing registry and disposable Kyverno fixtures; verify official/organization content in Audit and Deny, valid/invalid signatures, credential rotation, warm-cache outage, cold-cache failure, trust revocation and recovery, cleaning up all task-owned resources.
+- [x] 8.1 Add the documented `bundles:acceptance` workflow over the existing registry and disposable Kyverno fixtures; verify official/organization content in Audit and Deny, valid/invalid signatures, credential rotation, warm-cache outage, cold-cache failure, trust revocation and recovery, cleaning up all task-owned resources.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
+  Implemented as the `bundles` acceptance group (`task acceptance GROUP=bundles`; no separate Task task, see design §9), `internal/controller/bundles_live_test.go`, on an in-process controller; the packaged-image path stays `TestLiveHelmBundles` (charts group). Scenarios and limits: docs/policy-bundles.md "Bundle acceptance".
 - [ ] 8.2 Exercise full upgrade/rollback with the merged targeting/exception/evidence integrations; retain evidence proving replacement readiness, fresh exception revisions, stable logical checks and OSCAL provenance for the exact applied bundle.
   <!-- agent: tier=deep risk=high reason="Content trust, isolation, cache races, and release integrity" -->
 - [x] 8.3 Verify one official independently released OIDC-signed subject and its private mirror through the production verifier; retain release/registry/runtime versions, digest-based commands and results, and run the repository's applicable checks without treating unimplemented dependency integrations as complete.
