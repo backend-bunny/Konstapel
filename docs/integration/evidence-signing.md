@@ -78,7 +78,7 @@ auditor's and the tests' verification tool.
 | Cosign CLI (Devbox) | v3.1.3 |
 | `github.com/sigstore/sigstore-go` | v1.3.0 |
 | `github.com/sigstore/sigstore` | v1.10.8 |
-| `github.com/secure-systems-lab/go-securesystemslib` | v0.11.0 |
+| `github.com/secure-systems-lab/go-securesystemslib` | v0.11.1 |
 
 `internal/evidencesign` tests check this table against `devbox.json` and
 `go.mod`, and run the verification below with the pinned Cosign on every
