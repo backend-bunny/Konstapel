@@ -437,10 +437,15 @@ implemented feature behind each grant:
 
 | Grant (in `konstapel-system`) | Feature and object | Why not narrower |
 | --- | --- | --- |
-| Secret `get`, any name | EvidenceDestination `spec.s3.credentialSecret` (S3 static credentials, read uncached on each client build, `internal/s3store.LoadCredentials`) | The name is chosen in the CR, so it cannot be a static `resourceNames` entry. |
+| Secret `get`, any name | EvidenceDestination `spec.s3.credentialSecret` (S3 static credentials, read uncached on each client build, `internal/s3store.LoadCredentials`); EvidenceDestination `spec.signing.secretRef` (evidence signing key pair, read uncached by the destination reconciler, [evidence signing](integration/evidence-signing.md#who-can-read-signing-keys)) | The name is chosen in the CR, so it cannot be a static `resourceNames` entry. |
 | ConfigMap `get`, any name | Central default destination (`konstapel-evidence-destination`, fixed); EvidenceDestination `spec.s3.caTrust` (user-named); preserved legacy configuration (`spec.legacy`, user-named); exception acceptance snapshots and orphan-inventory chunks and headers (names derived from exception UIDs and revisions, and destination UIDs) read back by name | Same: user-chosen or runtime-derived names. All reads are uncached `get`s through the manager's API reader. |
 | ConfigMap `create` | Exception acceptance snapshots and orphan-inventory chunks (immutable; never updated or deleted) | The API server cannot restrict `create` by name. |
 | Bundles Role: ConfigMap `get`/`list`/`watch` on `bundles.sourcesConfigMap`; `get` on each `bundles.referencedConfigMaps` and `bundles.referencedSecrets` entry | [OCI policy bundles](#oci-policy-bundles) | Already by name. |
+
+The download server's own ServiceAccount is bound to the Role
+`konstapel-evidence-download-credentials`, which also allows Secret and
+ConfigMap `get` by any name in `konstapel-system`. That covers evidence
+signing keys too, although the download server never reads them.
 
 Nothing has `list`, `watch`, `update`, `patch`, `delete` or
 `deletecollection` on Secrets, nor on ConfigMaps other than the named,

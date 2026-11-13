@@ -26,6 +26,10 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
+    - jsonPath: .spec.signing.mode
+      name: Signing
+      priority: 1
+      type: string
     - jsonPath: .spec.deletionPolicy
       name: Deletion
       type: string
@@ -285,6 +289,67 @@ spec:
                     an isolated developmentFixture
                   rule: self.endpoint.startsWith('https://') || (has(self.developmentFixture)
                     && self.developmentFixture && self.endpoint.startsWith('http://'))
+              signing:
+                description: |-
+                  signing governs signatures of evidence published to this destination.
+                  Absent means Disabled. Bindings and requests inherit it and cannot
+                  override it. It can change at any time; a change applies to
+                  publication intents prepared afterwards.
+                properties:
+                  keyless:
+                    description: |-
+                      keyless is rejected when set: keyless (Fulcio) signing is not
+                      supported. It exists for the same reason as kms.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  kms:
+                    description: |-
+                      kms is rejected when set: remote signing keys are not supported yet.
+                      It exists so that the request is an explicit API error rather than a
+                      silently dropped field.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  mode:
+                    default: Disabled
+                    description: mode is Disabled (the default) or Required.
+                    enum:
+                    - Disabled
+                    - Required
+                    type: string
+                  secretRef:
+                    description: |-
+                      secretRef names the signing key Secret in the controller namespace.
+                      Required only with mode Required. Rotate by referencing a new Secret.
+                    properties:
+                      name:
+                        description: name of the object in the controller namespace.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is rejected when set; it exists so that a cross-namespace
+                          reference is an explicit API error rather than a silently dropped field.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: references resolve in the controller namespace only;
+                        namespace must not be set
+                      rule: '!has(self.__namespace__)'
+                type: object
+                x-kubernetes-validations:
+                - message: signing mode Required needs secretRef naming the signing
+                    key Secret in the controller namespace
+                  rule: self.mode != 'Required' || has(self.secretRef)
+                - message: secretRef is set only with signing mode Required
+                  rule: self.mode == 'Required' || !has(self.secretRef)
+                - message: KMS signing keys are not supported; use secretRef
+                  rule: '!has(self.kms)'
+                - message: keyless signing is not supported; use secretRef
+                  rule: '!has(self.keyless)'
             required:
             - s3
             type: object
@@ -309,7 +374,7 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               conditions:
-                description: conditions report readiness and retirement.
+                description: conditions report readiness, signing readiness, and retirement.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -473,6 +538,34 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              signing:
+                description: |-
+                  signing is the observed signing policy and key identity; absent when
+                  spec.signing is absent.
+                properties:
+                  algorithm:
+                    description: algorithm of the loaded key (ecdsa-sha2-256-nistp256).
+                    maxLength: 64
+                    type: string
+                  keyFingerprint:
+                    description: |-
+                      keyFingerprint identifies the loaded public key: "sha256:" and the hex
+                      SHA-256 of its DER SubjectPublicKeyInfo. Set only while the key loads.
+                    maxLength: 71
+                    type: string
+                  mode:
+                    description: mode is the observed spec.signing.mode.
+                    enum:
+                    - Disabled
+                    - Required
+                    type: string
+                  secretName:
+                    description: secretName is the referenced Secret (Required only).
+                    maxLength: 253
+                    type: string
+                required:
+                - mode
+                type: object
               unknownExpiryRuns:
                 description: |-
                   unknownExpiryRuns counts outstanding runs whose expiry is not yet

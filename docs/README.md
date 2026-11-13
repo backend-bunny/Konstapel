@@ -21,7 +21,7 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 | [Assessment workflows](integration/assessment-workflows.md) | Implemented schedules, on-demand requests, results, and namespace downloads. |
 | [Assessment contract](integration/assessment-contract.md) | Alpha APIs, scheduling, frozen captures, attribution, package/export contracts, and remaining integration boundaries. |
 | [S3 evidence](integration/s3-evidence.md) | Implemented publishing, download and retention behavior; destination API, legacy-file migration, retirement, and orphaning details. |
-| [Evidence signing](integration/evidence-signing.md) | Signing and offline verification contract for evidence archives (keys, bundle format, `cosign verify-blob` workflow); not yet wired into publication, so published packages are still unsigned. |
+| [Evidence signing](integration/evidence-signing.md) | Signing and offline verification contract (keys, bundle format, `cosign verify-blob` workflow), EvidenceDestination signing policy, key Secret setup and signing readiness; not yet wired into publication, so published packages are still unsigned. |
 | [Linux hardening](integration/linux-hardening.md) | Shipped policy variants, partial mappings, and live admission coverage; background/applicability and exception integration still in progress. |
 | [Policy exceptions](integration/policy-exceptions.md) | API, authenticated admission and acceptance snapshots exist; native grants remain disabled pending engine compatibility and lifecycle work. |
 | [Helm charts](charts.md) | CRD and runtime charts: installation, both TLS modes and certificate rotation, values, feature availability and installed-image acceptance; not yet published, and exception admission is not in the chart. |

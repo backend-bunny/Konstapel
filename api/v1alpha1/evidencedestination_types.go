@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // DeletionPolicy selects what deleting an EvidenceDestination does.
@@ -186,6 +187,62 @@ type EvidenceDestinationSpec struct {
 	// the destination is created and never changes.
 	// +optional
 	Legacy *LegacyDestination `json:"legacy,omitempty"`
+
+	// signing governs signatures of evidence published to this destination.
+	// Absent means Disabled. Bindings and requests inherit it and cannot
+	// override it. It can change at any time; a change applies to
+	// publication intents prepared afterwards.
+	// +optional
+	Signing *EvidenceSigning `json:"signing,omitempty"`
+}
+
+// SigningMode selects whether evidence published to a destination is signed.
+// +kubebuilder:validation:Enum=Disabled;Required
+type SigningMode string
+
+const (
+	// SigningDisabled publishes unsigned evidence. It is the default.
+	SigningDisabled SigningMode = "Disabled"
+	// SigningRequired publishes evidence only with a verified signature from
+	// the referenced key; there is no unsigned fallback.
+	SigningRequired SigningMode = "Required"
+)
+
+// EvidenceSigning is a destination's signing policy. Only operator-provided
+// Kubernetes Secret keys are supported: secretRef names a Secret in the
+// controller namespace with cosign.key, cosign.pub, and cosign.password
+// (docs/integration/evidence-signing.md).
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Required' || has(self.secretRef)",message="signing mode Required needs secretRef naming the signing key Secret in the controller namespace"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Required' || !has(self.secretRef)",message="secretRef is set only with signing mode Required"
+// +kubebuilder:validation:XValidation:rule="!has(self.kms)",message="KMS signing keys are not supported; use secretRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.keyless)",message="keyless signing is not supported; use secretRef"
+type EvidenceSigning struct {
+	// mode is Disabled (the default) or Required.
+	// +optional
+	// +kubebuilder:default=Disabled
+	Mode SigningMode `json:"mode,omitempty"`
+
+	// secretRef names the signing key Secret in the controller namespace.
+	// Required only with mode Required. Rotate by referencing a new Secret.
+	// +optional
+	SecretRef *ControllerNamespaceReference `json:"secretRef,omitempty"`
+
+	// kms is rejected when set: remote signing keys are not supported yet.
+	// It exists so that the request is an explicit API error rather than a
+	// silently dropped field.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	KMS *runtime.RawExtension `json:"kms,omitempty"`
+
+	// keyless is rejected when set: keyless (Fulcio) signing is not
+	// supported. It exists for the same reason as kms.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	Keyless *runtime.RawExtension `json:"keyless,omitempty"`
 }
 
 // LegacyDestination identifies the legacy file-configured destination a
@@ -244,7 +301,49 @@ const (
 	// ConditionDestinationRetiring is True while a deleted destination
 	// finishes its outstanding obligations.
 	ConditionDestinationRetiring = "Retiring"
+	// ConditionDestinationSigningReady reports whether the signing policy can
+	// be satisfied for new publication intents. It is advisory and set only
+	// when spec.signing is present: True for Disabled, or for Required when
+	// the referenced key loads and matches; False otherwise. It never
+	// affects Ready, historical downloads, retention, or retirement.
+	ConditionDestinationSigningReady = "SigningReady"
 )
+
+// SigningReady reasons. The set is fixed; messages never contain key
+// material.
+const (
+	SigningReasonDisabled         = "SigningDisabled"
+	SigningReasonKeyLoaded        = "KeyLoaded"
+	SigningReasonSecretNotFound   = "SecretNotFound"
+	SigningReasonSecretUnreadable = "SecretUnreadable"
+	SigningReasonKeyUnavailable   = "KeyUnavailable"
+	SigningReasonKeyMalformed     = "KeyMalformed"
+	SigningReasonKeyPassword      = "KeyPasswordInvalid"
+	SigningReasonKeyMismatch      = "KeyMismatch"
+	SigningReasonUnsupportedKey   = "UnsupportedKey"
+)
+
+// SigningStatus is the controller's latest observation of a destination's
+// signing policy and key. It is advisory: publication rereads the policy
+// and the Secret when it records a signing intent.
+type SigningStatus struct {
+	// mode is the observed spec.signing.mode.
+	// +required
+	Mode SigningMode `json:"mode"`
+	// secretName is the referenced Secret (Required only).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	SecretName string `json:"secretName,omitempty"`
+	// keyFingerprint identifies the loaded public key: "sha256:" and the hex
+	// SHA-256 of its DER SubjectPublicKeyInfo. Set only while the key loads.
+	// +optional
+	// +kubebuilder:validation:MaxLength=71
+	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+	// algorithm of the loaded key (ecdsa-sha2-256-nistp256).
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	Algorithm string `json:"algorithm,omitempty"`
+}
 
 // OrphanHandoff reports how storage work was fenced for an accepted orphan
 // handoff. Cancelling local work never reverses a remote write or deletion;
@@ -333,7 +432,12 @@ type EvidenceDestinationStatus struct {
 	// +optional
 	OrphanHandoff *OrphanHandoff `json:"orphanHandoff,omitempty"`
 
-	// conditions report readiness and retirement.
+	// signing is the observed signing policy and key identity; absent when
+	// spec.signing is absent.
+	// +optional
+	Signing *SigningStatus `json:"signing,omitempty"`
+
+	// conditions report readiness, signing readiness, and retirement.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -466,6 +570,7 @@ type LegacyPin struct {
 // +kubebuilder:printcolumn:name="Bucket",type=string,JSONPath=`.spec.s3.bucket`
 // +kubebuilder:printcolumn:name="Prefix",type=string,JSONPath=`.spec.s3.prefix`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Signing",type=string,JSONPath=`.spec.signing.mode`,priority=1
 // +kubebuilder:printcolumn:name="Deletion",type=string,JSONPath=`.spec.deletionPolicy`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type EvidenceDestination struct {

@@ -13,13 +13,13 @@
 
 ## 2. Add central destination configuration and Secret access
 
-- [ ] 2.1 Coordinate shared schema ownership with S3 publishing, then add Disabled/Required signing configuration and controller-namespace Secret reference validation to EvidenceDestination; regenerate CRDs and test defaults, missing/mismatched fields, cross-namespace references, and unsupported KMS/keyless backend requests.
+- [x] 2.1 Coordinate shared schema ownership with S3 publishing, then add Disabled/Required signing configuration and controller-namespace Secret reference validation to EvidenceDestination; regenerate CRDs and test defaults, missing/mismatched fields, cross-namespace references, and unsupported KMS/keyless backend requests.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 2.2 Resolve configured Secrets through bounded namespace-scoped reads and react to relevant rotation changes; verify application roles cannot access keys or override policy, controller permissions stay scoped, and key values never enter captured errors/logs/status.
+- [x] 2.2 Resolve configured Secrets through bounded namespace-scoped reads and react to relevant rotation changes; verify application roles cannot access keys or override policy, controller permissions stay scoped, and key values never enter captured errors/logs/status.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 2.3 Add bounded signing readiness and public-key identity status separately from assessment outcomes; test missing/malformed keys, recovery, unrelated destinations, and historical reads/cleanup with the current signer unavailable.
+- [x] 2.3 Add bounded signing readiness and public-key identity status separately from assessment outcomes; test missing/malformed keys, recovery, unrelated destinations, and historical reads/cleanup with the current signer unavailable.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.4 Document operator key generation/installation and destination setup using validated examples; exercise API admission and RBAC against the examples and state that keys and trust distribution are operator-managed.
+- [x] 2.4 Document operator key generation/installation and destination setup using validated examples; exercise API admission and RBAC against the examples and state that keys and trust distribution are operator-managed.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 3. Extend durable signing and publication

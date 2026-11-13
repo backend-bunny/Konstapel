@@ -36,7 +36,8 @@
       "TestLiveRetentionLifecycle",
       "TestLiveOrphanFence",
       "TestLiveDestinationAPI",
-      "TestLiveLegacyMigration"
+      "TestLiveLegacyMigration",
+      "TestLiveDestinationSigning"
     ]
   },
   "capabilities": {

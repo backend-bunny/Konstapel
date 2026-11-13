@@ -162,6 +162,9 @@ func TestRuntimeChartControllerSecretConfigMapAccess(t *testing.T) {
 				// Needed: by-name reads and ConfigMap creation in the
 				// controller namespace.
 				{controllerNS, "secrets", "get", "s3-credentials", true},
+				// EvidenceDestination spec.signing.secretRef, read by name.
+				{controllerNS, "secrets", "get", "konstapel-evidence-signing-2026-11", true},
+				{"default", "secrets", "get", "konstapel-evidence-signing-2026-11", false},
 				{controllerNS, "configmaps", "get", "konstapel-evidence-destination", true},
 				{controllerNS, "configmaps", "create", "", true},
 				{controllerNS, "configmaps", "list", sourcesCM, bundles},
