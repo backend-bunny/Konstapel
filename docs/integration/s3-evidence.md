@@ -46,6 +46,10 @@ spec:
 - **Status.** Status reports the observed generation, the `Ready` and
   `Retiring` conditions, outstanding run and package counts, runs whose
   expiry is still unknown, the latest retained expiry, and cleanup blockers.
+- **Signing.** The optional `spec.signing` sets the destination's evidence
+  signing policy and key Secret; with it, status adds `signing` and a
+  `SigningReady` condition. Without it nothing changes. See
+  [evidence signing](evidence-signing.md#set-up-signing-for-a-destination).
 
 **Readiness.** The controller probes each destination's backend with its
 current credentials and CA trust when the spec changes and every 5 minutes. It

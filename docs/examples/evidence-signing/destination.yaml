@@ -1,0 +1,18 @@
+# An evidence destination that requires signatures from an operator-provided
+# key (docs/integration/evidence-signing.md). The Secret is in the controller
+# namespace and was created with:
+#   cosign generate-key-pair k8s://konstapel-system/konstapel-evidence-signing-2026-11
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceDestination
+metadata:
+  name: primary
+spec:
+  s3:
+    endpoint: https://s3.example.internal
+    bucket: konstapel-evidence
+    region: eu-north-1
+    prefix: clusters/prod
+    credentialSecret: {name: konstapel-s3}
+  signing:
+    mode: Required
+    secretRef: {name: konstapel-evidence-signing-2026-11}

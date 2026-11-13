@@ -49,8 +49,30 @@ Add a bounded signing-readiness condition and observed key fingerprint. Required
 signer failure prevents readiness for new publications but does not disable
 historical downloads, retention, policy enforcement, or unrelated destinations.
 Readiness is advisory; the publication path revalidates the authoritative policy
-and actual Secret before recording its intent. Secret changes enqueue affected
-destinations without treating a cache observation as signing authorization.
+and actual Secret before recording its intent. Secret changes are picked up by
+bounded re-reads rather than a Secret watch, and an observation is never
+treated as signing authorization.
+
+Implemented (group 2): `spec.signing` is optional and has no default, so
+destinations without it keep their exact spec and status. Inside it, `mode`
+defaults to Disabled, and `secretRef` reuses the controller-namespace reference
+type, whose `namespace` field is rejected. CEL rules reject Required without a
+reference and a reference with Disabled. `kms` and `keyless` are schemaless
+placeholder fields that are always rejected, so these requests fail with an
+explicit message instead of being pruned silently. Status adds `signing`
+(mode, Secret name, key fingerprint, algorithm) and a `SigningReady` condition
+with a fixed reason set. Both appear only when `spec.signing` is set, and
+neither touches `Ready`.
+
+The controller reads the Secret with its existing uncached, namespace-scoped
+`get` by name. It does not add a Secret watch, because that would need Secret
+`list`/`watch` in the controller namespace, broader than today's boundary. A
+change to the destination reconciles immediately. While SigningReady is
+False, the key is re-read every 30 seconds, otherwise with the 5-minute
+destination probe. An unchanged Secret (same UID and resourceVersion) is not
+decrypted again; the memo holds only public results. Private key and password
+bytes from the read are cleared after loading. Readiness stays advisory;
+publication intent preparation (group 3) rereads the policy and the Secret.
 
 Alternative: putting key references on each binding duplicates security settings
 and allows storage peers to diverge without a clear central ownership boundary.
@@ -90,7 +112,7 @@ v0.11.0; these were already controller dependencies, so no module was added.
 
 Use direct controller-namespace Secret reads with bounded memory lifetime; avoid
 cluster-wide private-key caches and persistent private-key copies. Grant only
-necessary namespace-scoped read access, use narrowly scoped watches where needed,
+necessary namespace-scoped read access (by-name `get`, no Secret list or watch),
 and keep key/password values out of logs, errors, traces, status, disk staging,
 metrics, and subprocess arguments. The controller does not execute Cosign, fetch
 an arbitrary key URL, use ambient signing identity, or add a signing CLI to its

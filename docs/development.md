@@ -103,7 +103,7 @@ test-owned S3 and registry services:
 | --- | --- |
 | `admission` | Runner admission/background evidence, Chainsaw, offline replay, targeting/delivery, and Linux hardening |
 | `assessments` | Assessment status/runs, engine correlation, integrated assessments, and authenticated exception admission |
-| `storage` | Destination/credential changes, downloads, retention, and orphaning |
+| `storage` | Destination/credential changes, destination signing configuration and readiness, downloads, retention, and orphaning |
 | `recovery` | Kyverno outages and assessment/publication faults |
 | `capabilities` | Engine API and permission loss and recovery without a controller restart |
 | `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving), and OCI policy bundles from a disposable TLS registry (chart RBAC, watches, revocation, follower pins, upgrade and rollback); installs cert-manager and builds the image |

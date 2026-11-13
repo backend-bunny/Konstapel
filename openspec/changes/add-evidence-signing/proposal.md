@@ -42,10 +42,13 @@ its integrity and origin against an explicitly trusted public key.
 
 ### Modified Capabilities
 
-None. The existing continuous-assessment completeness, scope, and immutable-history
-contracts remain intact. This capability extends the publication contract being
-implemented by `add-s3-evidence-publishing`; shared schema changes must be
-coordinated with that owner.
+- `assessment-evidence`: the EvidenceDestination requirement on immutable
+  location and rotatable access now covers the signing policy and key
+  reference, and states that a destination without signing configuration is
+  unchanged. The archived `add-s3-evidence-publishing` change owned this
+  contract; its shared schema is extended here through that delta. The
+  continuous-assessment completeness, scope, and immutable-history contracts
+  remain intact.
 
 ## Impact
 

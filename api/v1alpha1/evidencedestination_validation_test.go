@@ -1,8 +1,13 @@
 package v1alpha1_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/backend-bunny/Konstapel/internal/crdtest"
 )
@@ -171,5 +176,192 @@ func TestEvidenceDestinationLegacyIsCreationOnly(t *testing.T) {
 	}
 	if errs := v.Validate(legacy("Not_A_Label")); len(errs) == 0 {
 		t.Error("invalid legacy destination ID accepted")
+	}
+}
+
+func withSigning(t *testing.T, signing any) map[string]any {
+	t.Helper()
+	o := obj(t, destination)
+	if signing != nil {
+		o["spec"].(map[string]any)["signing"] = signing
+	}
+	return o
+}
+
+// spec.signing: absent means Disabled and adds nothing to existing objects;
+// Required needs a controller-namespace Secret reference; deferred signer
+// kinds and invalid combinations are rejected with field-specific messages.
+func TestEvidenceDestinationSigningValidation(t *testing.T) {
+	v := crdtest.Load(t, "../../config/crd/bases")["EvidenceDestination"]
+	plain := obj(t, destination)
+	if errs := v.Validate(plain); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+	if _, ok := plain["spec"].(map[string]any)["signing"]; ok {
+		t.Fatalf("defaulting added spec.signing to a destination without it: %v", plain["spec"])
+	}
+	empty := withSigning(t, map[string]any{})
+	if errs := v.Validate(empty); len(errs) > 0 {
+		t.Fatalf("empty signing rejected: %v", errs.ToAggregate())
+	}
+	if m := empty["spec"].(map[string]any)["signing"].(map[string]any)["mode"]; m != "Disabled" {
+		t.Fatalf("signing.mode default: %v", m)
+	}
+	for name, s := range map[string]map[string]any{
+		"disabled": {"mode": "Disabled"},
+		"required": {"mode": "Required", "secretRef": map[string]any{"name": "konstapel-evidence-signing-2026-11"}},
+	} {
+		if errs := v.Validate(withSigning(t, s)); len(errs) > 0 {
+			t.Errorf("%s rejected: %v", name, errs.ToAggregate())
+		}
+	}
+	for name, c := range map[string]struct {
+		signing map[string]any
+		want    string
+	}{
+		"required without secretRef": {map[string]any{"mode": "Required"}, "Required needs secretRef"},
+		"disabled with secretRef":    {map[string]any{"mode": "Disabled", "secretRef": map[string]any{"name": "k"}}, "secretRef is set only with signing mode Required"},
+		"default with secretRef":     {map[string]any{"secretRef": map[string]any{"name": "k"}}, "secretRef is set only with signing mode Required"},
+		"cross-namespace secretRef":  {map[string]any{"mode": "Required", "secretRef": map[string]any{"name": "k", "namespace": "team-a"}}, "controller namespace only"},
+		"unknown mode":               {map[string]any{"mode": "Optional"}, "Unsupported value"},
+		"bad secret name":            {map[string]any{"mode": "Required", "secretRef": map[string]any{"name": "Bad_Name"}}, "secretRef.name"},
+		"kms":                        {map[string]any{"mode": "Required", "kms": map[string]any{"keyID": "arn:aws:kms:eu-north-1:1:key/x"}}, "KMS signing keys are not supported"},
+		"keyless":                    {map[string]any{"mode": "Required", "keyless": map[string]any{"issuer": "https://kubernetes.default.svc"}}, "keyless signing is not supported"},
+	} {
+		errs := v.Validate(withSigning(t, c.signing))
+		if len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), c.want) {
+			t.Errorf("%s: want rejection mentioning %q, got %v", name, c.want, errs.ToAggregate())
+		}
+		if len(errs) > 0 && !strings.Contains(errs.ToAggregate().Error(), "spec.signing") {
+			t.Errorf("%s: rejection does not name spec.signing: %v", name, errs.ToAggregate())
+		}
+	}
+	// The policy can change in either direction and the key can rotate,
+	// including while the destination retires.
+	required := func(secret string) map[string]any {
+		return withSigning(t, map[string]any{"mode": "Required", "secretRef": map[string]any{"name": secret}})
+	}
+	for name, c := range map[string]struct{ next, prev map[string]any }{
+		"enable":            {required("key-a"), obj(t, destination)},
+		"rotate":            {required("key-b"), required("key-a")},
+		"required→disabled": {withSigning(t, map[string]any{"mode": "Disabled"}), required("key-a")},
+		"remove":            {obj(t, destination), required("key-a")},
+	} {
+		for _, deleting := range []bool{false, true} {
+			next, prev := c.next, c.prev
+			if deleting {
+				next, prev = deepCopy(t, next), deepCopy(t, prev)
+				for _, o := range []map[string]any{next, prev} {
+					o["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-13T12:00:00Z"
+					o["metadata"].(map[string]any)["finalizers"] = []any{"compliance.erenius.io/destination"}
+				}
+			}
+			if errs := v.ValidateUpdate(deepCopy(t, next), deepCopy(t, prev)); len(errs) > 0 {
+				t.Errorf("%s (retiring=%v) rejected: %v", name, deleting, errs.ToAggregate())
+			}
+		}
+	}
+}
+
+func deepCopy(t *testing.T, o map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// Signing policy is central: no binding, request, run, or profile spec field
+// can select or disable signing, so the API prunes such fields and no other
+// CRD's spec schema has a signing property.
+func TestSigningIsOnlyConfiguredOnDestinations(t *testing.T) {
+	files, err := filepath.Glob("../../config/crd/bases/*.yaml")
+	if err != nil || len(files) == 0 {
+		t.Fatal(err)
+	}
+	var walk func(path string, schema map[string]any) []string
+	walk = func(path string, schema map[string]any) []string {
+		var found []string
+		props, _ := schema["properties"].(map[string]any)
+		for name, sub := range props {
+			if strings.Contains(strings.ToLower(name), "sign") {
+				found = append(found, path+"."+name)
+			}
+			if m, ok := sub.(map[string]any); ok {
+				found = append(found, walk(path+"."+name, m)...)
+			}
+		}
+		if items, ok := schema["items"].(map[string]any); ok {
+			found = append(found, walk(path+"[]", items)...)
+		}
+		return found
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_evidencedestinations.yaml") {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var crd struct {
+			Spec struct {
+				Versions []struct {
+					Schema struct {
+						OpenAPIV3Schema map[string]any `json:"openAPIV3Schema"`
+					} `json:"schema"`
+				} `json:"versions"`
+			} `json:"spec"`
+		}
+		if err := yaml.Unmarshal(raw, &crd); err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range crd.Spec.Versions {
+			spec, _ := v.Schema.OpenAPIV3Schema["properties"].(map[string]any)["spec"].(map[string]any)
+			if found := walk("spec", spec); len(found) > 0 {
+				t.Errorf("%s has signing fields %v; only EvidenceDestination configures signing", filepath.Base(f), found)
+			}
+		}
+	}
+	crds := crdtest.Load(t, "../../config/crd/bases")
+	request := obj(t, `apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentRequest
+metadata: {name: nightly, namespace: team-a}
+spec:
+  bindingRef: {name: baseline-audit}
+  signing: {mode: Disabled}
+`)
+	_ = crds["AssessmentRequest"].Validate(request)
+	if _, ok := request["spec"].(map[string]any)["signing"]; ok {
+		t.Fatal("an AssessmentRequest kept a signing override")
+	}
+}
+
+// The documented signing destination example is valid as published and names
+// the Secret the documented key-generation command creates.
+func TestEvidenceSigningExampleIsValid(t *testing.T) {
+	v := crdtest.Load(t, "../../config/crd/bases")["EvidenceDestination"]
+	raw, err := os.ReadFile("../../docs/examples/evidence-signing/destination.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := obj(t, string(raw))
+	if errs := v.Validate(o); len(errs) > 0 {
+		t.Fatalf("example rejected: %v", errs.ToAggregate())
+	}
+	signing := o["spec"].(map[string]any)["signing"].(map[string]any)
+	name := signing["secretRef"].(map[string]any)["name"].(string)
+	doc, err := os.ReadFile("../../docs/integration/evidence-signing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signing["mode"] != "Required" || !strings.Contains(string(doc), "cosign generate-key-pair k8s://konstapel-system/"+name+"\n") ||
+		!strings.Contains(string(doc), "docs/examples/evidence-signing/destination.yaml") {
+		t.Fatalf("example and guide disagree on the signing Secret %q", name)
 	}
 }

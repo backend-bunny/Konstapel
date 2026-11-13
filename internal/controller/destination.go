@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
@@ -94,6 +95,11 @@ type DestinationReconciler struct {
 	DrainTimeout time.Duration
 	// Probe checks a destination; tests replace it.
 	Probe func(ctx context.Context, d s3store.Destination, r client.Reader, namespace string) error
+
+	signingSeen signingObservations
+	// loadSigner loads a signing key; tests count calls (nil:
+	// evidencesign.NewSecretSigner).
+	loadSigner func(map[string][]byte) (*evidencesign.SecretSigner, error)
 }
 
 // ProbeDestination builds a publisher with the destination's current
@@ -174,6 +180,15 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	status.ObservedGeneration = ed.Generation
 	meta.SetStatusCondition(&status.Conditions, cond)
+	// Signing readiness is separate from backend readiness and never gates
+	// historical reads, retention, or retirement.
+	signing, signingCond := r.observeSigning(ctx, ed)
+	status.Signing = signing
+	if signingCond != nil {
+		meta.SetStatusCondition(&status.Conditions, *signingCond)
+	} else {
+		meta.RemoveStatusCondition(&status.Conditions, v1alpha1.ConditionDestinationSigningReady)
+	}
 	ob.apply(status)
 	if !ed.DeletionTimestamp.IsZero() {
 		meta.SetStatusCondition(&status.Conditions, ob.retiring(ed, status))
@@ -201,6 +216,9 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+	if signingCond != nil && signingCond.Status != metav1.ConditionTrue {
+		return ctrl.Result{RequeueAfter: SigningRecheckInterval}, nil
 	}
 	return ctrl.Result{RequeueAfter: DestinationProbeInterval}, nil
 }
