@@ -314,6 +314,16 @@ func (r *DestinationReconciler) obligations(ctx context.Context, ed *v1alpha1.Ev
 			if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupRetentionBlocked) || pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeletionFailed) {
 				block(run.Name, string(pub.Cleanup.State)+": "+pub.Cleanup.Message)
 			}
+		case retainedSigningFailure(run) && pub.Cleanup.State != v1alpha1.CleanupState(publication.CleanupDeleted):
+			// Staged evidence kept after a signing failure, until its expiry.
+			o.packages++
+			if pub.ExpiresAt != nil && (o.latest == nil || pub.ExpiresAt.After(o.latest.Time)) {
+				t := *pub.ExpiresAt
+				o.latest = &t
+			}
+			if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupRetentionBlocked) || pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeletionFailed) {
+				block(run.Name, string(pub.Cleanup.State)+": "+pub.Cleanup.Message)
+			}
 		case controllerutil.ContainsFinalizer(run, RetentionFinalizer):
 			// Terminal without a retained package, but attempt cleanup or
 			// release is still pending.
