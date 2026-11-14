@@ -45,7 +45,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | Task | Behavior |
 | --- | --- |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
-| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, plus CI decision and shell logging regression tests. |
+| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, plus CI decision and shell logging regression tests, and evaluate the documented Prometheus queries with the digest-pinned promtool image (`scripts/promtool.sh`). |
 | `task lint` | Check Go formatting, `go vet`, generated API files, Helm chart metadata, versions and values-schema fixtures (`scripts/charts/check.sh`), and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
@@ -63,7 +63,12 @@ regenerate deepcopy code and CRDs with the pinned `controller-gen`; `task lint`
 fails when they are stale. See the [targeting API guide](integration/targeting-api.md)
 and the [continuous assessment contract](integration/assessment-contract.md).
 
-`task check` needs no cluster or Docker daemon. Initial tool/module installation
+`task check` needs no cluster. Its only Docker use is the pinned promtool image
+(`KONSTAPEL_PROMTOOL_IMAGE` in `scripts/runtime.env`, Renovate-tracked and
+format-checked by `task deps:check`). Devbox's `prometheus` package ships
+promtool only in a separate output, which would change the `devbox.json`
+package format. Without a Docker daemon that step prints a notice and is
+skipped; CI requires it. Initial tool/module installation
 and the checksum-verified chart download need network access. The pinned Devbox
 Kyverno CLI replaces the previous manual release-archive download.
 
