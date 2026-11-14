@@ -29,6 +29,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="AssociationsValid")].status
       name: Associations
       type: string
+    - jsonPath: .status.conditions[?(@.type=="DocumentCommitted")].status
+      name: Committed
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -284,7 +287,8 @@ spec:
           status:
             description: |-
               EvidenceAttachmentStatus is written only by the Konstapel controller. It
-              never holds document bytes, credentials, or storage locations.
+              never holds document bytes or credentials; storage keys are owned,
+              UID-derived and opaque.
             properties:
               associations:
                 description: associations report each spec association, in spec order.
@@ -400,7 +404,145 @@ spec:
                 description: observedGeneration is the generation last processed.
                 format: int64
                 type: integer
+              storage:
+                description: storage is the document's durable storage ownership.
+                properties:
+                  cleanup:
+                    description: AttachmentCleanup reports cleanup of a withdrawn
+                      record's owned storage.
+                    properties:
+                      lastAttempt:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 1024
+                        type: string
+                      state:
+                        enum:
+                        - NotDue
+                        - Deleted
+                        - DeletionFailed
+                        - RetentionBlocked
+                        type: string
+                    required:
+                    - state
+                    type: object
+                  commitment:
+                    description: |-
+                      AttachmentCommitment is the first storage commitment of the document. It
+                      is read from the stored commit manifest and never changes.
+                    properties:
+                      committedAt:
+                        description: committedAt is the storage server's time of the
+                          commit manifest.
+                        format: date-time
+                        type: string
+                      documentKey:
+                        maxLength: 1024
+                        type: string
+                      documentVersionID:
+                        maxLength: 1024
+                        type: string
+                      expiresAt:
+                        description: |-
+                          expiresAt is max(committedAt, spec.validity.validUntil) + retention,
+                          fixed at commitment. Source cleanup never happens before it.
+                        format: date-time
+                        type: string
+                      manifestKey:
+                        maxLength: 1024
+                        type: string
+                      manifestVersionID:
+                        maxLength: 1024
+                        type: string
+                      retention:
+                        description: retention is the central retention frozen at
+                          commitment.
+                        format: duration
+                        type: string
+                      sha256:
+                        description: sha256 and size are the committed document's,
+                          equal to spec.document.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      size:
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      specDigest:
+                        description: specDigest is the sha256 of the immutable spec
+                          the commitment binds.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      uploader:
+                        description: |-
+                          uploader is the authenticated principal whose verified upload was
+                          committed, as recorded by the transfer service. It may differ from
+                          spec.registeredBy and from the declared spec.source.
+                        properties:
+                          uid:
+                            maxLength: 128
+                            type: string
+                          username:
+                            maxLength: 512
+                            minLength: 1
+                            type: string
+                        required:
+                        - username
+                        type: object
+                    required:
+                    - committedAt
+                    - documentKey
+                    - expiresAt
+                    - manifestKey
+                    - retention
+                    - sha256
+                    - size
+                    - specDigest
+                    - uploader
+                    type: object
+                  destination:
+                    description: |-
+                      destination is the EvidenceDestination pinned for this document,
+                      selected once from the central default. A later default never
+                      relocates it; credentials and trust rotate through the destination.
+                    properties:
+                      name:
+                        description: name of the EvidenceDestination.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        description: uid of the EvidenceDestination.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  destinationID:
+                    description: |-
+                      destinationID is the storage destination identity recorded with the
+                      commitment.
+                    maxLength: 253
+                    type: string
+                  pinnedAt:
+                    format: date-time
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: the pinned destination never changes
+                  rule: '!has(oldSelf.destination) || (has(self.destination) && self.destination
+                    == oldSelf.destination)'
+                - message: a recorded commitment never changes
+                  rule: '!has(oldSelf.commitment) || (has(self.commitment) && self.commitment
+                    == oldSelf.commitment)'
             type: object
+            x-kubernetes-validations:
+            - message: storage ownership is never removed
+              rule: '!has(oldSelf.storage) || has(self.storage)'
         required:
         - spec
         type: object

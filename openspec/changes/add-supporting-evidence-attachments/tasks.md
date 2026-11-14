@@ -23,15 +23,15 @@ for package integration.
 
 ## 2. Source storage and commitment
 
-- [ ] 2.1 Define the attachment storage/receipt contract separately from assessment RunRef/Publisher, consuming the S3 owner's destination and credential configuration; verify contract fixtures preserve document/spec identity, commitment, uploader, versions, and retention without fake assessment runs.
+- [x] 2.1 Define the attachment storage/receipt contract separately from assessment RunRef/Publisher, consuming the S3 owner's destination and credential configuration; verify contract fixtures preserve document/spec identity, commitment, uploader, versions, and retention without fake assessment runs.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 2.2 Implement staged upload, checksum/readback verification, and one conditional commit manifest through shared S3 primitives; verify identical retries, conflicting bytes, concurrent writers, lost responses, and restart recovery against a real S3-compatible endpoint.
+- [x] 2.2 Implement staged upload, checksum/readback verification, and one conditional commit manifest through shared S3 primitives; verify identical retries, conflicting bytes, concurrent writers, lost responses, and restart recovery against a real S3-compatible endpoint.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 2.3 Freeze source expiry as max(committedAt, validUntil) plus positive central retention with default 2160h; verify future/expired documents, policy changes to retention, withdrawal, and response loss cannot change the first commitment.
+- [x] 2.3 Freeze source expiry as max(committedAt, validUntil) plus positive central retention with default 2160h; verify future/expired documents, policy changes to retention, withdrawal, and response loss cannot change the first commitment.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 2.4 Track destination and attempt ownership durably, with bounded orphan cleanup; verify credential rotation, changed defaults, abandoned multipart/attempt data, and unrelated objects are handled without silent relocation or overbroad deletion.
+- [x] 2.4 Track destination and attempt ownership durably, with bounded orphan cleanup; verify credential rotation, changed defaults, abandoned multipart/attempt data, and unrelated objects are handled without silent relocation or overbroad deletion.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 2.5 Document source versus assessment-copy retention and the commit boundary; verify worked examples cover a year-long document with 90-day assessment retention and independent source/package expiry.
+- [x] 2.5 Document source versus assessment-copy retention and the commit boundary; verify worked examples cover a year-long document with 90-day assessment retention and independent source/package expiry.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 3. Authenticated transfer and CLI
@@ -88,6 +88,25 @@ for package integration.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
 - [ ] 7.4 Run appropriate existing Devbox/Task checks, generated-schema/package regressions, and strict OpenSpec validation; retain sanitized test/compatibility evidence and remove task-owned RustFS containers/volumes, credentials, prefixes, clusters, and processes.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+
+## Workflow follow-up
+
+- Switch association validation from the interim baseline reader
+  (`internal/attachments.ReadBaseline`: the bundle's Moderate profile with an
+  explicit `include-controls`/`with-ids` selection) to the coverage owner's
+  baseline reader once add-control-coverage-reporting 1.1 lands. Keep the
+  catalog-digest identity and fail-closed behavior, and re-verify the
+  association states.
+- The transfer service (group 3) commits with the central source retention
+  (`attachments.DefaultRetention`, 2160h) and must expose it as a validated
+  operator setting. It must stage and commit only against the record's
+  recorded `status.storage.destination`, and refuse records that are being
+  deleted. Withdrawal removes uncommitted attempts, so an upload accepted
+  before deletion must not commit afterwards.
+- Orphan handoff of a destination with pinned attachments is not part of the
+  orphan inventory: such attachments stay retained (the destination is never
+  contacted again) and block its release until an administrator resolves
+  them. Decide whether attachments join the inventory before group 4.
 
 ## Future Development
 

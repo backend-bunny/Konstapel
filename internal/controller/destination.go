@@ -360,6 +360,33 @@ func (r *DestinationReconciler) obligations(ctx context.Context, ed *v1alpha1.Ev
 			}
 		}
 	}
+	// Supporting-evidence attachments pinned here: a committed document is
+	// retained until its own expiry, and a pinned, uncommitted record may
+	// still receive an upload or need its attempts removed.
+	var atts v1alpha1.EvidenceAttachmentList
+	if err := r.Reader.List(ctx, &atts, client.MatchingLabels{v1alpha1.LabelAttachmentDestination: string(ed.UID)}); err != nil {
+		return obligations{}, err
+	}
+	for i := range atts.Items {
+		a := &atts.Items[i]
+		if !controllerutil.ContainsFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer) {
+			continue
+		}
+		st := a.Status.Storage
+		switch {
+		case st != nil && st.Commitment != nil:
+			o.packages++
+			if t := st.Commitment.ExpiresAt; o.latest == nil || t.After(o.latest.Time) {
+				o.latest = &t
+			}
+		default:
+			o.cleanup++
+			o.unknownExpiry++
+		}
+		if st != nil && st.Cleanup != nil && (st.Cleanup.State == string(publication.CleanupRetentionBlocked) || st.Cleanup.State == string(publication.CleanupDeletionFailed)) {
+			block("attachment "+a.Name, st.Cleanup.State+": "+st.Cleanup.Message)
+		}
+	}
 	return o, nil
 }
 

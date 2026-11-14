@@ -14,12 +14,17 @@ group 1. The following are implemented:
 - authenticated registrant attribution;
 - association validation by the controller;
 - the retention finalizer;
-- the platform roles.
+- the platform roles (group 1);
+- destination pinning;
+- the S3 storage and commit contract with its recorded commitment;
+- frozen source retention;
+- owned attempt cleanup;
+- retention-gated withdrawal (group 2).
 
-Document upload, storage, download, the `konstapel evidence` CLI, validity
-and availability status, and inclusion in assessment packages come in later
-task groups. Until then, a record describes a document and its associations,
-but Konstapel holds no bytes for it.
+The upload/download transfer service, the `konstapel evidence` CLI,
+validity and availability status, and inclusion in assessment packages come
+in later task groups. Until then, no released component writes document
+bytes.
 
 Platform operators manage attachments. Application-team attachments are
 future work, and no namespace role can register or read them.
@@ -169,19 +174,161 @@ Associating a document with a binding covers that binding's namespace scope
 for reporting. It gives the binding's teams no access to the document or its
 metadata.
 
-## Withdrawal and retention
+## Storage and the commit boundary
 
-Deleting a record withdraws it from new current evidence immediately. The
-controller adds the `compliance.erenius.io/evidence-attachment-retention`
-finalizer to every record. Later task groups (2 and 4) will use it to keep
-the record and its storage ownership until the source document's fixed
-retention expiry, which is `max(committedAt, validUntil) + retention`, 2160h
-by default. In this version no record owns stored bytes, so the controller
-releases the finalizer as soon as the record is deleted. If the controller is
-not running, deleted records wait for it.
+Document bytes live in S3, at an `EvidenceDestination` the controller pins
+for each record. Records never carry bytes, keys or credentials.
 
-The finalizer is the only lifecycle link. Attachments have no owner
-references, so deleting a binding or namespace never deletes an attachment.
+**Pinning.** The first reconcile pins the central default destination (the
+`konstapel-evidence-destination` ConfigMap, the same one assessments use):
+
+1. The controller labels the record
+   `compliance.erenius.io/attachment-destination-uid`.
+2. It re-reads the destination, adds the destination's finalizer with an
+   update conditioned on its resourceVersion, and records
+   `status.storage.destination`.
+
+The API rejects any change to a recorded pin. A later default never relocates
+a document; new records use the new default. Credentials and CA trust rotate
+through the pinned destination, and the controller rebuilds its client when
+the destination changes. A destination with pinned attachments doesn't retire
+while any of them still owns storage: committed documents count as retained
+packages until their expiry, and pinned uncommitted records count as cleanups.
+
+**Keys.** Everything an attachment owns is under
+`<prefix>/attachments/<cluster UID>/<attachment UID>/`:
+
+| Object | Written by | Purpose |
+| --- | --- | --- |
+| `attempts/<random>/intent.json` | the transfer service, before any bytes | the owning attachment and the authenticated uploader, so an interrupted attempt is always identifiable |
+| `attempts/<random>/document` | the transfer service | the bytes, uploaded with their SHA-256 |
+| `attempts/<random>/attempt.json` | the transfer service, after verification | the verified document version and uploader |
+| `commit.json` | the transfer service, conditionally (`If-None-Match: *`) | the one commitment |
+
+**Staging and commit.** Bytes are checked twice before they can be committed:
+
+- before upload, the transfer service hashes the bytes against the registered
+  size and SHA-256 and uploads nothing that differs;
+- after upload, it verifies the stored version from the server's SHA-256 or
+  by reading it back. ETags are never treated as content hashes.
+
+The commit is the conditional creation of `commit.json`. The manifest binds:
+
+- the document digest, size and version;
+- the record's spec digest (the SHA-256 of its immutable spec, registrant
+  included);
+- the uploader recorded with the verified attempt;
+- the destination ID (the EvidenceDestination UID);
+- `validUntil` and the retention.
+
+The manifest's server time is `committedAt`. Every later commit for the
+record returns that first commitment, whether it's a retry, a concurrent
+writer on another replica, or a call after a lost response. A request for
+other bytes or another spec is a conflict and never replaces it. A request
+with another retention or validity is ignored in favor of the first values.
+Interrupted, unverified, or losing attempts never become the document.
+
+**Recording.** The controller reads the commitment from storage and records
+it in `status.storage.commitment`, with the `DocumentCommitted` condition. A
+lost upload response, or a status write lost to a restart or leader change,
+is recovered by reading the manifest again. A commitment that doesn't match
+the record's spec digest, registered document or validity is never recorded
+(`StorageConflict`). Once recorded, the commitment is immutable at the API.
+`DocumentCommitted` attests storage and integrity only.
+
+| `DocumentCommitted` | Meaning |
+| --- | --- |
+| `False/NoDestination` | No default destination is configured, or it's replaced, retiring or not ready. Nothing is pinned or stored. |
+| `False/AwaitingUpload` | Pinned; no commitment yet. Rechecked every minute. |
+| `False/StorageUnavailable` | The pinned destination can't be reached or was handed off to an operator. |
+| `False/StorageConflict` | Storage holds a commitment for this UID that doesn't match this record. |
+| `True/Committed` | The commitment is recorded. |
+
+The controller removes uncommitted attempts once they are 24 hours old, along
+with incomplete multipart uploads under the record's prefix. A committed
+record's losing attempts are removed the same way. Only attempt directories
+whose records name this attachment are removed. Other objects under the
+prefix, and other attachments' prefixes, are never touched.
+
+**Tested compatibility.** `scripts/s3-compat.sh` runs
+`TestAttachmentStoreCompatibility` alongside the publisher suite. It uses the
+same pinned, test-owned RustFS service (`KONSTAPEL_S3_IMAGE`) in each
+versioning mode: unversioned, enabled and suspended. In each mode it checks:
+
+- mismatched bytes are rejected;
+- three concurrent writers, one of which loses its commit response, converge
+  on one commitment;
+- a retry with another retention returns the first commitment, and another
+  spec conflicts;
+- health checks pass;
+- owned attempt and multipart cleanup leaves the unrelated object;
+- deletion is refused before expiry;
+- full owned deletion at expiry removes null versions and delete markers in
+  a suspended bucket.
+
+On 2026-11-14 it passed against
+`docker.io/rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b`.
+This makes no claim about AWS S3 or Object Lock.
+
+The transfer service is not implemented yet (task group 3). Until it is,
+nothing in a release writes documents; the S3 adapter
+(`internal/s3store.AttachmentStore`) and this status contract are what it
+will use.
+
+## Retention
+
+The source document's expiry is fixed at commitment:
+
+```text
+expiresAt = max(committedAt, validUntil) + retention      (retention: 2160h by default)
+```
+
+The retention is positive, central (not a record field), and recorded in the
+manifest. Later changes to the setting, a retry with another value, and
+withdrawal can't change an existing commitment.
+
+Source and assessment-copy retention are independent. Assessment packages
+keep their own copies under their own per-binding retention (task group 5).
+For example, a document valid for 2026, committed on 2026-03-01:
+
+| | Expires | Why |
+| --- | --- | --- |
+| Source document | 2027-04-01 (`2027-01-01` + 2160h) | stays downloadable for its whole declared period and a tail for later assessments |
+| A package from a run on 2026-06-01 with 90-day retention | 2026-08-30 | the package's own retention; deleting it never deletes the source |
+| A package from a run on 2027-03-01 | 2027-05-30 | its own copy outlives the source; source cleanup never breaks it |
+
+A document that has already expired (`validUntil` 2025-12-31) and is
+committed on 2026-03-01 is kept until 2026-05-30 (`committedAt` + 2160h).
+Re-registering an expired document doesn't make it current: validity is
+declared in the immutable spec.
+
+## Withdrawal and cleanup
+
+Deleting a record withdraws it from new current evidence immediately
+(`AssociationsValid=False/Withdrawn`). The
+`compliance.erenius.io/evidence-attachment-retention` finalizer then keeps
+the record, and with it the storage ownership, until no owned storage
+remains:
+
+| Record | On deletion |
+| --- | --- |
+| never pinned | released at once: nothing can be stored |
+| pinned, no commitment | storage is read once more. A commitment found there (its status write was lost) is recorded and governs retention like any other. Otherwise every owned attempt and multipart upload is removed, then the record is released. |
+| committed, before `expiresAt` | kept: `SourceRetained=True/RetentionActive`, `status.storage.cleanup.state: NotDue`. Withdrawal never shortens the commitment. |
+| committed, at or after `expiresAt` | every owned version and delete marker is removed, the commit manifest last. Once storage confirms nothing owned remains, the record is released. |
+
+A failed or refused deletion is never treated as cleanup. Causes include an
+unreachable destination, Object Lock, a legal hold, or missing delete
+permission. The record keeps its finalizer, its pin and its commitment.
+`status.storage.cleanup` shows `DeletionFailed` or `RetentionBlocked` with
+the storage message, the destination lists the record among its cleanup
+blockers, and the controller retries every 5 minutes. A destination handed
+off to an operator is never contacted again, so its attachments stay
+retained until an administrator resolves them.
+
+If the controller isn't running, deleted records wait for it. Attachments
+have no owner references, so deleting a binding or namespace never deletes
+an attachment or its document.
 
 ## Authority
 
@@ -195,7 +342,7 @@ in the runtime chart. None is aggregated into the built-in `admin`, `edit` or
 | `konstapel-evidence-attachment-uploader` | `evidenceattachments`: get; `evidenceattachments/upload`: create | Upload a registered record's bytes (transfer service, task group 3) |
 | `konstapel-evidence-attachment-reader` | `evidenceattachments` and `status`: get, list, watch | Read metadata and status, never bytes |
 | `konstapel-evidence-attachment-downloader` | `evidenceattachments`: get; `evidenceattachments/download`: get | Cluster-wide document read through the transfer service. There are no per-document ACLs. |
-| `konstapel-controller` (generated) | `evidenceattachments`: get, list, watch, update, patch; `status`: get, update, patch; `finalizers`: update | Validation, status and the retention finalizer |
+| `konstapel-controller` (generated) | `evidenceattachments`: get, list, watch, update, patch; `status`: get, update, patch; `finalizers`: update | Validation, the destination-pin label, status and the retention finalizer |
 
 `evidenceattachments/upload` and `/download` are authorization attributes
 that the transfer service will check with SubjectAccessReview. They are not
