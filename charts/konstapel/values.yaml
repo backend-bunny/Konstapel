@@ -92,3 +92,23 @@ download:
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 512Mi}
+
+# Authenticated controller metrics (docs/charts.md, "Controller metrics"), off
+# by default. Every controller replica serves HTTPS on the
+# konstapel-controller-metrics Service (port 443, name https). Each scrape is
+# authenticated with a TokenReview and authorized with a SubjectAccessReview
+# for get on the non-resource URL /metrics; enabling this lets the controller
+# ServiceAccount create both reviews cluster-wide. The certificate comes from
+# tls.mode: cert-manager issues konstapel-controller-metrics-tls, or with
+# tls.mode=secret set tls.secretName below.
+metrics:
+  enabled: false
+  # Monitoring ServiceAccounts allowed to scrape, bound to the
+  # konstapel-metrics-reader ClusterRole: [{namespace: monitoring, name: prometheus}].
+  # Leave empty to bind the role yourself.
+  readers: []
+  tls:
+    # With tls.mode=secret: a kubernetes.io/tls Secret in the release
+    # namespace with tls.crt, tls.key and ca.crt covering
+    # konstapel-controller-metrics.<namespace>.svc.
+    secretName: ""

@@ -5,11 +5,20 @@ contract** (the families Konstapel exposes, their types, units, label
 vocabularies, availability and reset semantics) and the **projection rules**
 that turn owner state into those families. The controller registers the
 families in controller-runtime's metrics registry, next to its retained
-reconciliation, workqueue, client, Go and process collectors, and serves them
-on `--metrics-bind-address` (disabled by default). Targeting, assessment,
-evidence storage and, with bundle sources enabled, bundle resolution publish
-projections; see [Producers](#producers). Authenticated serving (group 3), Helm
-integration (group 4) and starter alerts (group 5) come later.
+reconciliation, workqueue, client, Go and process collectors.
+
+The controller serves them only over HTTPS, with a verified certificate
+(`--metrics-bind-address`, `--metrics-cert-dir`, `--metrics-server-name`).
+Every scrape is authenticated with a TokenReview and authorized with a
+SubjectAccessReview for `get` on `/metrics`. Metrics are off by default; the
+runtime chart's `metrics.enabled` turns them on, as described in
+[Controller metrics](../charts.md#controller-metrics), together with reader
+access and the revocation bounds.
+
+Targeting, assessment, evidence storage and, with bundle sources enabled,
+bundle resolution publish projections; see [Producers](#producers). The
+optional ServiceMonitor and PrometheusRule (group 4) and the starter alerts
+(group 5) come later.
 
 ## Rules of the contract
 
