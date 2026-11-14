@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/secure-systems-lab/go-securesystemslib/encrypted"
 
 	"github.com/backend-bunny/Konstapel/internal/evidencesign"
@@ -318,5 +320,133 @@ func TestPreSigningReaderRejectsSignedCommit(t *testing.T) {
 	}
 	if again, _ := json.Marshal(m); string(again) != string(raw2) {
 		t.Fatalf("the unsigned commit is not the pre-signing document:\n%s\n%s", raw2, again)
+	}
+}
+
+// Integrity checks, attempt cleanup, and retention deletion cover the
+// signature object and every version of it, without touching unrelated
+// objects or changing the recorded expiry.
+func TestSignatureObjectLifecycle(t *testing.T) {
+	for _, mode := range []string{"", "Enabled"} {
+		t.Run("versioning="+mode, func(t *testing.T) {
+			ctx := context.Background()
+			f := newFake()
+			f.versioning = mode
+			now := time.Now()
+			p := newPublisher(t, f, func() time.Time { return now })
+			s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			signer := testSigner(t)
+			good := signStaged(t, signer, s)
+			if _, _, err := p.StoreSignature(ctx, testRun, good); err != nil {
+				t.Fatal(err)
+			}
+			r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h"), Signing: requiredBy(signer)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			put := func(key string, body []byte) {
+				t.Helper()
+				if _, err := p.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(key), Body: bytes.NewReader(body)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			otherRun := testRun
+			otherRun.RunUID = "run-uid-other"
+			unrelated := []string{p.signatureKey(otherRun), p.Dest.KeyPrefix() + "unrelated-object"}
+			for _, k := range unrelated {
+				put(k, []byte("keep me"))
+			}
+			health := func() *publication.Failure {
+				t.Helper()
+				st, err := p.Inspect(ctx, testRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !st.ExpiresAt.Equal(r.ExpiresAt) {
+					t.Fatalf("expiry changed: %s, want %s", st.ExpiresAt, r.ExpiresAt)
+				}
+				return st.Failure
+			}
+			if f := health(); f != nil {
+				t.Fatalf("intact signed package: %+v", f)
+			}
+			// A replaced signature object is corrupt; a missing one is missing.
+			other := signStaged(t, testSigner(t), s)
+			put(p.signatureKey(testRun), other)
+			if f := health(); mode == "" && (f == nil || f.Reason != publication.FailureIntegrityFailed || !strings.Contains(f.Message, "signature")) {
+				t.Fatalf("replaced signature: %+v", f)
+			} else if mode == "Enabled" && f != nil {
+				// Versioned: the committed version is still intact.
+				t.Fatalf("versioned: the committed signature version is intact, got %+v", f)
+			}
+			if mode == "" {
+				put(p.signatureKey(testRun), good)
+				if _, err := p.Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(p.signatureKey(testRun))}); err != nil {
+					t.Fatal(err)
+				}
+				if f := health(); f == nil || f.Reason != publication.FailureObjectMissing || !strings.Contains(f.Message, "signature") {
+					t.Fatalf("missing signature: %+v", f)
+				}
+				put(p.signatureKey(testRun), good)
+			}
+			// Retention deletion after expiry removes every owned version,
+			// including the signature, and nothing else.
+			now = r.ExpiresAt.Add(time.Second)
+			if _, err := p.Delete(ctx, testRun); err != nil {
+				t.Fatal(err)
+			}
+			if left, err := p.listVersions(ctx, p.runPrefix(testRun)); err != nil {
+				t.Fatal(err)
+			} else {
+				if len(left) != 0 {
+					t.Fatalf("owned objects left after retention: %+v", left)
+				}
+			}
+			for _, k := range unrelated {
+				if _, err := p.read(ctx, k, ""); err != nil {
+					t.Fatalf("unrelated object %s removed: %v", k, err)
+				}
+			}
+		})
+	}
+}
+
+// Attempt cleanup of an uncommitted run removes its abandoned signature
+// object (every version); a committed run keeps its signature.
+func TestCleanupAttemptsRemovesUncommittedSignature(t *testing.T) {
+	ctx := context.Background()
+	f := newFake()
+	f.versioning = "Enabled"
+	p := newPublisher(t, f, time.Now)
+	s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := testSigner(t)
+	if _, _, err := p.StoreSignature(ctx, testRun, signStaged(t, signer, s)); err != nil {
+		t.Fatal(err)
+	}
+	// A second version of the key (written around the conditional create).
+	if _, err := p.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(p.signatureKey(testRun)), Body: bytes.NewReader([]byte("x"))}); err != nil {
+		t.Fatal(err)
+	}
+	sibling := p.signatureKey(testRun) + ".unrelated"
+	if _, err := p.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(sibling), Body: bytes.NewReader([]byte("keep"))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.CleanupAttempts(ctx, testRun); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ := p.listVersions(ctx, p.signatureKey(testRun))
+	for _, v := range vs {
+		if v.key == p.signatureKey(testRun) {
+			t.Fatalf("abandoned signature version left: %+v", v)
+		}
+	}
+	if _, err := p.read(ctx, sibling, ""); err != nil {
+		t.Fatalf("unrelated object removed: %v", err)
 	}
 }

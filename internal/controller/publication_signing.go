@@ -172,6 +172,18 @@ func (r *AssessmentRunReconciler) signingRequirement(ctx context.Context, run *v
 	case !errors.Is(err, publication.ErrNotFound):
 		return nil, err
 	}
+	// Signing and the signature upload are fenced work of the pinned
+	// destination: after an orphan handoff no new upload starts, one in
+	// flight is cancelled, and one that does not stop in time is reported
+	// as an uncertain operation in the handoff inventory.
+	if pin := run.Status.Destination; pin != nil && r.Runtime.Destinations != nil {
+		fenced, done, err := r.Runtime.Destinations.Begin(ctx, pin.UID, "run "+run.Name+" signature upload")
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+		ctx = fenced
+	}
 	signer, _, err := r.loadSigningKey(ctx, in)
 	if err != nil {
 		return nil, err

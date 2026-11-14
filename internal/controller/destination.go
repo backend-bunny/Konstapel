@@ -6,6 +6,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"slices"
 	"strings"
 	"time"
 
@@ -247,6 +248,7 @@ type obligations struct {
 	runs, packages, unknownExpiry, cleanup int32
 	latest                                 *metav1.Time
 	blockers                               []string
+	pendingKeys                            map[v1alpha1.PendingSigningKey]int32
 }
 
 func (o obligations) empty() bool {
@@ -256,7 +258,21 @@ func (o obligations) empty() bool {
 func (o obligations) apply(s *v1alpha1.EvidenceDestinationStatus) {
 	s.OutstandingRuns, s.OutstandingPackages, s.UnknownExpiryRuns = o.runs, o.packages, o.unknownExpiry
 	s.LatestRetainedExpiry, s.CleanupBlockers = o.latest, o.blockers
+	s.PendingSigningKeys = nil
+	for k, n := range o.pendingKeys {
+		k.Runs = n
+		s.PendingSigningKeys = append(s.PendingSigningKeys, k)
+	}
+	slices.SortFunc(s.PendingSigningKeys, func(a, b v1alpha1.PendingSigningKey) int {
+		return strings.Compare(a.SecretName+"/"+a.KeyFingerprint, b.SecretName+"/"+b.KeyFingerprint)
+	})
+	if len(s.PendingSigningKeys) > maxPendingSigningKeys {
+		s.PendingSigningKeys = s.PendingSigningKeys[:maxPendingSigningKeys]
+	}
 }
+
+// maxPendingSigningKeys bounds status.pendingSigningKeys.
+const maxPendingSigningKeys = 16
 
 func (o obligations) retiring(ed *v1alpha1.EvidenceDestination, status *v1alpha1.EvidenceDestinationStatus) metav1.Condition {
 	c := metav1.Condition{Type: v1alpha1.ConditionDestinationRetiring, Status: metav1.ConditionTrue, ObservedGeneration: ed.Generation}
@@ -301,6 +317,17 @@ func (r *DestinationReconciler) obligations(ctx context.Context, ed *v1alpha1.Ev
 			continue // handed off: recorded in the inventory, owned by an operator
 		}
 		pub := run.Status.Publication
+		if in := run.Status.SigningIntent; in != nil && in.Mode == v1alpha1.SigningRequired && !runDone(run) && pub == nil {
+			// Still waiting to be signed: its intent's key is a dependency.
+			k := v1alpha1.PendingSigningKey{SecretName: in.SecretName}
+			if in.Key != nil {
+				k.KeyFingerprint = in.Key.Fingerprint
+			}
+			if o.pendingKeys == nil {
+				o.pendingKeys = map[v1alpha1.PendingSigningKey]int32{}
+			}
+			o.pendingKeys[k]++
+		}
 		switch {
 		case !runDone(run):
 			o.runs++

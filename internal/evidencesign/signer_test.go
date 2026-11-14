@@ -552,3 +552,34 @@ func TestNoNetworkOrAmbientIdentity(t *testing.T) {
 		t.Fatalf("bundle carries ambient or service material: %s", sig.Bundle)
 	}
 }
+
+// Withdrawing trust in a key is final: a signature by the withdrawn key does
+// not verify under the remaining trusted keys, and no timestamp claim can
+// change that, because verification takes no time input and bundles that
+// carry timestamp or transparency-log material are refused outright.
+func TestTrustWithdrawalHasNoTimeException(t *testing.T) {
+	withdrawn, remaining := signer(t, cosignKey(t, "a")), signer(t, cosignKey(t, "b"))
+	d := DigestArchive([]byte("historical package"))
+	sig, err := withdrawn.Sign(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify(sig.Bundle, d, remaining.PublicKey()); err == nil {
+		t.Fatal("a withdrawn key's signature verified under the remaining trust")
+	}
+	for name, edit := range map[string]func(m map[string]any){
+		"claimed RFC 3161 timestamp": func(m map[string]any) {
+			m["verificationMaterial"].(map[string]any)["timestampVerificationData"] = map[string]any{"rfc3161Timestamps": []any{map[string]any{"signedTimestamp": "AA=="}}}
+		},
+		"claimed log entry time": func(m map[string]any) {
+			m["verificationMaterial"].(map[string]any)["tlogEntries"] = []any{map[string]any{"integratedTime": "1"}}
+		},
+	} {
+		raw := editMap(t, sig.Bundle, edit)
+		for _, key := range []PublicKey{withdrawn.PublicKey(), remaining.PublicKey()} {
+			if _, err := Verify(raw, d, key); !errors.Is(err, ErrUnsupportedFormat) {
+				t.Fatalf("%s: time material was not refused: %v", name, err)
+			}
+		}
+	}
+}

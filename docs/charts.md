@@ -32,6 +32,7 @@ and doesn't need the charts.
 | Verified OCI policy bundles | yes, with `bundles.sourcesConfigMap` (off by default) | the sources ConfigMap and the Secrets/ConfigMaps it references, created by you; see [OCI policy bundles](#oci-policy-bundles) |
 | Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
+| Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
 
 ## Chart input contract

@@ -85,8 +85,15 @@ type OrphanRun struct {
 	// OwnedPrefix holds every object, version, and incomplete upload of the
 	// run at this destination; nothing outside it belongs to the run.
 	OwnedPrefix string `json:"ownedPrefix,omitempty"`
-	// Publication is the original receipt and cleanup state, if any.
+	// Publication is the original receipt and cleanup state, if any. For a
+	// signed publication it includes the signature object's key, version,
+	// digest, and size under OwnedPrefix.
 	Publication *v1alpha1.PublicationStatus `json:"publication,omitempty"`
+	// SigningIntent is the run's frozen signing intent, if any: the mode,
+	// the key Secret's name, and the pinned public key and fingerprint,
+	// needed to verify or finish the run's signature. It never holds private
+	// key material.
+	SigningIntent *v1alpha1.SigningIntent `json:"signingIntent,omitempty"`
 }
 
 func inventoryName(uid string, i int) string {
@@ -119,6 +126,9 @@ func (r *DestinationReconciler) saveOrphanInventory(ctx context.Context, ed *v1a
 			if rec.Publication.Destination != nil {
 				rec.Publication.Destination.CredentialRef = nil
 			}
+		}
+		if in := run.Status.SigningIntent; in != nil {
+			rec.SigningIntent = in.DeepCopy()
 		}
 		if run.Status.Binding != nil {
 			rec.BindingUID = run.Status.Binding.UID

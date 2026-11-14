@@ -288,6 +288,12 @@ time, tamper-proof storage, or proof of an uncompromised controller.
 Alternative: retaining old private keys forever is unnecessary for verification;
 discarding old public keys loses the ability to independently authenticate history.
 
+Implemented (group 5): the destination's `status.pendingSigningKeys` lists
+the key Secrets, with pinned fingerprints when known, that still-publishing
+Required intents depend on. The list holds at most 16 entries, is independent
+of `spec.signing`, and is absent when no run is waiting. No Secret watch is
+added.
+
 ### 6. Extend authorized downloads and explicit verification
 
 Preserve current `/download` routes and returned archive bytes. Add companion
@@ -348,6 +354,20 @@ handoff must include signature objects and all owned versions. The orphan fence
 covers signing work and signature uploads as well as archive work. Retain audit
 inventory without secret bytes. Snapshot publication availability stays separate
 from assessment completeness, engine readiness, and signing configuration readiness.
+
+Implemented (group 5):
+- Integrity checks read the committed signature version back. Missing
+  material is `ObjectMissing`; different bytes are `IntegrityFailed`. The
+  receipt and expiry are unchanged.
+- Attempt cleanup of an uncommitted run removes its signature object, every
+  version, and only that key. Retention deletion already removes the run
+  prefix.
+- Signing and the signature upload run under the destination's fence, as
+  `run <name> signature upload`.
+- Orphan inventory records carry the run's signing intent, which holds only
+  public material, next to the receipt's signature reference. The inventory
+  format stays `orphan-inventory/v1`, because the field is additive and
+  optional.
 
 Coordinate these changes with `add-s3-evidence-publishing`, including its legacy
 destination migration; rebase before shared API, descriptor, or schema edits. If

@@ -479,6 +479,29 @@ func (p *Publisher) archiveHealth(ctx context.Context, r publication.Receipt) (*
 			return &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed archive has a different SHA-256", At: now}, nil
 		}
 	}
+	if g := r.Signature; g != nil {
+		return p.signatureHealth(ctx, g, now)
+	}
+	return nil, nil
+}
+
+// signatureHealth checks a signed publication's committed signature object:
+// it must exist before expiry and its bytes (small and bounded, so read in
+// full rather than trusting optional checksum metadata) must have the
+// committed size and SHA-256. Damaged signature material makes the package
+// unavailable; it is never served as unsigned.
+func (p *Publisher) signatureHealth(ctx context.Context, g *publication.Signature, now time.Time) (*publication.Failure, error) {
+	b, err := p.read(ctx, g.Key, g.VersionID)
+	switch {
+	case errors.Is(err, publication.ErrNotFound):
+		return &publication.Failure{Reason: publication.FailureObjectMissing, Message: "the committed signature is missing before its expiry", At: now}, nil
+	case err != nil:
+		return nil, fmt.Errorf("%w: inspect signature: %v", publication.ErrUnavailable, sanitize(err))
+	}
+	sum := sha256.Sum256(b)
+	if int64(len(b)) != g.Size || hex.EncodeToString(sum[:]) != g.SHA256 {
+		return &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed signature has different bytes", At: now}, nil
+	}
 	return nil, nil
 }
 

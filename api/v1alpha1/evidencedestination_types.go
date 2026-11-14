@@ -323,6 +323,24 @@ const (
 	SigningReasonUnsupportedKey   = "UnsupportedKey"
 )
 
+// PendingSigningKey is one key Secret that unsigned, still-publishing runs
+// depend on.
+type PendingSigningKey struct {
+	// secretName is the key Secret in the controller namespace.
+	// +required
+	// +kubebuilder:validation:MaxLength=253
+	SecretName string `json:"secretName"`
+	// keyFingerprint is the pinned key, when the intent pinned one; a
+	// replacement key under the same name cannot satisfy those runs.
+	// +optional
+	// +kubebuilder:validation:MaxLength=71
+	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+	// runs counts the runs waiting on this key.
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	Runs int32 `json:"runs"`
+}
+
 // SigningStatus is the controller's latest observation of a destination's
 // signing policy and key. It is advisory: publication rereads the policy
 // and the Secret when it records a signing intent.
@@ -431,6 +449,17 @@ type EvidenceDestinationStatus struct {
 	// orphanHandoff reports the work fence after an accepted handoff.
 	// +optional
 	OrphanHandoff *OrphanHandoff `json:"orphanHandoff,omitempty"`
+
+	// pendingSigningKeys lists the signing keys that runs still waiting to
+	// be signed depend on: each run's frozen intent names its key Secret and,
+	// once pinned, its key. Keep these Secrets until the list no longer names
+	// them; removing one leaves those runs to fail with SigningFailed.
+	// Independent of spec.signing: a run prepared under Required keeps its
+	// dependency after the policy changes.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=16
+	PendingSigningKeys []PendingSigningKey `json:"pendingSigningKeys,omitempty"`
 
 	// signing is the observed signing policy and key identity; absent when
 	// spec.signing is absent.

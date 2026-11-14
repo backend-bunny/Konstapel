@@ -29,7 +29,7 @@ func (e *pinEnv) acceptOrphan(t *testing.T, name string) {
 func (e *pinEnv) storageCalls() int {
 	n := 0
 	for _, s := range e.stores {
-		for _, op := range []fake.Op{fake.OpStage, fake.OpPublish, fake.OpInspect, fake.OpDelete, fake.OpCleanup, fake.OpOpen} {
+		for _, op := range []fake.Op{fake.OpStage, fake.OpPublish, fake.OpInspect, fake.OpDelete, fake.OpCleanup, fake.OpOpen, fake.OpStoreSignature, fake.OpReadSignature} {
 			n += s.Calls(op)
 		}
 	}
