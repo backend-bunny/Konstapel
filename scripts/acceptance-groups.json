@@ -37,7 +37,8 @@
       "TestLiveOrphanFence",
       "TestLiveDestinationAPI",
       "TestLiveLegacyMigration",
-      "TestLiveDestinationSigning"
+      "TestLiveDestinationSigning",
+      "TestLiveSignedEvidenceDownload"
     ]
   },
   "capabilities": {

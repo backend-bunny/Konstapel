@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -31,6 +32,21 @@ import (
 const (
 	RequestRoute = "GET /v1/namespaces/{namespace}/assessmentrequests/{name}/download"
 	RunRoute     = "GET /v1/assessmentruns/{uid}/download"
+	// RequestSignatureRoute and RunSignatureRoute serve the companion
+	// signature bundle of the same package, for the same identities and with
+	// exactly the same authorization, expiry, destination and orphan checks.
+	RequestSignatureRoute = "GET /v1/namespaces/{namespace}/assessmentrequests/{name}/signature"
+	RunSignatureRoute     = "GET /v1/assessmentruns/{uid}/signature"
+)
+
+// artifact selects what a route serves. Both are served only after the same
+// checks, and for a signed publication only after the archive/signature
+// pair has been verified.
+type artifact int
+
+const (
+	archiveArtifact artifact = iota
+	signatureArtifact
 )
 
 // Server serves verified package archives.
@@ -71,8 +87,10 @@ func (s *Server) Handler() http.Handler {
 		s.sem = make(chan struct{}, s.MaxConcurrent)
 	})
 	mux := http.NewServeMux()
-	mux.HandleFunc(RequestRoute, s.serveRequest)
-	mux.HandleFunc(RunRoute, s.serveRun)
+	mux.HandleFunc(RequestRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRequest(w, r, archiveArtifact) })
+	mux.HandleFunc(RunRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRun(w, r, archiveArtifact) })
+	mux.HandleFunc(RequestSignatureRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRequest(w, r, signatureArtifact) })
+	mux.HandleFunc(RunSignatureRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRun(w, r, signatureArtifact) })
 	return mux
 }
 
@@ -146,7 +164,7 @@ func attrs(namespace, resource, name string) []authzv1.ResourceAttributes {
 }
 
 // serveRequest serves a namespace request's own namespace-scoped package.
-func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request, art artifact) {
 	ctx := r.Context()
 	ns, name, uid := r.PathValue("namespace"), r.PathValue("name"), r.URL.Query().Get("uid")
 	if uid == "" {
@@ -168,7 +186,7 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	s.serve(w, r, run)
+	s.serve(w, r, run, art)
 }
 
 func (s *Server) resolveRequest(ctx context.Context, ns, name, uid string) (*v1alpha1.AssessmentRun, error) {
@@ -203,7 +221,7 @@ func (s *Server) resolveRequest(ctx context.Context, ns, name, uid string) (*v1a
 }
 
 // serveRun serves a platform run by UID.
-func (s *Server) serveRun(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, art artifact) {
 	ctx := r.Context()
 	u, err := s.authenticate(r)
 	if err != nil {
@@ -230,13 +248,15 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	s.serve(w, r, run)
+	s.serve(w, r, run, art)
 }
 
-// serve fetches the committed archive into bounded temporary storage,
+// serve fetches the committed archive into bounded temporary storage and
 // verifies its size and SHA-256 against the run's recorded receipt and the
-// committed status, and only then streams it.
-func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.AssessmentRun) {
+// committed status. For a signed publication it then verifies the
+// archive/signature pair (verifyPair). Only then does it stream the
+// requested artifact; nothing is served from an unverified pair.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.AssessmentRun, art artifact) {
 	ctx := r.Context()
 	if run.Status.Phase != v1alpha1.RunCompleted || run.Status.Publication == nil || run.Status.Scope == nil || run.Status.Binding == nil {
 		fail(w, problem{http.StatusConflict, "the run has no published package"})
@@ -317,11 +337,51 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.Ass
 		fail(w, problem{http.StatusBadGateway, "the stored package failed integrity verification"})
 		return
 	}
+	recordedSigned, storedSigned := recorded.Signature != nil, st.Signature != nil
+	if recordedSigned != storedSigned {
+		log.FromContext(ctx).Info("signature record mismatch", "run", run.Name, "recorded", recordedSigned, "stored", storedSigned)
+		fail(w, problem{http.StatusBadGateway, "the stored package does not match the run's receipt"})
+		return
+	}
+	var bundle []byte
+	if recordedSigned {
+		var digest evidencesign.ArchiveDigest
+		copy(digest[:], sum)
+		if bundle, err = verifyPair(ctx, pub, ref, run, st, digest); err != nil {
+			log.FromContext(ctx).Info("signed package failed verification", "run", run.Name, "error", err.Error())
+			fail(w, err)
+			return
+		}
+	} else if art == signatureArtifact {
+		w.Header().Set("X-Konstapel-Signing", "unsigned")
+		fail(w, problem{http.StatusNotFound, "the package was published unsigned; it has no signature"})
+		return
+	}
+	hd := w.Header()
+	if recordedSigned {
+		hd.Set("X-Konstapel-Signing", "signed")
+		hd.Set("X-Konstapel-Signing-Key", recorded.Signature.KeyFingerprint)
+		hd.Set("X-Konstapel-Signature-SHA256", recorded.Signature.SHA256)
+	} else {
+		hd.Set("X-Konstapel-Signing", "unsigned")
+	}
+	if art == signatureArtifact {
+		bsum := sha256.Sum256(bundle)
+		hd.Set("Cache-Control", "private, no-store")
+		hd.Set("Content-Type", "application/json")
+		hd.Set("Content-Disposition", `attachment; filename="`+st.PublicationID+`.sigstore.json"`)
+		hd.Set("Content-Length", strconv.Itoa(len(bundle)))
+		hd.Set("Repr-Digest", "sha-256=:"+base64.StdEncoding.EncodeToString(bsum[:])+":")
+		hd.Set("X-Konstapel-Publication", st.PublicationID)
+		hd.Set("X-Konstapel-Package-SHA256", st.PackageSHA256)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bundle)
+		return
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		fail(w, err)
 		return
 	}
-	hd := w.Header()
 	hd.Set("Cache-Control", "private, no-store")
 	hd.Set("Content-Type", "application/gzip")
 	hd.Set("Content-Disposition", `attachment; filename="`+st.PublicationID+`.tar.gz"`)
@@ -353,4 +413,42 @@ func (s *Server) release(n int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.used -= n
+}
+
+// verifyPair checks a signed publication before either artifact is served:
+// the run's protected receipt names the signature, the run's frozen signing
+// intent pinned the same key, the stored commit references the same
+// signature object, the stored bundle has the recorded digest and size, and
+// it verifies for the verified archive digest under the retained public
+// key. The current signing Secret or private key is never consulted.
+func verifyPair(ctx context.Context, pub publication.Publisher, ref publication.RunRef, run *v1alpha1.AssessmentRun, st publication.Status, archive evidencesign.ArchiveDigest) ([]byte, error) {
+	corrupt := problem{http.StatusBadGateway, "the stored signature does not match the run's receipt or fails verification"}
+	rec := run.Status.Publication.Signature
+	in := run.Status.SigningIntent
+	if in == nil || in.Mode != v1alpha1.SigningRequired || in.Key == nil || in.Key.Fingerprint != rec.KeyFingerprint || in.ArchiveSHA256 != run.Status.Publication.PackageSHA256 {
+		return nil, corrupt
+	}
+	g := st.Signature
+	if g.Key != rec.Key || g.VersionID != rec.VersionID || g.SHA256 != rec.SHA256 || g.Size != rec.Size || g.KeyFingerprint != rec.KeyFingerprint {
+		return nil, corrupt
+	}
+	key, err := evidencesign.ParsePublicKey([]byte(in.Key.PublicKey))
+	if err != nil || key.Fingerprint != rec.KeyFingerprint {
+		return nil, corrupt
+	}
+	bundle, _, err := pub.ReadSignature(ctx, ref)
+	switch {
+	case errors.Is(err, publication.ErrNotFound):
+		return nil, problem{http.StatusServiceUnavailable, "the package's signature is missing before its expiry; the package is not served unsigned"}
+	case err != nil:
+		return nil, problem{http.StatusServiceUnavailable, "the package is unavailable"}
+	}
+	sum := sha256.Sum256(bundle)
+	if int64(len(bundle)) != rec.Size || hex.EncodeToString(sum[:]) != rec.SHA256 {
+		return nil, corrupt
+	}
+	if _, err := evidencesign.Verify(bundle, archive, key); err != nil {
+		return nil, corrupt
+	}
+	return bundle, nil
 }
