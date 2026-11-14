@@ -16,6 +16,7 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel/model"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/listtype"
 	schemaobjectmeta "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/objectmeta"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	apiservervalidation "k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
@@ -102,11 +103,13 @@ func Load(t testing.TB, dir string) map[string]*Validator {
 	return out
 }
 
-// Validate defaults obj in place and returns every create-time field error.
+// Validate defaults obj in place and returns every create-time field error,
+// including duplicate entries in listType=set and listType=map lists.
 func (v *Validator) Validate(obj map[string]any) field.ErrorList {
 	v.prepare(obj)
 	errs := apiservervalidation.ValidateCustomResource(nil, obj, v.schema)
 	errs = append(errs, schemaobjectmeta.Validate(context.Background(), nil, obj, v.structural, true)...)
+	errs = append(errs, listtype.ValidateListSetsAndMaps(nil, v.structural, obj)...)
 	celErrs, _ := v.cel.Validate(context.Background(), nil, v.structural, obj, nil, celconfig.RuntimeCELCostBudget)
 	return append(errs, celErrs...)
 }

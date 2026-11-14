@@ -59,6 +59,7 @@ rules:
   - compliancebindings/status
   - complianceexceptions/status
   - complianceprofiles/status
+  - evidenceattachments/status
   - evidencedestinations/status
   verbs:
   - get
@@ -78,6 +79,7 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
+  - evidenceattachments
   - evidencedestinations
   verbs:
   - get
@@ -88,6 +90,7 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
+  - evidenceattachments/finalizers
   - evidencedestinations/finalizers
   verbs:
   - update

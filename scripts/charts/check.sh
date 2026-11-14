@@ -27,7 +27,10 @@ for chart in konstapel-crds konstapel; do
   for values in testdata/charts/"$chart"/*.yaml; do
     expect=$(sed -n '1s/^# expect: //p' "$values")
     [[ -n $expect ]] || { fail "$values: first line must be '# expect: ...'"; continue; }
-    if out=$(helm template fixture "$dir" --namespace konstapel-system "${base[@]}" -f "$values" 2>&1); then
+    # Only the error text is kept: a rendered chart can exceed the 128 KiB
+    # limit on one environment string, and a shell that exports variables
+    # (allexport) would then fail to exec the next command.
+    if out=$(helm template fixture "$dir" --namespace konstapel-system "${base[@]}" -f "$values" 2>&1 >/dev/null); then
       [[ $expect == ok ]] || fail "$values: rendered, expected an error containing '$expect'"
     else
       [[ $expect != ok ]] || { fail "$values: $out"; continue; }

@@ -60,6 +60,33 @@ moving evidence revision. Ordinary descriptive Kubernetes metadata cannot change
 scope or validity. Bindings keep their enforcement settings and revisions; there
 is no attachment-reference edit to a ComplianceBinding spec.
 
+Implementation (task group 1) fixes these interpretations:
+
+- **Field names.** `spec.document` holds `title`, `mediaType`, `size` and
+  `sha256`. `spec.source` holds `issuer` and an optional `url`.
+  `spec.validity` holds `validFrom` and `validUntil`. `spec.scope` holds
+  `description`. `spec.registeredBy` is the protected registrant. Each
+  `spec.associations[]` entry holds `binding.{name,uid}`, `catalogDigest`, and
+  `controls[].{id,statements}`.
+- **API ceilings.** The API's absolute size ceiling is 1 GiB. The transfer
+  service's configurable limit applies below it.
+- **Catalog digest.** The catalog digest is the SHA-256 of the OSCAL catalog
+  file in the bundle the binding's resolved profile revision pins.
+- **Selected baseline.** Until the coverage owner's baseline reader exists,
+  the selected baseline is that bundle's Moderate profile: an explicit
+  `include-controls`/`with-ids` selection. `include-all` and `matching` fail
+  closed as unavailable.
+- **Statements.** A statement must be the control's own `statement` part or
+  one of its nested `item` parts.
+- **Content source.** The controller reads the vendored content of its own
+  digest, or a frozen copy of verified OCI content. It never substitutes
+  other content.
+- **Status.** Status starts with per-association state and
+  `AssociationsValid`. Temporal, content, withdrawal, and commitment fields
+  are added additively by their task groups.
+- **Retention finalizer.** The finalizer is released immediately while a
+  record owns no stored bytes. Group 2 gates it on the recorded commitment.
+
 Capture registration using protected admission consistent with assessment
 requester attribution and the API-server-assigned creation timestamp; record the
 actual upload principal separately at the transfer service. Only controller

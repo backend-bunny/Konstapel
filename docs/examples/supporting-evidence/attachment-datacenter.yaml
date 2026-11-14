@@ -1,0 +1,38 @@
+# A platform operator registers a datacenter physical-access audit report as
+# supporting evidence for PE-3 of two bindings (docs/supporting-evidence.md).
+# Replace the binding UIDs with `kubectl get compliancebinding NAME -o
+# jsonpath='{.metadata.uid}'`; catalogDigest is the vendored NIST SP 800-53
+# Rev 5 catalog. spec.registeredBy is set by admission; do not supply it.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceAttachment
+metadata:
+  name: dc-north-physical-access-2026
+spec:
+  document:
+    title: DC North physical access control audit 2026
+    mediaType: application/pdf
+    size: 482113
+    sha256: sha256:9f2b5c1d0e8a7f6b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a10
+  source:
+    issuer: Example Audit AB on behalf of the DC North facility operator
+    url: https://audits.example.com/reports/dc-north-2026
+  validity:
+    validFrom: "2026-01-01T00:00:00Z"
+    validUntil: "2027-01-01T00:00:00Z"
+  scope:
+    description: DC North halls A and B, which host every node of this cluster.
+  associations:
+    - binding:
+        name: baseline-audit
+        uid: 0b6c1f0e-2f39-4c1a-9a51-7d1d5f3c2a11
+      catalogDigest: sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb
+      controls:
+        - id: pe-3
+          statements: [pe-3_smt.a, pe-3_smt.b]
+        - id: pe-6
+    - binding:
+        name: payments-deny
+        uid: 6a2e9d47-81c3-4f0b-b7e5-2c9f04d8e3b6
+      catalogDigest: sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb
+      controls:
+        - id: pe-3
