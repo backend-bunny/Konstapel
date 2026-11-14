@@ -303,15 +303,18 @@ func TestLiveAttachmentStorage(t *testing.T) {
 
 	// Credential rotation: a new Secret; the old one is removed.
 	secret("att-s3-rotated")
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		cur := &v1alpha1.EvidenceDestination{}
-		if err := l.c.Get(ctx, client.ObjectKeyFromObject(primary), cur); err != nil {
-			return err
+	// Both destinations use the Secret; both rotate before it is deleted.
+	for _, ed := range []*v1alpha1.EvidenceDestination{primary, secondary} {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			cur := &v1alpha1.EvidenceDestination{}
+			if err := l.c.Get(ctx, client.ObjectKeyFromObject(ed), cur); err != nil {
+				return err
+			}
+			cur.Spec.S3.CredentialSecret.Name = "att-s3-rotated"
+			return l.c.Update(ctx, cur)
+		}); err != nil {
+			t.Fatal(err)
 		}
-		cur.Spec.S3.CredentialSecret.Name = "att-s3-rotated"
-		return l.c.Update(ctx, cur)
-	}); err != nil {
-		t.Fatal(err)
 	}
 	_ = l.c.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "att-s3"}})
 	bodyB := []byte("%PDF-1.7 DC North audit 2026, long retention")
