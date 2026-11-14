@@ -669,6 +669,7 @@ Secret. Bind both to the download service account only.
 | --- | --- | --- |
 | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/download?uid=<request uid>` | `get` on `assessmentrequests/download` and `assessmentrequests`, name `<name>`, in `<ns>`, from `konstapel-assessment-requester` | that request's own namespace-scoped package |
 | `GET /v1/assessmentruns/<run uid>/download` | `get` on `assessmentruns/download` and `assessmentruns`, name of the run, from `konstapel-assessment-operator` | any run's package |
+| `GET /v1/namespaces/<ns>/assessmentrequests/<name>/signature?uid=<request uid>` and `GET /v1/assessmentruns/<run uid>/signature` | exactly the same as the matching `/download` route | the package's signature bundle ([evidence signing](evidence-signing.md#download-a-signed-package)) |
 
 Each request is checked as follows:
 
@@ -692,6 +693,9 @@ Each request is checked as follows:
    (`--max-temp-bytes`, `--max-concurrent`). Its size and SHA-256 are checked
    against the run's receipt and the stored commit before any byte is sent, and
    the temporary file is always removed.
+5. For a signed publication, the signature is checked with the archive
+   ([evidence signing](evidence-signing.md#download-a-signed-package)), and
+   neither artifact is served unless the pair verifies.
 
 A successful response is `Cache-Control: private, no-store`, with
 `Repr-Digest: sha-256=:…:`, `X-Konstapel-Publication`,
@@ -705,8 +709,9 @@ A successful response is `Cache-Control: private, no-store`, with
 | 409 | the request or run has no committed package yet |
 | 410 | the package expired and is no longer served |
 | 429 | too many concurrent downloads (`Retry-After`) |
-| 502 | the stored package does not match the receipt or fails integrity verification |
-| 503 | TokenReview/SubjectAccessReview unavailable (fail closed), storage unavailable, the archive missing before expiry, or temp space full (`Retry-After`) |
+| 404 | (signature routes) the package was published unsigned: `X-Konstapel-Signing: unsigned` |
+| 502 | the stored package or its signature does not match the receipt or fails verification |
+| 503 | TokenReview/SubjectAccessReview unavailable (fail closed), storage unavailable, the archive or the signature of a signed package missing before expiry, or temp space full (`Retry-After`) |
 
 Roles:
 
@@ -743,9 +748,9 @@ scope's data. A team downloads its package like this:
 # A service account in the team namespace; other identities need a token
 # issued for the konstapel-download audience by their identity provider.
 TOKEN=$(kubectl create token ci-reader -n dev --audience konstapel-download)
-UID=$(kubectl get assessmentrequest nightly -n dev -o jsonpath='{.metadata.uid}')
+REQUEST_UID=$(kubectl get assessmentrequest nightly -n dev -o jsonpath='{.metadata.uid}')
 curl --cacert ca.crt -H "Authorization: Bearer $TOKEN" -o package.tar.gz \
-  "https://<download-service>/v1/namespaces/dev/assessmentrequests/nightly/download?uid=$UID"
+  "https://<download-service>/v1/namespaces/dev/assessmentrequests/nightly/download?uid=$REQUEST_UID"
 ```
 
 ## Tested compatibility

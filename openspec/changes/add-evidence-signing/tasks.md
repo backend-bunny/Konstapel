@@ -39,11 +39,11 @@
 
 ## 4. Expose authorized verification material
 
-- [ ] 4.1 Add companion signature retrieval to the existing namespace-request and platform-run download paths using their current authorization rules; test team/sibling/full-binding boundaries, namespace UID replacement, expired/orphaned evidence, and explicit unsigned responses.
+- [x] 4.1 Add companion signature retrieval to the existing namespace-request and platform-run download paths using their current authorization rules; test team/sibling/full-binding boundaries, namespace UID replacement, expired/orphaned evidence, and explicit unsigned responses.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 4.2 Verify the archive/signature pair against protected receipt identity and retained public material before serving either artifact; test missing/tampered/swapped bundles, wrong keys and scope, and successful historical reads after current signing-Secret deletion.
+- [x] 4.2 Verify the archive/signature pair against protected receipt identity and retained public material before serving either artifact; test missing/tampered/swapped bundles, wrong keys and scope, and successful historical reads after current signing-Secret deletion.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 4.3 Document downloading both artifacts and verifying with a separately trusted public key, followed by existing file/scope checks; test the command sequence offline and demonstrate that a key supplied by an untrusted package cannot establish trust.
+- [x] 4.3 Document downloading both artifacts and verifying with a separately trusted public key, followed by existing file/scope checks; test the command sequence offline and demonstrate that a key supplied by an untrusted package cannot establish trust.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 5. Preserve rotation, retention, and migration behavior

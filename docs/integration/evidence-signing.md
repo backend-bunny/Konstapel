@@ -8,19 +8,18 @@ the parts implemented so far:
   signing readiness status;
 - [signed publication](#signed-publication): the frozen signing intent, signing
   and storing the signature, and the commit gate that never publishes unsigned
-  evidence under `mode: Required`.
+  evidence under `mode: Required`;
+- [signature downloads](#download-a-signed-package): authorized download of the
+  signature beside the archive, served only after the pair verifies.
 
 **Not implemented yet:**
-- signature downloads, and verification of the archive/signature pair before a
-  download is served;
 - rotation and retention around signatures: inspectable key dependencies,
   integrity checks, orphan fences, and inventories;
 - a trigger to retry signing for a run that ended with `SigningFailed`. Its
   evidence is retained, see [failure and recovery
   states](#publication-failure-and-recovery-states).
 
-Until signature downloads exist, the authorized download path serves a signed
-package's archive alone, as before. Remaining work is tracked in the change's
+Remaining work is tracked in the change's
 [tasks](../../openspec/changes/add-evidence-signing/tasks.md).
 
 ## What is signed
@@ -327,6 +326,69 @@ auditor's and the tests' verification tool.
 `internal/evidencesign` tests check this table against `devbox.json` and
 `go.mod`, and run the verification below with the pinned Cosign on every
 `task test`.
+
+## Download a signed package
+
+The download service ([S3 evidence downloads](s3-evidence.md#downloads)) serves
+each package's signature from a companion route beside the archive route:
+
+| Archive | Signature |
+| --- | --- |
+| `GET /v1/namespaces/<ns>/assessmentrequests/<name>/download?uid=<request uid>` | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/signature?uid=<request uid>` |
+| `GET /v1/assessmentruns/<run uid>/download` | `GET /v1/assessmentruns/<run uid>/signature` |
+
+A signature route checks exactly what its archive route checks, in the same
+order:
+- the same TokenReview audience;
+- the same SubjectAccessReviews (`get` on `.../download`, and on the
+  request or run itself);
+- the same request UID, namespace UID, and scope checks;
+- the same expiry (410), orphan (410), and pinned-destination rules.
+
+There is no separate permission and no other path to the signature.
+
+For a signed publication, the server downloads and checks both artifacts
+before it sends a byte of either:
+1. **The archive** has its recorded size and SHA-256.
+2. **The records agree.**
+   - The run's protected receipt (`status.publication.signature`) and the
+     stored commit name the same signature object, digest, size, and key.
+   - The run's frozen signing intent pinned that same key, for that same
+     archive.
+3. **The stored bundle** has the recorded digest and size, and it verifies for
+   the archive under the public key retained in the intent.
+
+The current signing Secret, the private key, and the destination's signing
+readiness are never consulted. Historical packages stay downloadable after
+their key is retired. If anything fails, neither artifact is served:
+- a missing signature is 503, and the archive is never served as an unsigned
+  replacement;
+- a mismatched or invalid one is 502.
+
+Both responses carry `X-Konstapel-Signing: signed`, the key fingerprint
+(`X-Konstapel-Signing-Key`), and the signature digest. They never name the
+key's Secret. An unsigned publication's archive is served as before, with
+`X-Konstapel-Signing: unsigned`, and its signature route answers 404 with the
+same header: the package has no signature.
+
+The verification above only proves that storage still matches what
+Konstapel recorded. Trust comes from your own check with a key you
+already trust.
+
+Download and verify a signed package:
+
+```sh
+TOKEN=$(kubectl create token ci-reader -n dev --audience konstapel-download)
+REQUEST_UID=$(kubectl get assessmentrequest nightly -n dev -o jsonpath='{.metadata.uid}')
+curl --fail --cacert ca.crt -H "Authorization: Bearer $TOKEN" -o package.tar.gz "https://download.example.internal/v1/namespaces/dev/assessmentrequests/nightly/download?uid=$REQUEST_UID"
+curl --fail --cacert ca.crt -H "Authorization: Bearer $TOKEN" -o package.sigstore.json "https://download.example.internal/v1/namespaces/dev/assessmentrequests/nightly/signature?uid=$REQUEST_UID"
+cosign verify-blob --key trusted.pub --bundle package.sigstore.json --insecure-ignore-tlog=true package.tar.gz
+```
+
+`trusted.pub` is the public key your platform gave you through a channel you
+already trust, as in [set up signing](#set-up-signing-for-a-destination). It is
+not anything served with the package. A platform operator does the same with
+the run routes.
 
 ## Verify a downloaded package
 
