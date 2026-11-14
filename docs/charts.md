@@ -33,7 +33,7 @@ and doesn't need the charts.
 | Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
 | Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
-| Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission and association validation only | platform subjects bound to the `konstapel-evidence-attachment-*` roles; document upload, storage and download are not implemented yet ([supporting evidence](supporting-evidence.md)) |
+| Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination`; the upload/download transfer service is not implemented yet ([supporting evidence](supporting-evidence.md)) |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
 
 ## Chart input contract
@@ -577,7 +577,7 @@ cluster stay. In detail:
 | downloads (the download Service goes away) | the S3 objects; operators can still read them with storage credentials |
 | retention cleanup: expired packages are **not** deleted until a controller runs again | the runs' retention finalizer, which keeps a run until its package is deleted |
 | the admission policies that protect run and destination status | `ComplianceException` objects (exception admission isn't served in v0.1.0) |
-| releasing deleted `EvidenceAttachment` records | records pending deletion keep their retention finalizer until a controller runs again |
+| releasing deleted `EvidenceAttachment` records and expiring their source documents | records pending deletion keep their retention finalizer, storage pin and commitment until a controller runs again; their documents stay in S3 |
 
 To remove Konstapel completely, keep the controller running while you remove
 its work:

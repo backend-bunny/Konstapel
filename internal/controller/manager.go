@@ -326,7 +326,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
 		return nil, err
 	}
-	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime())); err != nil {
+	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime()), attachmentStorage(mgr, currentRuntime(), br.Cluster)); err != nil {
 		return nil, err
 	}
 	if opts.WebhookCertDir != "" {

@@ -15,8 +15,8 @@ package controller
 // never change a binding, its enforcement, or its assessments.
 //
 // Deleting a record withdraws it at once. The retention finalizer then keeps
-// the record until owned source cleanup is confirmed; until document storage
-// exists (task group 2) no record owns stored bytes, so it is released
+// the record until owned source cleanup is confirmed (attachment_storage.go):
+// a record that never pinned a destination owns no bytes and is released
 // immediately.
 
 import (
@@ -66,6 +66,8 @@ type BaselineSource interface {
 type AttachmentReconciler struct {
 	Client    client.Client
 	Baselines BaselineSource
+	// Storage pins destinations and records commitments; nil pins nothing.
+	Storage *AttachmentStorage
 }
 
 func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -74,7 +76,7 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !a.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.finalize(ctx, a)
+		return r.finalize(ctx, a)
 	}
 	if !controllerutil.ContainsFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer) {
 		base := a.DeepCopy()
@@ -113,6 +115,13 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		cond.Message = "every association applies to its binding's current catalog and selected baseline; this is supporting material, not a control verdict"
 	}
 	meta.SetStatusCondition(&status.Conditions, cond)
+	var storageRequeue time.Duration
+	if r.Storage != nil {
+		var err error
+		if storageRequeue, err = r.Storage.reconcile(ctx, r.Client, a, status); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	if !equality.Semantic.DeepEqual(status, &a.Status) {
 		base := a.DeepCopy()
 		a.Status = *status
@@ -120,10 +129,11 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, err
 		}
 	}
-	if pending > 0 {
-		return ctrl.Result{RequeueAfter: attachmentPendingRequeue}, nil
+	requeue := storageRequeue
+	if pending > 0 && (requeue == 0 || attachmentPendingRequeue < requeue) {
+		requeue = attachmentPendingRequeue
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 // resolve validates one association. Only API errors other than NotFound are
@@ -182,18 +192,40 @@ func (r *AttachmentReconciler) resolve(ctx context.Context, as v1alpha1.Attachme
 		fmt.Sprintf("applies to binding %s with catalog %s", b.Name, base.CatalogDigest))
 }
 
-// finalize releases a withdrawn record once its owned source cleanup is
-// confirmed. No record owns stored bytes until document storage exists
-// (add-supporting-evidence-attachments group 2), which must gate this on its
-// recorded commitment and retention expiry.
-func (r *AttachmentReconciler) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment) error {
+// finalize releases a withdrawn record once no owned storage remains. A
+// record that pinned a destination is kept while storage is disabled.
+func (r *AttachmentReconciler) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer) {
-		return nil
+		return ctrl.Result{}, nil
+	}
+	release, requeue := true, time.Duration(0)
+	pinned := a.Status.Storage != nil && a.Status.Storage.Destination != nil
+	switch {
+	case r.Storage != nil:
+		status := a.Status.DeepCopy()
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociationsValid, Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReasonWithdrawn, Message: "the record is withdrawn and no longer contributes to new current evidence", ObservedGeneration: a.Generation})
+		var err error
+		if release, requeue, err = r.Storage.finalize(ctx, a, status); err != nil {
+			return ctrl.Result{}, err
+		}
+		if !release && !equality.Semantic.DeepEqual(status, &a.Status) {
+			base := a.DeepCopy()
+			a.Status = *status
+			if err := r.Client.Status().Patch(ctx, a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+		}
+	case pinned:
+		release, requeue = false, attachmentCleanupRetry
+	}
+	if !release {
+		return ctrl.Result{RequeueAfter: requeue}, nil
 	}
 	base := a.DeepCopy()
 	controllerutil.RemoveFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer)
 	err := r.Client.Patch(ctx, a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
-	return client.IgnoreNotFound(err)
+	return ctrl.Result{}, client.IgnoreNotFound(err)
 }
 
 // attachmentsForBinding enqueues every attachment associated with a binding
@@ -225,7 +257,7 @@ func attachmentBindingNames(o client.Object) []string {
 	return out
 }
 
-func setupAttachments(mgr manager.Manager, baselines BaselineSource) error {
+func setupAttachments(mgr manager.Manager, baselines BaselineSource, storage *AttachmentStorage) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.EvidenceAttachment{}, AttachmentBindingIndex, attachmentBindingNames); err != nil {
 		return err
 	}
@@ -234,7 +266,7 @@ func setupAttachments(mgr manager.Manager, baselines BaselineSource) error {
 		// Binding status carries the resolved profile revision, so status
 		// changes matter as well as recreation and deletion.
 		Watches(&v1alpha1.ComplianceBinding{}, handler.EnqueueRequestsFromMapFunc(attachmentsForBinding(mgr.GetClient()))).
-		Complete(&AttachmentReconciler{Client: mgr.GetClient(), Baselines: baselines})
+		Complete(&AttachmentReconciler{Client: mgr.GetClient(), Baselines: baselines, Storage: storage})
 }
 
 // ContentBaselines reads baselines from the same verified content

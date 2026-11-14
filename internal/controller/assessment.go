@@ -696,6 +696,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 	if err := builder.ControllerManagedBy(mgr).Named("evidencedestination").
 		For(&v1alpha1.EvidenceDestination{}).
 		Watches(&v1alpha1.AssessmentRun{}, destinationForRun(mgr.GetClient())).
+		Watches(&v1alpha1.EvidenceAttachment{}, destinationForLabel(mgr.GetClient(), v1alpha1.LabelAttachmentDestination)).
 		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Destinations: rt.Destinations}); err != nil {
 		return err
 	}
@@ -724,8 +725,14 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 // destinationForRun requeues the destination a run is pinned to, so
 // retirement accounting follows run progress.
 func destinationForRun(c client.Client) handler.EventHandler {
+	return destinationForLabel(c, LabelRunDestination)
+}
+
+// destinationForLabel enqueues the EvidenceDestination whose UID an object
+// records in label.
+func destinationForLabel(c client.Client, label string) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		uid := o.GetLabels()[LabelRunDestination]
+		uid := o.GetLabels()[label]
 		if uid == "" {
 			return nil
 		}

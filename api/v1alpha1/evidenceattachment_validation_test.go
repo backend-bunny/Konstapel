@@ -147,3 +147,40 @@ func TestEvidenceAttachmentSpecIsImmutable(t *testing.T) {
 		t.Fatal(errs.ToAggregate())
 	}
 }
+
+// add-supporting-evidence-attachments 2.3/2.4: the storage pin and the first
+// commitment are fixed once recorded, even for the controller.
+func TestEvidenceAttachmentStorageOwnershipIsImmutable(t *testing.T) {
+	crds := crdtest.Load(t, "../../config/crd/bases")
+	recorded := `{"status":{"storage":{"destination":{"name":"primary","uid":"dest-uid"},"destinationID":"primary",
+		"commitment":{"manifestKey":"k/commit.json","documentKey":"k/attempts/a/document","sha256":"sha256:9f2b5c1d0e8a7f6b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a10","size":482113,
+		"specDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","uploader":{"username":"u"},
+		"committedAt":"2026-03-01T00:00:00Z","retention":"2160h0m0s","expiresAt":"2027-03-31T00:00:00Z"}}}}`
+	base := attachment(t)
+	mergePatch(t, base, recorded)
+	if errs := crds["EvidenceAttachment"].Validate(copyObj(base)); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+	for name, c := range map[string]struct{ patch, expect string }{
+		"expiry shortened":   {`{"status":{"storage":{"commitment":{"expiresAt":"2026-04-01T00:00:00Z"}}}}`, "a recorded commitment never changes"},
+		"retention changed":  {`{"status":{"storage":{"commitment":{"retention":"1h0m0s"}}}}`, "a recorded commitment never changes"},
+		"commitment dropped": {`{"status":{"storage":{"commitment":null}}}`, "a recorded commitment never changes"},
+		"relocated":          {`{"status":{"storage":{"destination":{"name":"new-default","uid":"other"}}}}`, "the pinned destination never changes"},
+		"storage dropped":    {`{"status":{"storage":null}}`, "storage ownership is never removed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			updated := copyObj(base)
+			mergePatch(t, updated, c.patch)
+			errs := crds["EvidenceAttachment"].ValidateUpdate(updated, copyObj(base))
+			if len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), c.expect) {
+				t.Fatalf("accepted: %v", errs.ToAggregate())
+			}
+		})
+	}
+	// Cleanup state still advances.
+	updated := copyObj(base)
+	mergePatch(t, updated, `{"status":{"storage":{"cleanup":{"state":"RetentionBlocked","message":"AccessDenied"}}}}`)
+	if errs := crds["EvidenceAttachment"].ValidateUpdate(updated, copyObj(base)); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+}

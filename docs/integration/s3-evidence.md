@@ -1054,7 +1054,12 @@ kubectl get evidencedestination primary \
 ```
 
 It is released when nothing is outstanding, at the latest after
-`latestRetainedExpiry` and its expiry deletions. Fix any `cleanupBlockers`
+`latestRetainedExpiry` and its expiry deletions. Supporting-evidence
+attachments pinned to the destination count too. A committed document counts
+as a retained package until its own expiry, and a pinned uncommitted record
+counts as a cleanup ([supporting evidence](../supporting-evidence.md#storage-and-the-commit-boundary)).
+Their objects are under `<prefix>/attachments/`, separate from run packages
+under `<prefix>/evidence/`. Fix any `cleanupBlockers`
 as described under Recovery.
 
 **2. Choosing Orphan.** Hand the storage off when Konstapel should stop

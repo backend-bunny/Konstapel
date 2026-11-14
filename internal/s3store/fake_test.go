@@ -30,6 +30,9 @@ type fakeS3 struct {
 	accessKeys  []string          // access key ID of each signed request
 	uploads     map[string]string // incomplete multipart upload ID -> key
 	denyDelete  bool              // refuse object deletion (object lock / missing permission)
+	// loseCommits stores a conditional create of a commit.json and then
+	// answers 500, as if the response were lost after the write landed.
+	loseCommits bool
 }
 
 type fakeVersion struct {
@@ -139,6 +142,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		} else {
 			v.id = "null"
 			f.objects[key] = []fakeVersion{v}
+		}
+		if f.loseCommits && strings.HasSuffix(key, "/commit.json") && r.Header.Get("If-None-Match") == "*" {
+			xmlError(w, 500, "InternalError")
+			return
 		}
 		if f.versionIDs && f.versioning != "" {
 			w.Header().Set("X-Amz-Version-Id", v.id)

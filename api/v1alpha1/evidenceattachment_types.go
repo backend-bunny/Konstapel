@@ -247,8 +247,125 @@ type AttachmentAssociationStatus struct {
 	ObservedCatalogDigest string `json:"observedCatalogDigest,omitempty"`
 }
 
+// Storage conditions and reasons on EvidenceAttachment.
+const (
+	// ConditionDocumentCommitted is True once the document's storage
+	// commitment is recorded in status.storage.commitment. It attests
+	// storage and integrity only, never the truth of the document.
+	ConditionDocumentCommitted = "DocumentCommitted"
+
+	ReasonCommitted = "Committed"
+	// ReasonAwaitingUpload: a destination is pinned and no commitment exists.
+	ReasonAwaitingUpload = "AwaitingUpload"
+	// ReasonNoDestination: no destination could be pinned (none configured,
+	// replaced, retiring or not ready); nothing is stored elsewhere.
+	ReasonNoDestination = "NoDestination"
+	// ReasonStorageUnavailable: the pinned destination could not be read.
+	ReasonStorageUnavailable = "StorageUnavailable"
+	// ReasonStorageConflict: storage holds a commitment that does not match
+	// this record's spec; it is never recorded.
+	ReasonStorageConflict = "StorageConflict"
+
+	// ConditionSourceRetained reports a withdrawn record's retention: True
+	// while its committed source is retained until expiry, then False with
+	// the cleanup outcome.
+	ConditionSourceRetained = "SourceRetained"
+	ReasonRetentionActive   = "RetentionActive"
+	ReasonCleanupFailed     = "CleanupFailed"
+	ReasonCleanupBlocked    = "CleanupBlocked"
+)
+
+// LabelAttachmentDestination records an attachment's pinned destination UID.
+// The controller writes it before confirming the pin, so the destination's
+// obligations never miss an attachment; it is never changed afterwards.
+const LabelAttachmentDestination = "compliance.erenius.io/attachment-destination-uid"
+
+// AttachmentStorage is the attachment's durable storage ownership: where its
+// document is (or will be) stored, the first storage commitment, and the
+// cleanup of withdrawn storage. The pin and the commitment never change once
+// recorded.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.destination) || (has(self.destination) && self.destination == oldSelf.destination)",message="the pinned destination never changes"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.commitment) || (has(self.commitment) && self.commitment == oldSelf.commitment)",message="a recorded commitment never changes"
+type AttachmentStorage struct {
+	// destination is the EvidenceDestination pinned for this document,
+	// selected once from the central default. A later default never
+	// relocates it; credentials and trust rotate through the destination.
+	// +optional
+	Destination *DestinationReference `json:"destination,omitempty"`
+	// destinationID is the storage destination identity recorded with the
+	// commitment.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	DestinationID string `json:"destinationID,omitempty"`
+	// +optional
+	PinnedAt *metav1.Time `json:"pinnedAt,omitempty"`
+	// +optional
+	Commitment *AttachmentCommitment `json:"commitment,omitempty"`
+	// +optional
+	Cleanup *AttachmentCleanup `json:"cleanup,omitempty"`
+}
+
+// AttachmentCommitment is the first storage commitment of the document. It
+// is read from the stored commit manifest and never changes.
+type AttachmentCommitment struct {
+	// +required
+	// +kubebuilder:validation:MaxLength=1024
+	ManifestKey string `json:"manifestKey"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	ManifestVersionID string `json:"manifestVersionID,omitempty"`
+	// +required
+	// +kubebuilder:validation:MaxLength=1024
+	DocumentKey string `json:"documentKey"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	DocumentVersionID string `json:"documentVersionID,omitempty"`
+	// sha256 and size are the committed document's, equal to spec.document.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	SHA256 string `json:"sha256"`
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	Size int64 `json:"size"`
+	// specDigest is the sha256 of the immutable spec the commitment binds.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	SpecDigest string `json:"specDigest"`
+	// uploader is the authenticated principal whose verified upload was
+	// committed, as recorded by the transfer service. It may differ from
+	// spec.registeredBy and from the declared spec.source.
+	// +required
+	Uploader Requester `json:"uploader"`
+	// committedAt is the storage server's time of the commit manifest.
+	// +required
+	CommittedAt metav1.Time `json:"committedAt"`
+	// retention is the central retention frozen at commitment.
+	// +required
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	Retention metav1.Duration `json:"retention"`
+	// expiresAt is max(committedAt, spec.validity.validUntil) + retention,
+	// fixed at commitment. Source cleanup never happens before it.
+	// +required
+	ExpiresAt metav1.Time `json:"expiresAt"`
+}
+
+// AttachmentCleanup reports cleanup of a withdrawn record's owned storage.
+type AttachmentCleanup struct {
+	// +required
+	// +kubebuilder:validation:Enum=NotDue;Deleted;DeletionFailed;RetentionBlocked
+	State string `json:"state"`
+	// +optional
+	LastAttempt *metav1.Time `json:"lastAttempt,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
+}
+
 // EvidenceAttachmentStatus is written only by the Konstapel controller. It
-// never holds document bytes, credentials, or storage locations.
+// never holds document bytes or credentials; storage keys are owned,
+// UID-derived and opaque.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.storage) || has(self.storage)",message="storage ownership is never removed"
 type EvidenceAttachmentStatus struct {
 	// observedGeneration is the generation last processed.
 	// +optional
@@ -258,6 +375,9 @@ type EvidenceAttachmentStatus struct {
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	Associations []AttachmentAssociationStatus `json:"associations,omitempty"`
+	// storage is the document's durable storage ownership.
+	// +optional
+	Storage *AttachmentStorage `json:"storage,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -275,6 +395,7 @@ type EvidenceAttachmentStatus struct {
 // +kubebuilder:printcolumn:name="Valid From",type=string,JSONPath=`.spec.validity.validFrom`
 // +kubebuilder:printcolumn:name="Valid Until",type=string,JSONPath=`.spec.validity.validUntil`
 // +kubebuilder:printcolumn:name="Associations",type=string,JSONPath=`.status.conditions[?(@.type=="AssociationsValid")].status`
+// +kubebuilder:printcolumn:name="Committed",type=string,JSONPath=`.status.conditions[?(@.type=="DocumentCommitted")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type EvidenceAttachment struct {
 	metav1.TypeMeta   `json:",inline"`

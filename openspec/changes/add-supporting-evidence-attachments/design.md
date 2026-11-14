@@ -142,6 +142,27 @@ the manifest; its server LastModified supplies commitment time. Unknown results
 recover that same manifest. A concurrent loser cannot publish under another key
 or overwrite the winner, and its abandoned data is cleaned independently.
 
+Implementation (task group 2):
+
+- **Storage code.** The contract lives in `internal/attachments` (`Store`,
+  `Receipt`, `SpecDigest`, `ExpiresAt`). The S3 implementation is
+  `s3store.AttachmentStore`. It shares the publisher's client construction,
+  credentials, verified writes, version listing and error handling, with no
+  second SDK or credential path.
+- **Destination.** The destination is the central default
+  `EvidenceDestination`, pinned per record with the run pin protocol: a
+  label (`compliance.erenius.io/attachment-destination-uid`), then the
+  destination finalizer, then `status.storage.destination`. Receipts bind
+  the destination UID.
+- **Commitments.** The controller never writes documents. It reads the one
+  commit manifest and records it in `status.storage.commitment`. The pin and
+  the commitment are immutable at the API.
+- **Finalizer.** The retention finalizer is released only when nothing was
+  pinned, when nothing was committed and every owned attempt is removed, or
+  after `expiresAt` once every owned version is removed. Destinations count
+  committed attachments as retained packages and pinned uncommitted ones as
+  cleanups.
+
 Every ready serving replica can process authorized transfers; leader election
 owns background validity and cleanup. Conditional storage and API resourceVersion
 updates provide idempotency across replicas and restarts. Store the resolved

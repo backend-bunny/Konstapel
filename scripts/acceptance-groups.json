@@ -41,7 +41,8 @@
       "TestLiveLegacyMigration",
       "TestLiveDestinationSigning",
       "TestLiveSignedEvidenceDownload",
-      "TestLiveSignedPublicationWorkflow"
+      "TestLiveSignedPublicationWorkflow",
+      "TestLiveAttachmentStorage"
     ]
   },
   "capabilities": {
