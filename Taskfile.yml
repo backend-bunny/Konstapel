@@ -13,7 +13,9 @@ tasks:
   test:
     desc: Run Go tests and CI/logging regression tests
     cmds:
-      - go test -mod=readonly ./...
+      # The controller package takes about 8 minutes on an idle host, so Go's
+      # default 10-minute package timeout fails spuriously on a busy one.
+      - go test -mod=readonly -timeout 30m ./...
       - python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
   lint:
