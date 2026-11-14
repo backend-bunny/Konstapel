@@ -702,10 +702,55 @@ func (r *AssessmentRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, nil
 }
 
+// reasonEngineNotDelivered is the stale-scope reason of a subject whose
+// engine policy is not (yet) delivered.
+const reasonEngineNotDelivered = "EngineNotDelivered"
+
+// awaitDelivery is how long a run should wait before freezing its scope
+// because the binding's engine policies are still being delivered for the
+// first time (or are not yet visible in the cache): a run created right
+// after a binding or a newly added policy would otherwise freeze those
+// subjects as stale scope and publish an Incomplete snapshot for a
+// transient rollout. An update whose previous revision is still applied
+// does not wait: that applied revision is assessed. The wait is bounded by
+// the binding's collection timeout from the run's creation (or scheduled
+// time, if later); after it the run freezes what is delivered and records
+// the rest as stale scope, so a policy that never arrives (engine
+// unavailable, ownership conflict) still yields an honest incomplete run
+// instead of none. Zero means start now.
+func awaitDelivery(run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, awaiting bool, now time.Time, poll time.Duration) time.Duration {
+	if !awaiting {
+		return 0
+	}
+	_, timeout, _, err := bindingDurations(b)
+	if err != nil {
+		return 0
+	}
+	// The later of creation and the scheduled time it serves.
+	since := run.CreationTimestamp.Time
+	if t := run.Spec.Trigger; t != nil && t.ScheduledTime != nil && t.ScheduledTime.After(since) {
+		since = t.ScheduledTime.Time
+	}
+	left := since.Add(timeout).Sub(now)
+	if left <= 0 {
+		return 0
+	}
+	if poll <= 0 || poll > left {
+		return left
+	}
+	return poll
+}
+
 func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
-	c, limits, _, selected, err := r.Assess.snapshotContent(ctx, b, now)
+	c, limits, _, selected, awaiting, err := r.Assess.snapshotContent(ctx, b, now)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if wait := awaitDelivery(run, b, awaiting, now, r.Runtime.Poll); wait > 0 {
+		// Nothing is frozen or written yet: the run starts once delivery
+		// catches up, or freezes what is delivered at the bound.
+		log.FromContext(ctx).V(1).Info("waiting for engine policy delivery before freezing scope", "run", run.Name, "requeueAfter", wait)
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 	c.Reports = []assessment.Object{}
 	c.Observer = r.Instance

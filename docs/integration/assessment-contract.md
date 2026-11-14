@@ -364,7 +364,7 @@ only the run its binding's schedule admitted:
 
 | Phase | What happens |
 | --- | --- |
-| `Pending` | Not yet admitted. |
+| `Pending` | Not yet admitted, or admitted with nothing frozen yet. Starting waits while a current engine policy of the binding is not delivered (or not yet seen by the controller's cache) and nothing of that policy is applied in its namespace. This happens right after a binding is created or a policy is added. An update whose previous revision is still applied does not wait: the applied revision is assessed. The wait ends once they are delivered, or at the binding's `collectionTimeout` after the run's creation (or scheduled time, if later). After that bound the run freezes what is delivered and records the rest as stale scope (`EngineNotDelivered`), so a policy that never arrives still produces an honest incomplete snapshot. |
 | `Collecting` | Scope frozen into `<staging>/<run UID>/capture.json`. Each poll records workload, namespace, and configuration changes against the frozen scope and attaches the current reports. Collection closes at `collectionTimeout`, or earlier once evidence is `Complete`. |
 | `Publishing` | The capture is evaluated and exported (Assessment or Diagnostic package). The summary, descriptor digest, and `EvidenceComplete` condition are recorded, then the frozen package is staged and published with the binding's retention. Failures retry until `PublishTimeout` after closure. |
 | `Completed` | `status.publication` holds the commit receipt; staging is removed. |
