@@ -25,7 +25,7 @@ integration boundaries.
 
 - [x] 2.1 After the targeting manager lands, wire binding Conditions, known target counts and capability state into snapshots; test stale observed generations, unavailable reporting with functioning delivery, periodic validity refresh and no source work caused by scraping.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.2 After continuous assessment state/scheduling lands, wire current evidence, latest full-binding closure and recorded due obligations through its owner; test source-time expiry, initial overdue runs, diagnostic failures, namespace requests, interval edits and missed-tick coalescing without changing enforcement or scheduler semantics.
+- [x] 2.2 After continuous assessment state/scheduling lands, wire current evidence, latest full-binding closure and recorded due obligations through its owner; test source-time expiry, initial overdue runs, diagnostic failures, namespace requests, interval edits and missed-tick coalescing without changing enforcement or scheduler semantics.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
 - [x] 2.3 After bundle resolution lands, instrument bounded resolution attempts/durations and producer readiness; test failed verification, retries, recovery and process-counter reset without exposing repositories, digests, identities or credential details as labels.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

@@ -26,6 +26,9 @@ func FromStatus(s *v1alpha1.AssessmentSchedule) (State, error) {
 	if s.ActiveRun != nil {
 		st.Active = s.ActiveRun.Name
 	}
+	if s.OutstandingSince != nil {
+		st.Outstanding = s.OutstandingSince.UTC()
+	}
 	for _, g := range s.Gaps {
 		st.Gaps = append(st.Gaps, Gap{From: g.From.UTC(), To: g.To.UTC(), Missed: int(g.Missed)})
 	}
@@ -46,6 +49,10 @@ func ToStatus(st State, nextDue time.Time, activeUID string) *v1alpha1.Assessmen
 	}
 	if st.Active != "" {
 		s.ActiveRun = &v1alpha1.RunReference{Name: st.Active, UID: activeUID}
+	}
+	if !st.Outstanding.IsZero() {
+		t := metav1.NewTime(st.Outstanding)
+		s.OutstandingSince = &t
 	}
 	for _, g := range st.Gaps {
 		s.Gaps = append(s.Gaps, v1alpha1.MissedInterval{From: metav1.NewTime(g.From), To: metav1.NewTime(g.To), Missed: int32(g.Missed)})

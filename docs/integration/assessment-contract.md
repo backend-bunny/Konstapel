@@ -341,6 +341,21 @@ runs are created. Current evidence status (above) works without a publisher.
 - Missed due times coalesce into one run at the latest due time. The skipped
   times are recorded in `gaps` and `missedTotal` and never claimed as
   assessed.
+- `schedule.outstandingSince` is the earliest scheduled time, including missed
+  times, that no scheduled run has yet met. A scheduled run meets it when it
+  closes with an assessment export, complete or incomplete, even if
+  publication fails afterwards. It clears every earlier obligation it caught
+  up on. Diagnostic exports, lost captures, deleted runs, manual runs and
+  namespace requests do not meet it, and an interval edit keeps it. The field
+  only records obligations: no scheduling decision reads it. It is absent when
+  nothing is outstanding.
+- `oldestEvaluation`, on `current` and on run and request summaries,
+  is the source evaluation time of the oldest attributable observation. It is
+  never a collection or report-update time. `current.nextExpiry` is that time
+  plus the evidence-age limit used at evaluation. A closed run records it at
+  closure and keeps it after publication; the frozen package descriptor does
+  not carry it. It is absent without attributable evidence and on summaries
+  recorded by earlier controllers.
 - Each binding has at most one active run (`schedule.activeRun`). When the slot
   frees, an overdue scheduled run starts before queued platform manual runs,
   which wait as `Pending` in creation order. Manual runs never move the

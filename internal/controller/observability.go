@@ -67,6 +67,44 @@ func publishStorage(c client.Reader, hub *observability.Hub) func(context.Contex
 	}
 }
 
+// publishAssessment publishes each binding's current evidence, latest
+// closed full-binding run and scheduled obligations from the assessment
+// owner's recorded status and runs. A binding whose assessment settings do
+// not parse is left out: it has no effective configuration to report.
+func publishAssessment(c client.Reader, hub *observability.Hub) func(context.Context, observability.Term, time.Time) error {
+	return func(ctx context.Context, t observability.Term, now time.Time) error {
+		var bindings v1alpha1.ComplianceBindingList
+		if err := c.List(ctx, &bindings); err != nil {
+			return fmt.Errorf("list bindings: %w", err)
+		}
+		var runs v1alpha1.AssessmentRunList
+		if err := c.List(ctx, &runs); err != nil {
+			return fmt.Errorf("list assessment runs: %w", err)
+		}
+		byBinding := map[string][]v1alpha1.AssessmentRun{}
+		for _, r := range runs.Items {
+			if r.Status.Binding != nil {
+				byBinding[r.Status.Binding.UID] = append(byBinding[r.Status.Binding.UID], r)
+			}
+		}
+		s := observability.AssessmentSnapshot{}
+		for i := range bindings.Items {
+			b := &bindings.Items[i]
+			interval, timeout, _, err := bindingDurations(b)
+			if err != nil {
+				continue
+			}
+			maxAge, err := bindingMaxEvidenceAge(b)
+			if err != nil {
+				continue
+			}
+			s.Bindings = append(s.Bindings, observability.BindingAssessmentFrom(b, byBinding[string(b.UID)],
+				observability.AssessmentSettings{Interval: interval, MaxEvidenceAge: maxAge, CollectionTimeout: timeout}))
+		}
+		return hub.PublishAssessment(t, now, s)
+	}
+}
+
 // publishBundles marks bundle resolution synchronized while the sources
 // Watcher's latest Sync read its configuration within bound.
 func publishBundles(lastSync func() (time.Time, bool), bound time.Duration, hub *observability.Hub) func(context.Context, observability.Term, time.Time) error {
@@ -103,23 +141,26 @@ func setupObservability(mgr manager.Manager, hub *observability.Hub, caps capabi
 	for _, d := range []struct {
 		name    string
 		domain  observability.Domain
-		obj     client.Object
+		objs    []client.Object
 		publish func(context.Context, observability.Term, time.Time) error
 	}{
-		{"targeting-projection", observability.DomainTargeting, &v1alpha1.ComplianceBinding{}, publishTargeting(mgr.GetClient(), hub, caps)},
-		{"storage-projection", observability.DomainEvidenceStorage, &v1alpha1.AssessmentRun{}, publishStorage(mgr.GetClient(), hub)},
+		{"targeting-projection", observability.DomainTargeting, []client.Object{&v1alpha1.ComplianceBinding{}}, publishTargeting(mgr.GetClient(), hub, caps)},
+		{"assessment-projection", observability.DomainAssessment, []client.Object{&v1alpha1.ComplianceBinding{}, &v1alpha1.AssessmentRun{}}, publishAssessment(mgr.GetClient(), hub)},
+		{"storage-projection", observability.DomainEvidenceStorage, []client.Object{&v1alpha1.AssessmentRun{}}, publishStorage(mgr.GetClient(), hub)},
 	} {
-		inf, err := mgr.GetCache().GetInformer(context.Background(), d.obj)
-		if err != nil {
-			return err
-		}
 		trigger, notify := observability.Notifier()
-		if _, err := inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
-			AddFunc:    func(any) { notify() },
-			UpdateFunc: func(any, any) { notify() },
-			DeleteFunc: func(any) { notify() },
-		}); err != nil {
-			return err
+		for _, obj := range d.objs {
+			inf, err := mgr.GetCache().GetInformer(context.Background(), obj)
+			if err != nil {
+				return err
+			}
+			if _, err := inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
+				AddFunc:    func(any) { notify() },
+				UpdateFunc: func(any, any) { notify() },
+				DeleteFunc: func(any) { notify() },
+			}); err != nil {
+				return err
+			}
 		}
 		refreshers = append(refreshers, &observability.Refresher{Name: d.name, Hub: hub, Domain: d.domain, Synced: synced, Publish: d.publish, Trigger: trigger})
 	}

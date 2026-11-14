@@ -341,6 +341,14 @@ spec:
                           becomes stale.
                         format: date-time
                         type: string
+                      oldestEvaluation:
+                        description: |-
+                          oldestEvaluation is the source evaluation time of the oldest
+                          attributable observation: when the engine evaluated it, never a
+                          collection, upload or report-update time. Absent when no observation
+                          is attributable, and on status recorded before this field existed.
+                        format: date-time
+                        type: string
                       outcomes:
                         description: |-
                           OutcomeCounts preserves check dispositions separately from completeness.
@@ -523,6 +531,17 @@ spec:
                         minimum: 0
                         type: integer
                       nextDue:
+                        format: date-time
+                        type: string
+                      outstandingSince:
+                        description: |-
+                          outstandingSince is the earliest scheduled time, including missed
+                          times coalesced into a later run, whose obligation has not yet been
+                          met by a scheduled run that closed with an assessment export
+                          (complete or incomplete). A diagnostic or lost capture does not meet
+                          it; manual and namespace runs never do. Absent when nothing is
+                          outstanding. It is an observation of the schedule and never changes
+                          when runs start.
                         format: date-time
                         type: string
                     required:

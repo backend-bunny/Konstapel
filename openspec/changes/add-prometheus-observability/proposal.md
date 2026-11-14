@@ -35,8 +35,13 @@ the first supported content set.
 
 ### Modified Capabilities
 
-None. Existing assessment, targeting, evidence and chart behavior remains owned
-by its respective capability; this change exposes observations of those contracts.
+- `continuous-assessments`: status additionally records the oldest source
+  evaluation of current evidence and closed runs, and the earliest outstanding
+  scheduled obligation (design §4). These are additive observations through the
+  owner; scheduling, enforcement and evidence semantics are unchanged.
+
+Other assessment, targeting, evidence and chart behavior remains owned by its
+respective capability; this change exposes observations of those contracts.
 
 ## Impact
 

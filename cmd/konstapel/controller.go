@@ -118,10 +118,9 @@ func runController(args []string) error {
 	}
 	controller.ConfigureAssessments(rt)
 	// The metric contract is served next to controller-runtime's collectors.
-	// Targeting and evidence storage always publish projections; bundle
-	// resolution only with bundle sources. Assessment projections are not
-	// wired yet, so that domain is reported disabled rather than healthy.
-	domains := []observability.Domain{observability.DomainTargeting, observability.DomainEvidenceStorage}
+	// Targeting, assessment and evidence storage always publish
+	// projections; bundle resolution only with bundle sources.
+	domains := []observability.Domain{observability.DomainTargeting, observability.DomainAssessment, observability.DomainEvidenceStorage}
 	if bundles.Enabled() {
 		domains = append(domains, observability.DomainBundleResolution)
 	}

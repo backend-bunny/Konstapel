@@ -68,7 +68,7 @@ func TestLiveObservability(t *testing.T) {
 		_ = l.c.Delete(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "observe-only"}})
 	})
 
-	hub, err := observability.NewHub(observability.Options{Enabled: []observability.Domain{observability.DomainTargeting, observability.DomainEvidenceStorage}})
+	hub, err := observability.NewHub(observability.Options{Enabled: []observability.Domain{observability.DomainTargeting, observability.DomainAssessment, observability.DomainEvidenceStorage}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,14 +99,24 @@ func TestLiveObservability(t *testing.T) {
 		return s[`konstapel_observation_ready{domain="targeting"}`] == 1 && s[ready] == 1 &&
 			s[fmt.Sprintf(`konstapel_binding_target_namespaces{binding=%q}`, b.Name)] == 1 &&
 			s[`konstapel_capability_condition{capability="policy_delivery",status="true"}`] == 1 &&
-			s[`konstapel_observation_ready{domain="evidence_storage"}`] == 1, fmt.Sprint(s)
+			s[`konstapel_observation_ready{domain="evidence_storage"}`] == 1 &&
+			s[`konstapel_observation_ready{domain="assessment"}`] == 1 &&
+			s[fmt.Sprintf(`konstapel_binding_assessment_status{binding=%q,status="no_targets",view="current"}`, b.Name)] == 1, fmt.Sprint(s)
 	})
 	s := liveSeries(t, hub)
 	if _, ok := s["konstapel_publication_failed{}"]; !ok {
 		t.Fatal("ready storage projection lacks its backlog")
 	}
-	if s[`konstapel_observation_enabled{domain="assessment"}`] != 0 || s[`konstapel_observation_ready{domain="assessment"}`] != 0 {
-		t.Fatal("an unwired domain is reported enabled or ready")
+	// No workload is in scope: no targets, no closed run yet, and no
+	// source evaluation to report.
+	if s[fmt.Sprintf(`konstapel_binding_assessment_status{binding=%q,status="no_assessment",view="latest_closed"}`, b.Name)] != 1 {
+		t.Fatal("a closed run is reported before any closed")
+	}
+	if _, ok := s[fmt.Sprintf(`konstapel_binding_oldest_evaluation_timestamp_seconds{binding=%q,view="current"}`, b.Name)]; ok {
+		t.Fatal("an oldest evaluation is reported without attributable evidence")
+	}
+	if s[fmt.Sprintf(`konstapel_binding_max_evidence_age_seconds{binding=%q}`, b.Name)] != 7200 {
+		t.Fatal("effective evidence-age limit missing")
 	}
 	l.record("projected", map[string]any{"series": len(s)})
 

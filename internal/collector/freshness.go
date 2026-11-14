@@ -253,6 +253,20 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 	return ev, ev.Evidence.Validate()
 }
 
+// OldestEvaluated is the source evaluation time of the oldest attributable
+// observation, or nil when none is attributable. NextExpiry is this time
+// plus the evidence-age limit used at evaluation.
+func (ev Evaluation) OldestEvaluated() *time.Time {
+	var oldest *time.Time
+	for _, o := range ev.Observations {
+		if o.State == Attributable && o.Evaluated != nil && (oldest == nil || o.Evaluated.Before(*oldest)) {
+			t := *o.Evaluated
+			oldest = &t
+		}
+	}
+	return oldest
+}
+
 func (ev *Evaluation) add(o Observation) {
 	ev.Observations = append(ev.Observations, o)
 	switch o.State {
