@@ -31,7 +31,7 @@ integration boundaries.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 2.4 After evidence publishing/cleanup lands, wire attempts and durable backlog/oldest-expiry gauges; test successful incomplete publication, actionable versus historical failure, blocked deletion, restart reconstruction and cleanup surviving binding deletion.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 2.5 Extend each owning integration guide with its emitted signals and availability limits; verify documented state transitions against producer tests and keep unimplemented domains explicitly disabled instead of reporting healthy placeholders.
+- [x] 2.5 Extend each owning integration guide with its emitted signals and availability limits; verify documented state transitions against producer tests and keep unimplemented domains explicitly disabled instead of reporting healthy placeholders.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 3. Authenticated metrics serving

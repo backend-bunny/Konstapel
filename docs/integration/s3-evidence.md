@@ -1159,6 +1159,42 @@ another destination.
   resolves their pin, and they keep their records until their finalizers
   are removed as above.
 
+## Metrics
+
+The evidence-storage domain (`domain="evidence_storage"`) derives its backlog
+from retained AssessmentRun records, never from listing storage. The
+[metrics guide](metrics.md) has the full contract and query examples.
+
+| Run record state | Metric |
+| --- | --- |
+| `Publishing`, last attempt not failed | `konstapel_publication_pending` |
+| `Publishing` with `Published=False`, reason `Retrying` or `SigningPending` (actionable) | `konstapel_publication_failed` |
+| `Failed` with `PublicationFailed` (historical) | not counted |
+| Committed, past `expiresAt`, deletion not confirmed (including `DeletionFailed` retried with backoff) | `konstapel_cleanup_pending` |
+| `cleanup.state` `RetentionBlocked` | `konstapel_cleanup_blocked` |
+| Oldest expiry among pending and blocked cleanup | `konstapel_cleanup_oldest_expiry_timestamp_seconds` |
+| `Deleted` or `Orphaned` | not counted |
+
+Every replica counts its own publication and cleanup attempts in
+`konstapel_operation_attempts_total` and `konstapel_operation_duration_seconds`
+(`operation="evidence_publication"` and `"evidence_cleanup"`):
+
+- Publication: a failed stage, or each commit result, is one attempt.
+- Cleanup: each expiry deletion is one attempt; a package that is already gone
+  counts as success.
+- The counters reset when the process restarts.
+
+Limits on availability:
+
+- The backlog comes from the elected leader only. It survives the deletion of
+  the binding and is rebuilt from the records after a restart.
+- A delete request reduces it only after the run records the confirmed
+  deletion.
+
+Producer tests: `TestStorageFromRuns`, `TestIncompletePublicationSucceeds`,
+`TestPublicationFailureIsActionableWhileRetried`,
+`TestBlockedCleanupOutlivesBindingAndRestart` and `TestObserveOperation`.
+
 ## Teardown
 
 - **Test service:** `scripts/s3-compat.sh` always removes its container, with
