@@ -6,10 +6,12 @@ vocabularies, availability and reset semantics) and the **projection rules**
 that turn owner state into those families. The controller registers the
 families in controller-runtime's metrics registry, next to its retained
 reconciliation, workqueue, client, Go and process collectors, and serves them
-on `--metrics-bind-address` (disabled by default). **No owner domain publishes
-projections yet**: every domain is exposed as `konstapel_observation_enabled 0`
-until its producer is wired (group 2). Authenticated serving (group 3), Helm
-integration (group 4) and starter alerts (group 5) come later.
+on `--metrics-bind-address` (disabled by default). Targeting, evidence storage
+and (with bundle sources enabled) bundle resolution publish projections; see
+[Producers](#producers). The **assessment domain is not wired yet** and is
+exposed as `konstapel_observation_enabled{domain="assessment"} 0`, so binding
+assessment summaries are absent rather than fabricated. Authenticated serving
+(group 3), Helm integration (group 4) and starter alerts (group 5) come later.
 
 ## Rules of the contract
 
@@ -150,6 +152,47 @@ does not make it current.
 Publication and cleanup gauges count the storage owner's retained records and
 remain available after a binding is deleted. A known empty backlog is 0; an
 unknown one is absent.
+
+## Producers
+
+Each implemented owner runs a leader-elected refresher that waits for the
+manager's cache to synchronize, then republishes on every change of its
+objects and every 30 seconds. If it cannot read its state it withdraws the
+projection, so the domain stops being ready. It does not keep serving old
+values.
+
+| Domain | Source | Notes |
+| --- | --- | --- |
+| `targeting` | ComplianceBindings in the manager cache; the capability monitor's cached `PolicyDelivery` and `Assessment` results | A Condition or `targetCount` observed for an older generation is `unknown` or absent. A capability that cannot be checked (`DependencyUnavailable`) is `unknown`. A missing API or denied access is `false`. Policy delivery and assessment reporting are reported separately, so reporting can be unavailable while delivery works. |
+| `evidence_storage` | AssessmentRun records in the manager cache, including runs whose binding was deleted | See the backlog table below. |
+| `bundle_resolution` | The bundle sources Watcher | Ready while the Watcher's latest Sync read its configuration within two refresh intervals plus one read timeout. A missing or invalid sources ConfigMap is still a successful read; it shows up in profile Conditions, not here. |
+
+| Gauge | Counted runs |
+| --- | --- |
+| `konstapel_publication_pending` | `Publishing` runs whose last attempt did not fail |
+| `konstapel_publication_failed` | `Publishing` runs whose last attempt failed and is retried (`Published=False`, reason `Retrying`, or `SigningPending` while required signing is unmet). This is an actionable failure. A run that exhausted the publish timeout is `Failed` with `PublicationFailed`; that is a historical failure and is not counted. |
+| `konstapel_cleanup_pending` | Committed packages past their recorded expiry whose deletion is not confirmed, including deletions that failed and are retried with backoff |
+| `konstapel_cleanup_blocked` | Deletions refused by storage retention (`RetentionBlocked`), which need action |
+| `konstapel_cleanup_oldest_expiry_timestamp_seconds` | Oldest recorded expiry among pending and blocked cleanup |
+
+Deleted and operator-owned (orphaned) packages are not backlog. A delete
+request reduces the backlog only after the run records the confirmed
+deletion. After a restart the gauges are rebuilt from the records.
+
+`konstapel_operation_attempts_total` and `konstapel_operation_duration_seconds`
+count completed storage and resolution attempts on the replica that made them,
+and reset when that process restarts:
+
+- `evidence_publication`: one attempt per stage-and-commit. A failed stage or a
+  commit result completes it.
+- `evidence_cleanup`: one per expiry deletion. A package that is already gone
+  counts as success.
+- `bundle_resolution`: one per resolution that rechecks retained evidence,
+  retrieves, or fails before either. Reuse under a current acceptance is not
+  counted.
+
+Labels carry only the operation and `success`/`failure`. Repositories, digests,
+identities and error text are never labels.
 
 ## Catalog
 

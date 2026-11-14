@@ -118,9 +118,14 @@ func runController(args []string) error {
 	}
 	controller.ConfigureAssessments(rt)
 	// The metric contract is served next to controller-runtime's collectors.
-	// No owner domain publishes projections yet, so every domain is
-	// reported disabled rather than healthy.
-	hub, err := observability.NewHub(observability.Options{})
+	// Targeting and evidence storage always publish projections; bundle
+	// resolution only with bundle sources. Assessment projections are not
+	// wired yet, so that domain is reported disabled rather than healthy.
+	domains := []observability.Domain{observability.DomainTargeting, observability.DomainEvidenceStorage}
+	if bundles.Enabled() {
+		domains = append(domains, observability.DomainBundleResolution)
+	}
+	hub, err := observability.NewHub(observability.Options{Enabled: domains})
 	if err != nil {
 		return err
 	}

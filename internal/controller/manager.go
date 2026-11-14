@@ -312,7 +312,15 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}}); err != nil {
 		return nil, err
 	}
-	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll); err != nil {
+	var observeRun RunObserver
+	if hub := opts.Observability; hub != nil {
+		observeRun = RunObserver{Publication: observeOperation(hub, observability.OperationEvidencePublication),
+			Cleanup: observeOperation(hub, observability.OperationEvidenceCleanup)}
+		if err := setupObservability(mgr, hub, capabilities, bundles, opts.Bundles); err != nil {
+			return nil, err
+		}
+	}
+	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {

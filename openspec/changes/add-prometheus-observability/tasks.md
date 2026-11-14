@@ -23,13 +23,13 @@ integration boundaries.
 
 ## 2. Instrument authoritative producers
 
-- [ ] 2.1 After the targeting manager lands, wire binding Conditions, known target counts and capability state into snapshots; test stale observed generations, unavailable reporting with functioning delivery, periodic validity refresh and no source work caused by scraping.
+- [x] 2.1 After the targeting manager lands, wire binding Conditions, known target counts and capability state into snapshots; test stale observed generations, unavailable reporting with functioning delivery, periodic validity refresh and no source work caused by scraping.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 2.2 After continuous assessment state/scheduling lands, wire current evidence, latest full-binding closure and recorded due obligations through its owner; test source-time expiry, initial overdue runs, diagnostic failures, namespace requests, interval edits and missed-tick coalescing without changing enforcement or scheduler semantics.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 2.3 After bundle resolution lands, instrument bounded resolution attempts/durations and producer readiness; test failed verification, retries, recovery and process-counter reset without exposing repositories, digests, identities or credential details as labels.
+- [x] 2.3 After bundle resolution lands, instrument bounded resolution attempts/durations and producer readiness; test failed verification, retries, recovery and process-counter reset without exposing repositories, digests, identities or credential details as labels.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.4 After evidence publishing/cleanup lands, wire attempts and durable backlog/oldest-expiry gauges; test successful incomplete publication, actionable versus historical failure, blocked deletion, restart reconstruction and cleanup surviving binding deletion.
+- [x] 2.4 After evidence publishing/cleanup lands, wire attempts and durable backlog/oldest-expiry gauges; test successful incomplete publication, actionable versus historical failure, blocked deletion, restart reconstruction and cleanup surviving binding deletion.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
 - [ ] 2.5 Extend each owning integration guide with its emitted signals and availability limits; verify documented state transitions against producer tests and keep unimplemented domains explicitly disabled instead of reporting healthy placeholders.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->

@@ -556,9 +556,25 @@ type AssessmentRunReconciler struct {
 	// Instance identifies this controller process. A run resumed by another
 	// instance (restart or leader change) records a watch discontinuity.
 	Instance string
+	// Observe is told each completed storage attempt; zero observes none.
+	Observe RunObserver
 
 	checkedMu sync.Mutex
 	checked   map[types.UID]time.Time // last integrity check per retained run
+}
+
+// RunObserver receives the outcome (nil on success) and duration of each
+// completed publication and cleanup storage attempt. Retries are separate
+// attempts. Either function may be nil.
+type RunObserver struct {
+	Publication func(err error, d time.Duration)
+	Cleanup     func(err error, d time.Duration)
+}
+
+func observeAttempt(f func(error, time.Duration), start time.Time, err error) {
+	if f != nil {
+		f(err, time.Since(start))
+	}
 }
 
 func (r *AssessmentRunReconciler) integrityInterval() time.Duration {
@@ -994,8 +1010,12 @@ func (r *AssessmentRunReconciler) publish(ctx context.Context, run *v1alpha1.Ass
 	if d.Digest() != run.Status.DescriptorSHA256 {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "staged package does not match the frozen descriptor")
 	}
+	start := time.Now()
 	staged, err := pub.Stage(ctx, publication.StageRequest{Run: ref, Dir: pkg})
 	if err != nil {
+		// A failed stage ends this publication attempt; a successful one
+		// continues into the commit, which completes it.
+		observeAttempt(r.Observe.Publication, start, err)
 		return r.retry(ctx, run, now, err)
 	}
 	return r.commit(ctx, run, b, staged, now)
@@ -1024,7 +1044,9 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
+	start := time.Now()
 	receipt, err := store.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel, Signing: signing})
+	observeAttempt(r.Observe.Publication, start, err)
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
@@ -1117,7 +1139,13 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 		}
 	}
 	ref := publication.RunRef{ClusterID: run.Status.Scope.ClusterID, BindingUID: run.Status.Binding.UID, RunUID: string(run.UID)}
+	start := time.Now()
 	cl, err := store.Delete(ctx, ref)
+	if errors.Is(err, publication.ErrNotFound) {
+		observeAttempt(r.Observe.Cleanup, start, nil) // already gone: confirmed
+	} else {
+		observeAttempt(r.Observe.Cleanup, start, err)
+	}
 	at := metav1.NewTime(now)
 	pub.Availability = v1alpha1.Availability(publication.AvailabilityExpired)
 	pub.Cleanup.Attempts++
@@ -1259,7 +1287,7 @@ func (r *AssessmentRunReconciler) retry(ctx context.Context, run *v1alpha1.Asses
 	if run.Status.Window != nil && run.Status.Window.Closed != nil {
 		closed = run.Status.Window.Closed.Time
 	}
-	retrying, failed := "Retrying", v1alpha1.ReasonPublicationFailed
+	retrying, failed := v1alpha1.ReasonPublicationRetrying, v1alpha1.ReasonPublicationFailed
 	if isSigningError(cause) {
 		// Required signing is unmet: nothing unsigned is committed.
 		retrying, failed = v1alpha1.ReasonSigningPending, v1alpha1.ReasonSigningFailed

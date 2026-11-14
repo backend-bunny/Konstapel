@@ -22,6 +22,9 @@ const (
 	ReasonNamespaceNotInScope = "NamespaceNotInScope"
 	ReasonCaptureLost         = "CaptureLost"
 	ReasonPublicationFailed   = "PublicationFailed"
+	// ReasonPublicationRetrying marks a Published=False run whose current
+	// publication attempt failed and is retried within the publish timeout.
+	ReasonPublicationRetrying = "Retrying"
 	ReasonCleanupPending      = "CleanupPending"
 	ReasonCleaned             = "Cleaned"
 	// ReasonDestinationOrphaned ends a run whose destination was handed off

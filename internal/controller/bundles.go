@@ -16,6 +16,7 @@ import (
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/bundle/sources"
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
+	"github.com/backend-bunny/Konstapel/internal/observability"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -86,7 +87,11 @@ func setupBundles(h bundleHost, opts Options, newConfigCache func(crcache.Option
 	// replica. A cache built with ByObject options does not say so itself
 	// (it would be started only on the leader).
 	cc = everyReplica{cc}
-	s, err := stack.New(b, stack.Deps{APIReader: h.GetAPIReader(), Config: cc})
+	deps := stack.Deps{APIReader: h.GetAPIReader(), Config: cc}
+	if opts.Observability != nil {
+		deps.ObserveResolution = observeOperation(opts.Observability, observability.OperationBundleResolution)
+	}
+	s, err := stack.New(b, deps)
 	if err != nil {
 		return nil, nil, err
 	}

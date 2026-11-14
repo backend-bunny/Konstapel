@@ -30,6 +30,9 @@ type Deps struct {
 	// Config reads the sources ConfigMap: a cache built with
 	// sources.ConfigMapCacheOptions, which holds only that object.
 	Config client.Reader
+	// ObserveResolution, when set, is told each completed resolution
+	// attempt (resolve.Config.Observe).
+	ObserveResolution func(err error, d time.Duration)
 
 	// Test seams, set through export_test.go only.
 	fetcher       resolve.Fetcher
@@ -113,7 +116,7 @@ func New(opts Options, deps Deps) (*Stack, error) {
 		return nil, fmt.Errorf("bundle cache %s: %w", opts.CacheDir, err)
 	}
 	r, err := resolve.New(resolve.Config{Cache: c, Fetcher: fetcher, Verifier: verifier, Acceptances: acc,
-		Revisions: watcher, Compatible: compat.Check, Now: deps.now})
+		Revisions: watcher, Compatible: compat.Check, Now: deps.now, Observe: deps.ObserveResolution})
 	if err != nil {
 		c.Close()
 		provider.Close()

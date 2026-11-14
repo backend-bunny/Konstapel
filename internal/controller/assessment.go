@@ -666,7 +666,7 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 }
 
 // setupAssessments registers the assessment reconciler with the manager.
-func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration) error {
+func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration, observe RunObserver) error {
 	rt := currentRuntime()
 	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
@@ -694,7 +694,7 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Watches(&v1alpha1.ComplianceBinding{}, runsForBinding(mgr.GetClient())).
 		Watches(&v1alpha1.EvidenceDestination{}, runsForDestination(mgr.GetClient())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: rt.Workers}).
-		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt, Instance: string(uuid.NewUUID())}); err != nil {
+		Complete(&AssessmentRunReconciler{Client: mgr.GetClient(), Assess: r, Runtime: rt, Instance: string(uuid.NewUUID()), Observe: observe}); err != nil {
 		return err
 	}
 	if err := builder.ControllerManagedBy(mgr).Named("evidencedestination").

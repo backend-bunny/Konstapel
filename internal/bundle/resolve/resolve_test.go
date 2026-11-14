@@ -787,3 +787,49 @@ func TestResolveStress(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Observe sees each completed attempt once, with its outcome: retrievals,
+// rechecks, failed verification and recovery, but not reuse under a
+// current acceptance or malformed requests.
+func TestObserveAttempts(t *testing.T) {
+	w := newWorld(t)
+	var mu sync.Mutex
+	var got []error
+	observe := func(err error, d time.Duration) {
+		if d < 0 {
+			t.Errorf("negative duration %s", d)
+		}
+		mu.Lock()
+		got = append(got, err)
+		mu.Unlock()
+	}
+	reopen := func() {
+		w.restart()
+		w.r.cfg.Observe = observe
+	}
+	reopen()
+	w.mustResolve() // retrieval
+	w.mustResolve() // reuse: not an attempt
+	if _, err := w.r.Resolve(context.Background(), Request{Name: provfixture.Name, Digest: "sha256:x", Holder: bundle.HolderProfile, Owner: "o"}); !errors.Is(err, ErrRequest) {
+		t.Fatal(err)
+	}
+	// Failed verification after a trust change, retried, then recovery.
+	good := w.f.PubOrg
+	provfixture.PutKey(w.reader, "org", w.f.PubOther)
+	w.revs.edit(func(r *revs) { r.trust[provfixture.Name] = "trust-2" })
+	w.acc.InvalidateSource(provfixture.Name)
+	for range 2 {
+		if _, err := w.resolve("profile/p"); !errors.Is(err, ErrUntrusted) {
+			t.Fatalf("want untrusted, got %v", err)
+		}
+	}
+	provfixture.PutKey(w.reader, "org", good)
+	w.revs.edit(func(r *revs) { r.trust[provfixture.Name] = "trust-3" })
+	w.mustResolve() // recheck of retained evidence succeeds
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 4 || got[0] != nil || !errors.Is(got[1], ErrUntrusted) || !errors.Is(got[2], ErrUntrusted) || got[3] != nil {
+		t.Fatalf("observed %v", got)
+	}
+}
