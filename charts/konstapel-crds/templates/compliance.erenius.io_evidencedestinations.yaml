@@ -542,6 +542,42 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              pendingSigningKeys:
+                description: |-
+                  pendingSigningKeys lists the signing keys that runs still waiting to
+                  be signed depend on: each run's frozen intent names its key Secret and,
+                  once pinned, its key. Keep these Secrets until the list no longer names
+                  them; removing one leaves those runs to fail with SigningFailed.
+                  Independent of spec.signing: a run prepared under Required keeps its
+                  dependency after the policy changes.
+                items:
+                  description: |-
+                    PendingSigningKey is one key Secret that unsigned, still-publishing runs
+                    depend on.
+                  properties:
+                    keyFingerprint:
+                      description: |-
+                        keyFingerprint is the pinned key, when the intent pinned one; a
+                        replacement key under the same name cannot satisfy those runs.
+                      maxLength: 71
+                      type: string
+                    runs:
+                      description: runs counts the runs waiting on this key.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    secretName:
+                      description: secretName is the key Secret in the controller
+                        namespace.
+                      maxLength: 253
+                      type: string
+                  required:
+                  - runs
+                  - secretName
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: atomic
               signing:
                 description: |-
                   signing is the observed signing policy and key identity; absent when

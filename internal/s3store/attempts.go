@@ -69,6 +69,28 @@ func (p *Publisher) CleanupAttempts(ctx context.Context, run publication.RunRef)
 			}
 		}
 	}
+	// Without a commit the run's signature object (and every version of
+	// it) is an abandoned signing attempt owned by this run: remove it. A
+	// committed signature is kept with its archive until retention.
+	if keep == "" {
+		sig := p.signatureKey(run)
+		versions, err := p.listVersions(ctx, sig)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("list signature versions: %v", sanitize(err)))
+		}
+		for _, v := range versions {
+			if v.key != sig {
+				continue // another key that merely shares the prefix
+			}
+			in := &s3.DeleteObjectInput{Bucket: aws.String(p.Dest.Bucket), Key: aws.String(v.key)}
+			if v.version != "" {
+				in.VersionId = aws.String(v.version)
+			}
+			if _, err := p.Client.DeleteObject(ctx, in); err != nil && !isNotFound(err) {
+				problems = append(problems, fmt.Sprintf("delete %s: %v", v.key, sanitize(err)))
+			}
+		}
+	}
 	uploads, err := p.Client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: aws.String(p.Dest.Bucket), Prefix: aws.String(p.runPrefix(run))})
 	if err != nil {
 		problems = append(problems, fmt.Sprintf("list multipart uploads: %v", sanitize(err)))

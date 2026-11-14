@@ -272,6 +272,12 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 	case hex.EncodeToString(sha256Of(r.archive)) != r.receipt.PackageSHA256:
 		s.Availability = publication.AvailabilityUnavailable
 		s.Failure = &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed archive has a different SHA-256", At: p.now().UTC()}
+	case r.receipt.Signature != nil && p.signatures[run.PublicationID()] == nil:
+		s.Availability = publication.AvailabilityUnavailable
+		s.Failure = &publication.Failure{Reason: publication.FailureObjectMissing, Message: "the committed signature is missing before its expiry", At: p.now().UTC()}
+	case r.receipt.Signature != nil && hex.EncodeToString(sha256Of(p.signatures[run.PublicationID()])) != r.receipt.Signature.SHA256:
+		s.Availability = publication.AvailabilityUnavailable
+		s.Failure = &publication.Failure{Reason: publication.FailureIntegrityFailed, Message: "the committed signature has a different SHA-256", At: p.now().UTC()}
 	}
 	return s, nil
 }
@@ -293,6 +299,7 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 		return r.cleanup, publication.ErrRetentionActive
 	}
 	r.deleted = true
+	delete(p.signatures, run.PublicationID()) // retention removes the whole run prefix
 	r.cleanup = publication.Cleanup{State: publication.CleanupDeleted, Attempts: r.cleanup.Attempts + 1, LastAttempt: &now}
 	return r.cleanup, lost(f, nil)
 }
@@ -330,6 +337,11 @@ func (p *Publisher) CleanupAttempts(ctx context.Context, run publication.RunRef)
 	}
 	if r, ok := p.records[run.PublicationID()]; ok && r.receipt == nil {
 		delete(p.records, run.PublicationID())
+	}
+	// Like the S3 publisher: an uncommitted run's signature is an
+	// abandoned signing attempt and is removed with its attempts.
+	if r, ok := p.records[run.PublicationID()]; !ok || r.receipt == nil {
+		delete(p.signatures, run.PublicationID())
 	}
 	return lost(f, nil)
 }

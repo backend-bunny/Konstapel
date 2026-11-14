@@ -48,15 +48,15 @@
 
 ## 5. Preserve rotation, retention, and migration behavior
 
-- [ ] 5.1 Make pending key dependencies inspectable and document versioned-Secret rotation; test old intents using the previous key, new intents using the next key, early private-key removal, same-key re-encryption, and verification after completed keys are retired.
+- [x] 5.1 Make pending key dependencies inspectable and document versioned-Secret rotation; test old intents using the previous key, new intents using the next key, early private-key removal, same-key re-encryption, and verification after completed keys are retired.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 5.2 Extend integrity checks, attempts cleanup, retention deletion, and destination retirement to signature objects and owned versions; test cleanup without affecting unrelated artifacts or extending expiry and ensure mismatched material reports corrupt/unavailable evidence.
+- [x] 5.2 Extend integrity checks, attempts cleanup, retention deletion, and destination retirement to signature objects and owned versions; test cleanup without affecting unrelated artifacts or extending expiry and ensure mismatched material reports corrupt/unavailable evidence.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 5.3 Extend orphan fences and durable handoff inventories to signing/signature uploads and uncertain in-flight operations; test no new work after the fence, no late-response reactivation, and retained ownership records without private material.
+- [x] 5.3 Extend orphan fences and durable handoff inventories to signing/signature uploads and uncertain in-flight operations; test no new work after the fence, no late-response reactivation, and retained ownership records without private material.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 5.4 Document migration, rollback, historical public-key retention, and trust withdrawal after compromise; verify legacy unsigned fixtures keep original bytes/receipts and that required-signature verification never uses claimed timestamps to bypass withdrawn trust.
+- [x] 5.4 Document migration, rollback, historical public-key retention, and trust withdrawal after compromise; verify legacy unsigned fixtures keep original bytes/receipts and that required-signature verification never uses claimed timestamps to bypass withdrawn trust.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 5.5 Update shared status/observability and deployment documentation with the owning changes; verify bounded reason categories, signing versus evidence distinctions, and the configuration/permissions consumed by Helm without introducing separate controllers or unbounded metric labels.
+- [x] 5.5 Update shared status/observability and deployment documentation with the owning changes; verify bounded reason categories, signing versus evidence distinctions, and the configuration/permissions consumed by Helm without introducing separate controllers or unbounded metric labels.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 6. Verify real publication and required CI
@@ -72,7 +72,8 @@
 
 - Review against the evidence-signing spec and archive only after implementation
   and required CI acceptance are complete.
-- Add an admin-initiated re-sign for runs that ended with `SigningFailed` and
+- Owner decision needed on the API shape: add an admin-initiated re-sign, as
+  its own PR after group 5, for runs that ended with `SigningFailed` and
   retained their staged archive (design section 4, group 3 note), owned by
   this change's group 4/5 work. It reuses the run's recorded signing intent
   and pinned key, cannot change the archive, the run's identity, or its

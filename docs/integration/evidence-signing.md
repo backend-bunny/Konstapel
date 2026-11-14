@@ -10,14 +10,17 @@ the parts implemented so far:
   and storing the signature, and the commit gate that never publishes unsigned
   evidence under `mode: Required`;
 - [signature downloads](#download-a-signed-package): authorized download of the
-  signature beside the archive, served only after the pair verifies.
+  signature beside the archive, served only after the pair verifies;
+- [key rotation](#rotate-a-signing-key), [the signature
+  lifecycle](#signature-lifecycle), [migration, rollback, and trust
+  withdrawal](#migration-rollback-and-trust-withdrawal), and the [status and
+  deployment contract](#status-observability-and-deployment).
 
-**Not implemented yet:**
-- rotation and retention around signatures: inspectable key dependencies,
-  integrity checks, orphan fences, and inventories;
-- a trigger to retry signing for a run that ended with `SigningFailed`. Its
-  evidence is retained, see [failure and recovery
-  states](#publication-failure-and-recovery-states).
+**Not implemented yet:** a trigger to re-sign a run that ended with
+`SigningFailed`. Its evidence is retained (see [failure and recovery
+states](#publication-failure-and-recovery-states)). The re-sign is planned
+as its own platform-administrator action, and its API shape still needs an
+owner decision.
 
 Remaining work is tracked in the change's
 [tasks](../../openspec/changes/add-evidence-signing/tasks.md).
@@ -109,12 +112,43 @@ spec:
     secretRef: {name: konstapel-evidence-signing-2026-11}
 ```
 
-To rotate, create the next Secret under a new name, distribute its public key,
-and change `secretRef`. Editing a Secret in place, or deleting a key that
-pending publications still need, is not the supported workflow. A run's
-signing intent pins the Secret name and key it was prepared with (see
-[signed publication](#signed-publication)), so a run waiting to be signed
-still needs its old key. Rotation status is not implemented yet.
+To change keys later, see [rotate a signing key](#rotate-a-signing-key).
+
+### Rotate a signing key
+
+Use versioned, immutable Secrets: each key pair gets a new Secret name, as
+`cosign generate-key-pair k8s://` creates them. To rotate:
+
+1. Create the next Secret, for example
+   `cosign generate-key-pair k8s://konstapel-system/konstapel-evidence-signing-2027-05`.
+2. Give its `cosign.pub` to auditors and add it to their trusted keys. Keep the
+   previous public key trusted as well: it verifies everything signed before.
+3. Change the destination's `secretRef` to the new name. Runs prepared from
+   now on use the new key.
+4. Wait until the old key is no longer a dependency, then delete the old
+   Secret.
+
+Each run waiting to be signed pinned its Secret name, and usually its key,
+when its signing intent was recorded. The destination lists what those
+runs still need, whatever its current `spec.signing` says:
+
+```sh
+kubectl get evidencedestination primary -o jsonpath='{.status.pendingSigningKeys}'
+```
+
+Each entry has `secretName`, the pinned `keyFingerprint` (empty if the intent
+was recorded while the key was unavailable), and the number of `runs`. The
+list holds at most 16 entries and disappears when no run is waiting. If you
+delete a Secret that is still listed, or replace its key under the same name,
+those runs cannot be signed: they wait with `SigningPending` and then end with
+`SigningFailed`, with their evidence retained. Nothing is published unsigned,
+and no other key is substituted. Re-encrypting the same private key with a
+new password is safe, because the key, not its encoding, is pinned.
+
+A run whose signature is already stored or committed needs no private key.
+Retiring a key never affects verification, downloads, or retention of
+packages already signed: those use the public key retained in each run's
+status.
 
 ### Signing readiness
 
@@ -291,6 +325,84 @@ behave as before. Once a destination has signed history, do not roll back to
 a release without signing support: the older release cannot serve or retire
 those runs correctly. This release reads unknown commit kinds, versions,
 fields, and signature formats as unsupported records, never as unsigned.
+
+### Signature lifecycle
+
+The signature object, `package.sigstore.json` under the run's storage prefix,
+belongs to its run's publication. It shares every rule that applies to the
+archive:
+
+| When | What happens to the signature |
+| --- | --- |
+| Integrity check (daily while retained) | The committed signature version is read back. Missing → `Unavailable`, `ObjectMissing`; different bytes → `Unavailable`, `IntegrityFailed`. The message names the signature. The receipt, expiry, and assessment summary never change. |
+| Attempt cleanup (run ended without a commit) | Removed with the abandoned attempts, every version. A committed signature is kept. A `SigningFailed` run keeps its staged archive and any stored signature until its retention expires. |
+| Retention expiry | Deleted with the archive and commit: every owned version under the run's prefix. Nothing outside the prefix is touched. |
+| Destination retirement | The destination waits for these runs like any retained package; deleting the destination never removes them early. |
+| Orphan handoff | Signing and signature uploads are fenced like any storage work. No upload starts after the fence. One in flight is cancelled, and if it does not stop in time the handoff records `run <name> signature upload` as an uncertain operation; its late response never commits. The handoff inventory records each run's signing intent (mode, Secret name, pinned public key and fingerprint) and its signature reference. It holds public material only. |
+
+### Migration, rollback, and trust withdrawal
+
+**Migration.**
+- Upgrade the controllers first, with signing absent or `Disabled`. Until
+  then the records they write are byte for byte what earlier releases wrote.
+- Then enable `Required` on one destination, check `SigningReady`, publish a
+  test package, and verify it offline. Then roll out to the other
+  destinations.
+- Packages published before signing remain unsigned and identifiable: they
+  have no `status.publication.signature`, their signature route answers 404
+  with `X-Konstapel-Signing: unsigned`, and an offline workflow that requires
+  a signature rejects them. They are never re-signed or presented as signed,
+  and their bytes, receipts, and expiry do not change.
+
+**Rollback.** See [mixed versions and rollback](#mixed-versions-and-rollback).
+- Setting a destination back to `Disabled` affects only runs prepared later.
+  Runs already prepared under `Required` still need their key or their stored
+  signature.
+- Do not roll a controller back to a release without signing support while
+  signed history exists.
+
+**Historical public keys.**
+- Each signed run keeps the public key it was signed with
+  (`status.signingIntent.key.publicKey`). Konstapel uses that copy for its own
+  download checks, and the orphan inventory keeps it as well.
+- Auditors must keep their own trusted copies of every public key they rely
+  on. A key served with a package, or read from cluster status, is not a
+  trust anchor.
+
+**Trust withdrawal after a compromise.**
+- Remove the compromised key from every auditor's trusted keys. Packages
+  signed with it then fail trusted verification, including ones signed
+  before the compromise.
+- Evidence signatures carry no trusted timestamp or transparency-log proof,
+  and verification takes no time input. Konstapel's own checks refuse
+  bundles that carry such claims. A date inside a package, or its
+  publication time, cannot show that it was signed before the compromise.
+- Rotate to a new key as above. Decide separately, outside Konstapel, whether
+  to collect affected evidence again under new runs. Existing runs are never
+  re-signed with another key.
+
+### Status, observability, and deployment
+
+Signing reports through the existing resources, with fixed vocabularies:
+
+| Where | Field | Values |
+| --- | --- | --- |
+| EvidenceDestination | `status.signing`, `SigningReady` condition | the reasons in [signing readiness](#signing-readiness) |
+| EvidenceDestination | `status.pendingSigningKeys` | Secret name, key fingerprint, run count (at most 16 entries) |
+| AssessmentRun | `Published` condition | `SigningPending`, `SigningFailed` (beside the existing publication reasons) |
+| AssessmentRun | `status.signingIntent`, `status.publication.signature` | mode `Disabled`/`Required`; public key identity; signature reference |
+| AssessmentRun | `status.publication.failure.reason` | `ObjectMissing`, `IntegrityFailed`, `SigningFailed` |
+
+These describe signing only. Evidence completeness, outcomes, and the export
+kind are reported separately and never changed by signing.
+
+Signing runs in the existing controller and destination reconcilers, and the
+existing download server serves signatures. Signing adds no controller, Helm
+value, image, or metric. Its permissions are the controller's existing
+Secret `get` in the controller namespace and the download server's existing
+reads ([who can read signing keys](#who-can-read-signing-keys)). Any metric
+derived from these fields must label only by these fixed reasons and modes,
+never by run, key, Secret, or package.
 
 ## Signature format
 
