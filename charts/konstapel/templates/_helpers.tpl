@@ -39,6 +39,7 @@ app.kubernetes.io/component: controller
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than download.replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.download.replicaCount) -}}
 {{- end -}}
 {{- include "konstapel.validateBundles" . -}}
+{{- include "konstapel.validateMetrics" . -}}
 {{- end }}
 
 {{- define "konstapel.downloadSelector" -}}
@@ -88,5 +89,27 @@ access grants without the feature are refused.
 {{- if has $b.sourcesConfigMap $b.referencedConfigMaps -}}
 {{- fail (printf "bundles.referencedConfigMaps must not list the sources ConfigMap %q: it is granted separately, and sources.yaml cannot reference itself" $b.sourcesConfigMap) -}}
 {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Authenticated controller metrics (docs/charts.md, "Controller metrics").
+*/}}
+{{- define "konstapel.validateMetrics" -}}
+{{- $m := .Values.metrics -}}
+{{- if and (not $m.enabled) $m.readers -}}
+{{- fail "metrics.readers grants scrape access only to the metrics endpoint: set metrics.enabled, or leave metrics.readers empty" -}}
+{{- end -}}
+{{- if and $m.enabled (eq .Values.tls.mode "secret") (not $m.tls.secretName) -}}
+{{- fail "metrics.tls.secretName is required with tls.mode=secret: a kubernetes.io/tls Secret with tls.crt, tls.key and ca.crt for konstapel-controller-metrics.<namespace>.svc" -}}
+{{- end -}}
+{{- end }}
+
+{{/* The Secret holding the metrics server's tls.crt, tls.key, and ca.crt. */}}
+{{- define "konstapel.metricsTLSSecret" -}}
+{{- if eq .Values.tls.mode "secret" -}}
+{{ .Values.metrics.tls.secretName }}
+{{- else -}}
+konstapel-controller-metrics-tls
 {{- end -}}
 {{- end }}

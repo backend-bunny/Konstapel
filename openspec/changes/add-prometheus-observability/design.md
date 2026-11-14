@@ -251,7 +251,10 @@ support certificate reload and CA rotation. Do not use `insecureSkipVerify` as
 the install path, or reuse a certificate for an unrelated service identity.
 
 Grant the controller TokenReview and SubjectAccessReview create permissions,
-reusing existing role rules where already supplied. Provide a reader ClusterRole
+reusing existing role rules where already supplied. The grant is a separate
+ClusterRole bound only while `metrics.enabled`; the controller's generated
+role is unchanged. A certificate that is missing or fails verification at
+start stops the controller instead of falling back to a self-signed one. Provide a reader ClusterRole
 granting `get` on non-resource URL `/metrics`; bind only explicitly configured
 monitoring ServiceAccount subjects, with their namespaces. Namespace exception
 and assessment-request roles do not inherit it. This endpoint provides
@@ -275,7 +278,9 @@ Operator versions and validate the actual selected schema in acceptance.
 
 ### 6. Make Helm integrations independently optional
 
-Add `metrics.enabled` (default true), `metrics.serviceMonitor.enabled` (default
+Add `metrics.enabled` (default **false**, an owner decision: the endpoint
+gives the controller ServiceAccount cluster-scoped TokenReview and
+SubjectAccessReview `create`, so it is opt-in), `metrics.serviceMonitor.enabled` (default
 false), and `metrics.prometheusRule.enabled` (default false) to the implemented
 controller chart. Monitoring integrations require metrics to be enabled. The
 two Operator resources use `monitoring.coreos.com/v1`; each requires its own API

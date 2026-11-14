@@ -62,7 +62,8 @@
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall",
-      "TestLiveHelmBundles"
+      "TestLiveHelmBundles",
+      "TestLiveHelmMetrics"
     ]
   },
   "recovery": {

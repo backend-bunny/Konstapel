@@ -1,0 +1,6 @@
+# expect: ok
+metrics:
+  enabled: true
+  readers:
+    - namespace: monitoring
+      name: prometheus-k8s

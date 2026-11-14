@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -114,8 +113,10 @@ func (e Election) withDefaults() Election {
 
 // Options configure the targeting manager.
 type Options struct {
-	Content                 targeting.ContentSource
-	MetricsAddr             string
+	Content     targeting.ContentSource
+	MetricsAddr string
+	// MetricsTLS is required when MetricsAddr serves (not "0").
+	MetricsTLS              *MetricsTLS
 	ProbeAddr               string
 	LeaderElection          bool
 	LeaderElectionNamespace string
@@ -182,9 +183,13 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if shutdown < 0 {
 		return nil, fmt.Errorf("shutdown timeout %s must be positive", shutdown)
 	}
+	metricsOpts, metricsCerts, err := metricsOptions(opts.MetricsAddr, opts.MetricsTLS)
+	if err != nil {
+		return nil, err
+	}
 	mopts := ctrl.Options{
 		Scheme:                  Scheme(),
-		Metrics:                 metricsserver.Options{BindAddress: opts.MetricsAddr},
+		Metrics:                 metricsOpts,
 		HealthProbeBindAddress:  opts.ProbeAddr,
 		LeaderElection:          opts.LeaderElection,
 		LeaderElectionID:        LeaderElectionID,
@@ -204,6 +209,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	mgr, err := ctrl.NewManager(cfg, mopts)
 	if err != nil {
 		return nil, err
+	}
+	if metricsCerts != nil {
+		if err := mgr.Add(certificateReloader{certs: metricsCerts}); err != nil {
+			return nil, err
+		}
 	}
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		return nil, err
