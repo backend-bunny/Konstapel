@@ -404,6 +404,22 @@ reads ([who can read signing keys](#who-can-read-signing-keys)). Any metric
 derived from these fields must label only by these fixed reasons and modes,
 never by run, key, Secret, or package.
 
+### Acceptance
+
+Signing is covered by the mandatory acceptance groups, against a real API
+server, the test-owned S3 service, disposable key Secrets, and the pinned
+Cosign:
+
+| Test | Group | Covers |
+| --- | --- | --- |
+| `TestLiveDestinationSigning` | storage | the documented key setup and destination example, admission, RBAC, and readiness |
+| `TestLiveSignedEvidenceDownload` | storage | the documented download and verification commands, signature authorization, key retirement, and a replaced signature object |
+| `TestLiveSignedPublicationWorkflow` | storage | full-binding and namespace packages, incomplete and diagnostic packages, rotation with a pending key dependency and a re-encrypted key, retention deletion of the signature, and an orphan handoff with its inventory. Every pair is verified offline with the trusted key and rejected with the other key. Bundles, public keys, digests, and Cosign output are kept as evidence. |
+| `TestLiveHelmDurableRecovery` | availability | on the Helm-installed image, the leader is removed while its signature upload is held, and again after the signature was stored with its response lost and the private key deleted. The successor finishes the same signed publication, uploading the signature only once. |
+
+`scripts/ci/test_acceptance.py` fails if any of these leaves its group.
+Each test removes only the Secrets and objects it created.
+
 ## Signature format
 
 `package.sigstore.json` is a Sigstore bundle v0.3

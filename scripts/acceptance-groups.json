@@ -39,7 +39,8 @@
       "TestLiveDestinationAPI",
       "TestLiveLegacyMigration",
       "TestLiveDestinationSigning",
-      "TestLiveSignedEvidenceDownload"
+      "TestLiveSignedEvidenceDownload",
+      "TestLiveSignedPublicationWorkflow"
     ]
   },
   "capabilities": {

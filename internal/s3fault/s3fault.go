@@ -9,6 +9,12 @@
 //     never delivered, and every later request is blackholed, so the
 //     package is committed and the leader cannot record the receipt.
 //
+// The target is the run's commit by default. Armed for the signature object
+// instead (PUT .../<run UID>/package.sigstore.json with If-None-Match: *),
+// the same modes interrupt signing: hold keeps the signature from ever being
+// stored while the leader is mid-upload, and after stores it but withholds
+// the response and blackholes everything else.
+//
 // Requests are forwarded with their Host header unchanged, so SigV4
 // signatures made for the proxy's address stay valid at the backend. A
 // held or blackholed request is never forwarded; on release it fails with
@@ -33,11 +39,22 @@ const (
 	ModeAfter = "after"
 )
 
+// Targets: which conditional create of the run a mode applies to.
+const (
+	TargetCommit    = "commit"
+	TargetSignature = "signature"
+)
+
+var targetObjects = map[string]string{TargetCommit: "commit.json", TargetSignature: "package.sigstore.json"}
+
 // State is what the proxy observed since it was last armed.
 type State struct {
 	Mode string `json:"mode"`
 	Run  string `json:"run,omitempty"`
-	// CommitArrivals counts the run's commit requests that reached the
+	// Target is the armed object: commit (the default) or signature. The
+	// Commit* counters count requests for that target.
+	Target string `json:"target,omitempty"`
+	// CommitArrivals counts the run's target requests that reached the
 	// proxy; CommitsHeld those held in hold mode or blackholed;
 	// CommitsForwarded those sent to the backend.
 	CommitArrivals   int `json:"commitArrivals"`
@@ -85,8 +102,12 @@ func (p *Proxy) logf(format string, args ...any) {
 }
 
 func (p *Proxy) isCommit(r *http.Request, run string) bool {
+	obj := targetObjects[p.st.Target]
+	if obj == "" {
+		obj = targetObjects[TargetCommit]
+	}
 	return run != "" && r.Method == http.MethodPut && r.Header.Get("If-None-Match") == "*" &&
-		strings.HasSuffix(r.URL.Path, "/"+run+"/commit.json")
+		strings.HasSuffix(r.URL.Path, "/"+run+"/"+obj)
 }
 
 // ServeHTTP is the S3 data path.
@@ -175,15 +196,19 @@ func (p *Proxy) forwardDiscarding(r *http.Request) int {
 }
 
 // Arm resets the observations and sets a mode for one run's commit.
-func (p *Proxy) Arm(mode, run string) {
+func (p *Proxy) Arm(mode, run string) { p.ArmTarget(mode, run, TargetCommit) }
+
+// ArmTarget resets the observations and sets a mode for one run's commit or
+// signature object.
+func (p *Proxy) ArmTarget(mode, run, target string) {
 	p.init()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	close(p.released)
 	p.released = make(chan struct{})
-	p.st = State{Mode: mode, Run: run}
+	p.st = State{Mode: mode, Run: run, Target: target}
 	p.fired = false
-	p.logf("armed %s for run %s", mode, run)
+	p.logf("armed %s for run %s (%s)", mode, run, target)
 }
 
 // SetBlackhole holds every further request until Release.
@@ -215,7 +240,7 @@ func (p *Proxy) Snapshot() State {
 	return p.st
 }
 
-// Control serves the test's controls: GET /state, POST /arm?mode=&run=,
+// Control serves the test's controls: GET /state, POST /arm?mode=&run=[&target=],
 // POST /blackhole and POST /release.
 func (p *Proxy) Control() http.Handler {
 	mux := http.NewServeMux()
@@ -224,12 +249,15 @@ func (p *Proxy) Control() http.Handler {
 		_ = json.NewEncoder(w).Encode(p.Snapshot())
 	})
 	mux.HandleFunc("POST /arm", func(w http.ResponseWriter, r *http.Request) {
-		mode, run := r.URL.Query().Get("mode"), r.URL.Query().Get("run")
-		if (mode != ModeHold && mode != ModeAfter && mode != ModePass) || (mode != ModePass && run == "") {
-			http.Error(w, "mode must be pass, hold or after, with a run UID", http.StatusBadRequest)
+		mode, run, target := r.URL.Query().Get("mode"), r.URL.Query().Get("run"), r.URL.Query().Get("target")
+		if target == "" {
+			target = TargetCommit
+		}
+		if (mode != ModeHold && mode != ModeAfter && mode != ModePass) || (mode != ModePass && run == "") || targetObjects[target] == "" {
+			http.Error(w, "mode must be pass, hold or after, with a run UID; target commit or signature", http.StatusBadRequest)
 			return
 		}
-		p.Arm(mode, run)
+		p.ArmTarget(mode, run, target)
 	})
 	mux.HandleFunc("POST /blackhole", func(http.ResponseWriter, *http.Request) { p.SetBlackhole() })
 	mux.HandleFunc("POST /release", func(http.ResponseWriter, *http.Request) { p.Release() })
