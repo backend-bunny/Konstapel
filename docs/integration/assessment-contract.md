@@ -713,6 +713,39 @@ scope and never broaden or shrink it.
 - Admission results (`process` other than background scan) describe the
   admitted object. They follow the same rule and get no special trust.
 
+## Metrics
+
+The assessment domain (`domain="assessment"`) publishes binding status and run
+records as Prometheus metrics. The [metrics guide](metrics.md) has the full
+contract, the state table and query examples.
+
+| Owner state | Metric |
+| --- | --- |
+| `status.assessment.current` counts | `konstapel_binding_assessment_checks{view="current", state}` and `konstapel_binding_assessment_complete{view="current"}`, with `konstapel_binding_assessment_status{view="current"}` = `known` or `no_targets` |
+| No current evaluation yet, stale scope, lost inventory, or counts that do not add up | `konstapel_binding_assessment_status{status="unknown"}` and no counts |
+| `current.oldestEvaluation` / `current.nextExpiry` | `konstapel_binding_oldest_evaluation_timestamp_seconds{view="current"}` / `konstapel_binding_current_evidence_expiry_timestamp_seconds`; at the expiry the current view becomes `unknown` until the owner evaluates again |
+| Latest closed full-binding run of this binding object, including incomplete and diagnostic closures | `view="latest_closed"` series, `konstapel_binding_snapshot_collection_started_timestamp_seconds`, `konstapel_binding_last_closed_timestamp_seconds`; with no closed run, `status="no_assessment"` |
+| Namespace-scope request runs | never the `latest_closed` view |
+| `schedule.outstandingSince`, else the first scheduled time after `lastScheduled` | `konstapel_binding_scheduled_due_timestamp_seconds` (absent while never planned) |
+| Effective `interval`, `maxEvidenceAge`, `collectionTimeout` | `konstapel_binding_assessment_interval_seconds`, `konstapel_binding_max_evidence_age_seconds`, `konstapel_binding_collection_timeout_seconds` |
+
+A Kyverno `warn` result is counted once, as `unknown`, never as a pass or a
+failure. Its raw outcome stays in the run's `evaluation.json` and in OSCAL.
+
+Limits on availability:
+
+- Only the elected leader publishes, after its cache syncs. It refreshes on
+  binding and run changes and every 30 seconds.
+- A binding whose assessment settings do not parse exposes no assessment series.
+- Status recorded by earlier controllers has no `oldestEvaluation` or
+  `outstandingSince`. Those series stay absent until the owner records them.
+
+Producer tests: `TestOwnerRecordsOldestSourceEvaluation`,
+`TestScheduledObligationsAreRecorded`, `TestLostCaptureLeavesObligationOutstanding`,
+`TestPublicationFailureAfterExportMeetsObligation`, `TestLatestClosedSelection`,
+`TestCurrentEvidenceExpiresAtOwnerDeadline`, `TestStalePassNeverCountsAsCurrentPass`,
+`TestWarnCountsOnceAsUnknown` and the live `TestLiveObservability`.
+
 ## Integration sequence
 
 1. This contract merges first. It needs no scheduler.

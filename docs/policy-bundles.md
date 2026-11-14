@@ -3230,6 +3230,25 @@ and the binding scenarios above. Thirteen safeguards were removed one at a
 time to confirm a test fails for each. Not verified: anything in a cluster,
 the field-selected watch against a real API server, and the RBAC above.
 
+## Metrics
+
+Bundle resolution (`domain="bundle_resolution"`) is observed only when bundle
+sources are enabled. The [metrics guide](integration/metrics.md) has the full
+contract.
+
+| Owner state | Metric |
+| --- | --- |
+| The sources Watcher's latest Sync read its configuration within two refresh intervals plus one read timeout | `konstapel_observation_ready{domain="bundle_resolution"} 1` |
+| No Sync yet, a failed read, or an older Sync | readiness `0`; the projection is withdrawn |
+| A missing or invalid sources ConfigMap | still a successful read: it shows in profile Conditions, not here |
+| Each resolution that rechecks retained evidence, retrieves, or fails before either | `konstapel_operation_attempts_total{operation="bundle_resolution", result}` and `konstapel_operation_duration_seconds` |
+| Reuse under a current acceptance, or a malformed request | not counted |
+
+Labels never carry repositories, digests, identities or error text. Counters
+are per replica and reset when the process restarts.
+
+Producer tests: `TestObserveAttempts`, `TestLastSync` and `TestBundleProjection`.
+
 ## Helm installation and live acceptance
 
 The runtime chart enables OCI bundle content with `bundles.sourcesConfigMap`

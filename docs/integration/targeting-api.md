@@ -535,6 +535,33 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
 - `EngineUnavailable`: check API server and aggregation health. It retries by
   itself.
 
+## Metrics
+
+The targeting domain (`domain="targeting"`) publishes these status fields as
+Prometheus metrics. The [metrics guide](metrics.md) has the full contract and
+query examples.
+
+| Owner state | Metric |
+| --- | --- |
+| `Resolved` and `EngineReady` observed for the current generation | `konstapel_binding_condition{condition, status}` one-hot `true` or `false` |
+| A condition missing, or observed for an older generation | that condition's `status="unknown"` |
+| `status.targetCount` observed for the current generation | `konstapel_binding_target_namespaces`, `0` for a known empty scope |
+| `targetCount` absent or stale | no `konstapel_binding_target_namespaces` series |
+| Binding creation | `konstapel_binding_created_timestamp_seconds`, the boundary for queries that span a recreated name |
+| `PolicyDelivery` / `Assessment` capability results | `konstapel_capability_condition{capability, status}`: available is `true`, missing API or denied access is `false`, a dependency that cannot be asked is `unknown` |
+
+Limits on availability:
+
+- Only the elected leader publishes, after its cache syncs. It refreshes on
+  every binding change and every 30 seconds.
+- A projection older than 2 minutes, or withdrawn because the cache cannot be
+  read, exposes no binding series and `konstapel_observation_ready{domain="targeting"} 0`.
+- Assessment reporting can be `false` while delivery is `true`; a binding's
+  `EngineReady` reflects delivery only.
+
+Producer tests: `TestBindingTargetingFromStatus`, `TestTargetingProjection`,
+`TestRefresher` and the live `TestLiveObservability`.
+
 ## Downstream contract
 
 These capabilities share the targeting contract:
