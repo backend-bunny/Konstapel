@@ -36,9 +36,9 @@ integration boundaries.
 
 ## 3. Authenticated metrics serving
 
-- [ ] 3.1 Integrate the manager's authenticated TLS metrics server with certificate reload and the existing controller-runtime filter; test authorized/unauthorized scrapes, invalid CA/server identity, rotated certificates and passive behavior during dependency outages.
+- [x] 3.1 Integrate the manager's authenticated TLS metrics server with certificate reload and the existing controller-runtime filter; test authorized/unauthorized scrapes, invalid CA/server identity, rotated certificates and passive behavior during dependency outages.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
-- [ ] 3.2 Add narrowly scoped reader RBAC for configured monitoring ServiceAccounts and reuse controller TokenReview/SubjectAccessReview permissions; test namespace roles cannot scrape and revoked access stops within the pinned authentication/authorization cache bounds.
+- [x] 3.2 Add narrowly scoped reader RBAC for configured monitoring ServiceAccounts and reuse controller TokenReview/SubjectAccessReview permissions; test namespace roles cannot scrape and revoked access stops within the pinned authentication/authorization cache bounds.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
 - [ ] 3.3 Document metrics access, token rotation, filter cache durations and Prometheus authorization options; verify the documented setup using a monitoring identity in another namespace and an Operator configuration that exercises its credential-access policy.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
