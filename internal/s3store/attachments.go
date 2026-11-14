@@ -487,7 +487,7 @@ func (a *AttachmentStore) ownedAttempt(ctx context.Context, dir string, ref atta
 // prefix by attempt directory. Objects not inside a directory are unowned.
 func (a *AttachmentStore) attemptDirs(ctx context.Context, ref attachments.Ref) (map[string][]objectVersion, error) {
 	prefix := a.prefix(ref) + "attempts/"
-	objects, err := a.pub().listVersions(ctx, prefix)
+	objects, err := a.listRaw(ctx, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list attempts: %v", attachments.ErrUnavailable, sanitize(err))
 	}
@@ -501,6 +501,34 @@ func (a *AttachmentStore) attemptDirs(ctx context.Context, ref attachments.Ref) 
 		dirs[prefix+rest[:i+1]] = append(dirs[prefix+rest[:i+1]], o)
 	}
 	return dirs, nil
+}
+
+// listRaw lists every object version and delete marker under prefix with
+// its raw version ID ("null" kept, so a suspended bucket's null version is
+// deleted permanently rather than hidden behind a new marker), or the
+// current objects on services without version listing.
+func (a *AttachmentStore) listRaw(ctx context.Context, prefix string) ([]objectVersion, error) {
+	var out []objectVersion
+	in := &s3.ListObjectVersionsInput{Bucket: aws.String(a.Dest.Bucket), Prefix: aws.String(prefix)}
+	for {
+		page, err := a.Client.ListObjectVersions(ctx, in)
+		if err != nil {
+			if len(out) > 0 {
+				return nil, err
+			}
+			return a.pub().listCurrent(ctx, prefix)
+		}
+		for _, v := range page.Versions {
+			out = append(out, objectVersion{aws.ToString(v.Key), aws.ToString(v.VersionId)})
+		}
+		for _, m := range page.DeleteMarkers {
+			out = append(out, objectVersion{aws.ToString(m.Key), aws.ToString(m.VersionId)})
+		}
+		if !aws.ToBool(page.IsTruncated) {
+			return out, nil
+		}
+		in.KeyMarker, in.VersionIdMarker = page.NextKeyMarker, page.NextVersionIdMarker
+	}
 }
 
 func (a *AttachmentStore) deleteVersions(ctx context.Context, versions []objectVersion) []string {
@@ -643,7 +671,7 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 		}
 	}
 	problems = append(problems, a.abortUploads(ctx, r.Ref, time.Time{})...)
-	commits, err := a.pub().listVersions(ctx, r.ManifestKey)
+	commits, err := a.listRaw(ctx, r.ManifestKey)
 	if err != nil {
 		problems = append(problems, fmt.Sprintf("list commit versions: %v", sanitize(err)))
 	}
@@ -658,7 +686,7 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 		problems = append(problems, a.deleteVersions(ctx, own)...)
 	}
 	if len(problems) == 0 {
-		if left, err := a.pub().listVersions(ctx, r.ManifestKey); err != nil {
+		if left, err := a.listRaw(ctx, r.ManifestKey); err != nil {
 			problems = append(problems, fmt.Sprintf("verify deletion: %v", sanitize(err)))
 		} else {
 			for _, v := range left {

@@ -250,6 +250,26 @@ record's losing attempts are removed the same way. Only attempt directories
 whose records name this attachment are removed. Other objects under the
 prefix, and other attachments' prefixes, are never touched.
 
+**Tested compatibility.** `scripts/s3-compat.sh` runs
+`TestAttachmentStoreCompatibility` alongside the publisher suite. It uses the
+same pinned, test-owned RustFS service (`KONSTAPEL_S3_IMAGE`) in each
+versioning mode: unversioned, enabled and suspended. In each mode it checks:
+
+- mismatched bytes are rejected;
+- three concurrent writers, one of which loses its commit response, converge
+  on one commitment;
+- a retry with another retention returns the first commitment, and another
+  spec conflicts;
+- health checks pass;
+- owned attempt and multipart cleanup leaves the unrelated object;
+- deletion is refused before expiry;
+- full owned deletion at expiry removes null versions and delete markers in
+  a suspended bucket.
+
+On 2026-11-14 it passed against
+`docker.io/rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b`.
+This makes no claim about AWS S3 or Object Lock.
+
 The transfer service is not implemented yet (task group 3). Until it is,
 nothing in a release writes documents; the S3 adapter
 (`internal/s3store.AttachmentStore`) and this status contract are what it
