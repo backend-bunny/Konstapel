@@ -36,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/yaml"
@@ -250,10 +251,16 @@ func TestLiveDestinationAPI(t *testing.T) {
 
 	// A forged actor is replaced by the authenticated requester.
 	got := &v1alpha1.EvidenceDestination{}
-	_ = adminC.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
-	got.Spec.DeletionPolicy = v1alpha1.DeletionOrphan
-	got.Spec.Orphan = &v1alpha1.OrphanRequest{Reason: "bucket handed to the archive team", Actor: "someone-else"}
-	if err := adminC.Update(l.ctx, got); err != nil {
+	// The controller writes the destination's status (readiness, signing
+	// readiness) concurrently, so the update re-reads on a conflict.
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := adminC.Get(l.ctx, client.ObjectKeyFromObject(ed), got); err != nil {
+			return err
+		}
+		got.Spec.DeletionPolicy = v1alpha1.DeletionOrphan
+		got.Spec.Orphan = &v1alpha1.OrphanRequest{Reason: "bucket handed to the archive team", Actor: "someone-else"}
+		return adminC.Update(l.ctx, got)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
