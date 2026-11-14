@@ -106,7 +106,10 @@ func TestLiveHelmMetrics(t *testing.T) {
 		body = b
 		return err == nil && code == http.StatusOK, toJSON(map[string]any{"code": code, "err": err})
 	})
-	for _, want := range []string{"konstapel_observation_enabled", "konstapel_observation_ready", "konstapel_operation_attempts_total", "controller_runtime_reconcile_total", "process_cpu_seconds_total"} {
+	// Families every replica exposes: the forwarded pod may be a follower,
+	// which runs no controllers and has no reconcile series.
+	for _, want := range []string{"konstapel_observation_enabled", "konstapel_observation_ready", "konstapel_operation_attempts_total",
+		"rest_client_requests_total", "go_goroutines", "process_cpu_seconds_total"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("scrape lacks %s", want)
 		}
