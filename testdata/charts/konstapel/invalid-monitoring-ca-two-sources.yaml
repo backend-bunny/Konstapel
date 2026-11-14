@@ -1,0 +1,10 @@
+# expect: choose one CA source
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    tls:
+      ca:
+        secret: {name: a}
+        file: /etc/ca.crt

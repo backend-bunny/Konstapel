@@ -1,0 +1,10 @@
+# expect: for
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  prometheusRule:
+    enabled: true
+    groups:
+      g:
+        rules:
+          A: {expr: x, for: soon}

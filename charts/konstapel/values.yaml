@@ -112,3 +112,62 @@ metrics:
     # namespace with tls.crt, tls.key and ca.crt covering
     # konstapel-controller-metrics.<namespace>.svc.
     secretName: ""
+  # Optional Prometheus Operator integrations (docs/charts.md, "Monitoring
+  # integration"). Each needs metrics.enabled and, when enabled, its own
+  # monitoring.coreos.com/v1 API (helm template: --api-versions
+  # monitoring.coreos.com/v1/ServiceMonitor, .../PrometheusRule). Neither
+  # chart installs Prometheus, the Operator or their CRDs.
+  serviceMonitor:
+    enabled: false
+    # Labels your Prometheus's serviceMonitorSelector requires, for example
+    # {release: kube-prometheus-stack}. The Prometheus's
+    # serviceMonitorNamespaceSelector must also admit the release namespace.
+    labels: {}
+    # Scrape timing; the timeout must be shorter than the interval, and the
+    # interval at most 2m so the starter alerts' 5m windows hold.
+    interval: 30s
+    scrapeTimeout: 10s
+    # Name verified against the serving certificate; default is the metrics
+    # Service name, namespace and .svc.
+    serverName: ""
+    tls:
+      # Where the CA that verifies the metrics certificate comes from: the
+      # Secret of the active TLS mode (ca.crt), or one you name here. Set one
+      # of secret, configMap or file.
+      ca:
+        secret: {name: "", key: ca.crt}
+        configMap: {name: "", key: ca.crt}
+        file: ""
+    # How Prometheus presents a token for the reader ServiceAccount.
+    #   serviceAccountToken: its own mounted token file (bearerTokenFile, the
+    #     only file-based option the ServiceMonitor API offers; it needs an
+    #     Operator that permits file access from ServiceMonitors).
+    #   secret: a Secret in the release namespace holding a token, which the
+    #     Operator reads (works where file access is denied; you create and
+    #     rotate it).
+    authorization:
+      mode: serviceAccountToken
+      secret: {name: "", key: token}
+  # Rules are rendered from groups; the chart ships no group of its own yet
+  # (starter alerts come with add-prometheus-observability group 5), so
+  # enabling this renders nothing until a group with an enabled rule exists.
+  #   groups:
+  #     <group-name>:
+  #       enabled: true
+  #       interval: 1m
+  #       rules:
+  #         <AlertName>: {enabled: true, expr: "...__scope__...", for: 10m,
+  #                       threshold: 1, severity: warning, runbookURL: https://..}
+  # In expr, __scope__ becomes the scrape-scope matchers and __threshold__ the
+  # rule's threshold. Maps merge across value files, so one rule can be tuned
+  # alone: --set metrics.prometheusRule.groups.<g>.rules.<A>.for=15m.
+  prometheusRule:
+    enabled: false
+    labels: {}
+    runbookBaseURL: ""
+    # Label matchers that select this release's scraped series. Empty means
+    # the ServiceMonitor's target labels: job, namespace and release instance.
+    # Set them for an externally configured scrape job. Exact values only.
+    scope:
+      matchers: {}
+    groups: {}

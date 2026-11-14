@@ -304,7 +304,9 @@
       "required": [
         "enabled",
         "readers",
-        "tls"
+        "tls",
+        "serviceMonitor",
+        "prometheusRule"
       ],
       "properties": {
         "enabled": {
@@ -345,6 +347,264 @@
               "type": "string",
               "maxLength": 253,
               "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+            }
+          }
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "labels",
+            "interval",
+            "scrapeTimeout",
+            "tls",
+            "authorization"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 63,
+                "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
+              },
+              "propertyNames": {
+                "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$",
+                "maxLength": 253
+              }
+            },
+            "interval": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m)$",
+              "description": "Scrape interval: whole seconds or minutes."
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m)$",
+              "description": "Scrape timeout, shorter than interval."
+            },
+            "serverName": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+            },
+            "tls": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ca": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "secret": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+                        },
+                        "key": {
+                          "type": "string",
+                          "maxLength": 253,
+                          "pattern": "^[-._a-zA-Z0-9]+$"
+                        }
+                      }
+                    },
+                    "configMap": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+                        },
+                        "key": {
+                          "type": "string",
+                          "maxLength": 253,
+                          "pattern": "^[-._a-zA-Z0-9]+$"
+                        }
+                      }
+                    },
+                    "file": {
+                      "type": "string",
+                      "maxLength": 1024,
+                      "pattern": "^(/[^\\s]+)?$"
+                    }
+                  }
+                }
+              }
+            },
+            "authorization": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "serviceAccountToken",
+                    "secret"
+                  ]
+                },
+                "secret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+                    },
+                    "key": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^[-._a-zA-Z0-9]+$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "prometheusRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "labels",
+            "runbookBaseURL",
+            "scope",
+            "groups"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 63,
+                "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
+              },
+              "propertyNames": {
+                "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$",
+                "maxLength": 253
+              }
+            },
+            "runbookBaseURL": {
+              "type": "string",
+              "maxLength": 2048,
+              "pattern": "^(https://[^\\s]+)?$"
+            },
+            "scope": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "matchers": {
+                  "type": "object",
+                  "maxProperties": 8,
+                  "propertyNames": {
+                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+                    "maxLength": 63
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 253,
+                    "pattern": "^[A-Za-z0-9_.:/-]+$"
+                  }
+                }
+              }
+            },
+            "groups": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+                "maxLength": 63
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "interval": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*(s|m|h|d)$"
+                  },
+                  "rules": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                      "maxLength": 128
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "expr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "for": {
+                          "type": "string",
+                          "pattern": "^(0s|[1-9][0-9]*(s|m|h|d))$"
+                        },
+                        "threshold": {
+                          "type": "number"
+                        },
+                        "severity": {
+                          "enum": [
+                            "info",
+                            "warning",
+                            "critical"
+                          ]
+                        },
+                        "labels": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "maxLength": 63,
+                            "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
+                          },
+                          "propertyNames": {
+                            "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$",
+                            "maxLength": 253
+                          }
+                        },
+                        "annotations": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "maxLength": 2048
+                          }
+                        },
+                        "runbookURL": {
+                          "type": "string",
+                          "maxLength": 2048,
+                          "pattern": "^(https://[^\\s]+)?$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }

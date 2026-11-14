@@ -1,0 +1,5 @@
+# expect: does not serve
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
