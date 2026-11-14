@@ -6,8 +6,9 @@ coverage projection contract and scoped assessment producer. Shared schema,
 transport, and chart extensions go through their existing owners after rebasing.
 These tasks implement platform-only attachments. Application-team self-service
 is recorded under Future Development below, without implementation checkboxes.
-The SeaweedFS fixture in group 6 can start alongside group 1 and supplies the real
-local S3 endpoint for groups 2 and 3; it does not wait for package integration.
+The existing RustFS fixture (group 6 reuses it; no second S3 implementation is
+added) supplies the real local S3 endpoint for groups 2 and 3; it does not wait
+for package integration.
 
 ## 1. Attachment API and authority
 
@@ -68,11 +69,11 @@ local S3 endpoint for groups 2 and 3; it does not wait for package integration.
 - [ ] 5.5 Document report interpretation and producer/reader compatibility rollout; verify old packages remain readable, unknown protected versions fail closed, and rollback retains compatible download/cleanup service for existing commitments.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
-## 6. SeaweedFS local development
+## 6. RustFS local development
 
-- [ ] 6.1 Add or extend the S3 owner's disposable development helper with a pinned SeaweedFS container/S3 gateway, local credentials, bucket/prefix, and owned volume; verify start/stop commands use existing Devbox tooling and leave production Helm dependencies unchanged.
+- [ ] 6.1 Reuse and, where needed, extend the S3 owner's disposable development helper (the digest-pinned RustFS in scripts/runtime.env used by s3-compat.sh) with attachment local credentials, bucket/prefix, and owned volume; verify start/stop commands use existing Devbox tooling, leave production Helm dependencies unchanged, and add no second S3 image.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.2 Run the shared conditional-create, commit-time, checksum/readback, concurrency/recovery, and cleanup compatibility suite against that SeaweedFS pin; record supported versioning modes and reject missing required semantics without claiming untested AWS or Object Lock support.
+- [ ] 6.2 Run the shared conditional-create, commit-time, checksum/readback, concurrency/recovery, and cleanup compatibility suite against the existing RustFS pin; record its version and the supported versioning modes (the S3 change's three) and reject missing required semantics without claiming untested AWS or Object Lock support.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 6.3 Document the local registration/upload/capture/download workflow and safe teardown in development and supporting-evidence guides; verify the production S3 adapter handles the fixture with no alternate filesystem backend or one-task-per-script expansion.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
@@ -81,11 +82,11 @@ local S3 endpoint for groups 2 and 3; it does not wait for package integration.
 
 - [ ] 7.1 Integrate generated CRD/RBAC/admission and service settings into the existing aligned charts and controller startup through their owners; verify chart generation, permissions, serving readiness, and reader authorization are deployed before protected-document writers are enabled.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 7.2 Run full attachment/coverage/assessment acceptance with real S3 service and namespace/platform credentials using SeaweedFS; verify upload, multi-binding association, validity, independently authorized downloads, namespace confidentiality, and independent source/package retention.
+- [ ] 7.2 Run full attachment/coverage/assessment acceptance with real S3 service and namespace/platform credentials using the RustFS fixture; verify upload, multi-binding association, validity, independently authorized downloads, namespace confidentiality, and independent source/package retention.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
 - [ ] 7.3 Exercise replica/leader loss, interrupted upload, lost commit response, unavailable source storage, withdrawal during capture, and denied cleanup across the integrated workflow; verify durable recovery, unchanged historical bytes, and truthful unavailable states.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 7.4 Run appropriate existing Devbox/Task checks, generated-schema/package regressions, and strict OpenSpec validation; retain sanitized test/compatibility evidence and remove task-owned SeaweedFS containers/volumes, credentials, prefixes, clusters, and processes.
+- [ ] 7.4 Run appropriate existing Devbox/Task checks, generated-schema/package regressions, and strict OpenSpec validation; retain sanitized test/compatibility evidence and remove task-owned RustFS containers/volumes, credentials, prefixes, clusters, and processes.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## Future Development

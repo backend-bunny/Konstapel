@@ -24,8 +24,9 @@ their validity, historical bytes, and access boundaries.
 - Reuse the S3 change's storage configuration, authorization infrastructure, and
   tested object semantics through an attachment-specific storage boundary.
   Do not manufacture assessment runs to store source documents.
-- Use SeaweedFS's S3 endpoint for disposable local development and integration
-  fixtures, with recorded versions, compatibility checks, and teardown.
+- Reuse the repository's existing disposable RustFS S3 fixture for local
+  development and integration tests, with recorded versions, compatibility
+  checks, and teardown. No second S3 implementation is added.
 
 ## Capabilities
 
