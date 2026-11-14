@@ -316,6 +316,20 @@ After signature verification, existing bounded extraction, descriptor/file check
 and expected-scope inspection still apply. No new custom crypto or verification
 protocol is required.
 
+Implemented (group 4): the companion routes are
+`/v1/namespaces/<ns>/assessmentrequests/<name>/signature?uid=` and
+`/v1/assessmentruns/<uid>/signature`. They ask exactly the SubjectAccessReviews
+of the matching `/download` route, so no new RBAC verb or subresource is
+added. For a signed publication, each route first downloads and checks the
+archive, then the pair: the receipt, the stored commit, and the run's signing
+intent must name the same signature object and key, and the stored bundle
+must have the recorded digest and verify under the intent's retained public
+key. Only then is either artifact served. A missing bundle is 503 and an
+invalid one 502, and the archive is never served as unsigned. The signature
+route answers an unsigned publication with 404 and `X-Konstapel-Signing:
+unsigned`. Responses carry the key fingerprint, never the Secret name. The
+download server reads no Secrets for this.
+
 Alternative: requiring a live controller or current key Secret for verification
 defeats evidence portability. Public keys arriving with an untrusted package alone
 cannot authenticate its source.

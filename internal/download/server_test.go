@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	pubfake "github.com/backend-bunny/Konstapel/internal/publication/fake"
 )
@@ -87,7 +88,12 @@ func scheme() *runtime.Scheme {
 
 // newEnv publishes the namespace-complete fixture as team "dev"'s request
 // "nightly" and the binding-no-targets fixture as a platform run.
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvSigned(t, nil) }
+
+// newEnvSigned is newEnv, with both packages published signed under signer
+// (when set) as the controller does: the bundle is stored before a Required
+// commit, and each run records its frozen intent and the signed receipt.
+func newEnvSigned(t *testing.T, signer *evidencesign.SecretSigner) *env {
 	e := &env{t: t, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)}
 	e.pub = pubfake.New(func() time.Time { return e.now })
 	commit := func(dir string) (publication.RunRef, v1alpha1.PublicationStatus, string) {
@@ -99,8 +105,20 @@ func newEnv(t *testing.T) *env {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r, err := e.pub.Publish(context.Background(), publication.PublishRequest{Staged: s,
-			Retention: publication.Retention{Duration: "24h", BindingConfiguration: "g1", SelectedAt: e.now}})
+		req := publication.PublishRequest{Staged: s, Retention: publication.Retention{Duration: "24h", BindingConfiguration: "g1", SelectedAt: e.now}}
+		if signer != nil {
+			digest, _ := evidencesign.ParseArchiveDigest(s.PackageSHA256)
+			sig, err := signer.Sign(context.Background(), digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := e.pub.StoreSignature(context.Background(), d.Run, sig.Bundle); err != nil {
+				t.Fatal(err)
+			}
+			pub := signer.PublicKey()
+			req.Signing = &publication.Signing{Mode: publication.SigningRequired, PublicKeyPEM: pub.PEM, KeyFingerprint: pub.Fingerprint}
+		}
+		r, err := e.pub.Publish(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,6 +135,14 @@ func newEnv(t *testing.T) *env {
 	}
 	nsRunObj := run("nightly-run", nsRef, nsPub, nsDigest, v1alpha1.RunScopeNamespace, &v1alpha1.RequestReference{Namespace: "dev", Name: "nightly", UID: "req-uid"}, "uid-dev")
 	platRunObj := run("scheduled-run", platRef, platPub, platDigest, v1alpha1.RunScopeBinding, nil, "")
+	if signer != nil {
+		pub := signer.PublicKey()
+		for _, r := range []*v1alpha1.AssessmentRun{nsRunObj, platRunObj} {
+			r.Status.SigningIntent = &v1alpha1.SigningIntent{Mode: v1alpha1.SigningRequired, DestinationUID: "uid-primary", DestinationGeneration: 1,
+				SecretName: "konstapel-evidence-signing-2026-11", ArchiveSHA256: r.Status.Publication.PackageSHA256, PreparedAt: metav1.NewTime(e.now),
+				Key: &v1alpha1.SigningKey{Fingerprint: pub.Fingerprint, Algorithm: pub.Algorithm, PublicKey: string(pub.PEM), PinnedAt: metav1.NewTime(e.now)}}
+		}
+	}
 	req := &v1alpha1.AssessmentRequest{ObjectMeta: metav1.ObjectMeta{Namespace: "dev", Name: "nightly", UID: "req-uid"},
 		Spec: v1alpha1.AssessmentRequestSpec{BindingRef: v1alpha1.BindingReference{Name: "audit-all"}},
 		Status: v1alpha1.AssessmentRequestStatus{Phase: v1alpha1.RequestCompleted, NamespaceUID: "uid-dev",
