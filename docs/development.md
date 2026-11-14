@@ -198,6 +198,13 @@ checksum in `scripts/runtime.env`, and fetched by `scripts/fetch-chart.sh
 cert-manager`; `task deps:check` verifies the pin. Renovate updates the
 version and checksum together.
 
+The Prometheus Operator release whose `ServiceMonitor` and `PrometheusRule`
+CRDs the chart tests validate rendered objects against is pinned by
+`KONSTAPEL_PROMETHEUS_OPERATOR_VERSION` and a checksum of the vendored CRDs
+(`testdata/charts/prometheus-operator`) in `scripts/runtime.env`. Renovate
+proposes the version; `scripts/fetch-operator-crds.sh --refresh` renews the
+files and prints the checksum, and `task deps:check` fails until they agree.
+
 Kyverno chart and CLI updates are grouped. `task deps:check` verifies the chart's
 actual `appVersion` against the CLI pin and verifies the chart archive checksum.
 Update failures must be resolved with compatible pins, not by disabling the

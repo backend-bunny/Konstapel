@@ -1,0 +1,7 @@
+# expect: must not set app.kubernetes.io/instance
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels: {app.kubernetes.io/instance: other}

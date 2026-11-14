@@ -303,6 +303,28 @@ for incompatible option checks and safe bounded configuration. A ServiceMonitor
 is owned by the controller release, not the CRD chart. Extend certificate/config
 templates only after rebasing onto the Helm implementation.
 
+As implemented (group 4):
+
+- The ServiceMonitor selects by `app.kubernetes.io/name`, `instance` (release)
+  and `component=controller-metrics` within the release namespace, and copies
+  the release onto targets with `targetLabels`. The CA is a Secret (or
+  ConfigMap) reference to the certificate Secret's `ca.crt`, so no file access
+  is needed in either certificate mode; `tls.ca.file` is an explicit
+  alternative. Authorization is `mode: serviceAccountToken` (`bearerTokenFile`,
+  the only file option of the ServiceMonitor API, deprecated upstream and
+  rejected by Operators that deny file access) or `mode: secret`
+  (`authorization.credentials`). `insecureSkipVerify` is not offered.
+- Scrape `interval` is at most 2m (validated with a shorter timeout) so the
+  5m availability windows contain several scrapes.
+- `metrics.prometheusRule.groups` is a map of group to rule maps, so a rule is
+  tuned with one value; `expr` may use `__scope__` (exact-match release or
+  external-job matchers; no regular expressions) and `__threshold__`. The chart
+  ships no rule yet: enabling it renders a PrometheusRule only when a group
+  has an enabled rule. Group 5 adds the seven starter rules as default values.
+- Tests validate rendered objects against the vendored CRDs of the Operator
+  version pinned in `scripts/runtime.env` (checksum-verified by
+  `task deps:check`).
+
 ### 7. Ship conservative configurable rules with an availability prerequisite
 
 Starter rules are opt-in as a group and individually configurable. Use warning

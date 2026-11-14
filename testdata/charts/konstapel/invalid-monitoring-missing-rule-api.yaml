@@ -1,0 +1,5 @@
+# expect: PrometheusRule API
+metrics:
+  enabled: true
+  prometheusRule:
+    enabled: true

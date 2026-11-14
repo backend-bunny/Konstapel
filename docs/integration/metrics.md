@@ -17,8 +17,9 @@ access and the revocation bounds.
 
 Targeting, assessment, evidence storage and, with bundle sources enabled,
 bundle resolution publish projections; see [Producers](#producers). The
-optional ServiceMonitor and PrometheusRule (group 4) and the starter alerts
-(group 5) come later.
+optional ServiceMonitor and PrometheusRule are described in
+[Monitoring integration](../charts.md#monitoring-integration); the starter
+alerts (group 5) come later.
 
 ## Rules of the contract
 

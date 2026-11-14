@@ -103,6 +103,7 @@ Authenticated controller metrics (docs/charts.md, "Controller metrics").
 {{- if and $m.enabled (eq .Values.tls.mode "secret") (not $m.tls.secretName) -}}
 {{- fail "metrics.tls.secretName is required with tls.mode=secret: a kubernetes.io/tls Secret with tls.crt, tls.key and ca.crt for konstapel-controller-metrics.<namespace>.svc" -}}
 {{- end -}}
+{{- include "konstapel.validateMonitoring" . -}}
 {{- end }}
 
 {{/* The Secret holding the metrics server's tls.crt, tls.key, and ca.crt. */}}
@@ -112,4 +113,97 @@ Authenticated controller metrics (docs/charts.md, "Controller metrics").
 {{- else -}}
 konstapel-controller-metrics-tls
 {{- end -}}
+{{- end }}
+
+{{- define "konstapel.durationSeconds" -}}
+{{- if hasSuffix "m" . -}}{{ mul (trimSuffix "m" . | int64) 60 }}{{- else -}}{{ trimSuffix "s" . | int64 }}{{- end -}}
+{{- end }}
+
+{{/*
+Optional Prometheus Operator integrations (docs/charts.md, "Monitoring
+integration"). Both need metrics.enabled and, when enabled, their own API.
+*/}}
+{{- define "konstapel.validateMonitoring" -}}
+{{- $m := .Values.metrics -}}
+{{- $sm := $m.serviceMonitor -}}
+{{- $pr := $m.prometheusRule -}}
+{{- if and (or $sm.enabled $pr.enabled) (not $m.enabled) -}}
+{{- fail "metrics.serviceMonitor and metrics.prometheusRule monitor the metrics endpoint: set metrics.enabled, or leave both disabled" -}}
+{{- end -}}
+{{- if and $sm.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}
+{{- fail "metrics.serviceMonitor.enabled needs the monitoring.coreos.com/v1 ServiceMonitor API, which this cluster does not serve: install the Prometheus Operator CRDs (the chart never does), or disable it; offline helm template needs --api-versions monitoring.coreos.com/v1/ServiceMonitor" -}}
+{{- end -}}
+{{- if and $pr.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule")) -}}
+{{- fail "metrics.prometheusRule.enabled needs the monitoring.coreos.com/v1 PrometheusRule API, which this cluster does not serve: install the Prometheus Operator CRDs (the chart never does), or disable it; offline helm template needs --api-versions monitoring.coreos.com/v1/PrometheusRule" -}}
+{{- end -}}
+{{- range $key, $labels := dict "metrics.serviceMonitor.labels" $sm.labels "metrics.prometheusRule.labels" $pr.labels -}}
+{{- range $k, $_ := $labels -}}
+{{- if hasPrefix "app.kubernetes.io/" $k -}}
+{{- fail (printf "%s must not set %s: the chart owns the app.kubernetes.io labels that scope this release" $key $k) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $sm.enabled -}}
+{{- $interval := include "konstapel.durationSeconds" $sm.interval | int64 -}}
+{{- $timeout := include "konstapel.durationSeconds" $sm.scrapeTimeout | int64 -}}
+{{- if ge $timeout $interval -}}
+{{- fail (printf "metrics.serviceMonitor.scrapeTimeout (%s) must be shorter than metrics.serviceMonitor.interval (%s)" $sm.scrapeTimeout $sm.interval) -}}
+{{- end -}}
+{{- if gt $interval 120 -}}
+{{- fail (printf "metrics.serviceMonitor.interval (%s) must be at most 2m: Prometheus marks series stale after 5m and the alert windows assume several scrapes" $sm.interval) -}}
+{{- end -}}
+{{- $ca := $sm.tls.ca | default dict -}}
+{{- $set := list -}}
+{{- if ($ca.secret | default dict).name -}}{{- $set = append $set "secret" -}}{{- end -}}
+{{- if ($ca.configMap | default dict).name -}}{{- $set = append $set "configMap" -}}{{- end -}}
+{{- if $ca.file -}}{{- $set = append $set "file" -}}{{- end -}}
+{{- if gt (len $set) 1 -}}
+{{- fail (printf "metrics.serviceMonitor.tls.ca sets %s: choose one CA source" (join ", " $set)) -}}
+{{- end -}}
+{{- $az := $sm.authorization -}}
+{{- if and (eq $az.mode "secret") (not ($az.secret | default dict).name) -}}
+{{- fail "metrics.serviceMonitor.authorization.secret.name is required with authorization.mode=secret" -}}
+{{- end -}}
+{{- if and (eq $az.mode "serviceAccountToken") ($az.secret | default dict).name -}}
+{{- fail "metrics.serviceMonitor.authorization.secret.name conflicts with authorization.mode=serviceAccountToken: set mode=secret to use the Secret" -}}
+{{- end -}}
+{{- end -}}
+{{- if $pr.enabled -}}
+{{- range $gname, $g := $pr.groups -}}
+{{- range $rname, $r := $g.rules -}}
+{{- if and (ne ($r.enabled | toString) "false") -}}
+{{- if not $r.expr -}}
+{{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s has no expr" $gname $rname) -}}
+{{- end -}}
+{{- if and (contains "__threshold__" $r.expr) (not (hasKey $r "threshold")) -}}
+{{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s.expr uses __threshold__ but sets no threshold" $gname $rname) -}}
+{{- end -}}
+{{- range $k, $_ := ($r.labels | default dict) -}}
+{{- if or (eq $k "severity") (eq $k "alertname") -}}
+{{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s.labels must not set %s: use the severity field" $gname $rname $k) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Exact label matchers selecting this release's scraped series. */}}
+{{- define "konstapel.metricsScope" -}}
+{{- $pr := .Values.metrics.prometheusRule -}}
+{{- $m := dict -}}
+{{- if $pr.scope.matchers -}}
+{{- $m = $pr.scope.matchers -}}
+{{- else -}}
+{{- $m = dict "job" "konstapel-controller-metrics" "namespace" .Release.Namespace -}}
+{{- if .Values.metrics.serviceMonitor.enabled -}}
+{{- $_ := set $m "app_kubernetes_io_instance" .Release.Name -}}
+{{- end -}}
+{{- end -}}
+{{- $parts := list -}}
+{{- range $k := keys $m | sortAlpha -}}
+{{- $parts = append $parts (printf "%s=%s" $k (get $m $k | toJson)) -}}
+{{- end -}}
+{{- join "," $parts -}}
 {{- end }}

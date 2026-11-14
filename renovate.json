@@ -43,6 +43,17 @@
     },
     {
       "customType": "regex",
+      "description": "Prometheus Operator release whose CRDs the chart tests validate against; refresh the vendored CRDs with scripts/fetch-operator-crds.sh --refresh",
+      "managerFilePatterns": [
+        "/^scripts/runtime\\.env$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=github-releases depName=(?<depName>\\S+)\\nKONSTAPEL_PROMETHEUS_OPERATOR_VERSION=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
       "description": "Digest-pinned disposable cluster and workload images",
       "managerFilePatterns": [
         "/^scripts/runtime\\.env$/"
