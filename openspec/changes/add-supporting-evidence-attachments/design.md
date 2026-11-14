@@ -21,7 +21,7 @@ while preserving platform-only document management in the first version.
 
 **Goals:** Authenticated passive-document intake; durable immutable source bytes;
 exact associations; validity independent of retention; confidential package
-copies; a reproducible SeaweedFS development workflow.
+copies; a reproducible local development workflow on the existing RustFS fixture.
 
 **Non-Goals:** Team uploads, direct bucket credentials for users, fetching supplied
 URLs, text extraction/OCR, scanner-result ingestion, control verdicts, approval
@@ -224,20 +224,22 @@ uses recorded package protection, so historical downloads do not depend on the
 source record still existing. Do not silently redact an immutable platform archive
 at download time; deny the request if its reader lacks the additional grant.
 
-### 6. Use SeaweedFS for local development, with measured compatibility
+### 6. Use the existing RustFS fixture for local development, with measured compatibility
 
-Provide a disposable SeaweedFS deployment exposing its S3 gateway, with a pinned
-container version/digest, isolated local credentials, bucket, data volume, and
-test-owned prefix. Pin and document the version when implementing the fixture;
-this proposal does not claim a tested SeaweedFS release. Use the existing Devbox
-and Docker/Task conventions, and route all controller/CLI traffic through the
-same S3 adapter configured for production. Do not add a filesystem-only attachment
-backend for tests or ship SeaweedFS in the Konstapel production Helm chart.
+Reuse the S3 owner's disposable RustFS deployment (the digest-pinned image in
+`scripts/runtime.env` that `scripts/s3-compat.sh` and the live acceptance groups
+already use), with isolated local credentials, bucket, data volume, and
+test-owned prefix. Record the pinned version in the evidence. Use the existing
+Devbox and Docker/Task conventions, and route all controller/CLI traffic through
+the same S3 adapter configured for production. Do not add a second S3
+implementation, a filesystem-only attachment backend for tests, or ship RustFS in
+the Konstapel production Helm chart.
 
 Verify conditional manifest creation, immutable commit timestamps, checksum or
 readback verification, concurrent/lost-response recovery, multipart cleanup when
 used, and owned deletion. Exercise supported versioning modes and explicitly
-mark others unsupported; local SeaweedFS success proves neither AWS behavior nor
+mark others unsupported (the S3 change's three bucket versioning modes); local
+RustFS success proves neither AWS behavior nor
 Object Lock support. A missing required semantic blocks readiness instead of
 weakening the commit protocol. Explicit isolated local HTTP is permitted only
 through the S3 owner's existing development configuration; normal TLS behavior
@@ -260,7 +262,7 @@ sanitized compatibility/test reports can be retained as validation evidence.
   retention through validity plus a fixed tail, and independent package copies.
 - Uploads race or a serving replica dies → bounded S3 staging, one conditional
   manifest, durable receipts, and cleanup independent of any one process.
-- SeaweedFS differs from a production endpoint → test required semantics and
+- RustFS differs from a production endpoint → test required semantics and
   publish only the compatibility claims supported by each endpoint's results.
 - Shared API/transport work overlaps active agents → consume existing owners'
   contracts and land any shared extension in one coordinated PR after rebasing.
@@ -268,7 +270,7 @@ sanitized compatibility/test reports can be retained as validation evidence.
 ## Migration Plan
 
 Land the API/admission and attachment storage contract first with fixtures. Wire
-the actual S3 service and SeaweedFS workflow when their owner implementations are
+the actual S3 service and the RustFS-based workflow when their owner implementations are
 available. Integrate the coverage projection and scoped producer separately.
 Extend generated CRDs/RBAC and the aligned CRD/controller Helm charts through
 their existing generation/release workflows; preserve file and contract ownership.

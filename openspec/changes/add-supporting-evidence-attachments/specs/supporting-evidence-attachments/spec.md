@@ -212,17 +212,18 @@ remain governed by their original retention and current download authorization.
 - **THEN** it stops contributing to new current coverage, while source bytes and
   cleanup metadata persist until the recorded retention permits deletion
 
-### Requirement: Local development uses SeaweedFS through the S3 interface
+### Requirement: Local development uses the existing RustFS fixture through the S3 interface
 
-The project SHALL document and provide a disposable SeaweedFS S3 environment for
+The project SHALL document and reuse its disposable RustFS S3 environment for
 local attachment development and integration checks, using recorded immutable
-runtime pins and the production storage adapter. Tests SHALL verify the required
+runtime pins and the production storage adapter, and SHALL NOT add a second S3
+implementation for attachments. Tests SHALL verify the required
 commit, checksum, readback, and cleanup semantics. Local compatibility MUST NOT
 imply untested AWS, versioning, or Object Lock support.
 
 #### Scenario: Run the local attachment workflow
 
-- **WHEN** a developer starts the documented SeaweedFS fixture through the pinned
+- **WHEN** a developer starts the documented RustFS fixture through the pinned
   development environment
 - **THEN** registration, upload, authorized capture/download, expiry, and cleanup
   can be tested through its S3 endpoint, with task-owned resources removable
