@@ -2,8 +2,8 @@ apiVersion: v2
 name: konstapel-crds
 description: Konstapel compliance.erenius.io CustomResourceDefinitions, installed and retained independently of the controller.
 type: application
-version: 0.2.0 # x-release-please-version
-appVersion: "0.2.0" # x-release-please-version
+version: 0.3.0 # x-release-please-version
+appVersion: "0.3.0" # x-release-please-version
 kubeVersion: ">=1.36.0-0"
 home: https://github.com/backend-bunny/Konstapel
 sources:
