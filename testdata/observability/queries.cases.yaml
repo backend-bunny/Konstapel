@@ -1,0 +1,116 @@
+# Query examples documented in docs/integration/metrics.md, evaluated with
+# `promtool test rules` against series generated from the observability Hub
+# (testdata/observability/queries.test.yml, regenerated with
+# `go test ./internal/observability -update`). Every expression in the
+# document's promql blocks must appear here.
+#
+# Fixture: release "konstapel" with two replicas. konstapel-0 leads and holds
+# every owner projection; konstapel-1 follows and exposes only availability
+# and its own operation counters. Projections were produced at 60s.
+# Bindings: "payments" (resolved, delivered, current evidence known with a
+# failure, an accepted risk and a warning counted as unknown, evidence
+# expiring at 7200s, overdue scheduled work due at 120s) and "legacy"
+# (profile missing, no assessment yet). Storage: one actionable publication
+# failure and one retention-blocked cleanup.
+# Series last 150 minutes; counters increase by their exposed value every
+# minute.
+cases:
+  - name: enabled domain without a fresh ready projection on any replica
+    expr: |
+      max by (job, domain) (konstapel_observation_enabled) == 1
+      unless on (job, domain)
+      max by (job, domain) (konstapel_observation_ready) == 1
+    eval_time: 1m
+    exp_samples: []
+  - name: projection age per domain on the leader
+    expr: time() - max by (job, domain) (konstapel_observation_updated_timestamp_seconds)
+    eval_time: 1m
+    exp_samples:
+      - labels: '{domain="assessment", job="konstapel"}'
+        value: 0
+      - labels: '{domain="bundle_resolution", job="konstapel"}'
+        value: 0
+      - labels: '{domain="evidence_storage", job="konstapel"}'
+        value: 0
+      - labels: '{domain="targeting", job="konstapel"}'
+        value: 0
+  - name: bindings whose Resolved condition is not true
+    expr: max by (job, binding) (konstapel_binding_condition{condition="Resolved", status!="true"}) == 1
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="legacy", job="konstapel"}'
+        value: 1
+  - name: failing checks in current evidence
+    expr: max by (job, binding) (konstapel_binding_assessment_checks{view="current", state="fail"}) > 0
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 2
+  - name: accepted risks are counted separately from passes
+    expr: max by (job, binding) (konstapel_binding_assessment_checks{view="current", state="accepted_risk"})
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 1
+  - name: checks without a usable result (unknown includes warnings)
+    expr: |
+      sum by (job, binding) (
+        max by (job, binding, state) (
+          konstapel_binding_assessment_checks{view="current", state=~"unknown|missing|rejected|unresolved"}
+        )
+      )
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 3
+  - name: current evidence is stale (past the owner's expiry)
+    expr: time() >= max by (job, binding) (konstapel_binding_current_evidence_expiry_timestamp_seconds)
+    eval_time: 125m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 7200
+  - name: scheduled work overdue past its collection timeout and a 10m grace
+    expr: |
+      time() >
+        max by (job, binding) (konstapel_binding_scheduled_due_timestamp_seconds)
+      + max by (job, binding) (konstapel_binding_collection_timeout_seconds)
+      + 600
+    eval_time: 20m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 1020
+  - name: age of the latest closed full-binding run (historical, not current)
+    expr: time() - max by (job, binding) (konstapel_binding_last_closed_timestamp_seconds)
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 40
+  - name: failed publication attempts in 15m across replicas
+    expr: sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m]))
+    eval_time: 20m
+    exp_samples:
+      - labels: '{job="konstapel"}'
+        value: 45
+  - name: actionable publication failure with recent failed attempts
+    expr: |
+      max by (job) (konstapel_publication_failed) > 0
+      and on (job)
+      sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m])) >= 3
+    eval_time: 20m
+    exp_samples:
+      - labels: '{job="konstapel"}'
+        value: 1
+  - name: blocked retention cleanup
+    expr: max by (job) (konstapel_cleanup_blocked) > 0
+    eval_time: 1m
+    exp_samples:
+      - labels: '{job="konstapel"}'
+        value: 1
+  - name: binding summaries are exposed by one replica only (never sum them)
+    expr: count by (job, binding) (konstapel_binding_assessment_status{view="current"} == 1)
+    eval_time: 1m
+    exp_samples:
+      - labels: '{binding="legacy", job="konstapel"}'
+        value: 1
+      - labels: '{binding="payments", job="konstapel"}'
+        value: 1

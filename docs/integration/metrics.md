@@ -193,6 +193,127 @@ and reset when that process restarts:
 Labels carry only the operation and `success`/`failure`. Repositories, digests,
 identities and error text are never labels.
 
+## Query examples
+
+These queries are evaluated in `task test` with `promtool test rules`. They run
+against series generated from the observability Hub
+(`testdata/observability/queries.test.yml`), and the expected results are in
+`testdata/observability/queries.cases.yaml`. A test fails if any query below is
+not one of those cases. Regenerate the series with
+`go test ./internal/observability -update` after changing the catalog or the
+projections.
+
+Rules for aggregating safely:
+
+- **Binding and backlog gauges come from the leader only.** Aggregate them with
+  `max by (job, binding)` (or `max by (job)`). Never use `sum`, which would
+  double-count during a leader change.
+- **Counters are per replica and reset on restart.** Use `increase` or `rate`
+  first, then `sum` across replicas.
+- **Group by the scrape identity (`job`, and your cluster label if any).** Two
+  releases can have bindings with the same name.
+- **Gate on readiness.** A domain that is not ready exposes no values at all,
+  so check `konstapel_observation_ready` alongside any query on its series.
+  Absence never means zero.
+
+An enabled domain without a fresh, ready projection on any replica:
+
+```promql
+max by (job, domain) (konstapel_observation_enabled) == 1
+unless on (job, domain)
+max by (job, domain) (konstapel_observation_ready) == 1
+```
+
+Projection age per domain. This measures the owner's production time, not
+scrape time:
+
+```promql
+time() - max by (job, domain) (konstapel_observation_updated_timestamp_seconds)
+```
+
+Bindings whose `Resolved` condition is not `true` (false, or unknown for the
+current generation):
+
+```promql
+max by (job, binding) (konstapel_binding_condition{condition="Resolved", status!="true"}) == 1
+```
+
+Failing checks in current evidence:
+
+```promql
+max by (job, binding) (konstapel_binding_assessment_checks{view="current", state="fail"}) > 0
+```
+
+Accepted risks. These are counted separately and are never passes:
+
+```promql
+max by (job, binding) (konstapel_binding_assessment_checks{view="current", state="accepted_risk"})
+```
+
+Checks without a usable result. `unknown` includes engine warnings; find
+them through the raw outcome in the run's evidence:
+
+```promql
+sum by (job, binding) (
+  max by (job, binding, state) (
+    konstapel_binding_assessment_checks{view="current", state=~"unknown|missing|rejected|unresolved"}
+  )
+)
+```
+
+Current evidence past the owner's expiry. The current view is then `unknown`
+until the owner evaluates again:
+
+```promql
+time() >= max by (job, binding) (konstapel_binding_current_evidence_expiry_timestamp_seconds)
+```
+
+Scheduled work overdue past its collection timeout plus a 10-minute grace. A
+binding that has never been planned has no due time:
+
+```promql
+time() >
+  max by (job, binding) (konstapel_binding_scheduled_due_timestamp_seconds)
++ max by (job, binding) (konstapel_binding_collection_timeout_seconds)
++ 600
+```
+
+Age of the latest closed full-binding run. This is history: querying it never
+makes that snapshot current, and Prometheus keeps a deleted binding's old
+samples under the same name. Use `konstapel_binding_created_timestamp_seconds`
+as the boundary when a query spans a recreation.
+
+```promql
+time() - max by (job, binding) (konstapel_binding_last_closed_timestamp_seconds)
+```
+
+Failed publication attempts in 15 minutes, across replicas:
+
+```promql
+sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m]))
+```
+
+A current, actionable publication failure with recent failed attempts:
+
+```promql
+max by (job) (konstapel_publication_failed) > 0
+and on (job)
+sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m])) >= 3
+```
+
+Blocked retention cleanup:
+
+```promql
+max by (job) (konstapel_cleanup_blocked) > 0
+```
+
+Binding summaries come from exactly one replica. A count above 1 means
+ownership is ambiguous:
+
+```promql
+count by (job, binding) (konstapel_binding_assessment_status{view="current"} == 1)
+```
+
 ## Catalog
 
 <!-- catalog:begin -->

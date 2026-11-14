@@ -18,7 +18,7 @@ integration boundaries.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
 - [x] 1.5 Register custom collectors in the existing metrics registry and promote the Prometheus client dependency when imported; verify no duplicate upstream collectors, bounded series count as workload/history fixtures grow, and no credential or free-text label leakage.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.6 Document query examples, projection freshness, historical-view limitations and safe aggregation; verify those examples against fixtures and include projection/exposition checks in the existing test/check workflows.
+- [x] 1.6 Document query examples, projection freshness, historical-view limitations and safe aggregation; verify those examples against fixtures and include projection/exposition checks in the existing test/check workflows.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 2. Instrument authoritative producers
