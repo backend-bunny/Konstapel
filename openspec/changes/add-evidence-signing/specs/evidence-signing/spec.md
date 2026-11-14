@@ -138,6 +138,34 @@ SHALL NOT change evidence outcomes or cause recollection under the same run iden
 - **WHEN** the archive is stored but its verification material is not durable
 - **THEN** the publication remains uncommitted and retryable under its original intent
 
+### Requirement: Signing failures retain frozen evidence
+
+A publication whose Required signing intent is not satisfied within the
+bounded publication retries SHALL end with an explicit signing failure. Its
+staged archive and any stored signature SHALL be retained with the run until
+the run's recorded retention, counted from collection closure, expires. Loss
+of the frozen package itself SHALL remain a capture loss.
+
+#### Scenario: The signer never becomes available
+
+- **WHEN** a Required publication's key stays unavailable past the publication timeout
+- **THEN** the run fails with SigningFailed, releases its binding's slot, and keeps its evidence summary
+- **AND** its staged archive is retained until the run's retention expiry and then deleted like a retained package
+
+### Requirement: Retained signing failures share the package lifecycle
+
+Retained evidence of a signing failure SHALL count as an outstanding package
+of its destination. Abandoned-attempt cleanup and deletion of the run record
+SHALL NOT remove it. Only retention deletion at its expiry or an orphan
+handoff SHALL end Konstapel's ownership. The run's signing intent SHALL stay
+recorded so an authorized recovery can re-sign the same archive.
+
+#### Scenario: The run record is deleted after a signing failure
+
+- **WHEN** a run that failed signing is deleted before its retention expires
+- **THEN** the record is held and the staged archive is kept until that expiry
+- **AND** the destination still counts it until then
+
 ### Requirement: Signature recovery preserves publication identity
 
 Recoverable signature material SHALL be reused after retries or leader changes.

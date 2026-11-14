@@ -1039,11 +1039,17 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 		// record and retry later.
 		return ctrl.Result{RequeueAfter: AttemptCleanupRetry}, nil
 	}
-	if res, err := r.cleanupAttempts(ctx, run); err != nil || res.RequeueAfter > 0 {
-		return res, err
+	// A signing failure never costs evidence: the staged archive (and any
+	// stored signature) is not abandoned-attempt cleanup but retained with
+	// the run until its retention expiry, like a committed package.
+	retained := retainedSigningFailure(run)
+	if !retained {
+		if res, err := r.cleanupAttempts(ctx, run); err != nil || res.RequeueAfter > 0 {
+			return res, err
+		}
 	}
 	pub := run.Status.Publication
-	if run.Status.Phase != v1alpha1.RunCompleted || pub == nil || pub.ExpiresAt == nil {
+	if (run.Status.Phase != v1alpha1.RunCompleted && !retained) || pub == nil || pub.ExpiresAt == nil {
 		return ctrl.Result{}, r.release(ctx, run)
 	}
 	if pub.Cleanup.State == v1alpha1.CleanupState(publication.CleanupDeleted) {
@@ -1051,6 +1057,9 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 	}
 	now := r.now()
 	if now.Before(pub.ExpiresAt.Time) {
+		if retained {
+			return ctrl.Result{RequeueAfter: min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue)}, nil
+		}
 		wait := min(pub.ExpiresAt.Sub(now), MaxRetentionRequeue, r.integrityInterval())
 		return ctrl.Result{RequeueAfter: wait}, r.checkIntegrity(ctx, run, now)
 	}
@@ -1071,10 +1080,14 @@ func (r *AssessmentRunReconciler) retain(ctx context.Context, run *v1alpha1.Asse
 	res := ctrl.Result{}
 	switch {
 	case err == nil || errors.Is(err, publication.ErrNotFound):
-		pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleted)
+		if !retained { // an uncommitted, retained failure stays Failed
+			pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleted)
+		}
 		pub.Cleanup.State, pub.Cleanup.Message = v1alpha1.CleanupState(publication.CleanupDeleted), ""
 	default:
-		pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleting)
+		if !retained {
+			pub.Phase = v1alpha1.PublicationPhase(publication.PhaseDeleting)
+		}
 		pub.Cleanup.State = v1alpha1.CleanupState(publication.CleanupDeletionFailed)
 		if errors.Is(err, publication.ErrRetentionBlocked) {
 			pub.Cleanup.State = v1alpha1.CleanupState(publication.CleanupRetentionBlocked)
@@ -1267,6 +1280,7 @@ var requestMessages = map[string]string{
 	v1alpha1.ReasonBindingNotFound:     "the binding no longer exists",
 	"RequestNotFound":                  "the request was deleted or recreated",
 	"ExportFailed":                     "the evidence package could not be produced",
+	v1alpha1.ReasonSigningFailed:       "the evidence package could not be signed as its destination requires; it was not published unsigned and is retained until its retention expiry",
 }
 
 // finishRequest copies a namespace run's sanitized outcome to its request.
@@ -1307,6 +1321,9 @@ func (r *AssessmentRunReconciler) finishRequest(ctx context.Context, run *v1alph
 func (r *AssessmentRunReconciler) fail(ctx context.Context, run *v1alpha1.AssessmentRun, condition, reason, msg string) error {
 	run.Status.Phase = v1alpha1.RunFailed
 	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: condition, Status: metav1.ConditionFalse, Reason: reason, Message: truncateMsg(msg)})
+	if reason == v1alpha1.ReasonSigningFailed {
+		retainAfterSigningFailure(run, msg, r.now())
+	}
 	if reason == v1alpha1.ReasonCaptureLost {
 		if run.Status.Summary == nil {
 			run.Status.Summary = &v1alpha1.AssessmentSummary{Evidence: v1alpha1.EvidenceSummary{Completeness: "Incomplete"}}

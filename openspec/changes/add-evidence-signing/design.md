@@ -189,6 +189,19 @@ recovery; if capture is actually lost use CaptureLost. Never recollect newer
 observations under the same frozen identity or report signing failure as compliance
 failure. Retention and publishedAt continue using the existing commit rules.
 
+Implemented (group 3, pending owner confirmation): a `SigningFailed` run keeps
+its staged archive and any stored signature, tied to its own lifecycle.
+`status.publication` records phase `Failed`, the failure, the archive digest,
+and `expiresAt` = closure + the run's recorded retention. Terminal
+abandoned-attempt cleanup skips it. Deleting the run record waits for
+`expiresAt` (retention finalizer). The destination counts it as an
+outstanding package. At expiry the publisher's retention deletion removes the
+run's objects, and an orphan handoff hands it off like any retained package.
+The archived S3 contract does not cover this case: its abandoned-attempt
+cleanup applies to uncommitted attempts in general. The evidence-signing
+delta states the rule. A trigger to re-sign a retained failure is a
+follow-up.
+
 Alternative: signing after commit creates downloadable unsigned windows. Reading
 the latest key on every retry makes publication history depend on retry timing.
 

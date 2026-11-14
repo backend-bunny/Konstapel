@@ -30,11 +30,11 @@
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
 - [x] 3.3 Sign and locally verify staged archives, persist recoverable signature artifacts, and require a verified pair before conditional commit; test missing keys, invalid signatures, interrupted writes, and prevention of unsigned success for Required intents.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 3.4 Recover signatures before loading private keys and converge concurrent attempts on one committed pair; test randomized signature bytes, leader/restart recovery, lost commit responses, and completion after private-key retirement without changing archive bytes, signature bytes, expiry, or run identity.
+- [x] 3.4 Recover signatures before loading private keys and converge concurrent attempts on one committed pair; test randomized signature bytes, leader/restart recovery, lost commit responses, and completion after private-key retirement without changing archive bytes, signature bytes, expiry, or run identity.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 3.5 Integrate bounded signing retries with existing run termination and staged-evidence recovery; test unavailable signer behavior, released active slots, explicit capture loss, and no recollection or reassignment of failures to compliance outcomes.
+- [x] 3.5 Integrate bounded signing retries with existing run termination and staged-evidence recovery; test unavailable signer behavior, released active slots, explicit capture loss, and no recollection or reassignment of failures to compliance outcomes.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 3.6 Document the signing-intent boundary and publication failure/recovery states; verify worked examples cover a rotation, an in-flight Required-to-Disabled edit, and complete/incomplete/diagnostic archives without changing assessment meaning.
+- [x] 3.6 Document the signing-intent boundary and publication failure/recovery states; verify worked examples cover a rotation, an in-flight Required-to-Disabled edit, and complete/incomplete/diagnostic archives without changing assessment meaning.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Expose authorized verification material
@@ -72,6 +72,12 @@
 
 - Review against the evidence-signing spec and archive only after implementation
   and required CI acceptance are complete.
+- Add an admin-initiated re-sign for runs that ended with `SigningFailed` and
+  retained their staged archive (design section 4, group 3 note), owned by
+  this change's group 4/5 work. It reuses the run's recorded signing intent
+  and pinned key, cannot change the archive, the run's identity, or its
+  retention, and is authorized for platform administrators only. Until then,
+  the retained archive is kept until its expiry and is not re-signed.
 - Propose a separate follow-up for OpenBao/Vault Transit and AWS KMS keys. Keep
   their credentials, service behavior, key versions, and compatibility tests out
   of this change's implementation checklist.

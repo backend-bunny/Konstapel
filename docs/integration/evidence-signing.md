@@ -15,7 +15,9 @@ the parts implemented so far:
   download is served;
 - rotation and retention around signatures: inspectable key dependencies,
   integrity checks, orphan fences, and inventories;
-- keeping staged evidence after a run ends with `SigningFailed`.
+- a trigger to retry signing for a run that ended with `SigningFailed`. Its
+  evidence is retained, see [failure and recovery
+  states](#publication-failure-and-recovery-states).
 
 Until signature downloads exist, the authorized download path serves a signed
 package's archive alone, as before. Remaining work is tracked in the change's
@@ -216,14 +218,66 @@ While the intent cannot be satisfied (the key is missing, unreadable, or
 different, or the stored signature is invalid), the run's `Published`
 condition is False with reason `SigningPending`, and publication retries.
 After the publish timeout (5 minutes after collection closed) the run fails
-with `SigningFailed`. Its evidence completeness and outcomes are unchanged,
-nothing unsigned was committed, and the run releases the binding's slot.
-Signing problems are never reported as compliance results.
+with `SigningFailed`; see below for what happens to its evidence. Signing
+problems are never reported as compliance results.
 
 A signed run's `status.publication.signature` names the stored bundle (key,
 version, SHA-256, size, media type, algorithm, key fingerprint). Unsigned
 runs have no `signature`, and their commit, receipt, and publication status
 are byte for byte what earlier releases wrote.
+
+### Publication failure and recovery states
+
+The signing intent boundary separates two phases. Before the intent is
+recorded, the destination's current policy applies. After it is recorded,
+only the intent counts: edits, rotation, and key deletion change nothing for
+that run except whether its intent can still be satisfied.
+
+| Run state | `Published` condition | Evidence |
+| --- | --- | --- |
+| Signing pending | False, `SigningPending` (retrying every poll) | Staged archive kept; nothing committed |
+| Signed | True, `Committed`; `status.publication.signature` set | Archive and signature committed together |
+| Signing failed | False, `SigningFailed` (after the publish timeout) | Staged archive retained, see below |
+| Capture lost | False, `CaptureLost` | The frozen package itself was lost; a later run assesses current state |
+
+A signing failure never costs evidence:
+- **Retained, not discarded.** The staged archive, and the stored signature if
+  there is one, is not treated as an abandoned attempt.
+- **Recorded.** `status.publication` has phase `Failed`, failure reason
+  `SigningFailed`, the archive digest, the destination, and `expiresAt`.
+  `expiresAt` is the run's own retention (recorded at collection closure)
+  counted from closure.
+- **Held like a committed package.** Deleting the run record waits for that
+  expiry. The destination counts the archive as an outstanding package.
+  Expiry deletes it with the usual retryable cleanup, and an orphan handoff
+  hands it to the operator.
+- **Evidence unchanged.** Completeness and outcomes stay as they were. Nothing
+  is recollected under the run's identity. The binding's slot is released,
+  so later runs are scheduled normally.
+- **Recoverable.** The intent stays recorded so an authorized recovery can
+  later re-sign the same archive. That recovery trigger is not implemented
+  yet.
+
+If the staged archive itself is lost while signing is pending, the run ends
+with `CaptureLost` instead.
+
+**Worked examples.**
+- **Rotation.** Run A was prepared under `signing-2026-11`. Its signature
+  upload failed. The destination then moved to `signing-2027-05`. Run A is
+  still signed with the 2026 key, because its intent pinned it. Runs prepared
+  afterwards use the 2027 key. If the 2026 Secret is deleted before run A's
+  signature is stored, run A waits in `SigningPending` and then fails with
+  `SigningFailed`, with its evidence retained. If its signature was already
+  stored, run A completes without the key.
+- **In-flight Required→Disabled.** Run B's intent is Required, but its key is
+  missing. An administrator switches the destination to Disabled. Run B stays
+  Required: it is signed once its key is installed, or ends `SigningFailed`.
+  It is never published unsigned. Runs prepared after the edit are unsigned.
+- **Complete, incomplete, and diagnostic packages.** All three are signed the
+  same way. The run's evidence completeness, outcome counts, and export kind
+  (`Assessment` or `Diagnostic`) are identical to an unsigned publication of
+  the same package; a signature never makes an incomplete or diagnostic
+  package complete.
 
 ### Mixed versions and rollback
 

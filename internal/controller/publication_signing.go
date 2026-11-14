@@ -191,3 +191,71 @@ func (r *AssessmentRunReconciler) signingRequirement(ctx context.Context, run *v
 	}
 	return req, nil
 }
+
+// DefaultRetention is the binding default retention (bindingDurations),
+// used for a signing failure whose run recorded none at closure.
+const DefaultRetention = 2160 * time.Hour
+
+// retainAfterSigningFailure records, on a run that ends with SigningFailed,
+// the frozen package it keeps: the staged archive (and any stored
+// signature) stays in storage with the run until the run's retention
+// expiry, counted as a retained package of its destination, and is removed
+// only by that retention deletion (or an orphan handoff). It is never
+// abandoned-attempt cleanup, so a signing failure never costs evidence; the
+// signing intent stays recorded for an authorized recovery.
+func retainAfterSigningFailure(run *v1alpha1.AssessmentRun, msg string, now time.Time) {
+	in := run.Status.SigningIntent
+	if in == nil || run.Status.Publication != nil {
+		return
+	}
+	closed := now
+	if w := run.Status.Window; w != nil && w.Closed != nil {
+		closed = w.Closed.Time
+	}
+	retention, err := time.ParseDuration(string(run.Status.Retention))
+	if err != nil || retention <= 0 {
+		retention = DefaultRetention
+	}
+	expires := metav1.NewTime(closed.Add(retention))
+	pub := &v1alpha1.PublicationStatus{
+		Phase:            v1alpha1.PublicationPhase(publication.PhaseFailed),
+		PublicationID:    publication.RunRef{ClusterID: scopeCluster(run), BindingUID: bindingUID(run), RunUID: string(run.UID)}.PublicationID(),
+		DescriptorSHA256: run.Status.DescriptorSHA256, PackageSHA256: in.ArchiveSHA256,
+		ExpiresAt: &expires, Availability: v1alpha1.Availability(publication.AvailabilityUnavailable),
+		Cleanup: v1alpha1.PublicationCleanup{State: v1alpha1.CleanupState(publication.CleanupNotDue),
+			Message: "staged evidence is retained with the run until its retention expiry after the signing failure"},
+		Failure: &v1alpha1.PublicationFailure{Reason: v1alpha1.ReasonSigningFailed, Message: truncateStatus(msg), Retryable: true, At: metav1.NewTime(now)},
+	}
+	if pin := run.Status.Destination; pin != nil {
+		pub.Destination = &v1alpha1.PublicationDestination{ID: pin.UID, Endpoint: pin.Endpoint, Bucket: pin.Bucket, Prefix: pin.Prefix}
+	}
+	run.Status.Publication = pub
+}
+
+// retainedSigningFailure reports whether a terminal run keeps staged
+// evidence after a signing failure.
+func retainedSigningFailure(run *v1alpha1.AssessmentRun) bool {
+	pub := run.Status.Publication
+	return run.Status.Phase == v1alpha1.RunFailed && pub != nil && pub.Commit == nil && pub.Failure != nil && pub.Failure.Reason == v1alpha1.ReasonSigningFailed
+}
+
+func scopeCluster(run *v1alpha1.AssessmentRun) string {
+	if run.Status.Scope != nil {
+		return run.Status.Scope.ClusterID
+	}
+	return ""
+}
+
+func bindingUID(run *v1alpha1.AssessmentRun) string {
+	if run.Status.Binding != nil {
+		return run.Status.Binding.UID
+	}
+	return ""
+}
+
+func truncateStatus(s string) string {
+	if len(s) > publication.MaxMessageLength {
+		return s[:publication.MaxMessageLength-3] + "..."
+	}
+	return s
+}
