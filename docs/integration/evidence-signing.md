@@ -3,14 +3,22 @@
 `add-evidence-signing` lets an auditor who receives an evidence package outside
 the cluster check that it was published by a key they trust. This guide covers
 the parts implemented so far:
-- the signing and verification contract that the publication path will use;
+- the signing and verification contract;
 - the destination's signing policy, its key Secret, and the controller's
-  signing readiness status.
+  signing readiness status;
+- [signed publication](#signed-publication): the frozen signing intent, signing
+  and storing the signature, and the commit gate that never publishes unsigned
+  evidence under `mode: Required`.
 
-Signing during publication, signature downloads, and the rotation and
-retention behavior around them are **not implemented yet**. Until they are,
-every published package is unsigned, even on a destination with
-`mode: Required`. Remaining work is tracked in the change's
+**Not implemented yet:**
+- signature downloads, and verification of the archive/signature pair before a
+  download is served;
+- rotation and retention around signatures: inspectable key dependencies,
+  integrity checks, orphan fences, and inventories;
+- keeping staged evidence after a run ends with `SigningFailed`.
+
+Until signature downloads exist, the authorized download path serves a signed
+package's archive alone, as before. Remaining work is tracked in the change's
 [tasks](../../openspec/changes/add-evidence-signing/tasks.md).
 
 ## What is signed
@@ -102,8 +110,10 @@ spec:
 
 To rotate, create the next Secret under a new name, distribute its public key,
 and change `secretRef`. Editing a Secret in place, or deleting a key that
-pending publications still need, is not the supported workflow; the
-publication rules for rotation are not implemented yet.
+pending publications still need, is not the supported workflow. A run's
+signing intent pins the Secret name and key it was prepared with (see
+[signed publication](#signed-publication)), so a run waiting to be signed
+still needs its old key. Rotation status is not implemented yet.
 
 ### Signing readiness
 
@@ -162,6 +172,72 @@ server's `konstapel-evidence-download-credentials` Role has the same `get` on
 any Secret in the namespace; it does not read signing keys, but its identity
 could. Anyone who can read Secrets in the controller namespace can read the
 signing key. Protect that namespace, and encrypt Secrets at rest.
+
+## Signed publication
+
+Signing happens between staging and commit, inside the existing publication
+retries. The steps are:
+
+1. **Freeze the intent.** After the archive is staged and verified, and before
+   any commit attempt, the controller reads the run's pinned destination
+   (uncached, by name, and checked against the pinned UID). It records the run's
+   `status.signingIntent`: the mode, the destination UID and generation, the
+   archive SHA-256, and for `Required` the Secret name and the pinned public
+   key (fingerprint, algorithm, PEM, and the Secret's UID and resourceVersion
+   as provenance). The intent is written once and never removed. Its mode,
+   destination, Secret, and archive never change. Its key is set once: if the
+   key could not be loaded at preparation, the `Required` intent is recorded
+   without a key, and the first successful load pins it. Later edits to the
+   destination, including switching to `Disabled` or to another Secret,
+   affect only runs prepared later. A run whose intent is `Disabled` stays
+   unsigned even if the destination later requires signing.
+2. **Recover before signing.** If the run's `package.sigstore.json` is already
+   stored and verifies for this archive under the pinned key, it is used as
+   is. No private key is read, so a restarted or new leader finishes even
+   after the key Secret was deleted.
+3. **Sign and store once.** Otherwise the controller loads the intent's Secret,
+   requires its key to be the pinned key (a different key under the same
+   Secret name is refused; the same key re-encrypted with another password is
+   accepted), signs the archive digest, and verifies the result. It stores
+   the bundle with a conditional create. If another attempt stored a bundle
+   first, that bundle is used and verified again. ECDSA signatures differ on
+   every attempt, but only one is ever stored.
+4. **Commit gate.** The publisher reads the stored bundle back and verifies
+   it for the staged archive under the intent's key. Only then does it
+   create the commit, a `SignedPublicationCommit` that references both
+   objects. Without a stored, verifying bundle nothing is committed. An
+   existing commit that does not match the intent is a conflict and is never
+   accepted:
+   - an unsigned commit under `Required`;
+   - a signed commit under `Disabled`;
+   - a commit signed by another key.
+
+While the intent cannot be satisfied (the key is missing, unreadable, or
+different, or the stored signature is invalid), the run's `Published`
+condition is False with reason `SigningPending`, and publication retries.
+After the publish timeout (5 minutes after collection closed) the run fails
+with `SigningFailed`. Its evidence completeness and outcomes are unchanged,
+nothing unsigned was committed, and the run releases the binding's slot.
+Signing problems are never reported as compliance results.
+
+A signed run's `status.publication.signature` names the stored bundle (key,
+version, SHA-256, size, media type, algorithm, key fingerprint). Unsigned
+runs have no `signature`, and their commit, receipt, and publication status
+are byte for byte what earlier releases wrote.
+
+### Mixed versions and rollback
+
+Releases before evidence signing read `commit.json` leniently, but require
+its top-level `run` to match. A signed commit keeps the run under `subject`,
+so an older controller that meets one, after a rollback or during a rolling
+upgrade, reports a conflict for that run. It does not publish or serve it as
+unsigned. Its retries fail with `PublicationFailed`, and it never overwrites
+the commit. Destinations without signing, or with `mode: Disabled`, write
+exactly the records older releases read, so mixed versions and HA failover
+behave as before. Once a destination has signed history, do not roll back to
+a release without signing support: the older release cannot serve or retire
+those runs correctly. This release reads unknown commit kinds, versions,
+fields, and signature formats as unsupported records, never as unsigned.
 
 ## Signature format
 

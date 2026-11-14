@@ -469,6 +469,7 @@ spec:
                           - archive
                           - manifest
                           - staging
+                          - signature
                           type: string
                         uploadID:
                           maxLength: 1024
@@ -532,6 +533,41 @@ spec:
                     - duration
                     - selectedAt
                     type: object
+                  signature:
+                    description: |-
+                      signature is the committed detached signature; set only for a
+                      publication committed under a Required signing intent.
+                    properties:
+                      algorithm:
+                        maxLength: 64
+                        type: string
+                      key:
+                        maxLength: 1024
+                        type: string
+                      keyFingerprint:
+                        pattern: ^sha256:[0-9a-f]{64}$
+                        type: string
+                      mediaType:
+                        maxLength: 128
+                        type: string
+                      sha256:
+                        pattern: ^[0-9a-f]{64}$
+                        type: string
+                      size:
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      versionID:
+                        maxLength: 1024
+                        type: string
+                    required:
+                    - algorithm
+                    - key
+                    - keyFingerprint
+                    - mediaType
+                    - sha256
+                    - size
+                    type: object
                 required:
                 - availability
                 - cleanup
@@ -581,6 +617,108 @@ spec:
                 - revision
                 - sha256
                 type: object
+              signingIntent:
+                description: |-
+                  signingIntent is the signing policy frozen when publication was first
+                  prepared. It is written once and never removed; publication commits
+                  only what it requires. Absent for runs prepared before evidence
+                  signing existed (unsigned).
+                properties:
+                  archiveSha256:
+                    description: archiveSha256 is the digest of the staged archive
+                      the intent covers.
+                    pattern: ^[0-9a-f]{64}$
+                    type: string
+                  destinationGeneration:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  destinationUID:
+                    description: |-
+                      destinationUID and destinationGeneration identify the destination
+                      configuration the policy was read from.
+                    maxLength: 64
+                    type: string
+                  key:
+                    description: |-
+                      key is the public identity pinned at the first successful key load.
+                      A Required intent prepared while its key was unavailable has none
+                      until then; any later load must yield this same key.
+                    properties:
+                      algorithm:
+                        description: algorithm is the key's signing algorithm (ecdsa-sha2-256-nistp256).
+                        maxLength: 64
+                        type: string
+                      fingerprint:
+                        description: |-
+                          fingerprint is "sha256:" and the hex SHA-256 of the DER
+                          SubjectPublicKeyInfo.
+                        pattern: ^sha256:[0-9a-f]{64}$
+                        type: string
+                      pinnedAt:
+                        description: pinnedAt is when the key was pinned.
+                        format: date-time
+                        type: string
+                      publicKey:
+                        description: publicKey is the PEM public key, retained to
+                          verify the signature.
+                        maxLength: 4096
+                        type: string
+                      secretResourceVersion:
+                        maxLength: 64
+                        type: string
+                      secretUID:
+                        description: |-
+                          secretUID and secretResourceVersion record which Secret object the key
+                          was first read from (provenance only).
+                        maxLength: 64
+                        type: string
+                    required:
+                    - algorithm
+                    - fingerprint
+                    - pinnedAt
+                    - publicKey
+                    type: object
+                  mode:
+                    description: |-
+                      mode is Disabled or Required, from the destination's spec.signing
+                      (absent is Disabled).
+                    enum:
+                    - Disabled
+                    - Required
+                    type: string
+                  preparedAt:
+                    description: preparedAt is when the intent was recorded.
+                    format: date-time
+                    type: string
+                  secretName:
+                    description: |-
+                      secretName is the signing key Secret in the controller namespace
+                      (Required only).
+                    maxLength: 253
+                    type: string
+                required:
+                - archiveSha256
+                - destinationGeneration
+                - destinationUID
+                - mode
+                - preparedAt
+                type: object
+                x-kubernetes-validations:
+                - message: a signing intent is immutable
+                  rule: self.mode == oldSelf.mode && self.destinationUID == oldSelf.destinationUID
+                    && self.destinationGeneration == oldSelf.destinationGeneration
+                    && self.archiveSha256 == oldSelf.archiveSha256 && self.preparedAt
+                    == oldSelf.preparedAt
+                - message: a signing intent's key Secret is immutable
+                  rule: has(self.secretName) == has(oldSelf.secretName) && (!has(self.secretName)
+                    || self.secretName == oldSelf.secretName)
+                - message: a signing intent's pinned key is set once and never changes
+                  rule: '!has(oldSelf.key) || (has(self.key) && self.key == oldSelf.key)'
+                - message: Required intents name their key Secret; Disabled intents
+                    have no key
+                  rule: 'self.mode == ''Required'' ? has(self.secretName) : (!has(self.secretName)
+                    && !has(self.key))'
               summary:
                 description: |-
                   AssessmentSummary is the sanitized result summary exposed in status. It
@@ -704,6 +842,10 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: status.signingIntent is never removed
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.signingIntent) || (has(self.status)
+            && has(self.status.signingIntent))'
     served: true
     storage: true
     subresources:

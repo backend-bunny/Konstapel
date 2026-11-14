@@ -192,6 +192,66 @@ failure. Retention and publishedAt continue using the existing commit rules.
 Alternative: signing after commit creates downloadable unsigned windows. Reading
 the latest key on every retry makes publication history depend on retry timing.
 
+### 4a. Durable record names and versions (group 3 proposal)
+
+The names follow the existing patterns. Kubernetes status is additive
+`compliance.erenius.io/v1alpha1` fields. S3 records are JSON documents carrying
+`apiVersion` and `kind`, like the commit manifest (`PublicationCommit`) and the
+package descriptor. Each new field is optional with `omitempty`, so an
+unsigned publication writes exactly the bytes it writes today: the commit
+manifest, the receipt, the publication status, and its
+`AssessmentRun.status.publication` form, checked against goldens captured
+before the change. The only addition to an unsigned run is
+`status.signingIntent` with `mode: Disabled`. It records that the run was
+prepared unsigned, so a later Required policy cannot apply retroactively.
+Runs prepared before this change have no intent and stay unsigned.
+
+| Record | Unsigned (unchanged) | Signed (new) |
+| --- | --- | --- |
+| S3 commit `<run>/commit.json` | `kind: PublicationCommit` with top-level `run`, digests, archive reference, and retention | `kind: SignedPublicationCommit`, same `apiVersion`. `publicationID` and `retention` stay top-level; `subject` holds run, descriptor, archive key/version, package digest, and size; `signature` holds `format: sigstore-bundle-v0.3`, media type, object key/version, SHA-256, size, algorithm, key fingerprint, and public key PEM. |
+| S3 signature `<run>/package.sigstore.json` | absent | The canonical bundle, created once with `If-None-Match: *` and SHA-256 verified like the archive. The first durable writer wins. |
+| `AssessmentRun.status.signingIntent` | `mode: Disabled` plus destination UID/generation and the archive digest | `mode: Required` plus `secretRef.name`. `key` {fingerprint, algorithm, publicKey PEM, secretUID, secretResourceVersion, pinnedAt} is set once at the first successful key load. |
+| `AssessmentRun.status.publication.signature` | absent | {key, versionID, sha256, size, mediaType, algorithm, keyFingerprint} copied from the signed commit |
+| `publication.Receipt` / `Status` | unchanged | optional `Signature` reference |
+| owned-object role | `archive`, `manifest`, `staging` | adds `signature` |
+
+The signed commit moves the run identity into `subject`. Releases before this
+change require a top-level `run` in `commit.json`, so they treat a signed
+commit as another run's record (a conflict) and fail, instead of reading it as
+an unsigned publication. New readers decode both kinds strictly: unknown
+fields, unknown kinds or `apiVersion`s, and unknown signature formats return
+`ErrUnsupportedRecord`, which is never treated as unsigned.
+
+`signingIntent` is written once, with a resourceVersion-conditional status
+update, at the first preparation: after the archive is staged and verified,
+and before any commit attempt. It is read from an uncached destination `get`
+whose UID must equal the run's pin. CEL transition rules on the status forbid
+removing it or changing its mode, destination, Secret reference, or archive
+digest; `key` may only go from unset to set. A Required intent prepared while
+its key is unavailable is still recorded without `key`, so an admin switching
+to Disabled cannot downgrade it. The first successful load pins the key, and a
+later load with another fingerprint is `KeyMismatch`, which is also how a
+replaced same-name Secret is caught.
+
+Commit gate (the S3 publisher and the fake implement it identically):
+- **Required intent.** `Publish` requires a signature reference. It reads the
+  stored signature object back and verifies it with `evidencesign.Verify`
+  against the package digest and the intent's public key before the
+  conditional commit; a missing or invalid signature returns
+  `ErrSignatureRequired`.
+- **Existing commits.** An unsigned commit under a Required intent, a signed
+  commit under a Disabled intent, and a signed commit with another
+  fingerprint all return `ErrConflict`. None is accepted or downgraded.
+- **Run status.** While retrying, the run's Published condition says
+  `SigningPending`. After the existing PublishTimeout the run fails with
+  `SigningFailed`. Evidence completeness and outcomes are untouched, and the
+  staged package is kept.
+
+The signing step looks for the stored signature object before loading any
+private key. A stored bundle that verifies under the intent key is reused
+as is. Otherwise the step loads the intent's Secret, checks the fingerprint,
+signs, stores the bundle conditionally, and re-reads the winner.
+
 ### 5. Rotate keys without rewriting history
 
 Document versioned, preferably immutable Secrets as the normal rotation workflow:

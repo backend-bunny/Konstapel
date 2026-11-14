@@ -24,11 +24,11 @@
 
 ## 3. Extend durable signing and publication
 
-- [ ] 3.1 Version the shared signing-intent, commit/receipt, run status, and object-reference extensions with the S3 owner; verify legacy unsigned records remain readable and unsupported or malformed signed records cannot downgrade to unsigned.
+- [x] 3.1 Version the shared signing-intent, commit/receipt, run status, and object-reference extensions with the S3 owner; verify legacy unsigned records remain readable and unsupported or malformed signed records cannot downgrade to unsigned.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 3.2 Freeze signing mode, destination revision, key source/fingerprint/public material, and archive digest at first publication-intent preparation; test concurrent preparation, enabled/disabled changes, same-name Secret replacement, and rotation without changing an existing intent.
+- [x] 3.2 Freeze signing mode, destination revision, key source/fingerprint/public material, and archive digest at first publication-intent preparation; test concurrent preparation, enabled/disabled changes, same-name Secret replacement, and rotation without changing an existing intent.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 3.3 Sign and locally verify staged archives, persist recoverable signature artifacts, and require a verified pair before conditional commit; test missing keys, invalid signatures, interrupted writes, and prevention of unsigned success for Required intents.
+- [x] 3.3 Sign and locally verify staged archives, persist recoverable signature artifacts, and require a verified pair before conditional commit; test missing keys, invalid signatures, interrupted writes, and prevention of unsigned success for Required intents.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
 - [ ] 3.4 Recover signatures before loading private keys and converge concurrent attempts on one committed pair; test randomized signature bytes, leader/restart recovery, lost commit responses, and completion after private-key retirement without changing archive bytes, signature bytes, expiry, or run identity.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->

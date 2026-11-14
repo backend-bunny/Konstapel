@@ -53,6 +53,8 @@ const (
 	ObjectArchive  ObjectRole = "archive"
 	ObjectManifest ObjectRole = "manifest"
 	ObjectStaging  ObjectRole = "staging"
+	// ObjectSignature is the archive's detached signature bundle.
+	ObjectSignature ObjectRole = "signature"
 )
 
 // Bounds keep status small; bulk data belongs in packages.
@@ -92,6 +94,20 @@ type Commit struct {
 	ManifestVersionID string `json:"manifestVersionID,omitempty"`
 	ArchiveKey        string `json:"archiveKey"`
 	ArchiveVersionID  string `json:"archiveVersionID,omitempty"`
+}
+
+// Signature references a committed publication's detached signature: the
+// verified Sigstore bundle stored beside the archive. It is set only for a
+// publication committed under a Required signing intent; an unsigned
+// publication has none.
+type Signature struct {
+	Key            string `json:"key"`
+	VersionID      string `json:"versionID,omitempty"`
+	SHA256         string `json:"sha256"`
+	Size           int64  `json:"size"`
+	MediaType      string `json:"mediaType"`
+	Algorithm      string `json:"algorithm"`
+	KeyFingerprint string `json:"keyFingerprint"`
 }
 
 // Retention is the effective retention frozen at the first commit.
@@ -141,6 +157,8 @@ type Receipt struct {
 	PublishedAt      time.Time   `json:"publishedAt"`
 	Retention        Retention   `json:"retention"`
 	ExpiresAt        time.Time   `json:"expiresAt"`
+	// Signature is set only for a signed publication.
+	Signature *Signature `json:"signature,omitempty"`
 }
 
 // Validate checks receipt consistency, including expiresAt = publishedAt + retention.
@@ -157,6 +175,9 @@ func (r Receipt) Validate() error {
 	}
 	if r.PublishedAt.IsZero() || !r.ExpiresAt.Equal(r.PublishedAt.Add(d)) {
 		return errors.New("receipt expiry must equal publication time plus retention")
+	}
+	if g := r.Signature; g != nil && (g.Key == "" || !sha256Hex.MatchString(g.SHA256) || g.Size <= 0 || g.MediaType == "" || g.Algorithm == "" || g.KeyFingerprint == "") {
+		return errors.New("a signed receipt requires the signature's key, SHA-256, size, media type, algorithm, and key fingerprint")
 	}
 	return nil
 }
@@ -178,6 +199,8 @@ type Status struct {
 	Availability     Availability  `json:"availability"`
 	Cleanup          Cleanup       `json:"cleanup"`
 	Failure          *Failure      `json:"failure,omitempty"`
+	// Signature is the committed signature of a signed publication.
+	Signature *Signature `json:"signature,omitempty"`
 }
 
 // Failure reasons for a committed package that is not intact before its
@@ -193,7 +216,7 @@ func Committed(r Receipt) Status {
 		Phase: PhaseCommitted, PublicationID: r.PublicationID, Destination: &r.Destination,
 		DescriptorSHA256: r.DescriptorSHA256, PackageSHA256: r.PackageSHA256, PackageSize: r.PackageSize,
 		Commit: &r.Commit, PublishedAt: &r.PublishedAt, Retention: &r.Retention, ExpiresAt: &r.ExpiresAt,
-		Availability: AvailabilityAvailable, Cleanup: Cleanup{State: CleanupNotDue},
+		Availability: AvailabilityAvailable, Cleanup: Cleanup{State: CleanupNotDue}, Signature: r.Signature,
 	}
 }
 
@@ -216,12 +239,12 @@ func (s Status) Validate() error {
 			fail("%s publication requires its commit receipt", s.Phase)
 			break
 		}
-		r := Receipt{PublicationID: s.PublicationID, Destination: *s.Destination, Commit: *s.Commit, DescriptorSHA256: s.DescriptorSHA256, PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, PublishedAt: *s.PublishedAt, Retention: *s.Retention, ExpiresAt: *s.ExpiresAt}
+		r := Receipt{PublicationID: s.PublicationID, Destination: *s.Destination, Commit: *s.Commit, DescriptorSHA256: s.DescriptorSHA256, PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, PublishedAt: *s.PublishedAt, Retention: *s.Retention, ExpiresAt: *s.ExpiresAt, Signature: s.Signature}
 		if err := r.Validate(); err != nil {
 			errs = append(errs, err)
 		}
 	case PhasePending, PhaseUploading:
-		if s.Commit != nil || s.PublishedAt != nil {
+		if s.Commit != nil || s.PublishedAt != nil || s.Signature != nil {
 			fail("%s publication cannot record a commit", s.Phase)
 		}
 	case PhaseFailed:
@@ -237,7 +260,7 @@ func (s Status) Validate() error {
 				fail("orphaned publication with a commit requires its receipt")
 				break
 			}
-			r := Receipt{PublicationID: s.PublicationID, Destination: *s.Destination, Commit: *s.Commit, DescriptorSHA256: s.DescriptorSHA256, PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, PublishedAt: *s.PublishedAt, Retention: *s.Retention, ExpiresAt: *s.ExpiresAt}
+			r := Receipt{PublicationID: s.PublicationID, Destination: *s.Destination, Commit: *s.Commit, DescriptorSHA256: s.DescriptorSHA256, PackageSHA256: s.PackageSHA256, PackageSize: s.PackageSize, PublishedAt: *s.PublishedAt, Retention: *s.Retention, ExpiresAt: *s.ExpiresAt, Signature: s.Signature}
 			if err := r.Validate(); err != nil {
 				errs = append(errs, err)
 			}

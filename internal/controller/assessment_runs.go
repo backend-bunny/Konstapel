@@ -965,7 +965,21 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
-	receipt, err := store.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel})
+	// Freeze the signing intent before any commit, then satisfy it. The
+	// publisher's commit gate refuses an unsigned commit under a Required
+	// intent, so a signing failure is retried and never published unsigned.
+	intent, err := r.signingIntent(ctx, run, staged)
+	if err != nil {
+		if errors.Is(err, publication.ErrConflict) {
+			return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, err.Error())
+		}
+		return r.retry(ctx, run, now, err)
+	}
+	signing, err := r.signingRequirement(ctx, run, store, staged, intent)
+	if err != nil {
+		return r.retry(ctx, run, now, err)
+	}
+	receipt, err := store.Publish(ctx, publication.PublishRequest{Staged: staged, Retention: sel, Signing: signing})
 	if err != nil {
 		return r.retry(ctx, run, now, err)
 	}
@@ -1187,14 +1201,19 @@ func (r *AssessmentRunReconciler) retry(ctx context.Context, run *v1alpha1.Asses
 	if run.Status.Window != nil && run.Status.Window.Closed != nil {
 		closed = run.Status.Window.Closed.Time
 	}
+	retrying, failed := "Retrying", v1alpha1.ReasonPublicationFailed
+	if isSigningError(cause) {
+		// Required signing is unmet: nothing unsigned is committed.
+		retrying, failed = v1alpha1.ReasonSigningPending, v1alpha1.ReasonSigningFailed
+	}
 	if now.Before(closed.Add(r.Runtime.PublishTimeout)) {
-		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionPublished, Status: metav1.ConditionFalse, Reason: "Retrying", Message: truncateMsg(cause.Error())})
+		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionPublished, Status: metav1.ConditionFalse, Reason: retrying, Message: truncateMsg(cause.Error())})
 		if err := r.Client.Status().Update(ctx, run); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: r.Runtime.Poll}, nil
 	}
-	return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonPublicationFailed, "publication did not succeed within "+r.Runtime.PublishTimeout.String()+": "+cause.Error())
+	return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, failed, "publication did not succeed within "+r.Runtime.PublishTimeout.String()+": "+cause.Error())
 }
 
 // runNamespaceUID is the namespace a namespace run assesses.

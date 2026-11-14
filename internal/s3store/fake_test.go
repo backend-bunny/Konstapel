@@ -151,6 +151,9 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Last-Modified", v.at.Format(http.TimeFormat))
+		if f.versionIDs && v.id != "" {
+			w.Header().Set("X-Amz-Version-Id", v.id) // as S3 does for versioned objects
+		}
 		if v.checksum != "" {
 			w.Header().Set("X-Amz-Checksum-Sha256", v.checksum)
 		}
