@@ -28,6 +28,8 @@ package controller
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -52,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/s3fault"
 	"github.com/backend-bunny/Konstapel/internal/s3store"
@@ -207,6 +210,166 @@ func TestLiveHelmDurableRecovery(t *testing.T) {
 		"packageSha256": pubSt.PackageSHA256, "downloadedSha256": sum, "publishedAt": pubSt.PublishedAt.UTC(), "expiresAt": pubSt.ExpiresAt.UTC(),
 		"retention": pubSt.Retention.Duration + " (binding now 120s)", "commitArrivals": st.CommitArrivals, "commitsForwarded": st.CommitsForwarded,
 		"phases": phases, "recordedBy": successor})
+
+	// 3. Signing under HA (add-evidence-signing 6.2, 6.3): the leader is
+	// lost mid-signing, and the successor finishes the same signed
+	// publication through the same signing contract.
+	l.signedHandover(ns, ed, store, proxy, b.Name, caPEM, operator)
+}
+
+// signedHandover requires signing on the destination and interrupts two
+// runs' signature uploads at the proxy:
+//   - held: the leader's signature upload never reaches S3; the leader is
+//     removed, and the successor signs with the same pinned key and commits
+//     one signed publication;
+//   - stored, response lost: the signature lands in S3, its response is
+//     withheld and S3 is blackholed; the private key's Secret is deleted
+//     and the leader removed. The successor recovers the stored signature
+//     without any private key and commits it. The signature is uploaded
+//     once, and both artifacts download and verify offline.
+func (l *live) signedHandover(ns string, ed *v1alpha1.EvidenceDestination, store s3Store, proxy *faultProxy, binding string, caPEM []byte, operator string) {
+	t := l.t
+	t.Helper()
+	key, fp := signingKeySecret(t, "dr-signing", "dr-signing-password")
+	if err := l.c.Create(l.ctx, key.DeepCopy()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = l.c.Delete(l.ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: key.Name}})
+	})
+	trusted, err := evidencesign.ParsePublicKey(key.Data[evidencesign.SecretPublicKey])
+	if err != nil {
+		t.Fatal(err)
+	}
+	setSigning := func(s *v1alpha1.EvidenceSigning) {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			got := &v1alpha1.EvidenceDestination{}
+			if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got); err != nil {
+				return err
+			}
+			got.Spec.Signing = s
+			return l.c.Update(l.ctx, got)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setSigning(requiredSigning(key.Name))
+	t.Cleanup(func() { setSigning(nil) })
+	l.eventually("signing ready on the Helm-installed controller", func() (bool, string) {
+		got := &v1alpha1.EvidenceDestination{}
+		_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(ed), got)
+		return got.Status.Signing != nil && got.Status.Signing.KeyFingerprint == fp, toJSON(got.Status.Signing)
+	})
+	l.setRetention(binding, "600s", nil)
+	sigKey := func(r *v1alpha1.AssessmentRun) string {
+		return s3store.RunPrefix(store.dest, publication.RunRef{ClusterID: r.Status.Scope.ClusterID, BindingUID: r.Status.Binding.UID, RunUID: string(r.UID)}) + evidencesign.BundleFileName
+	}
+	signedCommit := func(r *v1alpha1.AssessmentRun) map[string]any {
+		raw := store.get(s3store.RunPrefix(store.dest, publication.RunRef{ClusterID: r.Status.Scope.ClusterID, BindingUID: r.Status.Binding.UID, RunUID: string(r.UID)})+"commit.json", "")
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil || m["kind"] != "SignedPublicationCommit" || m["run"] != nil {
+			t.Fatalf("commit of %s is not a signed commit: %s", r.Name, raw)
+		}
+		return m
+	}
+	verify := func(r *v1alpha1.AssessmentRun) (string, string) {
+		t.Helper()
+		addr := l.portForward(ns, "svc/konstapel-download", 443)
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM(caPEM)
+		hc := &http.Client{Timeout: 3 * time.Minute, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "konstapel-download.konstapel-system.svc"}}}
+		tok := l.token(ns, operator, downloadAudience)
+		ac, archive := fetch(t, hc, "https://"+addr+"/v1/assessmentruns/"+string(r.UID)+"/download", tok)
+		sc, bundle := fetch(t, hc, "https://"+addr+"/v1/assessmentruns/"+string(r.UID)+"/signature", tok)
+		if ac != http.StatusOK || sc != http.StatusOK {
+			t.Fatalf("downloads of %s: archive %d, signature %d %s", r.Name, ac, sc, bundle)
+		}
+		d := evidencesign.DigestArchive(archive)
+		if _, err := evidencesign.Verify(bundle, d, trusted); err != nil || d.String() != r.Status.Publication.PackageSHA256 {
+			t.Fatalf("downloaded pair of %s does not verify: %v", r.Name, err)
+		}
+		return d.String(), fmt.Sprintf("%x", sha256.Sum256(bundle))
+	}
+
+	// 3a. The signature upload is held: nothing is stored.
+	run := l.createRun(binding, "dr-audit-signing-held")
+	proxy.armTarget(s3fault.ModeHold, run.UID, s3fault.TargetSignature)
+	watch := l.watchRun(run.Name, run.UID)
+	proxy.waitFor("the leader's signature upload held", func(st s3fault.State) bool { return st.CommitsHeld >= 1 })
+	cur := l.publishingWithoutReceipt(run.Name)
+	if in := cur.Status.SigningIntent; in == nil || in.Mode != v1alpha1.SigningRequired || in.Key == nil || in.Key.Fingerprint != fp {
+		t.Fatalf("intent before handover: %s", toJSON(in))
+	}
+	if _, err := store.pub.Client.HeadObject(l.ctx, &s3.HeadObjectInput{Bucket: aws.String(store.pub.Dest.Bucket), Key: aws.String(sigKey(cur))}); err == nil {
+		t.Fatal("a held signature reached S3")
+	}
+	killed, follower := l.killLeader(ns)
+	successor := l.leaderPod(ns, killed)
+	if successor != follower {
+		t.Fatalf("Lease taken by %s, not %s", successor, follower)
+	}
+	l.cordonWorkload(false)
+	proxy.waitFor("the successor's signature upload held", func(st s3fault.State) bool { return st.CommitsHeld >= 2 })
+	l.stillPublishing(binding, run.Name, run.UID, 20*time.Second)
+	proxy.release()
+	done := l.publishedRun(binding, run.Name)
+	l.checkPhases(watch())
+	st := proxy.state()
+	signedCommit(done)
+	archiveSum, bundleSum := verify(done)
+	if done.Status.Publication.Signature == nil || done.Status.Publication.Signature.KeyFingerprint != fp || st.CommitsForwarded != 1 || bundleSum != done.Status.Publication.Signature.SHA256 {
+		t.Fatalf("held-signature recovery: %s %s", toJSON(done.Status.Publication), toJSON(st))
+	}
+	l.record("signing-held-recovered", map[string]any{"run": done.Name, "uid": done.UID, "killed": killed, "signedBy": successor, "keyFingerprint": fp,
+		"signatureArrivals": st.CommitArrivals, "signaturesHeld": st.CommitsHeld, "signaturesForwarded": st.CommitsForwarded,
+		"archiveSha256": archiveSum, "signatureSha256": bundleSum, "verifiedOffline": true})
+
+	// 3b. The signature is stored and its response lost; the private key is
+	// retired before the successor takes over.
+	l.readyPods(ns, "controller", 2)
+	run = l.createRun(binding, "dr-audit-signing-stored")
+	proxy.armTarget(s3fault.ModeAfter, run.UID, s3fault.TargetSignature)
+	watch = l.watchRun(run.Name, run.UID)
+	st = proxy.waitFor("the leader's signature stored and its response withheld", func(st s3fault.State) bool {
+		return st.CommitsForwarded == 1 && st.Blackhole && st.Waiting >= 1
+	})
+	if st.LastCommitStatus != http.StatusOK {
+		t.Fatalf("the backend refused the signature: %s", toJSON(st))
+	}
+	cur = l.publishingWithoutReceipt(run.Name)
+	stored := store.get(sigKey(cur), "")
+	storedSum := fmt.Sprintf("%x", sha256.Sum256(stored))
+	if _, err := evidencesign.Verify(stored, mustDigest(t, cur.Status.SigningIntent.ArchiveSHA256), trusted); err != nil {
+		t.Fatalf("the stored signature does not verify: %v", err)
+	}
+	if err := l.c.Delete(l.ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: key.Name}}); err != nil {
+		t.Fatal(err)
+	}
+	l.record("signing-stored-withheld", map[string]any{"run": run.Name, "uid": run.UID, "signatureSha256": storedSum, "privateKey": "deleted before handover"})
+	killed, follower = l.killLeader(ns)
+	successor = l.successorBlocked(ns, killed, follower, proxy)
+	l.stillPublishing(binding, run.Name, run.UID, 30*time.Second)
+	proxy.release()
+	done = l.publishedRun(binding, run.Name)
+	l.checkPhases(watch())
+	st = proxy.state()
+	signedCommit(done)
+	archiveSum, bundleSum = verify(done)
+	if done.Status.Publication.Signature == nil || done.Status.Publication.Signature.SHA256 != storedSum || bundleSum != storedSum ||
+		st.CommitArrivals != 1 || st.CommitsForwarded != 1 || done.Status.SigningIntent.Key.Fingerprint != fp {
+		t.Fatalf("stored-signature recovery without the private key: %s %s", toJSON(done.Status.Publication), toJSON(st))
+	}
+	l.record("signing-stored-recovered", map[string]any{"run": done.Name, "uid": done.UID, "killed": killed, "committedBy": successor,
+		"signatureSha256": storedSum, "signatureArrivals": st.CommitArrivals, "privateKey": "absent", "archiveSha256": archiveSum, "verifiedOffline": true})
+}
+
+func mustDigest(t *testing.T, hexSum string) evidencesign.ArchiveDigest {
+	t.Helper()
+	d, err := evidencesign.ParseArchiveDigest(hexSum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }
 
 // setRetention sets the binding's assessment retention (and destination,
@@ -612,6 +775,9 @@ func (f *faultProxy) must(method, path string) []byte {
 
 func (f *faultProxy) arm(mode string, run types.UID) {
 	f.must(http.MethodPost, "/arm?mode="+mode+"&run="+string(run))
+}
+func (f *faultProxy) armTarget(mode string, run types.UID, target string) {
+	f.must(http.MethodPost, "/arm?mode="+mode+"&run="+string(run)+"&target="+target)
 }
 func (f *faultProxy) blackhole() { f.must(http.MethodPost, "/blackhole") }
 func (f *faultProxy) release()   { f.must(http.MethodPost, "/release") }

@@ -103,12 +103,12 @@ test-owned S3 and registry services:
 | --- | --- |
 | `admission` | Runner admission/background evidence, Chainsaw, offline replay, targeting/delivery, and Linux hardening |
 | `assessments` | Assessment status/runs, engine correlation, integrated assessments, and authenticated exception admission |
-| `storage` | Destination/credential changes, destination signing configuration and readiness, downloads, retention, and orphaning |
+| `storage` | Destination/credential changes, downloads, retention, and orphaning, plus evidence signing: destination configuration and readiness, signed downloads, and the signed-publication workflow |
 | `recovery` | Kyverno outages and assessment/publication faults |
 | `capabilities` | Engine API and permission loss and recovery without a controller restart |
 | `charts` | The CRD chart lifecycle and the Helm-installed controller image (both TLS modes, downloads, rotation, follower serving), and OCI policy bundles from a disposable TLS registry (chart RBAC, watches, revocation, follower pins, upgrade and rollback); installs cert-manager and builds the image |
 | `bundles` | OCI policy bundles on an in-process controller: the official keyless release read anonymously from `ghcr.io` and the organization-key fixture from a disposable TLS registry, each in Audit and Deny; unsigned, wrong-key and tampered bundles; warm-cache outage, cold-cache failure, credential rotation, trust revocation and recovery ([bundle acceptance](policy-bundles.md#bundle-acceptance)); needs network access to `ghcr.io` and fails without it |
-| `availability` | The Helm-installed image on a multi-node cluster (two workers): placement, PDB, rolling and capacity-blocked upgrades, co-location, development values, controller outage, leader pod and node loss, and leader loss during an S3 outage; builds the image |
+| `availability` | The Helm-installed image on a multi-node cluster (two workers): placement, PDB, rolling and capacity-blocked upgrades, co-location, development values, controller outage, leader pod and node loss, leader loss during an S3 outage, and leader loss mid-signing; builds the image |
 
 `scripts/acceptance-groups.json` defines the matrix and Go test selection. The
 normal `task test` checks that every compiled `TestLive*` test is assigned exactly

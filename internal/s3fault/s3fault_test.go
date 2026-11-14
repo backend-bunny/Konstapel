@@ -175,3 +175,52 @@ func TestControl(t *testing.T) {
 		t.Fatalf("release: %d %+v", code, p.Snapshot())
 	}
 }
+
+// Armed for the signature target, hold and after apply to the run's
+// conditional signature upload; the run's commit and other keys pass.
+func TestSignatureTarget(t *testing.T) {
+	sigPath := "/bucket/p/evidence/c/b/" + run + "/package.sigstore.json"
+	t.Run("hold", func(t *testing.T) {
+		p, be, url := setup(t)
+		p.ArmTarget(ModeHold, run, TargetSignature)
+		if code, err := send(t, url, http.MethodPut, commitPath, "manifest", true); err != nil || code != http.StatusOK {
+			t.Fatalf("commit with a signature target: %d %v", code, err)
+		}
+		done := make(chan int, 1)
+		go func() { code, _ := send(t, url, http.MethodPut, sigPath, "bundle", true); done <- code }()
+		eventually(t, "the signature held", func() bool { st := p.Snapshot(); return st.CommitsHeld == 1 && st.Waiting == 1 })
+		p.Release()
+		if code := <-done; code != http.StatusServiceUnavailable {
+			t.Fatalf("released held signature: %d", code)
+		}
+		for _, r := range be.seen() {
+			if strings.Contains(r, "package.sigstore.json") {
+				t.Fatalf("held signature reached the backend: %q", r)
+			}
+		}
+	})
+	t.Run("after", func(t *testing.T) {
+		p, be, url := setup(t)
+		p.ArmTarget(ModeAfter, run, TargetSignature)
+		go func() { _, _ = send(t, url, http.MethodPut, sigPath, "bundle", true) }()
+		eventually(t, "the signature forwarded", func() bool { st := p.Snapshot(); return st.CommitsForwarded == 1 && st.Blackhole && st.Waiting == 1 })
+		if got := be.seen(); len(got) != 1 || got[0] != "PUT "+sigPath+" signed.example:9000 bundle" {
+			t.Fatalf("backend saw %q", got)
+		}
+		if st := p.Snapshot(); st.Target != TargetSignature || st.LastCommitStatus != http.StatusOK {
+			t.Fatalf("state %+v", st)
+		}
+		p.Release()
+	})
+	t.Run("control", func(t *testing.T) {
+		p, _, _ := setup(t)
+		cs := httptest.NewServer(p.Control())
+		defer cs.Close()
+		if code, _ := send(t, cs.URL, http.MethodPost, "/arm?mode=hold&run="+run+"&target=archive", "", false); code != http.StatusBadRequest {
+			t.Fatalf("unknown target: %d", code)
+		}
+		if code, _ := send(t, cs.URL, http.MethodPost, "/arm?mode=after&run="+run+"&target=signature", "", false); code != http.StatusOK || p.Snapshot().Target != TargetSignature {
+			t.Fatalf("signature target: %d %+v", code, p.Snapshot())
+		}
+	})
+}

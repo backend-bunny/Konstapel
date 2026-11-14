@@ -61,11 +61,11 @@
 
 ## 6. Verify real publication and required CI
 
-- [ ] 6.1 Add signing blackbox cases to the existing mandatory acceptance-group inventory, using real Kubernetes APIs, the isolated S3 backend, disposable Secrets, and pinned Cosign; verify local/CI selection requires these tests and teardown removes only test-owned keys and infrastructure.
+- [x] 6.1 Add signing blackbox cases to the existing mandatory acceptance-group inventory, using real Kubernetes APIs, the isolated S3 backend, disposable Secrets, and pinned Cosign; verify local/CI selection requires these tests and teardown removes only test-owned keys and infrastructure.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.2 Run the complete signed-publication workflow for namespace and full-binding packages, including incomplete and diagnostic results, rotation, interruption/recovery, tampering, authorization, retention, and orphaning; verify downloaded artifacts offline and retain sanitized evidence with stdout/file progress logs.
+- [x] 6.2 Run the complete signed-publication workflow for namespace and full-binding packages, including incomplete and diagnostic results, rotation, interruption/recovery, tampering, authorization, retention, and orphaning; verify downloaded artifacts offline and retain sanitized evidence with stdout/file progress logs.
   <!-- agent: tier=deep risk=high reason="Cryptographic trust, key isolation, and immutable publication" -->
-- [ ] 6.3 Run the pinned Devbox checks, relevant image workflows, and required acceptance groups on the final implementation; verify Kyverno/unsigned publication regressions remain green and supported HA recovery consumes the same signing contract before implementation is marked complete.
+- [x] 6.3 Run the pinned Devbox checks, relevant image workflows, and required acceptance groups on the final implementation; verify Kyverno/unsigned publication regressions remain green and supported HA recovery consumes the same signing contract before implementation is marked complete.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## Workflow follow-up

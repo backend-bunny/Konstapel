@@ -38,6 +38,30 @@ class GroupCoverageTests(unittest.TestCase):
         self.assertEqual(sum(group["core"] for group in acceptance.GROUPS.values()), 1)
 
 
+class SigningAcceptanceTests(unittest.TestCase):
+    """add-evidence-signing 6.1: the signing blackbox cases are part of the
+    mandatory acceptance inventory. They run in groups CI always requires
+    (the acceptance gate requires every group), on real Kubernetes APIs with
+    the test S3 service; leader loss mid-signing runs in the release group
+    that installs the image."""
+
+    REQUIRED = {
+        "TestLiveDestinationSigning": "storage",
+        "TestLiveSignedEvidenceDownload": "storage",
+        "TestLiveSignedPublicationWorkflow": "storage",
+        "TestLiveHelmDurableRecovery": "availability",
+    }
+
+    def test_signing_cases_are_in_required_groups(self):
+        for test, group in self.REQUIRED.items():
+            with self.subTest(test=test):
+                self.assertIn(test, acceptance.GROUPS[group]["goTests"])
+
+    def test_the_durable_recovery_case_exercises_signing(self):
+        text = (HERE.parents[1] / "internal/controller/helm_availability_durable_live_test.go").read_text()
+        self.assertIn("l.signedHandover(", text)
+
+
 class ReleaseGroupTests(unittest.TestCase):
     """Release acceptance (scripts/charts/acceptance.sh) runs exactly the
     groups marked "release": true against the frozen chart archives and the
