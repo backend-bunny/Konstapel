@@ -1,0 +1,73 @@
+# Supporting-evidence attachment roles (add-supporting-evidence-attachments
+# 1.3). Registration, upload, metadata read and document download are
+# separate platform grants; bind each with a ClusterRoleBinding to platform
+# subjects only. None is aggregated into the built-in admin/edit/view roles,
+# and no namespace role (assessment requester, exception editor) receives any
+# of them: application-team attachments are future work.
+#
+# evidenceattachments/upload and evidenceattachments/download are service
+# authorization attributes checked by the authenticated transfer service with
+# SubjectAccessReview, not CRD subresources served by the API server.
+#
+# Registrars register and withdraw (delete) records. The spec, including the
+# admission-recorded registrant, is immutable, so no update or patch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-attachment-registrar
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments/status]
+    verbs: [get]
+---
+# Uploaders transfer a registered record's document bytes. Upload needs the
+# record (get) and the upload attribute; it cannot create, change or
+# withdraw records.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-attachment-uploader
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments]
+    verbs: [get]
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments/upload]
+    verbs: [create]
+---
+# Readers see attachment metadata and status (titles, declared sources,
+# associations, validity and availability), never document bytes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-attachment-reader
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments, evidenceattachments/status]
+    verbs: [get, list, watch]
+---
+# Downloaders read document bytes through the transfer service. Download
+# needs the record (get) and the download attribute. This is the cluster-wide
+# document-read grant; there are no per-document ACLs in this version.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-attachment-downloader
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments]
+    verbs: [get]
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments/download]
+    verbs: [get]

@@ -11,13 +11,13 @@ local S3 endpoint for groups 2 and 3; it does not wait for package integration.
 
 ## 1. Attachment API and authority
 
-- [ ] 1.1 Add cluster-scoped EvidenceAttachment types with immutable document metadata, required validity dates, exact binding/catalog/control associations, protected attribution, status, and retention finalization; verify generated CRDs reject malformed dates/digests, unsupported fields, and evidence-defining edits.
+- [x] 1.1 Add cluster-scoped EvidenceAttachment types with immutable document metadata, required validity dates, exact binding/catalog/control associations, protected attribution, status, and retention finalization; verify generated CRDs reject malformed dates/digests, unsupported fields, and evidence-defining edits.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 1.2 Protect registration attribution using existing admission conventions and validate references before activation; verify the authenticated actor cannot be forged, statement IDs belong to their controls, and binding recreation or wrong-catalog associations cannot become active.
+- [x] 1.2 Protect registration attribution using existing admission conventions and validate references before activation; verify the authenticated actor cannot be forged, statement IDs belong to their controls, and binding recreation or wrong-catalog associations cannot become active.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 1.3 Add dedicated platform registration/upload/read/download and controller roles without built-in role aggregation; verify namespace assessment/exception credentials cannot create, upload, associate, read private metadata, or withdraw attachments.
+- [x] 1.3 Add dedicated platform registration/upload/read/download and controller roles without built-in role aggregation; verify namespace assessment/exception credentials cannot create, upload, associate, read private metadata, or withdraw attachments.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 1.4 Document the platform API, immutable replacement workflow, associations, and authority matrix in `docs/supporting-evidence.md`; verify example manifests and permission probes against the generated API.
+- [x] 1.4 Document the platform API, immutable replacement workflow, associations, and authority matrix in `docs/supporting-evidence.md`; verify example manifests and permission probes against the generated API.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 2. Source storage and commitment

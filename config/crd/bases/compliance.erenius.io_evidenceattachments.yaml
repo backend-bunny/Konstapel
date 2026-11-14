@@ -1,0 +1,410 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: evidenceattachments.compliance.erenius.io
+spec:
+  group: compliance.erenius.io
+  names:
+    kind: EvidenceAttachment
+    listKind: EvidenceAttachmentList
+    plural: evidenceattachments
+    shortNames:
+    - eattach
+    singular: evidenceattachment
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.document.title
+      name: Title
+      type: string
+    - jsonPath: .spec.validity.validFrom
+      name: Valid From
+      type: string
+    - jsonPath: .spec.validity.validUntil
+      name: Valid Until
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="AssociationsValid")].status
+      name: Associations
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          EvidenceAttachment is a platform-managed supporting document for selected
+          controls of explicitly named bindings. It is supporting material only: it
+          records no control verdict and never changes technical outcomes.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              EvidenceAttachmentSpec registers one immutable supporting document. Every
+              field is evidence-defining and fixed at creation: a corrected document,
+              period, catalog mapping, or added binding is a new EvidenceAttachment
+              (and a new upload); the old record can be withdrawn by deleting it.
+            properties:
+              associations:
+                description: |-
+                  associations name the exact local bindings, the catalog each was
+                  registered against, and the controls (and optionally statements) the
+                  document supports. The controller validates them against each
+                  binding's current resolved catalog and selected baseline before they
+                  apply; a recreated binding or changed catalog never inherits them.
+                items:
+                  description: |-
+                    AttachmentAssociation links the document to controls of one exact local
+                    binding.
+                  properties:
+                    binding:
+                      description: binding is the exact binding identity, name and
+                        UID.
+                      properties:
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        uid:
+                          maxLength: 128
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - uid
+                      type: object
+                    catalogDigest:
+                      description: |-
+                        catalogDigest is the sha256 of the OSCAL catalog file the binding
+                        resolved when the association was registered, "sha256:<64 hex>". A
+                        catalog revision change stops the association.
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    controls:
+                      description: controls are the selected-baseline controls the
+                        document supports.
+                      items:
+                        description: AttachmentControl is one catalog control and
+                          optional statement parts.
+                        properties:
+                          id:
+                            description: id is the catalog control identifier, for
+                              example "pe-3" or "ac-2.1".
+                            maxLength: 128
+                            minLength: 1
+                            pattern: ^[A-Za-z_][A-Za-z0-9_.-]*$
+                            type: string
+                          statements:
+                            description: |-
+                              statements optionally narrow the support to statement parts of this
+                              control, for example "pe-3_smt.a".
+                            items:
+                              maxLength: 128
+                              minLength: 1
+                              pattern: ^[A-Za-z_][A-Za-z0-9_.-]*$
+                              type: string
+                            maxItems: 64
+                            type: array
+                            x-kubernetes-list-type: set
+                        required:
+                        - id
+                        type: object
+                      maxItems: 64
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - id
+                      x-kubernetes-list-type: map
+                  required:
+                  - binding
+                  - catalogDigest
+                  - controls
+                  type: object
+                maxItems: 32
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+              document:
+                description: |-
+                  document identifies the bytes the platform will upload: its declared
+                  title and media type, and the exact size and SHA-256 the transfer
+                  service verifies before the document becomes available.
+                properties:
+                  mediaType:
+                    description: |-
+                      mediaType is descriptive only (lowercase type/subtype, no
+                      parameters); downloads are always served as passive attachments.
+                    maxLength: 255
+                    pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$
+                    type: string
+                  sha256:
+                    description: sha256 is the document's content digest, "sha256:<64
+                      hex>".
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  size:
+                    description: |-
+                      size is the exact byte length of the document. The transfer
+                      service's configured limit (32 MiB by default) applies on upload;
+                      1 GiB is the API's absolute ceiling.
+                    format: int64
+                    maximum: 1073741824
+                    minimum: 1
+                    type: integer
+                  title:
+                    description: title is a human-readable name for the document.
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: title must not be blank
+                      rule: self.trim().size() > 0
+                required:
+                - mediaType
+                - sha256
+                - size
+                - title
+                type: object
+              registeredBy:
+                description: |-
+                  registeredBy is the authenticated identity that created the record.
+                  The konstapel-evidence-attachment-registrant admission policy sets it
+                  from the API server's user info on create; user-supplied values are
+                  overwritten and mismatches are rejected. The actual uploader is
+                  recorded separately by the transfer service.
+                properties:
+                  uid:
+                    maxLength: 128
+                    type: string
+                  username:
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                required:
+                - username
+                type: object
+              scope:
+                description: |-
+                  scope is the platform's description of the facility or system the
+                  document covers. It is a declaration; Konstapel does not verify it.
+                properties:
+                  description:
+                    description: description explains the facility or system covered.
+                    maxLength: 2048
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: description must not be blank
+                      rule: self.trim().size() > 0
+                required:
+                - description
+                type: object
+              source:
+                description: |-
+                  source declares where the document came from. It is a platform claim,
+                  not an identity Konstapel authenticates; its url is informational and
+                  is never fetched.
+                properties:
+                  issuer:
+                    description: |-
+                      issuer describes who issued the document, for example an audit firm
+                      or datacenter operator. It is not an authenticated identity.
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: issuer must not be blank
+                      rule: self.trim().size() > 0
+                  url:
+                    description: |-
+                      url is optional informational provenance. Konstapel never fetches it
+                      and never treats it as a storage location.
+                    maxLength: 2048
+                    pattern: ^https?://[^\s]+$
+                    type: string
+                required:
+                - issuer
+                type: object
+              validity:
+                description: |-
+                  validity is the declared documentary coverage period,
+                  validFrom <= T < validUntil. Upload or copy time never changes it.
+                properties:
+                  validFrom:
+                    description: |-
+                      validFrom is the first instant the document declares coverage for
+                      (RFC 3339).
+                    format: date-time
+                    type: string
+                  validUntil:
+                    description: |-
+                      validUntil is the first instant the document no longer covers
+                      (RFC 3339).
+                    format: date-time
+                    type: string
+                required:
+                - validFrom
+                - validUntil
+                type: object
+                x-kubernetes-validations:
+                - message: validFrom must be before validUntil
+                  rule: timestamp(self.validFrom) < timestamp(self.validUntil)
+            required:
+            - associations
+            - document
+            - scope
+            - source
+            - validity
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable; register a new EvidenceAttachment
+              rule: self == oldSelf
+            - message: each binding UID may be associated only once
+              rule: self.associations.all(a, self.associations.exists_one(b, b.binding.uid
+                == a.binding.uid))
+          status:
+            description: |-
+              EvidenceAttachmentStatus is written only by the Konstapel controller. It
+              never holds document bytes, credentials, or storage locations.
+            properties:
+              associations:
+                description: associations report each spec association, in spec order.
+                items:
+                  description: AttachmentAssociationStatus is the resolution of one
+                    spec association.
+                  properties:
+                    binding:
+                      description: binding is the association's binding reference,
+                        as registered.
+                      properties:
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        uid:
+                          maxLength: 128
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - uid
+                      type: object
+                    message:
+                      maxLength: 1024
+                      type: string
+                    observedCatalogDigest:
+                      description: |-
+                        observedCatalogDigest is the catalog digest the binding currently
+                        resolves, when known.
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    reason:
+                      maxLength: 64
+                      type: string
+                    state:
+                      description: AssociationState is the controller's current view
+                        of one association.
+                      enum:
+                      - Pending
+                      - Valid
+                      - Mismatched
+                      type: string
+                  required:
+                  - binding
+                  - reason
+                  - state
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-type: atomic
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the generation last processed.
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

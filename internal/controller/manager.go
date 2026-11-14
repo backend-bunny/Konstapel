@@ -326,6 +326,9 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
 		return nil, err
 	}
+	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime())); err != nil {
+		return nil, err
+	}
 	if opts.WebhookCertDir != "" {
 		// Admission runs on every replica; the server needs no leader. It
 		// reads through the API reader so acceptance sees current configuration.

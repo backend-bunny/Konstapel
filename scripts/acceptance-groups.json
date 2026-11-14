@@ -13,7 +13,8 @@
       "TestLiveHardeningUserNamespaces",
       "TestLiveLeaderElection",
       "TestLiveBoundedShutdown",
-      "TestLiveHardeningBackground"
+      "TestLiveHardeningBackground",
+      "TestLiveEvidenceAttachmentAPI"
     ]
   },
   "assessments": {

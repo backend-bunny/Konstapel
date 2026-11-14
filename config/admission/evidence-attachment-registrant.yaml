@@ -1,0 +1,71 @@
+# Records the authenticated registrant of every EvidenceAttachment
+# (add-supporting-evidence-attachments 1.2). The mutation overwrites any
+# user-supplied spec.registeredBy; the validation fails closed if the stored
+# value does not match the API server's user info. The spec is immutable
+# after creation (CRD rule), so the registrant cannot be rewritten later.
+# The declared document source (spec.source) is a separate, unauthenticated
+# claim. The uploader is recorded by the transfer service, not here.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: konstapel-evidence-attachment-registrant
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [evidenceattachments]
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{spec: Object.spec{registeredBy: Object.spec.registeredBy{
+            username: request.userInfo.username,
+            ?uid: request.userInfo.?uid
+          }}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: konstapel-evidence-attachment-registrant
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  policyName: konstapel-evidence-attachment-registrant
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: konstapel-evidence-attachment-registrant
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [evidenceattachments]
+  validations:
+    - expression: >-
+        has(object.spec.registeredBy) &&
+        object.spec.registeredBy.username == request.userInfo.username &&
+        object.spec.registeredBy.?uid.orValue('') == request.userInfo.?uid.orValue('')
+      message: spec.registeredBy must be the authenticated registrant
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: konstapel-evidence-attachment-registrant
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  policyName: konstapel-evidence-attachment-registrant
+  validationActions: [Deny]
