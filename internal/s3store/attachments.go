@@ -531,6 +531,45 @@ func (a *AttachmentStore) listRaw(ctx context.Context, prefix string) ([]objectV
 	}
 }
 
+// ownedFiles are the only objects an attempt directory holds for its
+// attachment, in deletion order: the document first and the ownership
+// records last, so a deletion that fails part-way (an object lock, a
+// missing permission, an outage) still finds the directory's owner on its
+// next attempt. Any other object in the directory is not the attachment's
+// and is never deleted.
+var ownedFiles = []string{attachmentDocumentFile, attachmentAttemptFile, intentFile}
+
+// deleteAttempt removes an attempt directory's own objects, every version
+// and delete marker, in ownedFiles order. It stops at the first object that
+// cannot be removed, keeping the ownership records.
+func (a *AttachmentStore) deleteAttempt(ctx context.Context, dir string, versions []objectVersion) []string {
+	for _, name := range ownedFiles {
+		var own []objectVersion
+		for _, v := range versions {
+			if v.key == dir+name {
+				own = append(own, v)
+			}
+		}
+		if problems := a.deleteVersions(ctx, own); len(problems) > 0 {
+			return problems
+		}
+	}
+	return nil
+}
+
+// holdsOwnedFiles reports whether a directory still holds any of its owned
+// objects.
+func holdsOwnedFiles(dir string, versions []objectVersion) bool {
+	for _, v := range versions {
+		for _, name := range ownedFiles {
+			if v.key == dir+name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *AttachmentStore) deleteVersions(ctx context.Context, versions []objectVersion) []string {
 	var problems []string
 	for _, v := range versions {
@@ -598,7 +637,7 @@ func (a *AttachmentStore) CleanupAttempts(ctx context.Context, ref attachments.R
 		if !owned || !created.Before(olderThan) {
 			continue
 		}
-		problems = append(problems, a.deleteVersions(ctx, versions)...)
+		problems = append(problems, a.deleteAttempt(ctx, dir, versions)...)
 	}
 	problems = append(problems, a.abortUploads(ctx, ref, olderThan)...)
 	if len(problems) > 0 {
@@ -629,7 +668,7 @@ func (a *AttachmentStore) DeleteUncommitted(ctx context.Context, ref attachments
 		case err != nil:
 			problems = append(problems, err.Error())
 		case owned:
-			problems = append(problems, a.deleteVersions(ctx, versions)...)
+			problems = append(problems, a.deleteAttempt(ctx, dir, versions)...)
 		}
 	}
 	problems = append(problems, a.abortUploads(ctx, ref, time.Time{})...)
@@ -663,8 +702,10 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 	if err := r.Ref.Validate(); err != nil {
 		return attachments.Cleanup{}, err
 	}
-	// Only the attachment's own attempts and its commit are removed; any
-	// other object that happens to share the prefix is left in place.
+	// Only the attachment's own attempt objects and its commit are removed;
+	// any other object that happens to share the prefix, even inside an
+	// owned attempt directory, is left in place.
+	committed := path.Dir(r.DocumentKey) + "/"
 	dirs, err := a.attemptDirs(ctx, r.Ref)
 	if err != nil {
 		return attachments.Cleanup{}, err
@@ -675,8 +716,8 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 		switch {
 		case err != nil:
 			problems = append(problems, err.Error())
-		case owned || dir == path.Dir(r.DocumentKey)+"/":
-			problems = append(problems, a.deleteVersions(ctx, versions)...)
+		case owned || dir == committed:
+			problems = append(problems, a.deleteAttempt(ctx, dir, versions)...)
 		}
 	}
 	problems = append(problems, a.abortUploads(ctx, r.Ref, time.Time{})...)
@@ -690,7 +731,26 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 			own = append(own, v)
 		}
 	}
-	// The commit goes last, so an interrupted deletion still finds it.
+	// The commit goes last, so an interrupted deletion still finds it, and
+	// only once nothing owned remains.
+	if len(problems) == 0 {
+		if left, err := a.attemptDirs(ctx, r.Ref); err != nil {
+			problems = append(problems, err.Error())
+		} else {
+			for dir, versions := range left {
+				if !holdsOwnedFiles(dir, versions) {
+					continue
+				}
+				if dir == committed {
+					problems = append(problems, "the committed document versions remain")
+					continue
+				}
+				if owned, _, err := a.ownedAttempt(ctx, dir, r.Ref); err != nil || owned {
+					problems = append(problems, "owned attempt objects remain")
+				}
+			}
+		}
+	}
 	if len(problems) == 0 {
 		problems = append(problems, a.deleteVersions(ctx, own)...)
 	}
@@ -704,11 +764,6 @@ func (a *AttachmentStore) Delete(ctx context.Context, r attachments.Receipt, now
 					break
 				}
 			}
-		}
-		if dirs, err := a.attemptDirs(ctx, r.Ref); err != nil {
-			problems = append(problems, err.Error())
-		} else if _, ok := dirs[path.Dir(r.DocumentKey)+"/"]; ok {
-			problems = append(problems, "the committed document versions remain")
 		}
 	}
 	return a.cleanupResult(problems)

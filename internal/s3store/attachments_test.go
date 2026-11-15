@@ -465,3 +465,122 @@ func TestAttachmentDeleteUncommittedSeesALateCommit(t *testing.T) {
 		t.Fatalf("the late commitment was removed: %v", err)
 	}
 }
+
+// add-supporting-evidence-attachments 4.2/4.3: owned cleanup removes every
+// owned version and delete marker, never an unrelated object (outside the
+// attachment's prefix, under it, or inside one of its own attempt
+// directories) and never a historical package. A deletion refused part-way
+// keeps the ownership records, so its retry still finds and removes the
+// owned bytes.
+func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
+	for _, mode := range []string{"", "Enabled", "Suspended"} {
+		t.Run("versioning="+mode, func(t *testing.T) {
+			f := newFake()
+			f.versioning = mode
+			a, now := attachmentStore(t, f)
+			ctx := context.Background()
+			body := []byte("annual audit, committed")
+			loser := stage(t, a, attRef, []byte("a losing upload of other bytes"), alice)
+			stage(t, a, attRef, body, alice)
+			r, err := a.Commit(ctx, commitReq(attRef, body, specA, now.Add(time.Hour), time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := AttachmentPrefix(a.Dest, attRef)
+			loserDir := prefix + "attempts/" + loser.AttemptID + "/"
+			committedDir := r.DocumentKey[:strings.LastIndex(r.DocumentKey, "/")+1]
+			put := func(key, body string) {
+				t.Helper()
+				if _, err := a.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(a.Dest.Bucket), Key: aws.String(key), Body: strings.NewReader(body)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Objects Konstapel does not own, and a historical package.
+			pkg := RunPrefix(a.Dest, testRun) + "package.tar.gz"
+			unrelated := map[string]string{prefix + "operator-notes.txt": "keep", loserDir + "operator-notes.txt": "keep too",
+				committedDir + "legal-hold.txt": "keep as well", pkg: "historical package bytes"}
+			for k, v := range unrelated {
+				put(k, v)
+			}
+			if mode == "Enabled" {
+				// A delete marker on an owned key is owned too.
+				if _, err := a.Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(a.Dest.Bucket), Key: aws.String(loserDir + attachmentDocumentFile)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			*now = r.ExpiresAt
+			// An object lock on the losing upload's document refuses deletion
+			// part-way: its ownership records and the commit are kept.
+			f.denyDeleteKey = func(k string) bool { return k == loserDir+attachmentDocumentFile }
+			if c, err := a.Delete(ctx, r, *now); !errors.Is(err, attachments.ErrRetentionBlocked) || c.State != attachments.CleanupRetentionBlocked {
+				t.Fatalf("locked document: %+v %v", c, err)
+			}
+			for _, k := range []string{loserDir + intentFile, loserDir + attachmentAttemptFile} {
+				if len(f.objects[k]) == 0 {
+					t.Fatalf("ownership record %s removed before the bytes it owns", k)
+				}
+			}
+			if _, err := a.Committed(ctx, attRef); err != nil {
+				t.Fatalf("a refused deletion lost the commitment: %v", err)
+			}
+			// The lock is lifted: the retry removes every owned object.
+			f.denyDeleteKey = nil
+			if c, err := a.Delete(ctx, r, *now); err != nil || c.State != attachments.CleanupDeleted {
+				t.Fatalf("retry: %+v %v", c, err)
+			}
+			for k, versions := range f.objects {
+				if _, keep := unrelated[k]; keep {
+					if got := versions[len(versions)-1]; got.deleted || string(got.body) != unrelated[k] {
+						t.Fatalf("unrelated object %s changed", k)
+					}
+					continue
+				}
+				if strings.HasPrefix(k, prefix) {
+					t.Fatalf("owned object %s (%d versions) remains", k, len(versions))
+				}
+			}
+			if len(f.objects) != len(unrelated) {
+				t.Fatalf("objects left: %d, want %d unrelated", len(f.objects), len(unrelated))
+			}
+		})
+	}
+}
+
+// Withdrawal of an uncommitted record and abandoned-attempt cleanup keep
+// the same order: a refused document keeps its attempt owned and cleanable.
+func TestAttachmentUncommittedCleanupFailsSafeAndRecovers(t *testing.T) {
+	f := newFake()
+	f.versioning = "Enabled"
+	a, now := attachmentStore(t, f)
+	ctx := context.Background()
+	s1 := stage(t, a, attRef, []byte("abandoned upload one"), alice)
+	s2 := stage(t, a, otherRef, []byte("abandoned upload two"), bob)
+	prefix := AttachmentPrefix(a.Dest, attRef)
+	dir1 := prefix + "attempts/" + s1.AttemptID + "/"
+	dir2 := AttachmentPrefix(a.Dest, otherRef) + "attempts/" + s2.AttemptID + "/"
+	f.denyDeleteKey = func(k string) bool { return strings.HasSuffix(k, "/"+attachmentDocumentFile) }
+	if c, err := a.DeleteUncommitted(ctx, attRef); !errors.Is(err, attachments.ErrRetentionBlocked) || c.State != attachments.CleanupRetentionBlocked {
+		t.Fatalf("locked withdrawal: %+v %v", c, err)
+	}
+	if err := a.CleanupAttempts(ctx, otherRef, now.Add(time.Hour)); err == nil {
+		t.Fatal("a refused attempt cleanup reported success")
+	}
+	for _, k := range []string{dir1 + intentFile, dir1 + attachmentAttemptFile, dir2 + intentFile, dir2 + attachmentAttemptFile} {
+		if len(f.objects[k]) == 0 {
+			t.Fatalf("ownership record %s removed before its document", k)
+		}
+	}
+	f.denyDeleteKey = nil
+	if c, err := a.DeleteUncommitted(ctx, attRef); err != nil || c.State != attachments.CleanupDeleted {
+		t.Fatalf("retried withdrawal: %+v %v", c, err)
+	}
+	if err := a.CleanupAttempts(ctx, otherRef, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if left := f.keys(prefix); len(left) != 0 {
+		t.Fatalf("withdrawn attempt objects remain: %v", left)
+	}
+	if left := f.keys(dir2); len(left) != 0 {
+		t.Fatalf("abandoned attempt objects remain: %v", left)
+	}
+}

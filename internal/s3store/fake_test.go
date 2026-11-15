@@ -30,6 +30,9 @@ type fakeS3 struct {
 	accessKeys  []string          // access key ID of each signed request
 	uploads     map[string]string // incomplete multipart upload ID -> key
 	denyDelete  bool              // refuse object deletion (object lock / missing permission)
+	// denyDeleteKey refuses deletion of matching keys only, as an object
+	// lock on one object would.
+	denyDeleteKey func(key string) bool
 	// loseCommits stores a conditional create of a commit.json and then
 	// answers 500, as if the response were lost after the write landed.
 	loseCommits bool
@@ -170,7 +173,7 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(v.body)
 		}
 	case http.MethodDelete:
-		if f.denyDelete {
+		if f.denyDelete || (f.denyDeleteKey != nil && f.denyDeleteKey(key)) {
 			xmlError(w, 403, "AccessDenied")
 			return
 		}
