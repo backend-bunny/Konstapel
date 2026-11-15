@@ -161,7 +161,9 @@ func TestAttachmentContentTracksTheCommittedBytes(t *testing.T) {
 		set  func()
 		want string
 	}{
-		{"damaged", func() { st.problem = &attachments.Problem{Reason: attachments.ProblemIntegrity, Message: "different SHA-256"} }, "Unavailable/IntegrityFailed"},
+		{"damaged", func() {
+			st.problem = &attachments.Problem{Reason: attachments.ProblemIntegrity, Message: "different SHA-256"}
+		}, "Unavailable/IntegrityFailed"},
 		{"no answer", func() { st.problem, st.healthErr = nil, attachments.ErrUnavailable }, "Unavailable/StorageUnavailable"},
 		{"unreachable", func() { st.healthErr, f.stores.down = nil, true }, "Unavailable/StorageUnavailable"},
 		{"handed off", func() { f.stores.down, f.stores.orphaned = false, true }, "Unavailable/DestinationHandedOff"},
