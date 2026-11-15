@@ -63,14 +63,26 @@ spec:
 {{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
 {{- $pr := .Values.metrics.prometheusRule }}
 {{- $scope := include "konstapel.metricsScope" . }}
+{{- $scopeLabels := include "konstapel.metricsScopeLabels" . }}
+{{- $age := include "konstapel.durationSeconds" $pr.maxProjectionAge }}
+{{- /* The one replica with a fresh, ready projection of a domain; nothing
+when none or several replicas claim it (docs/charts.md, "Rules"). */}}
+{{- $fresh := printf "konstapel_observation_ready{__scope__%%s} == 1 and time() - konstapel_observation_updated_timestamp_seconds{__scope__%%s} < %s" $age }}
+{{- $owner := printf "((%s) and on (__scope_labels__, domain) (count by (__scope_labels__, domain) (%s) == 1))" $fresh $fresh }}
+{{- $ownerOf := replace "%s" ",domain=\"${1}\"" $owner }}
+{{- $owners := replace "%s" "" $owner }}
 {{- $groups := list }}
 {{- range $gname, $g := $pr.groups }}
 {{- if ne ($g.enabled | toString) "false" }}
 {{- $rules := list }}
 {{- range $rname, $r := $g.rules }}
 {{- if ne ($r.enabled | toString) "false" }}
-{{- $expr := replace "__scope__" $scope $r.expr }}
+{{- $expr := regexReplaceAll "__owner\\(([a-z_]+)\\)__" $r.expr $ownerOf }}
+{{- $expr = replace "__owners__" $owners $expr }}
+{{- $expr = replace "__scope_labels__" $scopeLabels $expr }}
+{{- $expr = replace "__scope__" $scope $expr }}
 {{- if hasKey $r "threshold" }}{{- $expr = replace "__threshold__" (printf "%v" $r.threshold) $expr }}{{- end }}
+{{- if $r.window }}{{- $expr = replace "__window__" $r.window $expr }}{{- end }}
 {{- $labels := merge (dict "severity" ($r.severity | default "warning")) ($r.labels | default dict) }}
 {{- $annotations := $r.annotations | default dict }}
 {{- if $r.runbookURL }}
@@ -94,8 +106,9 @@ spec:
 {{- if $groups }}
 ---
 # Optional PrometheusRule (docs/charts.md, "Monitoring integration"). Rule
-# content comes from metrics.prometheusRule.groups; thresholds, holds,
-# severity and enablement are chart values.
+# content comes from metrics.prometheusRule.groups, which default to the
+# starter alerts (docs/integration/alert-runbooks.md); thresholds, windows,
+# holds, severity and enablement are chart values.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

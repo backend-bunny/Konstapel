@@ -49,7 +49,7 @@ Implementation adds instrumentation and metric projections around the existing
 targeting contract and future assessment, bundle and storage controllers, plus
 metrics TLS/RBAC and monitoring templates in the controller chart. It reuses the
 existing controller-runtime and Prometheus client dependencies, promotes direct
-dependencies when imported, and adds pinned rule-testing tooling through Devbox.
+dependencies when imported, and runs rule tests with pinned tooling (a digest-pinned promtool image).
 
 Metric definitions and rule fixtures can start independently. Runtime integration
 follows the owning manager/status implementations; chart integration follows the

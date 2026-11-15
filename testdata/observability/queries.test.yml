@@ -352,3 +352,26 @@ tests:
             value: 1
           - labels: '{binding="payments", job="konstapel"}'
             value: 1
+      # observation readiness per replica (runbook diagnostics)
+      - expr: |
+          konstapel_observation_ready{domain="assessment"}
+        eval_time: 1m
+        exp_samples:
+          - labels: 'konstapel_observation_ready{domain="assessment", instance="konstapel-0", job="konstapel"}'
+            value: 1
+          - labels: 'konstapel_observation_ready{domain="assessment", instance="konstapel-1", job="konstapel"}'
+            value: 0
+      # projection age per replica (runbook diagnostics)
+      - expr: |
+          time() - konstapel_observation_updated_timestamp_seconds{domain="assessment"}
+        eval_time: 3m
+        exp_samples:
+          - labels: '{domain="assessment", instance="konstapel-0", job="konstapel"}'
+            value: 120
+      # known current summary with incomplete evidence
+      - expr: |
+          max by (job, binding) (konstapel_binding_assessment_complete{view="current"}) == 0
+        eval_time: 1m
+        exp_samples:
+          - labels: '{binding="payments", job="konstapel"}'
+            value: 0

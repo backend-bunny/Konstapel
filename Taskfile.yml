@@ -11,15 +11,19 @@ tasks:
     cmd: scripts/build.sh
 
   test:
-    desc: Run Go tests, Prometheus query tests and CI/logging regression tests
+    desc: Run Go tests, Prometheus query and alert-rule tests and CI/logging regression tests
     cmds:
       # The controller package takes about 8 minutes on an idle host, so Go's
       # default 10-minute package timeout fails spuriously on a busy one.
       - go test -mod=readonly -timeout 30m ./...
       - python3 -m unittest discover -s scripts/ci -p 'test_*.py'
-      # Documented metric queries against Hub-generated series; needs Docker
-      # (required in CI, skipped with a notice without a daemon).
+      # Documented metric queries against Hub-generated series, and the
+      # chart's Helm-rendered starter alerts (kept identical to the rendered
+      # PrometheusRule by internal/charttest) with their rule tests. Needs
+      # Docker (required in CI, skipped with a notice without a daemon).
       - scripts/promtool.sh test rules testdata/observability/queries.test.yml
+      - scripts/promtool.sh check rules testdata/observability/rules/konstapel.rules.yml testdata/observability/rules/konstapel-b.rules.yml
+      - scripts/promtool.sh test rules testdata/observability/rules/starter.test.yml testdata/observability/rules/releases.test.yml
 
   lint:
     desc: Check Go formatting, vet, generated API files, Helm charts, and shell syntax

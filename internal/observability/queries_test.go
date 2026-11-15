@@ -161,25 +161,32 @@ func TestQueryExamplesFixture(t *testing.T) {
 	}
 	golden(t, "testdata/observability/queries.test.yml", []byte(b.String()))
 
-	// Every documented query is one of the evaluated cases.
-	md, err := os.ReadFile(filepath.Join(repoRoot, "docs/integration/metrics.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocks := regexp.MustCompile("(?s)```promql\n(.*?)```").FindAllStringSubmatch(string(md), -1)
-	if len(blocks) == 0 {
-		t.Fatal("docs/integration/metrics.md has no promql examples")
-	}
+	// Every documented query is one of the evaluated cases, and every case
+	// is documented.
 	exprs := map[string]bool{}
 	for _, c := range doc.Cases {
 		exprs[strings.TrimSpace(c.Expr)] = true
 	}
-	for _, blk := range blocks {
-		if !exprs[strings.TrimSpace(blk[1])] {
-			t.Errorf("documented query is not an evaluated case:\n%s", blk[1])
+	documented := map[string]bool{}
+	for _, page := range []string{"docs/integration/metrics.md", "docs/integration/alert-runbooks.md"} {
+		md, err := os.ReadFile(filepath.Join(repoRoot, page))
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocks := regexp.MustCompile("(?s)```promql\n(.*?)```").FindAllStringSubmatch(string(md), -1)
+		if len(blocks) == 0 {
+			t.Fatalf("%s has no promql examples", page)
+		}
+		for _, blk := range blocks {
+			if !exprs[strings.TrimSpace(blk[1])] {
+				t.Errorf("%s: documented query is not an evaluated case:\n%s", page, blk[1])
+			}
+			documented[strings.TrimSpace(blk[1])] = true
 		}
 	}
-	if len(blocks) != len(doc.Cases) {
-		t.Errorf("%d documented queries, %d cases", len(blocks), len(doc.Cases))
+	for _, c := range doc.Cases {
+		if !documented[strings.TrimSpace(c.Expr)] {
+			t.Errorf("case %q is not documented", c.Name)
+		}
 	}
 }

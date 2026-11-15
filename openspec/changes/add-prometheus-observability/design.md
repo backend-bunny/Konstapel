@@ -318,9 +318,11 @@ As implemented (group 4):
   5m availability windows contain several scrapes.
 - `metrics.prometheusRule.groups` is a map of group to rule maps, so a rule is
   tuned with one value; `expr` may use `__scope__` (exact-match release or
-  external-job matchers; no regular expressions) and `__threshold__`. The chart
-  ships no rule yet: enabling it renders a PrometheusRule only when a group
-  has an enabled rule. Group 5 adds the seven starter rules as default values.
+  external-job matchers; no regular expressions) and `__threshold__`.
+  Enabling it renders a PrometheusRule only when a group has an enabled
+  rule (an owner decision: all rules disabled renders nothing, never an
+  empty object). Group 5 added the seven starter rules as default values,
+  so an enabled default install renders them.
 - Tests validate rendered objects against the vendored CRDs of the Operator
   version pinned in `scripts/runtime.env` (checksum-verified by
   `task deps:check`).
@@ -364,6 +366,45 @@ state, timing, relevant Conditions, diagnostic commands and recovery checks.
 Runbooks do not prescribe disabling verification, deleting retained records,
 relaxing policy mode or granting exceptions to silence monitoring.
 
+As implemented (group 5):
+
+- Two default groups: `konstapel-availability` (MetricsUnavailable,
+  ObservationUnavailable) and `konstapel-operations` (the other five), all
+  `warning`, each with an explicit `runbookURL` to
+  `docs/integration/alert-runbooks.md` (`runbookBaseURL` stays for rules
+  without one).
+- Owner filtering is the chart placeholder `__owner(<domain>)__`: the scrape
+  target whose domain projection is ready and whose
+  `konstapel_observation_updated_timestamp_seconds` is younger than
+  `metrics.prometheusRule.maxProjectionAge` (default 4m: the exporter's 2m
+  maximum plus the 2m scrape-interval cap; validated against the
+  ServiceMonitor interval), counted per release; it yields nothing when no
+  target or several qualify. Gauges are joined to it `on (scope, instance)`
+  and aggregated with `max by (scope, ...)`; `__scope_labels__` keeps the
+  scope labels in every aggregation. ObservationUnavailable fires for an
+  enabled domain without such an owner (`__owners__`). The age check also
+  stops a former leader's samples, which linger for the lookback window
+  without staleness markers, from counting.
+- KonstapelPublicationFailing holds **2m**, not 5m: the owner fails a run at
+  the 5-minute publish timeout after closure (`Failed`/`PublicationFailed`,
+  a historical failure not counted in `konstapel_publication_failed`), so a
+  failing run is actionable for under 5 minutes and a 5m hold could never
+  fire. Its attempt window is the new per-rule `window` (`__window__`,
+  default 15m).
+- A clean leader handover keeps a pending hold; an overlap or gap without a
+  single owner restarts it (documented in the runbooks). Operational alerts
+  resolve when their domain becomes unobservable; the runbooks state that
+  this is not recovery.
+- Rule tests: `internal/charttest` keeps
+  `testdata/observability/rules/<release>.rules.yml` byte-identical to the
+  rendered PrometheusRule's `spec.groups` for two release names and
+  generates promtool tests from `*.cases.yaml` (series checked against the
+  catalog; severity and annotations taken from the rendered rules). `task
+  test` runs `promtool check rules` and `promtool test rules` through the
+  digest-pinned promtool image (`scripts/promtool.sh`), not a Devbox package
+  (Devbox's `prometheus` ships promtool only in a separate output); CI
+  requires Docker, a local run without a daemon skips with a notice.
+
 ### 8. Keep implementation dependencies and validation explicit
 
 This change owns metric definitions/projections, instrumentation hooks, metrics
@@ -380,8 +421,8 @@ publication/cleanup implementation. Authenticated ServiceMonitor acceptance wait
 for the Helm chart. Do not emit fabricated healthy metrics for unfinished domains.
 
 Use Prometheus `promtool check rules` and `promtool test rules` on the exact rendered
-rule content, promoting a pinned Prometheus tooling package into Devbox when
-implemented. Put formatting, exposition and rule tests behind existing
+rule content with pinned tooling (implemented as the digest-pinned promtool
+image, see §7). Put formatting, exposition and rule tests behind existing
 `task check`; extend the chart plan's `charts:acceptance` workflow with a
 monitoring scenario. No new public task is necessary for each rule/helper.
 

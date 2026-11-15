@@ -148,26 +148,165 @@ metrics:
     authorization:
       mode: serviceAccountToken
       secret: {name: "", key: token}
-  # Rules are rendered from groups; the chart ships no group of its own yet
-  # (starter alerts come with add-prometheus-observability group 5), so
-  # enabling this renders nothing until a group with an enabled rule exists.
+  # Rules are rendered from groups. The chart ships the seven starter alerts
+  # below (docs/integration/alert-runbooks.md); add your own groups beside
+  # them. A PrometheusRule renders only while some group has an enabled rule.
   #   groups:
   #     <group-name>:
   #       enabled: true
   #       interval: 1m
   #       rules:
   #         <AlertName>: {enabled: true, expr: "...__scope__...", for: 10m,
-  #                       threshold: 1, severity: warning, runbookURL: https://..}
-  # In expr, __scope__ becomes the scrape-scope matchers and __threshold__ the
-  # rule's threshold. Maps merge across value files, so one rule can be tuned
-  # alone: --set metrics.prometheusRule.groups.<g>.rules.<A>.for=15m.
+  #                       threshold: 1, window: 15m, severity: warning,
+  #                       runbookURL: https://..}
+  # In expr:
+  #   __scope__         the scrape-scope matchers (see scope)
+  #   __scope_labels__  their label names, for by (...) and on (...)
+  #   __threshold__     the rule's threshold; __window__ its window
+  #   __owner(<domain>)__  the one replica holding a fresh, ready projection
+  #                     of that domain (targeting, assessment,
+  #                     bundle_resolution, evidence_storage), or nothing when
+  #                     none or several do; join gauges to it with
+  #                     "and on (__scope_labels__, instance)"
+  #   __owners__        the same for every domain, with its domain label
+  # Maps merge across value files, so one rule can be tuned alone:
+  # --set metrics.prometheusRule.groups.<g>.rules.<A>.for=15m.
   prometheusRule:
     enabled: false
     labels: {}
+    # Runbook link for rules without a runbookURL: <runbookBaseURL>/<Alert>.
+    # The starter alerts set their own runbookURL.
     runbookBaseURL: ""
     # Label matchers that select this release's scraped series. Empty means
     # the ServiceMonitor's target labels: job, namespace and release instance.
     # Set them for an externally configured scrape job. Exact values only.
+    # Add your cluster label when one ruler evaluates several clusters.
     scope:
       matchers: {}
-    groups: {}
+    # How old an owner's projection (konstapel_observation_updated_timestamp_seconds)
+    # may be when rules read it: the controller's 2m maximum plus the scrape
+    # interval. Older samples (a replica no longer scraped, a lingering
+    # former leader) are not an owner.
+    maxProjectionAge: 4m
+    groups:
+      # Is this release scraped, and does each enabled domain have exactly
+      # one fresh owner? Operational rules are silent without one, so these
+      # alerts are what reports missing observability.
+      konstapel-availability:
+        rules:
+          KonstapelMetricsUnavailable:
+            # No target, or no successful scrape on any target.
+            expr: |-
+              max by (__scope_labels__) (up{__scope__}) == 0
+              or
+              absent(up{__scope__})
+            for: 5m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelmetricsunavailable
+            annotations:
+              summary: Konstapel controller metrics are not being scraped.
+              description: >-
+                Prometheus has no successful scrape of the Konstapel release
+                selected by this alert's labels. No other Konstapel alert can
+                fire meanwhile; this says nothing about enforcement,
+                assessments or evidence.
+          KonstapelObservationUnavailable:
+            # Enabled, but no single replica holds a fresh, ready projection.
+            expr: |-
+              max by (__scope_labels__, domain) (konstapel_observation_enabled{__scope__}) == 1
+              unless on (__scope_labels__, domain)
+              __owners__
+            for: 5m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelobservationunavailable
+            annotations:
+              summary: Konstapel's {{ $labels.domain }} observation is unavailable.
+              description: >-
+                The enabled {{ $labels.domain }} domain has no fresh, ready
+                projection on exactly one replica. Its alerts cannot fire,
+                and their resolution does not mean recovery.
+      # Operational alerts. Each reads gauges only from the domain's single
+      # fresh owner (__owner(...)__), aggregated per release with max, never
+      # summed across replicas.
+      konstapel-operations:
+        rules:
+          KonstapelBindingUnresolved:
+            expr: |-
+              max by (__scope_labels__, binding) (
+                konstapel_binding_condition{__scope__, condition="Resolved", status!="true"} == 1
+                and on (__scope_labels__, instance) __owner(targeting)__
+              )
+            for: 10m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelbindingunresolved
+            annotations:
+              summary: ComplianceBinding {{ $labels.binding }} is not resolved.
+              description: >-
+                The Resolved condition of ComplianceBinding {{ $labels.binding }}
+                is false or unknown for its current generation. Its previous
+                enforcement stays in force; changes to it are not delivered.
+          KonstapelEngineUnavailable:
+            expr: |-
+              max by (__scope_labels__, capability) (
+                konstapel_capability_condition{__scope__, status!="true"} == 1
+                and on (__scope_labels__, instance) __owner(targeting)__
+              )
+            for: 10m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelengineunavailable
+            annotations:
+              summary: Kyverno capability {{ $labels.capability }} is unavailable to Konstapel.
+              description: >-
+                The {{ $labels.capability }} capability is false (API missing
+                or access denied) or unknown (dependency cannot be asked).
+          KonstapelAssessmentOverdue:
+            # Seconds past the scheduled due time plus the collection
+            # timeout; threshold is the grace.
+            expr: |-
+              time()
+              - max by (__scope_labels__, binding) (konstapel_binding_scheduled_due_timestamp_seconds{__scope__} and on (__scope_labels__, instance) __owner(assessment)__)
+              - max by (__scope_labels__, binding) (konstapel_binding_collection_timeout_seconds{__scope__} and on (__scope_labels__, instance) __owner(assessment)__)
+              > __threshold__
+            threshold: 600
+            for: 5m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelassessmentoverdue
+            annotations:
+              summary: Scheduled assessment of {{ $labels.binding }} is overdue.
+              description: >-
+                ComplianceBinding {{ $labels.binding }} has scheduled work
+                outstanding past its due time, collection timeout and grace.
+                Namespace requests and diagnostic runs do not meet it.
+          KonstapelPublicationFailing:
+            # A failing run is actionable only until the 5-minute publish
+            # timeout after its collection closed, so the hold stays shorter.
+            expr: |-
+              max by (__scope_labels__) (konstapel_publication_failed{__scope__} and on (__scope_labels__, instance) __owner(evidence_storage)__) > 0
+              and on (__scope_labels__)
+              sum by (__scope_labels__) (increase(konstapel_operation_attempts_total{__scope__, operation="evidence_publication", result="failure"}[__window__])) >= __threshold__
+            threshold: 3
+            window: 15m
+            for: 2m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelpublicationfailing
+            annotations:
+              summary: Konstapel evidence publication is failing.
+              description: >-
+                Assessment runs are retrying publication after repeated failed
+                attempts. Their assessment results stand; their evidence
+                packages are not committed.
+          KonstapelCleanupBlocked:
+            # Blocked cleanup, or pending cleanup more than threshold
+            # seconds past the oldest recorded expiry.
+            expr: |-
+              max by (__scope_labels__) (konstapel_cleanup_blocked{__scope__} and on (__scope_labels__, instance) __owner(evidence_storage)__) > 0
+              or
+              (
+                time() - max by (__scope_labels__) (konstapel_cleanup_oldest_expiry_timestamp_seconds{__scope__} and on (__scope_labels__, instance) __owner(evidence_storage)__) > __threshold__
+                and on (__scope_labels__)
+                max by (__scope_labels__) (konstapel_cleanup_pending{__scope__} and on (__scope_labels__, instance) __owner(evidence_storage)__) > 0
+              )
+            threshold: 3600
+            for: 15m
+            runbookURL: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelcleanupblocked
+            annotations:
+              summary: Konstapel evidence retention cleanup is blocked or late.
+              description: >-
+                Expired evidence packages are retained past their expiry:
+                storage refuses deletion, or deletion is unconfirmed more than
+                an hour after the oldest expiry. Records outlive deleted
+                bindings, so check every AssessmentRun.
