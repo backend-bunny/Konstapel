@@ -94,10 +94,15 @@ func (f *attachmentFixture) association(binding, uid string, controls ...v1alpha
 
 func (f *attachmentFixture) create(name string, as ...v1alpha1.AttachmentAssociation) {
 	f.t.Helper()
+	f.createValid(name, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), as...)
+}
+
+func (f *attachmentFixture) createValid(name string, from, until time.Time, as ...v1alpha1.AttachmentAssociation) {
+	f.t.Helper()
 	a := &v1alpha1.EvidenceAttachment{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Generation: 1}, Spec: v1alpha1.EvidenceAttachmentSpec{
 		Document:     v1alpha1.AttachmentDocument{Title: "DC audit", MediaType: "application/pdf", Size: 10, SHA256: "sha256:" + hex.EncodeToString(make([]byte, 32))},
 		Source:       v1alpha1.AttachmentSource{Issuer: "Auditor"},
-		Validity:     v1alpha1.AttachmentValidity{ValidFrom: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), ValidUntil: metav1.NewTime(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))},
+		Validity:     v1alpha1.AttachmentValidity{ValidFrom: metav1.NewTime(from), ValidUntil: metav1.NewTime(until)},
 		Associations: as,
 		Scope:        v1alpha1.AttachmentScope{Description: "DC North"},
 		RegisteredBy: &v1alpha1.Requester{Username: "platform-operator"},

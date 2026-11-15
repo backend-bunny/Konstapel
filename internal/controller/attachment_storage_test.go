@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -36,6 +37,13 @@ type memStore struct {
 	deleteErr error
 	cleanups  int
 	deleted   []attachments.Ref
+	// deletedAt is the controller time of each successful deletion.
+	deletedAt []time.Time
+	// problem and healthErr are the next Health answers.
+	problem     *attachments.Problem
+	healthErr   error
+	healthCalls int
+	deleteCalls int
 }
 
 func newMemStore(id string) *memStore {
@@ -61,7 +69,10 @@ func (m *memStore) Committed(_ context.Context, ref attachments.Ref) (attachment
 }
 func (m *memStore) Open(context.Context, attachments.Receipt) (io.ReadCloser, error) { return nil, nil }
 func (m *memStore) Health(context.Context, attachments.Receipt) (*attachments.Problem, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCalls++
+	return m.problem, m.healthErr
 }
 func (m *memStore) CleanupAttempts(context.Context, attachments.Ref, time.Time) error {
 	m.mu.Lock()
@@ -82,6 +93,7 @@ func (m *memStore) DeleteUncommitted(_ context.Context, ref attachments.Ref) (at
 func (m *memStore) Delete(_ context.Context, r attachments.Receipt, now time.Time) (attachments.Cleanup, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.deleteCalls++
 	if now.Before(r.ExpiresAt) {
 		return attachments.Cleanup{}, attachments.ErrRetentionActive
 	}
@@ -90,15 +102,21 @@ func (m *memStore) Delete(_ context.Context, r attachments.Receipt, now time.Tim
 	}
 	delete(m.committed, r.Ref)
 	m.deleted = append(m.deleted, r.Ref)
+	m.deletedAt = append(m.deletedAt, now)
 	return attachments.Cleanup{State: attachments.CleanupDeleted}, nil
 }
 
 type memStores struct {
 	stores map[string]*memStore // destination UID
 	down   bool
+	// orphaned answers as for a destination handed off to an operator.
+	orphaned bool
 }
 
 func (s *memStores) Store(_ context.Context, ref v1alpha1.DestinationReference) (attachments.Store, error) {
+	if s.orphaned {
+		return nil, fmt.Errorf("%w: %w: handed off", attachments.ErrUnavailable, publication.ErrOrphaned)
+	}
 	if s.down {
 		return nil, attachments.ErrUnavailable
 	}
@@ -127,7 +145,7 @@ func newStorageFixture(t *testing.T, objs ...client.Object) *storageFixture {
 	t.Helper()
 	f := newAttachmentFixture(t)
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.EvidenceAttachment{}, &v1alpha1.EvidenceDestination{}).
+		WithStatusSubresource(&v1alpha1.EvidenceAttachment{}, &v1alpha1.EvidenceDestination{}, &v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}).
 		WithIndex(&v1alpha1.EvidenceAttachment{}, AttachmentBindingIndex, attachmentBindingNames).
 		Build()
 	f.c = c
