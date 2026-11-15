@@ -36,13 +36,13 @@ for package integration.
 
 ## 3. Authenticated transfer and CLI
 
-- [ ] 3.1 Extend the existing authenticated TLS service with UID-addressed attachment upload/download routes and dedicated authorization attributes; verify current TokenReview/SubjectAccessReview decisions, record identity, deleted-record upload denial, and revocation behavior using real Kubernetes credentials.
+- [x] 3.1 Extend the existing authenticated TLS service with UID-addressed attachment upload/download routes and dedicated authorization attributes; verify current TokenReview/SubjectAccessReview decisions, record identity, deleted-record upload denial, and revocation behavior using real Kubernetes credentials.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 3.2 Add bounded streaming with the documented 32 MiB, five-minute, and two-per-replica defaults plus validated overrides; verify size/hash mismatch, timeout, concurrency saturation, interrupted transfers, and safe non-inline download responses leave no falsely available document.
+- [x] 3.2 Add bounded streaming with the documented 32 MiB, five-minute, and two-per-replica defaults plus validated overrides; verify size/hash mismatch, timeout, concurrency saturation, interrupted transfers, and safe non-inline download responses leave no falsely available document.
   <!-- agent: tier=deep risk=medium reason="Bounded transfers and cross-owner temporal evidence state" -->
-- [ ] 3.3 Add independent `konstapel evidence` CLI dispatch for registration/upload, download, and status inspection; verify kubeconfig/context handling, exact binding/record UIDs, actionable errors, and absence of C2P/provider/policy-delivery startup.
+- [x] 3.3 Add independent `konstapel evidence` CLI dispatch for registration/upload, download, and status inspection; verify kubeconfig/context handling, exact binding/record UIDs, actionable errors, and absence of C2P/provider/policy-delivery startup.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 3.4 Document end-to-end platform commands and the distinction between authenticated submitter, uploader, and declared document source; verify a different authorized uploader is recorded truthfully and an informational URL is never fetched.
+- [x] 3.4 Document end-to-end platform commands and the distinction between authenticated submitter, uploader, and declared document source; verify a different authorized uploader is recorded truthfully and an informational URL is never fetched.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Association, validity, withdrawal, and cleanup
