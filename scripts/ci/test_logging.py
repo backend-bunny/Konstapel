@@ -49,6 +49,8 @@ class LoggingTests(unittest.TestCase):
         self.stub("scripts/exception-admission-live.sh", "echo exceptions")
         self.stub("scripts/fetch-chart.sh", 'echo "chart-$1"')
         self.stub("bin/helm", 'echo "helm $*"')
+        self.stub("scripts/fetch-operator-crds.sh", 'echo "operator-bundle-$1"')
+        self.stub("bin/kubectl", 'echo "kubectl $*"')
         (self.repo / "scripts/image").mkdir()
         self.stub("scripts/image/build.sh", "echo image-build")
         # crictl reports kind's import alias; ctr names the image by digest.
@@ -122,6 +124,7 @@ class LoggingTests(unittest.TestCase):
                 self.assertEqual("prepared-userns konstapel-assessment-log-test-control-plane" in result.stdout, config["core"])
                 self.assertEqual("require-userns=true" in result.stdout, config["core"])
                 self.assertEqual("helm upgrade --install cert-manager chart-cert-manager" in result.stdout, config.get("certManager", False))
+                self.assertEqual("kubectl --kubeconfig" in result.stdout and "apply --server-side" in result.stdout, config.get("prometheusOperator", False))
                 image = config.get("image", False)
                 self.assertEqual("image-build" in result.stdout, image)
                 self.assertEqual("tagged ghcr.io/backend-bunny/konstapel@sha256:abc" in result.stdout, image)
