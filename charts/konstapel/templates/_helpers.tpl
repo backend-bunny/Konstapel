@@ -169,6 +169,17 @@ integration"). Both need metrics.enabled and, when enabled, their own API.
 {{- end -}}
 {{- end -}}
 {{- if $pr.enabled -}}
+{{- $age := include "konstapel.durationSeconds" $pr.maxProjectionAge | int64 -}}
+{{- $minAge := 121 -}}
+{{- if $sm.enabled -}}{{- $minAge = add 120 (include "konstapel.durationSeconds" $sm.interval | int64) -}}{{- end -}}
+{{- if lt $age (int64 $minAge) -}}
+{{- fail (printf "metrics.prometheusRule.maxProjectionAge (%s) must exceed the controller's 2m maximum projection age plus the scrape interval" $pr.maxProjectionAge) -}}
+{{- end -}}
+{{- range $k, $_ := $pr.scope.matchers -}}
+{{- if has $k (list "instance" "domain" "binding" "capability" "condition" "status" "view" "state" "operation" "result") -}}
+{{- fail (printf "metrics.prometheusRule.scope.matchers must not match %s: it varies within one release, or is a Konstapel metric label" $k) -}}
+{{- end -}}
+{{- end -}}
 {{- range $gname, $g := $pr.groups -}}
 {{- range $rname, $r := $g.rules -}}
 {{- if and (ne ($r.enabled | toString) "false") -}}
@@ -177,6 +188,14 @@ integration"). Both need metrics.enabled and, when enabled, their own API.
 {{- end -}}
 {{- if and (contains "__threshold__" $r.expr) (not (hasKey $r "threshold")) -}}
 {{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s.expr uses __threshold__ but sets no threshold" $gname $rname) -}}
+{{- end -}}
+{{- if and (contains "__window__" $r.expr) (not $r.window) -}}
+{{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s.expr uses __window__ but sets no window" $gname $rname) -}}
+{{- end -}}
+{{- range $m := regexFindAll "__owner\\([^)]*\\)__" $r.expr -1 -}}
+{{- if not (has (trimSuffix ")__" (trimPrefix "__owner(" $m)) (list "targeting" "assessment" "bundle_resolution" "evidence_storage")) -}}
+{{- fail (printf "metrics.prometheusRule.groups.%s.rules.%s.expr uses %s: the domain must be targeting, assessment, bundle_resolution or evidence_storage" $gname $rname $m) -}}
+{{- end -}}
 {{- end -}}
 {{- range $k, $_ := ($r.labels | default dict) -}}
 {{- if or (eq $k "severity") (eq $k "alertname") -}}
@@ -190,7 +209,7 @@ integration"). Both need metrics.enabled and, when enabled, their own API.
 {{- end }}
 
 {{/* Exact label matchers selecting this release's scraped series. */}}
-{{- define "konstapel.metricsScope" -}}
+{{- define "konstapel.metricsScopeMatchers" -}}
 {{- $pr := .Values.metrics.prometheusRule -}}
 {{- $m := dict -}}
 {{- if $pr.scope.matchers -}}
@@ -201,9 +220,19 @@ integration"). Both need metrics.enabled and, when enabled, their own API.
 {{- $_ := set $m "app_kubernetes_io_instance" .Release.Name -}}
 {{- end -}}
 {{- end -}}
+{{- toJson $m -}}
+{{- end }}
+
+{{- define "konstapel.metricsScope" -}}
+{{- $m := include "konstapel.metricsScopeMatchers" . | fromJson -}}
 {{- $parts := list -}}
 {{- range $k := keys $m | sortAlpha -}}
 {{- $parts = append $parts (printf "%s=%s" $k (get $m $k | toJson)) -}}
 {{- end -}}
 {{- join "," $parts -}}
+{{- end }}
+
+{{/* The scope's label names, for aggregation (by) and joins (on). */}}
+{{- define "konstapel.metricsScopeLabels" -}}
+{{- keys (include "konstapel.metricsScopeMatchers" . | fromJson) | sortAlpha | join ", " -}}
 {{- end }}

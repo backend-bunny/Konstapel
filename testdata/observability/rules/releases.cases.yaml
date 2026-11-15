@@ -1,0 +1,55 @@
+# Two releases scraped by one Prometheus, both with a binding named
+# "payments" (add-prometheus-observability 5.2). Each release's rules read
+# only its own series, count owners per release, and label alerts with the
+# release scope. See starter.cases.yaml for the format.
+rule_files: [konstapel.rules.yml, konstapel-b.rules.yml]
+targets:
+  k0: {release: konstapel, pod: konstapel-0, ip: 10.0.0.10}
+  k1: {release: konstapel, pod: konstapel-1, ip: 10.0.0.11}
+  b0: {release: konstapel-b, pod: konstapel-0, ip: 10.1.0.10}
+  b1: {release: konstapel-b, pod: konstapel-1, ip: 10.1.0.11}
+tests:
+  - name: identical binding names in two releases stay separate
+    interval: 1m
+    input_series:
+      - {series: 'up{@k0}', values: '1x30'}
+      - {series: 'up{@k1}', values: '1x30'}
+      - {series: 'up{@b0}', values: '1x30'}
+      - {series: 'up{@b1}', values: '1x30'}
+      - {series: 'konstapel_observation_enabled{@k0,domain="targeting"}', values: '1x30'}
+      - {series: 'konstapel_observation_enabled{@k1,domain="targeting"}', values: '1x30'}
+      - {series: 'konstapel_observation_enabled{@b0,domain="targeting"}', values: '1x30'}
+      - {series: 'konstapel_observation_enabled{@b1,domain="targeting"}', values: '1x30'}
+      # konstapel-0 leads release konstapel; konstapel-1 leads konstapel-b.
+      # One ready owner in each release is not two owners in one.
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x30'}
+      - {series: 'konstapel_observation_ready{@k1,domain="targeting"}', values: '0x30'}
+      - {series: 'konstapel_observation_ready{@b0,domain="targeting"}', values: '0x30'}
+      - {series: 'konstapel_observation_ready{@b1,domain="targeting"}', values: '1x30'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x30'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@b1,domain="targeting"}', values: '0+60x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '1x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="true"}', values: '0x30'}
+      - {series: 'konstapel_binding_condition{@b1,binding="payments",condition="Resolved",status="false"}', values: '0x30'}
+      - {series: 'konstapel_binding_condition{@b1,binding="payments",condition="Resolved",status="true"}', values: '1x30'}
+      - {series: 'konstapel_capability_condition{@k0,capability="assessment",status="true"}', values: '1x30'}
+      - {series: 'konstapel_capability_condition{@b1,capability="assessment",status="false"}', values: '1x30'}
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KonstapelBindingUnresolved
+        exp_alerts: [{release: konstapel, binding: payments}]
+      - eval_time: 10m
+        alertname: KonstapelEngineUnavailable
+        exp_alerts: [{release: konstapel-b, capability: assessment}]
+      - {eval_time: 10m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - {eval_time: 10m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+
+  - name: one release losing its targets does not hide behind the other
+    interval: 1m
+    input_series:
+      - {series: 'up{@k0}', values: '1x30'}
+      - {series: 'up{@b0}', values: '1x2 0x30'}
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KonstapelMetricsUnavailable
+        exp_alerts: [{release: konstapel-b}]

@@ -482,6 +482,7 @@
             "labels",
             "runbookBaseURL",
             "scope",
+            "maxProjectionAge",
             "groups"
           ],
           "properties": {
@@ -504,6 +505,10 @@
               "type": "string",
               "maxLength": 2048,
               "pattern": "^(https://[^\\s]+)?$"
+            },
+            "maxProjectionAge": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m)$"
             },
             "scope": {
               "type": "object",
@@ -568,6 +573,10 @@
                         },
                         "threshold": {
                           "type": "number"
+                        },
+                        "window": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*(s|m|h|d)$"
                         },
                         "severity": {
                           "enum": [
