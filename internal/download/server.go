@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/attachments"
 	"github.com/backend-bunny/Konstapel/internal/evidencesign"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
@@ -69,13 +70,29 @@ type Server struct {
 	// MaxDiskBytes bounds TempDir usage across downloads (default 2 GiB).
 	MaxDiskBytes int64
 
-	once sync.Once
-	sem  chan struct{}
-	mu   sync.Mutex
-	used int64
+	// AttachmentStores opens the attachment store of a pinned
+	// EvidenceDestination (add-supporting-evidence-attachments 3.1-3.2); nil
+	// disables the attachment routes. Uploads and downloads use only the
+	// record's pinned destination.
+	AttachmentStores func(ctx context.Context, ref v1alpha1.DestinationReference) (attachments.Store, error)
+	// Cluster is the cluster identity attachments are stored under
+	// ("kube-system:<uid>"), the same one the controller uses.
+	Cluster string
+	// AttachmentLimits bound attachment transfers; zero fields take
+	// DefaultAttachmentLimits.
+	AttachmentLimits AttachmentLimits
+	// Now is the expiry clock (default time.Now).
+	Now func() time.Time
+
+	once   sync.Once
+	sem    chan struct{}
+	attSem chan struct{}
+	mu     sync.Mutex
+	used   int64
 }
 
-// Handler returns the download routes.
+// Handler returns the download routes, and the attachment routes when
+// AttachmentStores is set.
 func (s *Server) Handler() http.Handler {
 	s.once.Do(func() {
 		if s.MaxConcurrent <= 0 {
@@ -85,12 +102,30 @@ func (s *Server) Handler() http.Handler {
 			s.MaxDiskBytes = 2 << 30
 		}
 		s.sem = make(chan struct{}, s.MaxConcurrent)
+		def, l := DefaultAttachmentLimits(), &s.AttachmentLimits
+		if l.MaxBytes <= 0 {
+			l.MaxBytes = def.MaxBytes
+		}
+		if l.Timeout <= 0 {
+			l.Timeout = def.Timeout
+		}
+		if l.MaxConcurrent <= 0 {
+			l.MaxConcurrent = def.MaxConcurrent
+		}
+		if l.Retention <= 0 {
+			l.Retention = def.Retention
+		}
+		s.attSem = make(chan struct{}, l.MaxConcurrent)
 	})
 	mux := http.NewServeMux()
 	mux.HandleFunc(RequestRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRequest(w, r, archiveArtifact) })
 	mux.HandleFunc(RunRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRun(w, r, archiveArtifact) })
 	mux.HandleFunc(RequestSignatureRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRequest(w, r, signatureArtifact) })
 	mux.HandleFunc(RunSignatureRoute, func(w http.ResponseWriter, r *http.Request) { s.serveRun(w, r, signatureArtifact) })
+	if s.AttachmentStores != nil {
+		mux.HandleFunc(AttachmentUploadRoute, s.uploadAttachment)
+		mux.HandleFunc(AttachmentDownloadRoute, s.downloadAttachment)
+	}
 	return mux
 }
 

@@ -2,7 +2,8 @@
 // by current Kubernetes RBAC (add-s3-evidence-publishing group 4). Callers
 // authenticate with a bearer token checked by TokenReview against the
 // service's audience; every request is authorized with SubjectAccessReview on
-// dedicated download attributes and read access to the resolved object.
+// dedicated download attributes and read access to the resolved object. The
+// same service transfers supporting-evidence documents (attachments.go).
 package download
 
 import (

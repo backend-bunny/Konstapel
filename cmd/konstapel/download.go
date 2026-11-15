@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -18,10 +19,10 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/download"
 )
 
-// runDownload serves verified evidence packages:
-// `konstapel download-server [flags]`. Its service account needs
-// config/rbac/evidence-download.yaml and, for a credentialSecret
-// destination, get on that Secret in its namespace.
+// runDownload serves verified evidence packages and transfers
+// supporting-evidence documents: `konstapel download-server [flags]`. Its
+// service account needs config/rbac/evidence-download.yaml and, for a
+// credentialSecret destination, get on that Secret in its namespace.
 func runDownload(args []string) error {
 	fs := flag.NewFlagSet("download-server", flag.ContinueOnError)
 	addr := fs.String("listen", ":8443", "TLS listen address")
@@ -35,9 +36,18 @@ func runDownload(args []string) error {
 	maxConcurrent := fs.Int("max-concurrent", 4, "concurrent downloads")
 	maxDisk := fs.Int64("max-temp-bytes", 2<<30, "temporary disk bytes across concurrent downloads")
 	drain := fs.Duration("shutdown-drain", download.DefaultDrain, "how long accepted downloads may finish after a termination signal before connections are closed")
+	att := download.DefaultAttachmentLimits()
+	fs.Int64Var(&att.MaxBytes, "attachment-max-bytes", att.MaxBytes, "largest registered supporting document accepted for upload (at most 1 GiB and --max-temp-bytes)")
+	fs.DurationVar(&att.Timeout, "attachment-timeout", att.Timeout, "deadline of one attachment transfer, receiving and storing included (1s to 1h)")
+	fs.IntVar(&att.MaxConcurrent, "attachment-max-concurrent", att.MaxConcurrent, "concurrent attachment uploads and downloads on this replica (1 to 64)")
+	fs.DurationVar(&att.Retention, "attachment-retention", att.Retention, "central source retention frozen into each new attachment commitment: expiresAt = max(committedAt, validUntil) + retention")
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	// Invalid limits are refused before anything is contacted.
+	if err := att.Validate(*maxDisk); err != nil {
 		return err
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zopts)))
@@ -65,11 +75,19 @@ func runDownload(args []string) error {
 	if err := os.MkdirAll(*tmp, 0o700); err != nil {
 		return err
 	}
+	// Attachments are stored under the cluster identity the controller
+	// uses, in the destination each record pinned.
+	ks := &corev1.Namespace{}
+	if err := c.Get(ctx, client.ObjectKey{Name: "kube-system"}, ks); err != nil {
+		return fmt.Errorf("cluster identity (kube-system namespace): %w", err)
+	}
+	stores := controller.NewAttachmentStores(c, ns)
 	srv := &download.Server{Reader: c, Reviews: download.KubeReviewer{Client: c, Audience: *audience},
 		PublisherFor: func(ctx context.Context, run *v1alpha1.AssessmentRun) (publication.Publisher, error) {
 			return destinations.For(ctx, run.Status.Destination)
 		},
-		TempDir: *tmp, MaxConcurrent: *maxConcurrent, MaxDiskBytes: *maxDisk}
+		TempDir: *tmp, MaxConcurrent: *maxConcurrent, MaxDiskBytes: *maxDisk,
+		AttachmentStores: stores.Store, Cluster: "kube-system:" + string(ks.UID), AttachmentLimits: att}
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return err

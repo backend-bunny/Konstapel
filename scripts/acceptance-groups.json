@@ -42,7 +42,8 @@
       "TestLiveDestinationSigning",
       "TestLiveSignedEvidenceDownload",
       "TestLiveSignedPublicationWorkflow",
-      "TestLiveAttachmentStorage"
+      "TestLiveAttachmentStorage",
+      "TestLiveAttachmentTransfer"
     ]
   },
   "capabilities": {
