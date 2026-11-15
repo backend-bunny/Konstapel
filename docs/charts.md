@@ -767,7 +767,7 @@ operator and config-reloader images replaced by their digest-pinned
 Local measurements (one run, kind, 15s scrape interval): all replicas up 9s
 after the Prometheus API answered; the file-access policy rejected the default
 mode 66s after it was set and the Secret mode scraped again 153s after the
-`helm upgrade`; scrapes failed with `403` 313s after the binding was deleted,
+`helm upgrade`; scrapes failed with `403` 313s (CI: 315s) after the binding was deleted,
 which is the 5-minute allow cache plus a scrape interval, as documented in
 [Controller metrics](#controller-metrics). Expect up to about 5 minutes and 30
 seconds, never longer.
