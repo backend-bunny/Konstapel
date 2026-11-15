@@ -1,23 +1,36 @@
 package controller
 
 // EvidenceAttachment reconciliation (add-supporting-evidence-attachments
-// 1.1-1.2): the retention finalizer and association validation.
+// 1.1-1.2, 4.1-4.2): the retention finalizer and four separately reconciled
+// states. There is no combined verdict.
 //
-// Admission records the registrant and the CRD keeps the spec immutable;
-// this reconciler resolves each association before it applies. An
-// association is Valid only when the named binding still has the registered
-// UID, has resolved its current profile revision, and that revision's
-// verified bundle content has the registered catalog digest and selects every
-// referenced control in its baseline, with every statement a statement part
-// of its control. A recreated binding, a changed catalog, or a control that
-// leaves the baseline makes it Mismatched; it is never re-pointed. While the
-// binding or its content is still resolving it is Pending. Associations
-// never change a binding, its enforcement, or its assessments.
-//
-// Deleting a record withdraws it at once. The retention finalizer then keeps
-// the record until owned source cleanup is confirmed (attachment_storage.go):
-// a record that never pinned a destination owns no bytes and is released
-// immediately.
+//   - Association. Admission records the registrant and the CRD keeps the
+//     spec immutable; this reconciler resolves each association before it
+//     applies. An association is Valid only when the named binding still
+//     has the registered UID, has resolved a profile revision, and that
+//     revision's verified bundle content has the registered catalog digest
+//     and selects every referenced control in its baseline, with every
+//     statement a statement part of its control. A recreated binding, a
+//     changed catalog, or a control that leaves the baseline makes it
+//     Mismatched; it is never re-pointed. While the binding or its content
+//     is still resolving it is Pending. The binding's resolved revision is
+//     what it enforces, so a binding edit or a newer revision of the same
+//     profile content (reporting-only, policy-parameter or exception-setting
+//     edits) leaves the association as it was; a revision with other content
+//     is validated once the binding resolves it. Associations never change a
+//     binding, its enforcement, or its assessments.
+//   - Validity. validFrom <= now < validUntil, from the immutable spec and
+//     the controller clock only; the reconciler requeues at the next
+//     declared boundary, so expiry needs no other event.
+//   - Content. Pending until a commitment is known; then Available while
+//     the committed version is present and intact, Unavailable when it is
+//     missing, damaged, unreachable, handed off, or past its source expiry
+//     (attachment_storage.go).
+//   - Withdrawal. Deleting a record withdraws it at once and permanently
+//     (status.withdrawal). The retention finalizer then keeps the record
+//     until owned source cleanup is confirmed (attachment_storage.go): a
+//     record that never pinned a destination owns no bytes and is released
+//     immediately. Associations are kept as last resolved.
 
 import (
 	"context"
@@ -68,6 +81,46 @@ type AttachmentReconciler struct {
 	Baselines BaselineSource
 	// Storage pins destinations and records commitments; nil pins nothing.
 	Storage *AttachmentStorage
+	// Now is the controller clock for validity, content and cleanup
+	// decisions (default: Storage's clock, else time.Now).
+	Now func() time.Time
+}
+
+func (r *AttachmentReconciler) now() time.Time {
+	switch {
+	case r.Now != nil:
+		return r.Now()
+	case r.Storage != nil:
+		return r.Storage.now()
+	}
+	return time.Now()
+}
+
+// soonest returns the shortest positive wait (zero when none is positive).
+func soonest(waits ...time.Duration) time.Duration {
+	var out time.Duration
+	for _, w := range waits {
+		if w > 0 && (out == 0 || w < out) {
+			out = w
+		}
+	}
+	return out
+}
+
+// setValidity records the declared validity at now and returns the wait
+// until its next boundary (zero once expired), capped so a long period is
+// still re-evaluated periodically.
+func setValidity(status *v1alpha1.EvidenceAttachmentStatus, v v1alpha1.AttachmentValidity, now time.Time) time.Duration {
+	state, next := attachments.Temporal(v, now)
+	vs := &v1alpha1.AttachmentValidityStatus{State: state}
+	if next.IsZero() {
+		status.Validity = vs
+		return 0
+	}
+	t := metav1.NewTime(next)
+	vs.NextTransition = &t
+	status.Validity = vs
+	return min(next.Sub(now), MaxRetentionRequeue)
 }
 
 func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -75,8 +128,9 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Client.Get(ctx, req.NamespacedName, a); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	now := r.now()
 	if !a.DeletionTimestamp.IsZero() {
-		return r.finalize(ctx, a)
+		return r.finalize(ctx, a, now)
 	}
 	if !controllerutil.ContainsFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer) {
 		base := a.DeepCopy()
@@ -115,12 +169,15 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		cond.Message = "every association applies to its binding's current catalog and selected baseline; this is supporting material, not a control verdict"
 	}
 	meta.SetStatusCondition(&status.Conditions, cond)
+	validityWait := setValidity(status, a.Spec.Validity, now)
 	var storageRequeue time.Duration
 	if r.Storage != nil {
 		var err error
-		if storageRequeue, err = r.Storage.reconcile(ctx, r.Client, a, status); err != nil {
+		if storageRequeue, err = r.Storage.reconcile(ctx, r.Client, a, status, now); err != nil {
 			return ctrl.Result{}, err
 		}
+	} else {
+		setContent(status, v1alpha1.ContentPending, v1alpha1.ReasonNoDestination, "attachment storage is not configured; nothing can be stored", now)
 	}
 	if !equality.Semantic.DeepEqual(status, &a.Status) {
 		base := a.DeepCopy()
@@ -129,11 +186,11 @@ func (r *AttachmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, err
 		}
 	}
-	requeue := storageRequeue
-	if pending > 0 && (requeue == 0 || attachmentPendingRequeue < requeue) {
-		requeue = attachmentPendingRequeue
+	pendingWait := time.Duration(0)
+	if pending > 0 {
+		pendingWait = attachmentPendingRequeue
 	}
-	return ctrl.Result{RequeueAfter: requeue}, nil
+	return ctrl.Result{RequeueAfter: soonest(storageRequeue, pendingWait, validityWait)}, nil
 }
 
 // resolve validates one association. Only API errors other than NotFound are
@@ -157,10 +214,12 @@ func (r *AttachmentReconciler) resolve(ctx context.Context, as v1alpha1.Attachme
 		return set(v1alpha1.AssociationMismatched, v1alpha1.ReasonBindingReplaced,
 			fmt.Sprintf("binding %s was recreated (UID %s, registered %s); associations are never inherited", b.Name, b.UID, as.Binding.UID))
 	}
+	// The binding's resolved profile revision is the content it enforces;
+	// an unobserved binding edit leaves that revision in force.
 	resolved := meta.FindStatusCondition(b.Status.Conditions, v1alpha1.ConditionResolved)
-	if b.Status.Profile == nil || resolved == nil || resolved.Status != metav1.ConditionTrue || b.Status.ObservedGeneration != b.Generation {
+	if b.Status.Profile == nil || resolved == nil || resolved.Status != metav1.ConditionTrue {
 		return set(v1alpha1.AssociationPending, v1alpha1.ReasonBindingUnresolved,
-			fmt.Sprintf("binding %s has not resolved its current profile", b.Name))
+			fmt.Sprintf("binding %s has not resolved a profile", b.Name))
 	}
 	p := &v1alpha1.ComplianceProfile{}
 	switch err := r.Client.Get(ctx, client.ObjectKey{Name: b.Status.Profile.Name}, p); {
@@ -170,11 +229,13 @@ func (r *AttachmentReconciler) resolve(ctx context.Context, as v1alpha1.Attachme
 	case err != nil:
 		return s, err
 	}
-	// Only the exact profile revision the binding resolved identifies its
-	// content; a newer revision is validated once the binding resolves it.
-	if p.UID != b.Status.Profile.UID || p.Generation != b.Status.Profile.Generation || p.Spec.Bundle.Digest != b.Status.Profile.BundleDigest {
+	// The resolved revision's content is identified by its bundle digest. A
+	// newer revision of the same profile with the same digest (a
+	// policy-parameter or exception-setting edit) selects the same catalog
+	// and baseline; other content is validated once the binding resolves it.
+	if p.UID != b.Status.Profile.UID || p.Spec.Bundle.Digest != b.Status.Profile.BundleDigest {
 		return set(v1alpha1.AssociationPending, v1alpha1.ReasonBindingUnresolved,
-			fmt.Sprintf("binding %s is resolving a changed profile %s", b.Name, p.Name))
+			fmt.Sprintf("binding %s is resolving changed content of profile %s", b.Name, p.Name))
 	}
 	base, err := r.Baselines.Baseline(ctx, p.Spec.Bundle)
 	if err != nil {
@@ -192,39 +253,45 @@ func (r *AttachmentReconciler) resolve(ctx context.Context, as v1alpha1.Attachme
 		fmt.Sprintf("applies to binding %s with catalog %s", b.Name, base.CatalogDigest))
 }
 
-// finalize releases a withdrawn record once no owned storage remains. A
-// record that pinned a destination is kept while storage is disabled.
-func (r *AttachmentReconciler) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment) (ctrl.Result, error) {
+// finalize records the withdrawal and releases the record once no owned
+// storage remains. A record that pinned a destination is kept while storage
+// is disabled. Associations are kept as last resolved.
+func (r *AttachmentReconciler) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment, now time.Time) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer) {
 		return ctrl.Result{}, nil
 	}
+	status := a.Status.DeepCopy()
+	if status.Withdrawal == nil {
+		status.Withdrawal = &v1alpha1.AttachmentWithdrawal{WithdrawnAt: *a.DeletionTimestamp}
+	}
+	validityWait := setValidity(status, a.Spec.Validity, now)
 	release, requeue := true, time.Duration(0)
 	pinned := a.Status.Storage != nil && a.Status.Storage.Destination != nil
 	switch {
 	case r.Storage != nil:
-		status := a.Status.DeepCopy()
-		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociationsValid, Status: metav1.ConditionFalse,
-			Reason: v1alpha1.ReasonWithdrawn, Message: "the record is withdrawn and no longer contributes to new current evidence", ObservedGeneration: a.Generation})
 		var err error
-		if release, requeue, err = r.Storage.finalize(ctx, a, status); err != nil {
+		if release, requeue, err = r.Storage.finalize(ctx, a, status, now); err != nil {
 			return ctrl.Result{}, err
 		}
-		if !release && !equality.Semantic.DeepEqual(status, &a.Status) {
+	case pinned:
+		release, requeue = false, attachmentCleanupRetry
+	}
+	if !release {
+		if !equality.Semantic.DeepEqual(status, &a.Status) {
 			base := a.DeepCopy()
 			a.Status = *status
 			if err := r.Client.Status().Patch(ctx, a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
 		}
-	case pinned:
-		release, requeue = false, attachmentCleanupRetry
-	}
-	if !release {
-		return ctrl.Result{RequeueAfter: requeue}, nil
+		return ctrl.Result{RequeueAfter: soonest(requeue, validityWait)}, nil
 	}
 	base := a.DeepCopy()
 	controllerutil.RemoveFinalizer(a, v1alpha1.EvidenceAttachmentFinalizer)
 	err := r.Client.Patch(ctx, a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	if err == nil && r.Storage != nil {
+		r.Storage.forget(a.UID)
+	}
 	return ctrl.Result{}, client.IgnoreNotFound(err)
 }
 

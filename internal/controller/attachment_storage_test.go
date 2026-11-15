@@ -136,6 +136,7 @@ func newStorageFixture(t *testing.T, objs ...client.Object) *storageFixture {
 		now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)}
 	f.r.Storage = &AttachmentStorage{Reader: c, Namespace: "konstapel-system", Cluster: "kube-system:cluster", Stores: sf.stores,
 		Now: func() time.Time { return sf.now }}
+	f.r.Now = nil // the storage clock is the controller clock
 	return sf
 }
 
@@ -292,8 +293,8 @@ func TestAttachmentFinalizerWaitsForExpiryAndCleanup(t *testing.T) {
 	if a.Status.Storage.Cleanup == nil || a.Status.Storage.Cleanup.State != "NotDue" || res.RequeueAfter <= 0 || res.RequeueAfter > MaxRetentionRequeue {
 		t.Fatalf("retained: %+v %v", a.Status.Storage.Cleanup, res)
 	}
-	if c := meta.FindStatusCondition(a.Status.Conditions, v1alpha1.ConditionAssociationsValid); c == nil || c.Reason != v1alpha1.ReasonWithdrawn {
-		t.Fatalf("not withdrawn: %+v", c)
+	if a.Status.Withdrawal == nil || !a.Status.Withdrawal.WithdrawnAt.Equal(a.DeletionTimestamp) {
+		t.Fatalf("not withdrawn: %+v", a.Status.Withdrawal)
 	}
 	if c := meta.FindStatusCondition(a.Status.Conditions, v1alpha1.ConditionSourceRetained); c == nil || c.Reason != v1alpha1.ReasonRetentionActive {
 		t.Fatalf("retention: %+v", c)
@@ -311,6 +312,11 @@ func TestAttachmentFinalizerWaitsForExpiryAndCleanup(t *testing.T) {
 		t.Fatalf("blocked: %+v", a.Status.Storage)
 	}
 	f.stores.stores["dest-1"].deleteErr = nil
+	// The retry waits for its backoff (one minute after the first failure).
+	if res, _ := f.reconcile("dc"); res.RequeueAfter != time.Minute {
+		t.Fatalf("retried before its backoff: %v", res)
+	}
+	f.now = f.now.Add(time.Minute)
 	if _, err := f.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: "dc"}}); err != nil {
 		t.Fatal(err)
 	}

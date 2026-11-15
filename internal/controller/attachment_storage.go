@@ -18,13 +18,23 @@ package controller
 // when it matches this record's spec digest and registered document; the
 // API keeps it immutable once recorded.
 //
+// Content (add-supporting-evidence-attachments 4.1) is checked separately
+// from the commitment record: a committed version that is missing, damaged,
+// unreachable or handed off is Unavailable, and so is every source at or
+// after its fixed expiry, while the commitment itself never changes. The
+// check reads object metadata only, at most once per ContentInterval while
+// the content was last Available, and every reconcile otherwise.
+//
 // Deleting a record withdraws it immediately. The finalizer stays until:
 //   - nothing was pinned (no bytes can exist), or
 //   - nothing was committed and every owned attempt is removed, or
 //   - the commitment expired and every owned version is removed.
 //
-// Failures keep the finalizer and the pin and are retried; they are never
-// treated as deletion.
+// Before the expiry nothing is deleted and storage is contacted only to
+// check the retained content. Failures keep the finalizer, the pin and the
+// commitment, and are retried after a backoff of one minute doubling to an
+// hour (status.storage.cleanup.attempts); they are never treated as
+// deletion, and a pass that waits for its backoff writes nothing.
 
 import (
 	"context"
@@ -36,6 +46,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,7 +63,9 @@ const (
 	// attachmentStorageRequeue re-reads storage while a commitment is
 	// awaited or a destination is unavailable.
 	attachmentStorageRequeue = time.Minute
-	// attachmentCleanupRetry retries a failed or blocked cleanup.
+	// attachmentCleanupRetry re-checks a pinned, withdrawn record while
+	// this controller has no attachment storage configured. Failed cleanups
+	// back off with cleanupBackoff instead.
 	attachmentCleanupRetry = 5 * time.Minute
 )
 
@@ -76,7 +89,104 @@ type AttachmentStorage struct {
 	// AttemptRetention is how long uncommitted attempts are kept (default
 	// attachments.DefaultAttemptRetention).
 	AttemptRetention time.Duration
-	Now              func() time.Time
+	// ContentInterval is how often available committed content is
+	// re-checked (default MaxRetentionRequeue). Unavailable content is
+	// re-checked on every reconcile, at least every minute.
+	ContentInterval time.Duration
+	Now             func() time.Time
+
+	// checked is when this process last checked each record's content; a
+	// restart or a new leader checks again at once.
+	checkedMu sync.Mutex
+	checked   map[types.UID]time.Time
+}
+
+func (s *AttachmentStorage) contentInterval() time.Duration {
+	if s.ContentInterval > 0 {
+		return s.ContentInterval
+	}
+	return MaxRetentionRequeue
+}
+
+// contentDue reports whether a committed record's content must be checked
+// now, and otherwise how long until it must.
+func (s *AttachmentStorage) contentDue(uid types.UID, now time.Time, prev *v1alpha1.AttachmentContentStatus) (bool, time.Duration) {
+	if prev == nil || prev.State != v1alpha1.ContentAvailable {
+		return true, 0
+	}
+	s.checkedMu.Lock()
+	last, ok := s.checked[uid]
+	s.checkedMu.Unlock()
+	if !ok {
+		return true, 0
+	}
+	if next := last.Add(s.contentInterval()); now.Before(next) {
+		return false, next.Sub(now)
+	}
+	return true, 0
+}
+
+func (s *AttachmentStorage) markChecked(uid types.UID, now time.Time) {
+	s.checkedMu.Lock()
+	defer s.checkedMu.Unlock()
+	if s.checked == nil {
+		s.checked = map[types.UID]time.Time{}
+	}
+	s.checked[uid] = now
+}
+
+// forget drops a released record's schedule.
+func (s *AttachmentStorage) forget(uid types.UID) {
+	s.checkedMu.Lock()
+	defer s.checkedMu.Unlock()
+	delete(s.checked, uid)
+}
+
+// setContent records the content state. Its transition time changes only
+// when the state or reason does; messages are fixed per reason, so an
+// unchanged state writes nothing.
+func setContent(status *v1alpha1.EvidenceAttachmentStatus, state v1alpha1.ContentState, reason, msg string, now time.Time) {
+	t := metav1.NewTime(now)
+	if c := status.Content; c != nil && c.State == state && c.Reason == reason && c.LastTransitionTime != nil {
+		t = *c.LastTransitionTime
+	}
+	status.Content = &v1alpha1.AttachmentContentStatus{State: state, Reason: reason, Message: truncateMsg(msg), LastTransitionTime: &t}
+}
+
+// storageReason classifies a failure to open the pinned destination.
+func storageReason(err error) (string, string) {
+	if errors.Is(err, publication.ErrOrphaned) {
+		return v1alpha1.ReasonDestinationHandedOff, "the pinned destination was handed off to an operator and is no longer contacted"
+	}
+	return v1alpha1.ReasonStorageUnavailable, "the pinned destination cannot be reached; see DocumentCommitted"
+}
+
+// sourceExpired marks content whose fixed source expiry has passed.
+func sourceExpired(status *v1alpha1.EvidenceAttachmentStatus, c *v1alpha1.AttachmentCommitment, now time.Time) {
+	setContent(status, v1alpha1.ContentUnavailable, v1alpha1.ReasonSourceExpired,
+		"the source retention ended at "+c.ExpiresAt.UTC().Format(time.RFC3339)+"; the document is no longer served", now)
+}
+
+// checkContent checks a recorded, unexpired commitment's bytes (metadata
+// only) and returns when to check again.
+func (s *AttachmentStorage) checkContent(ctx context.Context, st attachments.Store, a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus, now time.Time) time.Duration {
+	c := status.Storage.Commitment
+	p, err := st.Health(ctx, s.receipt(a, c, st))
+	switch {
+	case err != nil:
+		setContent(status, v1alpha1.ContentUnavailable, v1alpha1.ReasonStorageUnavailable, "the committed document could not be checked: storage did not answer", now)
+	case p != nil:
+		setContent(status, v1alpha1.ContentUnavailable, p.Reason, p.Message, now)
+	default:
+		setContent(status, v1alpha1.ContentAvailable, v1alpha1.ReasonContentVerified,
+			"the committed version is present with its registered size; this attests storage and integrity only", now)
+	}
+	s.markChecked(a.UID, now)
+	untilExpiry := c.ExpiresAt.Sub(now)
+	if status.Content.State != v1alpha1.ContentAvailable {
+		return min(untilExpiry, attachmentStorageRequeue)
+	}
+	return min(untilExpiry, s.contentInterval())
 }
 
 func (s *AttachmentStorage) now() time.Time {
@@ -106,7 +216,7 @@ func (s *AttachmentStorage) begin(ctx context.Context, a *v1alpha1.EvidenceAttac
 		var err error
 		ctx, done, err = s.Fences.Begin(ctx, pin.UID, "attachment "+a.Name)
 		if err != nil {
-			return ctx, nil, done, fmt.Errorf("%w: destination %s is fenced: %v", attachments.ErrUnavailable, pin.Name, err)
+			return ctx, nil, done, fmt.Errorf("%w: destination %s is fenced: %w", attachments.ErrUnavailable, pin.Name, err)
 		}
 	}
 	st, err := s.Stores.Store(ctx, *pin)
@@ -225,25 +335,45 @@ func (s *AttachmentStorage) receipt(a *v1alpha1.EvidenceAttachment, c *v1alpha1.
 		CommittedAt: c.CommittedAt.UTC(), ValidUntil: a.Spec.Validity.ValidUntil.UTC(), Retention: c.Retention.Duration, ExpiresAt: c.ExpiresAt.UTC()}
 }
 
-// reconcile pins a destination and records the commitment of a live record.
-func (s *AttachmentStorage) reconcile(ctx context.Context, c client.Client, a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus) (time.Duration, error) {
+// reconcile pins a destination, records the commitment of a live record,
+// and checks its content.
+func (s *AttachmentStorage) reconcile(ctx context.Context, c client.Client, a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus, now time.Time) (time.Duration, error) {
 	if status.Storage == nil || status.Storage.Destination == nil {
 		ok, err := s.pin(ctx, c, a, status)
-		if err != nil || !ok {
+		if err != nil {
 			return attachmentStorageRequeue, err
 		}
+		if !ok {
+			setContent(status, v1alpha1.ContentPending, v1alpha1.ReasonNoDestination, "no destination is pinned; nothing can be stored yet", now)
+			return attachmentStorageRequeue, nil
+		}
+		setContent(status, v1alpha1.ContentPending, v1alpha1.ReasonAwaitingUpload, "no committed upload yet", now)
 		// Persist the pin before any storage read.
 		return time.Second, nil
 	}
-	if status.Storage.Commitment != nil {
-		recordCommitment(status, a.Generation, status.Storage.Commitment)
+	if cm := status.Storage.Commitment; cm != nil {
+		recordCommitment(status, a.Generation, cm)
+		if !now.Before(cm.ExpiresAt.Time) {
+			// Downloads stop at the fixed expiry; a live record's bytes stay
+			// until it is withdrawn.
+			sourceExpired(status, cm, now)
+			return 0, nil
+		}
+		if due, wait := s.contentDue(a.UID, now, status.Content); !due {
+			return min(wait, cm.ExpiresAt.Sub(now)), nil
+		}
 	}
 	ctx, st, done, err := s.begin(ctx, a)
 	defer done()
 	if err != nil {
-		if status.Storage.Commitment == nil {
-			setCommitted(status, a.Generation, metav1.ConditionFalse, v1alpha1.ReasonStorageUnavailable, err.Error())
+		reason, msg := storageReason(err)
+		if cm := status.Storage.Commitment; cm != nil {
+			setContent(status, v1alpha1.ContentUnavailable, reason, msg, now)
+			s.markChecked(a.UID, now)
+			return min(attachmentStorageRequeue, cm.ExpiresAt.Sub(now)), nil
 		}
+		setCommitted(status, a.Generation, metav1.ConditionFalse, v1alpha1.ReasonStorageUnavailable, err.Error())
+		setContent(status, v1alpha1.ContentPending, reason, msg, now)
 		return attachmentStorageRequeue, nil
 	}
 	if status.Storage.DestinationID == "" {
@@ -252,98 +382,148 @@ func (s *AttachmentStorage) reconcile(ctx context.Context, c client.Client, a *v
 	if status.Storage.Commitment == nil {
 		cm, err := s.commitment(ctx, st, a, status)
 		if err != nil {
+			setContent(status, v1alpha1.ContentPending, v1alpha1.ReasonStorageUnavailable, "storage could not be read for a commitment", now)
 			return attachmentStorageRequeue, nil
 		}
 		if cm == nil {
-			s.cleanupAttempts(ctx, st, a)
+			if c := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionDocumentCommitted); c != nil && c.Reason == v1alpha1.ReasonStorageConflict {
+				setContent(status, v1alpha1.ContentUnavailable, v1alpha1.ReasonStorageConflict,
+					"storage holds a commitment for this UID that does not match the record; it is never used", now)
+			} else {
+				setContent(status, v1alpha1.ContentPending, v1alpha1.ReasonAwaitingUpload, "no committed upload yet", now)
+			}
+			s.cleanupAttempts(ctx, st, a, now)
 			return attachmentStorageRequeue, nil
 		}
 		recordCommitment(status, a.Generation, cm)
+		if !now.Before(cm.ExpiresAt.Time) {
+			sourceExpired(status, cm, now)
+			return 0, nil
+		}
 	}
+	wait := s.checkContent(ctx, st, a, status, now)
 	// Abandoned attempts (a concurrent writer that lost, an interrupted
-	// upload) are removed once they are old enough.
-	s.cleanupAttempts(ctx, st, a)
-	return 0, nil
+	// upload) are removed once they are old enough, on the content schedule.
+	s.cleanupAttempts(ctx, st, a, now)
+	return wait, nil
 }
 
-func (s *AttachmentStorage) cleanupAttempts(ctx context.Context, st attachments.Store, a *v1alpha1.EvidenceAttachment) {
-	if err := st.CleanupAttempts(ctx, s.ref(a), s.now().Add(-s.attemptRetention())); err != nil {
+func (s *AttachmentStorage) cleanupAttempts(ctx context.Context, st attachments.Store, a *v1alpha1.EvidenceAttachment, now time.Time) {
+	if err := st.CleanupAttempts(ctx, s.ref(a), now.Add(-s.attemptRetention())); err != nil {
 		log.FromContext(ctx).Info("attachment attempt cleanup incomplete; retried later", "attachment", a.Name, "reason", err.Error())
 	}
 }
 
 // finalize decides whether a withdrawn record may be released. It returns
 // release=true only when no owned storage remains.
-func (s *AttachmentStorage) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus) (release bool, requeue time.Duration, err error) {
+func (s *AttachmentStorage) finalize(ctx context.Context, a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus, now time.Time) (release bool, requeue time.Duration, err error) {
 	if status.Storage == nil || status.Storage.Destination == nil {
 		// Never pinned: the transfer service accepts bytes only for a
 		// pinned record, so nothing can be stored.
 		return true, 0, nil
 	}
-	now := s.now()
-	setCleanup := func(state, msg string) {
-		t := metav1.NewTime(now)
-		status.Storage.Cleanup = &v1alpha1.AttachmentCleanup{State: state, LastAttempt: &t, Message: truncateMsg(msg)}
-	}
-	retained := func(st metav1.ConditionStatus, reason, msg string) {
-		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionSourceRetained, Status: st, Reason: reason,
-			Message: truncateMsg(msg), ObservedGeneration: a.Generation})
-	}
-	ctx, st, done, err := s.begin(ctx, a)
-	defer done()
-	if err != nil {
-		setCleanup(string(attachments.CleanupDeletionFailed), err.Error())
-		retained(metav1.ConditionTrue, v1alpha1.ReasonCleanupFailed, "owned storage cannot be reached; ownership is kept and cleanup retried: "+err.Error())
-		return false, attachmentCleanupRetry, nil
-	}
-	if status.Storage.Commitment == nil {
-		// A commitment that landed while its status write was lost governs
-		// retention exactly like a recorded one.
-		cm, err := s.commitment(ctx, st, a, status)
-		if err != nil {
-			setCleanup(string(attachments.CleanupDeletionFailed), err.Error())
-			retained(metav1.ConditionTrue, v1alpha1.ReasonCleanupFailed, err.Error())
-			return false, attachmentCleanupRetry, nil
+	// The store is opened at most once per pass, and only when storage
+	// must be contacted.
+	var st attachments.Store
+	closeStore := func() {}
+	defer func() { closeStore() }()
+	open := func() error {
+		if st != nil {
+			return nil
 		}
-		if cm != nil {
-			recordCommitment(status, a.Generation, cm)
-		} else if c := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionDocumentCommitted); c != nil && c.Reason == v1alpha1.ReasonStorageConflict {
-			// A foreign commitment under this record's UID is never deleted
-			// as ours; an administrator must resolve it.
-			setCleanup(string(attachments.CleanupDeletionFailed), c.Message)
-			retained(metav1.ConditionTrue, v1alpha1.ReasonCleanupBlocked, "storage holds a commitment that does not match this record; it is not deleted: "+c.Message)
-			return false, attachmentCleanupRetry, nil
-		} else {
+		var err error
+		ctx, st, closeStore, err = s.begin(ctx, a)
+		if err != nil {
+			st = nil
+		}
+		return err
+	}
+	cm := status.Storage.Commitment
+	if cm == nil {
+		// Undecided: a commitment that landed while its status write was
+		// lost governs retention exactly like a recorded one.
+		if wait := cleanupWait(status.Storage.Cleanup, now); wait > 0 {
+			return false, wait, nil
+		}
+		if err := open(); err != nil {
+			return s.cleanupFailed(a, status, attachments.Cleanup{}, err, now)
+		}
+		found, err := s.commitment(ctx, st, a, status)
+		if err != nil {
+			return s.cleanupFailed(a, status, attachments.Cleanup{}, err, now)
+		}
+		if found == nil {
+			if c := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionDocumentCommitted); c != nil && c.Reason == v1alpha1.ReasonStorageConflict {
+				// A foreign commitment under this record's UID is never
+				// deleted as ours; an administrator must resolve it.
+				return s.cleanupFailed(a, status, attachments.Cleanup{State: attachments.CleanupRetentionBlocked,
+					Message: "storage holds a commitment that does not match this record; it is not deleted: " + c.Message}, attachments.ErrRetentionBlocked, now)
+			}
 			res, err := st.DeleteUncommitted(ctx, s.ref(a))
 			if errors.Is(err, attachments.ErrConflict) {
 				return false, time.Second, nil // committed meanwhile: record it first
 			}
 			if err != nil {
-				return s.cleanupFailed(res, err, setCleanup, retained)
+				return s.cleanupFailed(a, status, res, err, now)
 			}
-			setCleanup(string(attachments.CleanupDeleted), "no commitment; owned upload attempts removed")
 			return true, 0, nil
 		}
+		recordCommitment(status, a.Generation, found)
+		cm = status.Storage.Commitment
 	}
-	r := s.receipt(a, status.Storage.Commitment, st)
-	if now.Before(r.ExpiresAt) {
-		setCleanup("NotDue", "withdrawn; the committed source is retained until "+r.ExpiresAt.Format(time.RFC3339))
-		retained(metav1.ConditionTrue, v1alpha1.ReasonRetentionActive, "withdrawn from new current evidence; the committed source is retained until "+r.ExpiresAt.Format(time.RFC3339))
-		wait := r.ExpiresAt.Sub(now)
-		if wait > MaxRetentionRequeue {
-			wait = MaxRetentionRequeue
+	if now.Before(cm.ExpiresAt.Time) {
+		// Retention active: withdrawal never shortens the commitment, and
+		// nothing is deleted. The retained source stays downloadable, so its
+		// content is still checked.
+		until := cm.ExpiresAt.UTC().Format(time.RFC3339)
+		status.Storage.Cleanup = &v1alpha1.AttachmentCleanup{State: "NotDue", Message: "withdrawn; the committed source is retained until " + until}
+		s.retained(a, status, metav1.ConditionTrue, v1alpha1.ReasonRetentionActive, "withdrawn from new current evidence; the committed source is retained until "+until)
+		wait := min(cm.ExpiresAt.Sub(now), MaxRetentionRequeue)
+		if due, untilDue := s.contentDue(a.UID, now, status.Content); !due {
+			return false, min(wait, untilDue), nil
 		}
+		if err := open(); err != nil {
+			reason, msg := storageReason(err)
+			setContent(status, v1alpha1.ContentUnavailable, reason, msg, now)
+			s.markChecked(a.UID, now)
+			return false, min(wait, attachmentStorageRequeue), nil
+		}
+		return false, min(wait, s.checkContent(ctx, st, a, status, now)), nil
+	}
+	sourceExpired(status, cm, now)
+	if wait := cleanupWait(status.Storage.Cleanup, now); wait > 0 {
 		return false, wait, nil
 	}
-	res, err := st.Delete(ctx, r, now)
-	if err != nil {
-		return s.cleanupFailed(res, err, setCleanup, retained)
+	if err := open(); err != nil {
+		return s.cleanupFailed(a, status, attachments.Cleanup{}, err, now)
 	}
-	setCleanup(string(attachments.CleanupDeleted), "expired source and every owned version removed")
+	res, err := st.Delete(ctx, s.receipt(a, cm, st), now)
+	if err != nil {
+		return s.cleanupFailed(a, status, res, err, now)
+	}
 	return true, 0, nil
 }
 
-func (s *AttachmentStorage) cleanupFailed(res attachments.Cleanup, err error, setCleanup func(string, string), retained func(metav1.ConditionStatus, string, string)) (bool, time.Duration, error) {
+func (s *AttachmentStorage) retained(a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus, st metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionSourceRetained, Status: st, Reason: reason,
+		Message: truncateMsg(msg), ObservedGeneration: a.Generation})
+}
+
+// cleanupWait is the remaining backoff after a failed or refused cleanup.
+func cleanupWait(c *v1alpha1.AttachmentCleanup, now time.Time) time.Duration {
+	if c == nil || c.LastAttempt == nil || (c.State != string(attachments.CleanupDeletionFailed) && c.State != string(attachments.CleanupRetentionBlocked)) {
+		return 0
+	}
+	if next := c.LastAttempt.Add(cleanupBackoff(c.Attempts)); now.Before(next) {
+		return next.Sub(now)
+	}
+	return 0
+}
+
+// cleanupFailed records a failed or refused cleanup attempt: ownership, the
+// pin and any commitment are kept, and the attempt is retried after its
+// backoff.
+func (s *AttachmentStorage) cleanupFailed(a *v1alpha1.EvidenceAttachment, status *v1alpha1.EvidenceAttachmentStatus, res attachments.Cleanup, err error, now time.Time) (bool, time.Duration, error) {
 	state, reason := string(attachments.CleanupDeletionFailed), v1alpha1.ReasonCleanupFailed
 	if res.State == attachments.CleanupRetentionBlocked || errors.Is(err, attachments.ErrRetentionBlocked) {
 		state, reason = string(attachments.CleanupRetentionBlocked), v1alpha1.ReasonCleanupBlocked
@@ -352,9 +532,18 @@ func (s *AttachmentStorage) cleanupFailed(res attachments.Cleanup, err error, se
 	if msg == "" {
 		msg = err.Error()
 	}
-	setCleanup(state, msg)
-	retained(metav1.ConditionTrue, reason, "owned storage could not be removed; ownership is kept and cleanup retried: "+msg)
-	return false, attachmentCleanupRetry, nil
+	if errors.Is(err, publication.ErrOrphaned) {
+		msg = "the pinned destination was handed off to an operator and is not contacted; take over the attachment's storage and release the record (docs/supporting-evidence.md)"
+	}
+	attempts := int32(1)
+	if prev := status.Storage.Cleanup; prev != nil && (prev.State == string(attachments.CleanupDeletionFailed) || prev.State == string(attachments.CleanupRetentionBlocked)) {
+		attempts = prev.Attempts + 1
+	}
+	t := metav1.NewTime(now)
+	status.Storage.Cleanup = &v1alpha1.AttachmentCleanup{State: state, Attempts: attempts, LastAttempt: &t, Message: truncateMsg(msg)}
+	wait := cleanupBackoff(attempts)
+	s.retained(a, status, metav1.ConditionTrue, reason, fmt.Sprintf("owned storage could not be removed; ownership is kept and cleanup is retried after %s: %s", wait, msg))
+	return false, wait, nil
 }
 
 // destinationStores builds attachment stores for pinned destinations. The
