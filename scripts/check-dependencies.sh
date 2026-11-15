@@ -5,7 +5,7 @@ source scripts/runtime.env
 
 sigstore_images=("$KONSTAPEL_SIGSTORE_FULCIO_IMAGE" "$KONSTAPEL_SIGSTORE_REKOR_IMAGE" "$KONSTAPEL_SIGSTORE_TRILLIAN_SERVER_IMAGE"
   "$KONSTAPEL_SIGSTORE_TRILLIAN_SIGNER_IMAGE" "$KONSTAPEL_SIGSTORE_DB_IMAGE" "$KONSTAPEL_SIGSTORE_TSA_IMAGE" "$KONSTAPEL_SIGSTORE_OIDC_IMAGE")
-for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE" "$KONSTAPEL_REGISTRY_IMAGE" "$KONSTAPEL_REGISTRY_API_IMAGE" "$KONSTAPEL_PROMTOOL_IMAGE" "${sigstore_images[@]}"; do
+for image in "$KONSTAPEL_NODE_IMAGE" "$KONSTAPEL_WORKLOAD_IMAGE" "$KONSTAPEL_S3_IMAGE" "$KONSTAPEL_REGISTRY_IMAGE" "$KONSTAPEL_REGISTRY_API_IMAGE" "$KONSTAPEL_PROMTOOL_IMAGE" "$KONSTAPEL_PROMETHEUS_OPERATOR_IMAGE" "$KONSTAPEL_PROMETHEUS_CONFIG_RELOADER_IMAGE" "${sigstore_images[@]}"; do
   if [[ ! $image =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[a-f0-9]{64}$ ]]; then
     echo "Runtime image must include a tag and complete SHA-256 digest: $image" >&2
     exit 1
@@ -48,6 +48,8 @@ if [[ ${chart_kyverno#v} != "$expected_kyverno" ]]; then
 fi
 # The vendored Prometheus Operator CRDs must match their pin.
 scripts/fetch-operator-crds.sh
+# The Operator bundle, operator and config-reloader images must be that same release.
+scripts/fetch-operator-crds.sh --bundle >/dev/null
 # The cert-manager pin must resolve to the checksummed archive.
 scripts/fetch-chart.sh cert-manager >/dev/null
 printf 'Dependency pins agree: Go %s, Kyverno %s, chart %s\n' "$expected_go" "$expected_kyverno" "$KONSTAPEL_KYVERNO_CHART_VERSION"

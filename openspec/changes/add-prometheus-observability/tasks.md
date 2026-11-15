@@ -40,7 +40,7 @@ integration boundaries.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
 - [x] 3.2 Add narrowly scoped reader RBAC for configured monitoring ServiceAccounts and reuse controller TokenReview/SubjectAccessReview permissions; test namespace roles cannot scrape and revoked access stops within the pinned authentication/authorization cache bounds.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
-- [ ] 3.3 Document metrics access, token rotation, filter cache durations and Prometheus authorization options; verify the documented setup using a monitoring identity in another namespace and an Operator configuration that exercises its credential-access policy.
+- [x] 3.3 Document metrics access, token rotation, filter cache durations and Prometheus authorization options; verify the documented setup using a monitoring identity in another namespace and an Operator configuration that exercises its credential-access policy.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Optional Helm monitoring integration
@@ -73,7 +73,7 @@ implemented (group 5)").
 
 ## 6. End-to-end monitoring acceptance
 
-- [ ] 6.1 Extend the existing chart acceptance workflow with pinned Prometheus Operator/Prometheus fixtures; verify actual ServiceMonitor discovery, successful TLS/authenticated scraping, unauthorized denial and task-owned teardown, recording dependency versions.
+- [x] 6.1 Extend the existing chart acceptance workflow with pinned Prometheus Operator/Prometheus fixtures; verify actual ServiceMonitor discovery, successful TLS/authenticated scraping, unauthorized denial and task-owned teardown, recording dependency versions.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 6.2 Exercise implemented producer failures/recovery through a real scrape and rule evaluator; verify per-binding evidence expiry, overdue scheduling, publication/cleanup alerts, configuration overrides and availability alerts without fabricated healthy data for missing integrations.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->

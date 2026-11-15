@@ -20,6 +20,12 @@ bundle resolution publish projections; see [Producers](#producers). The
 optional ServiceMonitor and PrometheusRule are described in
 [Monitoring integration](../charts.md#monitoring-integration), and the
 starter alerts with their runbooks in [Alert runbooks](alert-runbooks.md).
+The documented setup is verified against a real, pinned Prometheus Operator
+and a Prometheus in another namespace ([Verified Operator
+setup](../charts.md#verified-operator-setup)): discovery through the chart's
+ServiceMonitor, authenticated TLS scrapes, the starter rules loaded, denial
+for an unbound identity, the Operator's file-access policy with the Secret
+fallback, and revocation within the cache bound.
 
 ## Rules of the contract
 

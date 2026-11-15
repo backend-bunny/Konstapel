@@ -109,6 +109,18 @@ if includes certManager; then
     -n cert-manager --create-namespace --set crds.enabled=true --wait --timeout 10m 2>&1 | tee "$out/cert-manager-install.log"
   export KONSTAPEL_LIVE_CERT_MANAGER=true
 fi
+if includes prometheusOperator; then
+  # A real Prometheus Operator for the monitoring acceptance, installed from
+  # its pinned release bundle as a platform team would. It is not a chart
+  # dependency; the disposable cluster's deletion removes it, and the test
+  # deletes the Prometheus it creates.
+  stage 'Installing the pinned Prometheus Operator'
+  kubectl --kubeconfig "$kubeconfig" --context "$context" apply --server-side --force-conflicts \
+    -f "$(scripts/fetch-operator-crds.sh --bundle)" 2>&1 | tee "$out/prometheus-operator-install.log"
+  kubectl --kubeconfig "$kubeconfig" --context "$context" -n default rollout status deployment/prometheus-operator --timeout 5m \
+    2>&1 | tee -a "$out/prometheus-operator-install.log"
+  export KONSTAPEL_LIVE_PROMETHEUS_OPERATOR=true
+fi
 if includes image && [[ -n ${KONSTAPEL_ACCEPTANCE_IMAGE:-} ]]; then
   # Release acceptance: the node pulls the published image by its registry
   # digest, so the cluster runs exactly the bytes that will be released.

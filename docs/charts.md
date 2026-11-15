@@ -579,6 +579,9 @@ cert-manager TLS and a reader in another namespace, and checks:
 - a certificate reissued by cert-manager is served without a pod restart;
 - deleting the reader binding stops scraping within the 5-minute bound.
 
+`TestLiveHelmMonitoring` repeats the reader and revocation checks as a real
+Prometheus (see [Verified Operator setup](#verified-operator-setup)).
+
 Credential access, rotation and reader identities for the monitoring system
 are in [Monitoring integration](#monitoring-integration), which also covers
 the optional ServiceMonitor and PrometheusRule.
@@ -721,7 +724,58 @@ of the PrometheusRule an enabled default install renders (two release
 names), and generates the promtool rule tests from `*.cases.yaml`. `task
 test` runs `promtool check rules` and `promtool test rules` on those files
 with the pinned promtool image. A live scrape through a real Operator is the end-to-end
-monitoring acceptance (tasks 6.x of `add-prometheus-observability`).
+monitoring acceptance, described next.
+
+#### Verified Operator setup
+
+`TestLiveHelmMonitoring` (the `charts` group) runs the setup above against a
+real Prometheus Operator, so the documented values are exercised rather than
+only rendered. `scripts/acceptance.sh` installs the Operator from its pinned
+release bundle (`scripts/fetch-operator-crds.sh --bundle`: `bundle.yaml`
+checked against `KONSTAPEL_PROMETHEUS_OPERATOR_BUNDLE_SHA256`, with the
+operator and config-reloader images replaced by their digest-pinned
+`KONSTAPEL_PROMETHEUS_OPERATOR_IMAGE` and
+`KONSTAPEL_PROMETHEUS_CONFIG_RELOADER_IMAGE`). The Prometheus it manages runs
+`KONSTAPEL_PROMTOOL_IMAGE`, the same pinned image as the rule tests.
+`task deps:check` keeps those pins on one Operator release. The test then:
+
+1. installs the chart with `metrics.readers` naming a ServiceAccount in another
+   namespace and `metrics.serviceMonitor.labels` / `metrics.prometheusRule.labels`
+   set to `release: monitoring-acceptance`;
+2. creates a `Prometheus` in that other namespace, running as the listed reader
+   ServiceAccount, with `serviceMonitorSelector`, `ruleSelector` and both
+   namespace selectors limited to that label and the release namespace;
+3. waits for every controller replica to be an active target of
+   `serviceMonitor/<namespace>/konstapel-controller/0`, healthy over verified
+   TLS with the Pod's own token, labelled with the release, and queries a
+   Konstapel metric through the Prometheus HTTP API;
+4. checks that the seven starter alerts are loaded and evaluating healthily;
+5. checks denial: an identity without the reader binding gets
+   `403 Forbidden`, a wrong `serverName` fails with an `x509` error, and a
+   ServiceMonitor or PrometheusRule without the selector label is never
+   discovered or loaded;
+6. sets the Prometheus `arbitraryFSAccessThroughSMs.deny: true` (the Operator's
+   policy on file access from ServiceMonitors): the default
+   `serviceAccountToken` mode, which uses `bearerTokenFile`, is rejected and its
+   targets vanish; `helm upgrade` to `authorization.mode=secret` with a token
+   Secret in the release namespace brings them back up;
+7. deletes the `konstapel-metrics-reader` binding and measures how long until
+   the Prometheus targets report `403`;
+8. deletes the Prometheus and fails if any of its Pods remain. The disposable
+   cluster, and with it the Operator, is removed by the acceptance teardown.
+
+Local measurements (one run, kind, 15s scrape interval): all replicas up 9s
+after the Prometheus API answered; the file-access policy rejected the default
+mode 66s after it was set and the Secret mode scraped again 153s after the
+`helm upgrade`; scrapes failed with `403` 313s (CI: 315s) after the binding was deleted,
+which is the 5-minute allow cache plus a scrape interval, as documented in
+[Controller metrics](#controller-metrics). Expect up to about 5 minutes and 30
+seconds, never longer.
+
+The dependency versions of every run (Operator, config-reloader, Prometheus
+and controller images, the running Prometheus version) are recorded in
+`TestLiveHelmMonitoring.json` of the group's evidence. Pinned for this
+change: Prometheus Operator v0.95.2 and Prometheus v3.16.0.
 
 ### OCI policy bundles
 

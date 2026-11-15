@@ -16,8 +16,9 @@ tests=$(jq -er --arg group "$group" '
 ' scripts/acceptance-groups.json)
 mkdir -p "$out"
 # The evidence download test runs the pinned test-owned S3 service; the Helm
-# bundle test runs the pinned registry.
+# bundle test runs the pinned registry; the monitoring test the pinned Prometheus
+# (the Operator is installed by acceptance.sh).
 source scripts/runtime.env
-KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_REGISTRY_IMAGE=$KONSTAPEL_REGISTRY_IMAGE KONSTAPEL_WORKLOAD_IMAGE=$KONSTAPEL_WORKLOAD_IMAGE KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
-  go test -mod=readonly -tags live -count=1 -p 1 -timeout 40m -run "$tests" -v ./internal/targeting/ ./internal/controller/ \
+KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_REGISTRY_IMAGE=$KONSTAPEL_REGISTRY_IMAGE KONSTAPEL_PROMETHEUS_IMAGE=$KONSTAPEL_PROMTOOL_IMAGE KONSTAPEL_PROMETHEUS_OPERATOR_VERSION=$KONSTAPEL_PROMETHEUS_OPERATOR_VERSION KONSTAPEL_PROMETHEUS_OPERATOR_IMAGE=$KONSTAPEL_PROMETHEUS_OPERATOR_IMAGE KONSTAPEL_PROMETHEUS_CONFIG_RELOADER_IMAGE=$KONSTAPEL_PROMETHEUS_CONFIG_RELOADER_IMAGE KONSTAPEL_WORKLOAD_IMAGE=$KONSTAPEL_WORKLOAD_IMAGE KONSTAPEL_LIVE_KUBECONFIG=$kubeconfig KONSTAPEL_LIVE_CONTEXT=$context KONSTAPEL_LIVE_OUTPUT=$out \
+  go test -mod=readonly -tags live -count=1 -p 1 -timeout 60m -run "$tests" -v ./internal/targeting/ ./internal/controller/ \
   2>&1 | tee "$out/targeting-live.log"
