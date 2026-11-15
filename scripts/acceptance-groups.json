@@ -60,13 +60,22 @@
     "exceptionAdmission": false,
     "image": true,
     "certManager": true,
-    "prometheusOperator": true,
     "release": true,
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall",
       "TestLiveHelmBundles",
-      "TestLiveHelmMetrics",
+      "TestLiveHelmMetrics"
+    ]
+  },
+  "monitoring": {
+    "core": false,
+    "exceptionAdmission": false,
+    "image": true,
+    "certManager": true,
+    "prometheusOperator": true,
+    "release": true,
+    "goTests": [
       "TestLiveHelmMonitoring"
     ]
   },

@@ -2,13 +2,17 @@
 
 package controller
 
-// Live monitoring acceptance (add-prometheus-observability 3.3, 6.1): a real,
-// digest-pinned Prometheus Operator (installed by scripts/acceptance.sh from
-// its pinned release bundle) and a Prometheus in another namespace scrape the
-// Helm-installed controller through the chart's own ServiceMonitor and load
-// its PrometheusRule. Run through scripts/targeting-live.sh (charts group).
+// Live monitoring acceptance (add-prometheus-observability 3.3, 6.1, 6.2,
+// 6.3): a real, digest-pinned Prometheus Operator (installed by
+// scripts/acceptance.sh from its pinned release bundle) and a Prometheus in
+// another namespace scrape the Helm-installed controller through the chart's
+// own ServiceMonitor and evaluate its PrometheusRule, while real producer
+// failures, replica changes and credential changes are exercised
+// (monitoring_alerts_live_test.go). Run through scripts/targeting-live.sh
+// (monitoring group).
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -34,10 +38,11 @@ const (
 )
 
 type promTarget struct {
-	Pool      string            `json:"scrapePool"`
-	Health    string            `json:"health"`
-	LastError string            `json:"lastError"`
-	Labels    map[string]string `json:"labels"`
+	Pool       string            `json:"scrapePool"`
+	Health     string            `json:"health"`
+	LastError  string            `json:"lastError"`
+	LastScrape time.Time         `json:"lastScrape"`
+	Labels     map[string]string `json:"labels"`
 }
 
 // promGet queries the Prometheus HTTP API behind addr.
@@ -113,7 +118,12 @@ func monitoringObject(kind, ns, name string, labels map[string]any, spec map[str
 // loaded, denial for an identity without the reader binding, a wrong server
 // name and an undiscovered ServiceMonitor, the Operator's policy against file
 // access from ServiceMonitors with the chart's documented Secret fallback,
-// revocation seen by the scraper within the pinned cache bound, and teardown.
+// and teardown. It then runs the integrated phases of
+// monitoring_alerts_live_test.go on the same release and Prometheus: rule
+// overrides, producer failures and recoveries through the real rule
+// evaluator, binding recreation, leader loss and restart, certificate and
+// token rotation, and revocation seen by the scraper within the pinned
+// cache bound.
 func TestLiveHelmMonitoring(t *testing.T) {
 	image := os.Getenv("KONSTAPEL_LIVE_IMAGE")
 	repo, digest, ok := strings.Cut(image, "@")
@@ -130,6 +140,11 @@ func TestLiveHelmMonitoring(t *testing.T) {
 		t.Fatalf("pinned images are required: %q %q %q", promImage, operatorImage, reloaderImage)
 	}
 	l := newLive(t)
+	// The integrated phases take longer than newLive's default budget; the
+	// group's go test timeout still bounds the whole run.
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Minute)
+	t.Cleanup(cancel)
+	l.ctx = ctx
 	const ns, monNS, teamNS = "konstapel-system", "obs-monitoring", "obs-team"
 	for _, n := range []string{monNS, teamNS} {
 		_ = l.c.Create(l.ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: n}})
@@ -219,6 +234,9 @@ func TestLiveHelmMonitoring(t *testing.T) {
 	if err := l.c.Create(l.ctx, prom); err != nil {
 		t.Fatal(err)
 	}
+	// While Prometheus starts: the storage fixtures, workloads and bindings
+	// whose failures the integrated phases observe.
+	obs := l.prepareObservability(ns)
 	var opPod corev1.Pod
 	_ = l.c.Get(l.ctx, client.ObjectKeyFromObject(&running.Items[0]), &opPod)
 	l.record("versions", map[string]any{"operatorImage": operatorImage, "operatorRunning": opPod.Spec.Containers[0].Image,
@@ -237,6 +255,13 @@ func TestLiveHelmMonitoring(t *testing.T) {
 		return err == nil, fmt.Sprint(err)
 	})
 	l.record("prometheus", map[string]any{"version": build.Version})
+	obs.prom = promAddr
+	obs.alerts = startAlertTracker(promAddr)
+	obs.start = time.Now()
+	t.Cleanup(func() {
+		obs.alerts.close()
+		l.record("alert-timeline", map[string]any{"changes": obs.alerts.changes(obs.start), "polls": obs.alerts.polls, "failedPolls": obs.alerts.bad})
+	})
 
 	// Hand-made negative fixtures the Operator discovers beside the chart's
 	// ServiceMonitor. Each uses the Secret mode, which also works where the
@@ -248,7 +273,10 @@ func TestLiveHelmMonitoring(t *testing.T) {
 		}
 	}
 	tokenSecret("obs-unauthorized-token", scraper)
-	tokenSecret("obs-reader-token", l.apiToken(monNS, "prometheus"))
+	// The reader's token is bound to an anchor Secret, so the token rotation
+	// phase can revoke it by deleting the anchor.
+	readerToken, readerAnchor := l.boundToken(monNS, "prometheus", "obs-reader-anchor-0")
+	tokenSecret("obs-reader-token", readerToken)
 	endpoint := func(serverName, secret string) map[string]any {
 		return map[string]any{"port": "https", "scheme": "https", "path": "/metrics", "interval": "15s", "scrapeTimeout": "10s",
 			"tlsConfig":     map[string]any{"serverName": serverName, "ca": map[string]any{"secret": map[string]any{"name": "konstapel-controller-metrics-tls", "key": "ca.crt"}}},
@@ -379,30 +407,16 @@ func TestLiveHelmMonitoring(t *testing.T) {
 	})
 	l.record("credentialPolicy", map[string]any{"arbitraryFSAccessThroughSMs.deny": true, "fileModeRejectedAfterSeconds": denied.Seconds(), "secretModeUpAfterSeconds": fallback.Seconds()})
 
-	// 5. Revocation as the scraper sees it: removing the reader binding turns
-	// the chart's targets down with 403 within the pinned allow-cache bound
-	// (5 minutes) plus a scrape interval and margin.
-	if err := l.c.Delete(l.ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "konstapel-metrics-reader"}}); err != nil {
-		t.Fatal(err)
-	}
-	revoked := time.Now()
-	for {
-		all, err := promTargets(promAddr)
-		pool, down := poolTargets(all, chartPool), 0
-		for _, tg := range pool {
-			if tg.Health == "down" && strings.Contains(tg.LastError, "403") {
-				down++
-			}
-		}
-		if err == nil && len(pool) == replicas && down == replicas {
-			break
-		}
-		if time.Since(revoked) > 5*time.Minute+45*time.Second {
-			t.Fatalf("revoked Prometheus still scrapes %s after revocation: %v %s", time.Since(revoked), err, toJSON(pool))
-		}
-		time.Sleep(5 * time.Second)
-	}
-	l.record("revocation", map[string]any{"seconds": time.Since(revoked).Seconds(), "boundSeconds": 300})
+	// 6.2 and 6.3, on this release and this Prometheus.
+	obs.overrides()
+	obs.baseline()
+	obs.failures()
+	obs.engine()
+	obs.cleanupRecovered()
+	obs.leaderKilled()
+	obs.noLeader()
+	obs.tokenRotation(monNS, readerAnchor, readerToken)
+	obs.revocation()
 }
 
 func allReady(p corev1.Pod) bool {
