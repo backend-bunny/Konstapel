@@ -243,7 +243,7 @@ func TestEvidenceWorkflow(t *testing.T) {
 	}
 	// Another file than the registered one is refused before sending.
 	other := e.write("other.pdf", []byte("%PDF-1.7 another document"))
-	if _, err := e.transfer("upload", "dc-north-2026", uid, "up", "--file", other); err == nil || !strings.Contains(err.Error(), "nothing was sent") {
+	if _, err := e.transfer("upload", "dc-north-2026", uid, "up", "--file", other); err == nil || !strings.Contains(err.Error(), "registers") || !strings.Contains(err.Error(), "nothing was sent") {
 		t.Fatalf("wrong file: %v", err)
 	}
 	if e.requests.Load() != before {
