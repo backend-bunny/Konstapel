@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -891,6 +892,105 @@ func TestAttachmentUploadNeverWritesAHandedOffDestination(t *testing.T) {
 		if strings.HasPrefix(c, "Commit ") {
 			t.Fatalf("committed into a handed-off destination: %v", e.store.Calls())
 		}
+	}
+	e.tempEmpty()
+}
+
+// endless is a request body that never ends.
+type endless struct{}
+
+func (endless) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+// countingBody counts the bytes the handler reads from a request body.
+type countingBody struct {
+	io.ReadCloser
+	n *atomic.Int64
+}
+
+func (c countingBody) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+// An undeclared (chunked) body is read only up to the registered size plus
+// one byte, however much the client sends.
+func TestAttachmentUploadReadsAtMostTheRegisteredSize(t *testing.T) {
+	e := newAttEnv(t)
+	var read atomic.Int64
+	h := e.srv.Handler()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = countingBody{r.Body, &read}
+		h.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/evidenceattachments/att-north/upload", endless{})
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer up")
+	// The server may close the connection before the client stops sending;
+	// either way the upload must fail.
+	if resp, err := ts.Client().Do(req); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("endless body: %d", resp.StatusCode)
+		}
+	}
+	if n, size := read.Load(), int64(len(e.bodies["dc-north"])); n > size+1 {
+		t.Fatalf("read %d bytes of a %d-byte registration", n, size)
+	}
+	if e.staged() != 0 {
+		t.Fatalf("staged: %v", e.store.Calls())
+	}
+	e.tempEmpty()
+}
+
+// The record's pin is immutable at the API; should status nevertheless
+// name another destination mid-upload, nothing is committed. Storage that
+// already holds a commitment for another registration under this UID is
+// never answered as this upload's commitment.
+func TestAttachmentUploadRefusesAChangedPinOrAForeignCommitment(t *testing.T) {
+	e := newAttEnv(t)
+	body := e.bodies["dc-north"]
+	e.store.AfterStage = func(attachments.Ref) {
+		e.store.AfterStage = nil
+		a := e.get("dc-north")
+		a.Status.Storage.Destination = &v1alpha1.DestinationReference{Name: "secondary", UID: "dest-uid-2"}
+		if err := e.c.Status().Update(context.Background(), a); err != nil {
+			t.Error(err)
+		}
+	}
+	if r := e.upload("att-north", "up", body); r.code != http.StatusConflict || !strings.Contains(string(r.body), "pin changed") {
+		t.Fatalf("pin changed: %d %s", r.code, r.body)
+	}
+	if _, err := e.store.Committed(context.Background(), e.ref("att-north")); !errors.Is(err, attachments.ErrNotFound) {
+		t.Fatal("committed after the pin changed")
+	}
+	// dc-south's UID already holds a commitment of another registration
+	// (same bytes, another spec): refused, preserved, nothing staged.
+	south := e.get("dc-south")
+	other := south.Spec.DeepCopy()
+	other.Scope.Description = "DC South, another registration"
+	sbody := e.bodies["dc-south"]
+	if _, err := e.store.Stage(context.Background(), attachments.StageRequest{Ref: e.ref("att-south"), Document: attachments.Expected(south.Spec),
+		Uploader: attachments.Principal{Username: "someone"}, Body: bytes.NewReader(sbody)}); err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := e.store.Commit(context.Background(), attachments.CommitRequest{Ref: e.ref("att-south"), SpecDigest: attachments.SpecDigest(*other),
+		Document: attachments.Expected(south.Spec), ValidUntil: south.Spec.Validity.ValidUntil.Time, Retention: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := e.staged()
+	if r := e.upload("att-south", "up", sbody); r.code != http.StatusConflict || !strings.Contains(string(r.body), "different commitment") {
+		t.Fatalf("foreign commitment: %d %s", r.code, r.body)
+	}
+	if got, _ := e.store.Committed(context.Background(), e.ref("att-south")); got != foreign || e.staged() != staged {
+		t.Fatalf("the foreign commitment was replaced or another attempt staged: %+v %v", got, e.store.Calls())
 	}
 	e.tempEmpty()
 }

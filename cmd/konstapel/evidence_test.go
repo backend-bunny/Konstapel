@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -466,5 +467,50 @@ func TestEvidenceStartsNoProviderOrDelivery(t *testing.T) {
 	err := run()
 	if err == nil || !strings.Contains(err.Error(), "kubeconfig") || strings.Contains(err.Error(), "manifest") || strings.Contains(err.Error(), "provider") {
 		t.Fatalf("evidence dispatch: %v", err)
+	}
+}
+
+// Without an injected client, transfers trust the service only through the
+// system roots or --ca-file, and never follow a redirect: the bearer token
+// is not resent to another server (Go would resend it to the same host on
+// another port).
+func TestEvidenceTransferTrustAndRedirects(t *testing.T) {
+	e := newCLIEnv(t)
+	if _, err := e.run("register", "-f", e.path("attachment.yaml"), "--document", e.path("dc-north-2026.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	uid := string(e.record("dc-north-2026").UID)
+	e.pin("dc-north-2026")
+	run := func(args ...string) error {
+		var out bytes.Buffer
+		return (&evidenceCmd{stdout: &out, stderr: &out, newClient: func() (client.Client, error) { return e.c, nil }}).run(args)
+	}
+	transfer := func(op, token string, extra ...string) error {
+		return run(append([]string{op, "dc-north-2026", "--uid", uid, "--server", e.ts.URL, "--token-file", e.path(token + ".token")}, extra...)...)
+	}
+	// Untrusted service certificate: nothing reaches the service.
+	if err := transfer("download", "down", "--output", e.path("untrusted.pdf")); err == nil || !strings.Contains(err.Error(), "certificate") || e.requests.Load() != 0 {
+		t.Fatalf("untrusted service: %v (%d requests)", err, e.requests.Load())
+	}
+	ca := e.write("ca.crt", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: e.ts.Certificate().Raw}))
+	var elsewhere atomic.Int32
+	other := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { elsewhere.Add(1) }))
+	defer other.Close()
+	e.serve = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}
+	if err := transfer("download", "down", "--output", e.path("redirected.pdf"), "--ca-file", ca); err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("redirected download: %v", err)
+	}
+	if err := transfer("upload", "up", "--file", e.path("dc-north-2026.pdf"), "--ca-file", ca); err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("redirected upload: %v", err)
+	}
+	if n := elsewhere.Load(); n != 0 {
+		t.Fatalf("a redirect was followed with the token %d times", n)
+	}
+	// Trusted and not redirected: the transfer works.
+	e.serve = nil
+	if err := transfer("upload", "up", "--file", e.path("dc-north-2026.pdf"), "--ca-file", ca); err != nil {
+		t.Fatal(err)
 	}
 }
