@@ -757,6 +757,144 @@ func TestAttachmentDownloadRefusesUnconfirmedOrExpiredDocuments(t *testing.T) {
 	e.tempEmpty()
 }
 
+// rawUpload uploads from any goroutine; it reports transport errors in the
+// response instead of failing the test.
+func (e *attEnv) rawUpload(uid, token string, body []byte) response {
+	req, _ := http.NewRequest(http.MethodPut, e.ts.URL+"/v1/evidenceattachments/"+uid+"/upload", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := e.ts.Client().Do(req)
+	if err != nil {
+		return response{body: []byte(err.Error())}
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return response{resp.StatusCode, resp.Header, b}
+}
+
+// Two authorized uploads of one record race, as on two replicas: both
+// verify and stage their bytes, exactly one commitment is created, and both
+// callers are answered with it (one of them as a retry would be).
+func TestAttachmentConcurrentUploadsConvergeOnOneCommitment(t *testing.T) {
+	e := newAttEnv(t)
+	body := e.bodies["dc-north"]
+	e.grant("downloader", "create", "upload", "dc-north")
+	// Neither commits before both have staged.
+	var mu sync.Mutex
+	arrived, both := 0, make(chan struct{})
+	e.store.AfterStage = func(attachments.Ref) {
+		mu.Lock()
+		if arrived++; arrived == 2 {
+			close(both)
+		}
+		mu.Unlock()
+		select {
+		case <-both:
+		case <-time.After(5 * time.Second):
+		}
+	}
+	results := make([]response, 2)
+	var wg sync.WaitGroup
+	for i, token := range []string{"up", "down"} {
+		wg.Add(1)
+		go func() { defer wg.Done(); results[i] = e.rawUpload("att-north", token, body) }()
+	}
+	wg.Wait()
+	var receipts [2]UploadReceipt
+	for i, r := range results {
+		if r.code != http.StatusOK {
+			t.Fatalf("upload %d: %d %s", i, r.code, r.body)
+		}
+		if err := json.Unmarshal(r.body, &receipts[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, err := e.store.Committed(context.Background(), e.ref("att-north"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.store.Attempts(e.ref("att-north")) != 2 {
+		t.Fatalf("both uploads should have staged: %v", e.store.Calls())
+	}
+	for i, got := range receipts {
+		if !got.CommittedAt.Equal(stored.CommittedAt) || got.Uploader != stored.Uploader || got.SHA256 != stored.Document.SHA256 {
+			t.Fatalf("upload %d answered with %+v, the commitment is %+v", i, got, stored)
+		}
+	}
+	if u := stored.Uploader.Username; u != "uploader" && u != "downloader" {
+		t.Fatalf("committed uploader %q", u)
+	}
+	// The controller records that one commitment, and it is what is served.
+	e.store.AfterStage = nil
+	e.record("dc-north")
+	if r := e.download("att-north", "down"); r.code != http.StatusOK || !bytes.Equal(r.body, body) {
+		t.Fatalf("download: %d", r.code)
+	}
+	e.tempEmpty()
+}
+
+// The commit was created but its response was lost: the caller gets a
+// retryable failure, and the retry returns that commitment without staging
+// or committing anything new.
+func TestAttachmentUploadAfterALostCommitResponse(t *testing.T) {
+	e := newAttEnv(t)
+	body := e.bodies["dc-north"]
+	e.store.LoseCommitResponse = fmt.Errorf("%w: connection reset after the commit", attachments.ErrUnavailable)
+	if r := e.upload("att-north", "up", body); r.code != http.StatusServiceUnavailable || r.header.Get("Retry-After") == "" {
+		t.Fatalf("lost commit response: %d %s", r.code, r.body)
+	}
+	stored, err := e.store.Committed(context.Background(), e.ref("att-north"))
+	if err != nil {
+		t.Fatalf("the commitment itself was not kept: %v", err)
+	}
+	calls := len(e.store.Calls())
+	e.now = e.now.Add(10 * time.Minute)
+	r := e.upload("att-north", "up", body)
+	var got UploadReceipt
+	_ = json.Unmarshal(r.body, &got)
+	if r.code != http.StatusOK || !got.CommittedAt.Equal(stored.CommittedAt) || !got.ExpiresAt.Equal(stored.ExpiresAt) {
+		t.Fatalf("retry: %d %s, stored %+v", r.code, r.body, stored)
+	}
+	for _, c := range e.store.Calls()[calls:] {
+		if !strings.HasPrefix(c, "Committed ") {
+			t.Fatalf("the retry wrote to storage: %v", e.store.Calls()[calls:])
+		}
+	}
+	e.tempEmpty()
+}
+
+// A destination handed off to an operator (deletionPolicy: Orphan) is never
+// written to again, also when the handoff happens during an upload.
+func TestAttachmentUploadNeverWritesAHandedOffDestination(t *testing.T) {
+	e := newAttEnv(t)
+	body := e.bodies["dc-north"]
+	pinned := e.stores
+	orphaned := func(context.Context, v1alpha1.DestinationReference) (attachments.Store, error) {
+		return nil, fmt.Errorf("%w: %w: handed off", attachments.ErrUnavailable, publication.ErrOrphaned)
+	}
+	e.stores = orphaned
+	if r := e.upload("att-north", "up", body); r.code != http.StatusGone {
+		t.Fatalf("handed off before the upload: %d %s", r.code, r.body)
+	}
+	if e.staged() != 0 {
+		t.Fatalf("staged into a handed-off destination: %v", e.store.Calls())
+	}
+	// Handed off after staging, before the commit.
+	e.stores = pinned
+	e.store.AfterStage = func(attachments.Ref) {
+		e.store.AfterStage = nil
+		e.stores = orphaned
+	}
+	if r := e.upload("att-north", "up", body); r.code != http.StatusGone {
+		t.Fatalf("handed off during the upload: %d %s", r.code, r.body)
+	}
+	for _, c := range e.store.Calls() {
+		if strings.HasPrefix(c, "Commit ") {
+			t.Fatalf("committed into a handed-off destination: %v", e.store.Calls())
+		}
+	}
+	e.tempEmpty()
+}
+
 func TestAttachmentRoutesNeedAStore(t *testing.T) {
 	srv := &Server{Reader: fake.NewClientBuilder().WithScheme(scheme()).Build(), Reviews: &reviews{}, TempDir: t.TempDir()}
 	ts := httptest.NewServer(srv.Handler())

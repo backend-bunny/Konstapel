@@ -52,6 +52,10 @@ type Store struct {
 	// after Commit chose its attempt and before it creates the commitment,
 	// to inject races.
 	AfterStage, BeforeCommit func(ref attachments.Ref)
+	// LoseCommitResponse, when set, makes the next Commit that creates a
+	// commitment return it as an error instead (the commitment is kept), as
+	// if the storage response were lost.
+	LoseCommitResponse error
 }
 
 var _ attachments.Store = (*Store)(nil)
@@ -189,6 +193,10 @@ func (s *Store) Commit(_ context.Context, req attachments.CommitRequest) (attach
 		Document: at.doc, SpecDigest: req.SpecDigest, Uploader: at.uploader, CommittedAt: now, ValidUntil: req.ValidUntil.UTC(),
 		Retention: req.Retention, ExpiresAt: attachments.ExpiresAt(now, req.ValidUntil, req.Retention)}
 	s.commits[req.Ref] = r
+	if lost := s.LoseCommitResponse; lost != nil {
+		s.LoseCommitResponse = nil
+		return attachments.Receipt{}, lost
+	}
 	return r, nil
 }
 

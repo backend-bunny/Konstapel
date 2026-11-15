@@ -392,8 +392,14 @@ func (s *Server) stageAndCommit(ctx context.Context, u authnv1.UserInfo, a *v1al
 		return attachments.Receipt{}, storageProblem(ctx, a, err)
 	}
 	// Withdrawal removes uncommitted attempts; an upload accepted before
-	// it must not commit afterwards.
+	// it must not commit afterwards. A destination handed off to an
+	// operator meanwhile is not written to again either: the controller
+	// fences only its own in-process work, so this service re-reads the
+	// destination (uncached) right before its one write that matters.
 	if _, err := s.current(ctx, a); err != nil {
+		return attachments.Receipt{}, err
+	}
+	if _, err := s.store(ctx, a); err != nil {
 		return attachments.Receipt{}, err
 	}
 	r, err := st.Commit(ctx, req)
