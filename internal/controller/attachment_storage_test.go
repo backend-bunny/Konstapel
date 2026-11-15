@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/attachments"
+	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
 // add-supporting-evidence-attachments 2.3/2.4: destination pinning, the
@@ -375,5 +377,27 @@ func TestDestinationObligationsCountAttachments(t *testing.T) {
 	}
 	if o.packages != 1 || o.cleanup != 1 || o.empty() || o.latest == nil || !o.latest.Time.Equal(r.ExpiresAt) {
 		t.Fatalf("obligations %+v", o)
+	}
+}
+
+// add-supporting-evidence-attachments 3.1: the transfer service's stores
+// (NewAttachmentStores) never substitute a replaced destination and report
+// a destination handed off to an operator as orphaned, which the service
+// answers with 410 without contacting storage.
+func TestAttachmentStoresRefuseReplacedOrHandedOffDestinations(t *testing.T) {
+	handedOff := readyDestination("handed-off", "dest-2")
+	handedOff.Status.OrphanIntent = &v1alpha1.OrphanIntent{Reason: "migrating", Actor: "admin"}
+	c := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(readyDestination("primary", "dest-1"), handedOff).
+		WithStatusSubresource(&v1alpha1.EvidenceDestination{}).Build()
+	stores := NewAttachmentStores(c, "konstapel-system")
+	ctx := context.Background()
+	if _, err := stores.Store(ctx, v1alpha1.DestinationReference{Name: "primary", UID: "dest-0"}); !errors.Is(err, attachments.ErrUnavailable) || errors.Is(err, publication.ErrOrphaned) {
+		t.Fatalf("replaced destination: %v", err)
+	}
+	if _, err := stores.Store(ctx, v1alpha1.DestinationReference{Name: "missing", UID: "dest-9"}); !errors.Is(err, attachments.ErrUnavailable) {
+		t.Fatalf("missing destination: %v", err)
+	}
+	if _, err := stores.Store(ctx, v1alpha1.DestinationReference{Name: "handed-off", UID: "dest-2"}); !errors.Is(err, publication.ErrOrphaned) || !errors.Is(err, attachments.ErrUnavailable) {
+		t.Fatalf("handed-off destination: %v", err)
 	}
 }

@@ -508,9 +508,33 @@ func TestEvidenceTransferTrustAndRedirects(t *testing.T) {
 	if n := elsewhere.Load(); n != 0 {
 		t.Fatalf("a redirect was followed with the token %d times", n)
 	}
+	// A success answer for another document is not reported as committed.
+	e.serve = func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(download.UploadReceipt{Name: "dc-north-2026", UID: "uid-other", SHA256: "sha256:" + strings.Repeat("0", 64), Size: 1})
+	}
+	if err := transfer("upload", "up", "--file", e.path("dc-north-2026.pdf"), "--ca-file", ca); err == nil || !strings.Contains(err.Error(), "another document") {
+		t.Fatalf("foreign receipt: %v", err)
+	}
 	// Trusted and not redirected: the transfer works.
 	e.serve = nil
 	if err := transfer("upload", "up", "--file", e.path("dc-north-2026.pdf"), "--ca-file", ca); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 3.2: invalid attachment limits stop the download service before it
+// contacts anything (no kubeconfig is needed to see the refusal).
+func TestDownloadServerRefusesInvalidAttachmentLimits(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "absent"))
+	for flag, want := range map[string]string{
+		"--attachment-max-bytes=0":          "attachment upload limit",
+		"--attachment-max-bytes=4294967296": "attachment upload limit",
+		"--attachment-timeout=10ms":         "attachment transfer timeout",
+		"--attachment-max-concurrent=0":     "concurrent attachment transfers",
+		"--attachment-retention=1500ms":     "attachment retention",
+	} {
+		if err := runDownload([]string{flag}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", flag, err, want)
+		}
 	}
 }

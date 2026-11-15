@@ -111,7 +111,7 @@ func newAttEnv(t *testing.T) *attEnv {
 		AttachmentStores: func(ctx context.Context, ref v1alpha1.DestinationReference) (attachments.Store, error) {
 			return e.stores(ctx, ref)
 		},
-		AttachmentLimits: AttachmentLimits{MaxBytes: 1 << 10, Timeout: 2 * time.Second, MaxConcurrent: 2, Retention: attachments.DefaultRetention}}
+		AttachmentLimits: AttachmentLimits{MaxBytes: 1 << 10, Timeout: 2 * time.Second, MaxConcurrent: 2, Retention: 1000 * time.Hour}}
 	e.ts = httptest.NewServer(e.srv.Handler())
 	t.Cleanup(e.ts.Close)
 	return e
@@ -249,10 +249,10 @@ func TestAttachmentUploadCommitsAsTheAuthenticatedCaller(t *testing.T) {
 	}
 	a := e.get("dc-north")
 	if got.Name != "dc-north" || got.UID != "att-north" || got.Uploader.Username != "uploader" || got.SHA256 != a.Spec.Document.SHA256 ||
-		got.Size != int64(len(body)) || got.Retention != attachments.DefaultRetention.String() {
+		got.Size != int64(len(body)) || got.Retention != e.srv.AttachmentLimits.Retention.String() {
 		t.Fatalf("receipt %+v", got)
 	}
-	if !got.ExpiresAt.Equal(a.Spec.Validity.ValidUntil.Add(attachments.DefaultRetention)) {
+	if !got.ExpiresAt.Equal(a.Spec.Validity.ValidUntil.Add(e.srv.AttachmentLimits.Retention)) {
 		t.Fatalf("expiry %s", got.ExpiresAt)
 	}
 	// The authenticated caller is the uploader; the registrant and the
