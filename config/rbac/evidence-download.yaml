@@ -1,10 +1,12 @@
 # The evidence download service authenticates callers with TokenReview,
-# authorizes them with SubjectAccessReview, and resolves requests, runs and
-# namespaces. Bind this role with a ClusterRoleBinding to the download
-# service's own service account only; no other identity needs review
-# permissions. Callers need the download attributes in
-# konstapel-assessment-requester (namespace) or konstapel-assessment-operator
-# (platform runs).
+# authorizes them with SubjectAccessReview, and resolves requests, runs,
+# namespaces and supporting-evidence attachments. Bind this role with a
+# ClusterRoleBinding to the download service's own service account only; no
+# other identity needs review permissions. Callers need the download
+# attributes in konstapel-assessment-requester (namespace) or
+# konstapel-assessment-operator (platform runs), and for attachments the
+# upload or download attribute in konstapel-evidence-attachment-uploader or
+# konstapel-evidence-attachment-downloader.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -24,6 +26,12 @@ rules:
   # A run's package is served from its pinned EvidenceDestination.
   - apiGroups: [compliance.erenius.io]
     resources: [evidencedestinations]
+    verbs: [get, list]
+  # Attachment transfers resolve the record by UID and transfer its
+  # document through its pinned destination. The service never writes
+  # records or status.
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidenceattachments]
     verbs: [get, list]
   - apiGroups: [""]
     resources: [namespaces]

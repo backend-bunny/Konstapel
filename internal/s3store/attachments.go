@@ -643,6 +643,15 @@ func (a *AttachmentStore) DeleteUncommitted(ctx context.Context, ref attachments
 	if remaining > 0 && len(problems) == 0 {
 		problems = append(problems, fmt.Sprintf("%d owned attempts remain", remaining))
 	}
+	// A commit that landed while the attempts were being removed (an upload
+	// that passed the transfer service's last withdrawal check just before
+	// the deletion) is never treated as uncommitted: the caller records it
+	// and retains it until its fixed expiry.
+	if _, err := a.Committed(ctx, ref); err == nil {
+		return attachments.Cleanup{}, fmt.Errorf("%w: the attachment was committed during its withdrawal cleanup", attachments.ErrConflict)
+	} else if !errors.Is(err, attachments.ErrNotFound) {
+		problems = append(problems, err.Error())
+	}
 	return a.cleanupResult(problems)
 }
 

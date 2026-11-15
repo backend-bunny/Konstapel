@@ -661,15 +661,17 @@ fails while the files are invalid or the served certificate has expired, and
 `GET /healthz` reports only that the process is serving. Neither probe needs a
 token. Its service account needs
 `config/rbac/evidence-download.yaml`. That file holds a ClusterRole with
-TokenReview and SubjectAccessReview `create` plus read on requests, runs and
-namespaces, and for a `credentialSecret` destination a Role reading that
-Secret. Bind both to the download service account only.
+TokenReview and SubjectAccessReview `create` plus read on requests, runs,
+namespaces, destinations and supporting-evidence attachments, and for a
+`credentialSecret` destination a Role reading that Secret. Bind both to the
+download service account only.
 
 | Route | Caller needs (SubjectAccessReview) | Serves |
 | --- | --- | --- |
 | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/download?uid=<request uid>` | `get` on `assessmentrequests/download` and `assessmentrequests`, name `<name>`, in `<ns>`, from `konstapel-assessment-requester` | that request's own namespace-scoped package |
 | `GET /v1/assessmentruns/<run uid>/download` | `get` on `assessmentruns/download` and `assessmentruns`, name of the run, from `konstapel-assessment-operator` | any run's package |
 | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/signature?uid=<request uid>` and `GET /v1/assessmentruns/<run uid>/signature` | exactly the same as the matching `/download` route | the package's signature bundle ([evidence signing](evidence-signing.md#download-a-signed-package)) |
+| `PUT /v1/evidenceattachments/<uid>/upload` and `GET /v1/evidenceattachments/<uid>/download` | `create` on `evidenceattachments/upload` or `get` on `evidenceattachments/download`, plus `get` on the record | a platform supporting-evidence document ([supporting evidence](../supporting-evidence.md#uploading-and-downloading)), with its own limits and statuses |
 
 Each request is checked as follows:
 
@@ -1114,6 +1116,10 @@ kubectl -n konstapel-system get configmap konstapel-orphan-$uid -o jsonpath='{.d
   (`DestinationOrphaned`), and never claim success.
 - **Deleted records:** they stay `Deleted`.
 - **New runs:** bindings that selected the destination need a new one.
+- **Supporting-evidence attachments:** they aren't in the inventory yet.
+  Their transfers answer 410, and they keep the destination from being
+  released until an administrator takes over their storage and releases
+  them ([supporting evidence](../supporting-evidence.md#a-destination-handed-off-to-an-operator)).
 
 **5. External recovery and cleanup are the operator's job.**
 - **Unreachable storage.** The inventory's `remoteState` is `NotEnumerated`,

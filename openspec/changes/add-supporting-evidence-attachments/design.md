@@ -273,6 +273,59 @@ do not add one public Task task per helper. Cleanup removes only task-owned
 containers, volumes, buckets/prefixes, credentials, and temporary files. Useful
 sanitized compatibility/test reports can be retained as validation evidence.
 
+Implementation (task group 3):
+
+- **Routes.** The download service (`internal/download`) serves
+  `PUT /v1/evidenceattachments/<uid>/upload` and
+  `GET /v1/evidenceattachments/<uid>/download`. It uses the archive routes'
+  TokenReview audience and the same SubjectAccessReview shape: the dedicated
+  attribute (`create` on `evidenceattachments/upload` or `get` on
+  `evidenceattachments/download`) plus `get` on the record, both by the
+  resolved record's name. Records are addressed by UID only, and an unknown
+  UID gets the same 403 as a denial. The service's own role gains `get, list`
+  on `evidenceattachments` and nothing else; it never writes records.
+- **Upload order.** The service refuses before reading any byte when the
+  record is withdrawn, has no pinned destination, registers a size above the
+  limit, or declares another `Content-Length`. It then takes a transfer slot,
+  receives the bytes into bounded temporary storage and hashes them against
+  the registered size and SHA-256. Mismatches are refused with nothing stored.
+  It repeats authorization and the record check (same UID, not withdrawn,
+  same pin) and answers a retry with the existing commitment. Otherwise it
+  stages through the pinned destination's `attachments.Store`, re-checks
+  withdrawal immediately before `Commit`, and checks it once more after.
+- **Withdrawal race.** `DeleteUncommitted` re-reads the commitment after
+  removing attempts. A commit that landed meanwhile returns `ErrConflict`,
+  so the controller records and retains it until its expiry rather than
+  releasing the record over it. A commit PUT still in flight after that final
+  read can leave a stray commit manifest without its document under the
+  released record's prefix. This is tracked in Workflow follow-up.
+- **Downloads.** Only the commitment recorded in status is served. The
+  stored manifest must match it field by field for this UID, and the bytes
+  are verified before any is sent. A withdrawn record's retained source stays
+  downloadable until `expiresAt`, marked `X-Konstapel-Withdrawn: true`;
+  after that it answers 410. A destination handed off to an operator answers
+  410. Responses are `application/octet-stream`, `nosniff`, sandboxed,
+  `attachment` with the record name as filename, and `private, no-store`.
+- **Limits.** `--attachment-max-bytes` (32 MiB; 1 byte to 1 GiB and at most
+  `--max-temp-bytes`), `--attachment-timeout` (5m; 1s to 1h, covering
+  receive and store), and `--attachment-max-concurrent` (2; 1 to 64, uploads
+  and downloads together). The deadline sets the request context and the
+  connection's read and write deadlines. Invalid values stop startup.
+- **Retention setting.** The central source retention is the download
+  service's `--attachment-retention` (2160h, positive whole seconds), frozen
+  into each first commitment. Chart values for these settings belong to the
+  chart integration (7.1). Until then the chart runs the defaults.
+- **CLI.** `konstapel evidence register|upload|download|status` is
+  dispatched before the C2P provider starts. `register` completes a
+  reviewable manifest. It takes the document size and SHA-256 from the file
+  and fills missing binding UIDs from the cluster. It refuses values that
+  disagree, and also refuses `registeredBy`, `status` and unknown fields.
+  `--dry-run` is a server-side dry run that includes admission. Bindings
+  don't publish a catalog digest, so the manifest states it.
+  `upload`/`download` require the record's exact UID and an https server.
+  `download` writes only verified bytes and never replaces a file. Kubeconfig
+  loading follows kubectl.
+
 ## Risks / Trade-offs
 
 - Documents are mistaken for proof or fresh scanner results → preserve declared

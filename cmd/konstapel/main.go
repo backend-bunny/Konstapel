@@ -22,7 +22,7 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: konstapel controller|download-server|generate|deliver|convert|acceptance|validate [flags]")
+		return fmt.Errorf("usage: konstapel controller|download-server|evidence|generate|deliver|convert|acceptance|validate [flags]")
 	}
 	command := os.Args[1]
 	if command == "controller" {
@@ -30,6 +30,11 @@ func run() error {
 	}
 	if command == "download-server" {
 		return runDownload(os.Args[2:])
+	}
+	// Supporting-evidence documents: Kubernetes API and download service
+	// only; the C2P provider below is never started for them.
+	if command == "evidence" {
+		return runEvidence(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	root := fs.String("root", ".", "repository root")

@@ -97,16 +97,20 @@ for package integration.
   baseline reader once add-control-coverage-reporting 1.1 lands. Keep the
   catalog-digest identity and fail-closed behavior, and re-verify the
   association states.
-- The transfer service (group 3) commits with the central source retention
-  (`attachments.DefaultRetention`, 2160h) and must expose it as a validated
-  operator setting. It must stage and commit only against the record's
-  recorded `status.storage.destination`, and refuse records that are being
-  deleted. Withdrawal removes uncommitted attempts, so an upload accepted
-  before deletion must not commit afterwards.
-- Orphan handoff of a destination with pinned attachments is not part of the
-  orphan inventory: such attachments stay retained (the destination is never
-  contacted again) and block its release until an administrator resolves
-  them. Decide whether attachments join the inventory before group 4.
+- Expose the transfer service's attachment settings (`--attachment-max-bytes`,
+  `--attachment-timeout`, `--attachment-max-concurrent`,
+  `--attachment-retention`) as validated runtime chart values in 7.1; until
+  then the chart runs the documented defaults.
+- Extend the S3 orphan inventory to attachments in a later group, after
+  group 4 (owner decision). Record each pinned attachment's owned prefix and
+  commitment, mark the records handed off, and release them without
+  contacting storage. Until then a destination handed off with pinned
+  attachments stays retained and blocks its release (fail-safe); the
+  documented administrator path (export, take over
+  `<prefix>/attachments/<cluster>/<uid>/`, withdraw, remove the finalizer)
+  resolves it. The same extension should report stray commit manifests left
+  by a commit still in flight after a withdrawal's final check (group 3
+  design note).
 
 ## Future Development
 

@@ -12,7 +12,9 @@ import (
 // read and document download are distinct platform grants held by dedicated
 // ClusterRoles; no namespace role (assessment requester, exception editor)
 // or other shipped role receives any of them, and only the controller writes
-// status. Checked statically against every shipped Role and ClusterRole;
+// status. The download service's own role reads records (by UID) to
+// transfer their documents (3.1) and writes nothing. Checked statically
+// against every shipped Role and ClusterRole;
 // TestLiveEvidenceAttachmentAPI checks the same matrix against a real API
 // server with SubjectAccessReview.
 
@@ -22,6 +24,7 @@ const (
 	attachmentReader     = "konstapel-evidence-attachment-reader"
 	attachmentDownloader = "konstapel-evidence-attachment-downloader"
 	controllerRole       = "konstapel-controller"
+	downloadServiceRole  = "konstapel-evidence-download"
 )
 
 type grant struct{ verb, resource string }
@@ -40,6 +43,9 @@ var attachmentMatrix = map[string][]grant{
 		{"update", "evidenceattachments"}, {"patch", "evidenceattachments"},
 		{"get", "evidenceattachments/status"}, {"update", "evidenceattachments/status"}, {"patch", "evidenceattachments/status"},
 		{"update", "evidenceattachments/finalizers"}},
+	// The transfer service resolves records; the callers' own upload and
+	// download attributes are checked with SubjectAccessReview.
+	downloadServiceRole: {{"get", "evidenceattachments"}, {"list", "evidenceattachments"}},
 }
 
 var (
@@ -77,7 +83,7 @@ func TestAttachmentAuthorityMatrix(t *testing.T) {
 // so binding one cannot widen assessment, exception or storage authority.
 func TestAttachmentRolesGrantOnlyAttachments(t *testing.T) {
 	for _, r := range loadRoles(t) {
-		if r.name == controllerRole || attachmentMatrix[r.name] == nil {
+		if r.name == controllerRole || r.name == downloadServiceRole || attachmentMatrix[r.name] == nil {
 			continue
 		}
 		for _, rule := range r.rules {
@@ -106,7 +112,7 @@ func TestAttachmentAuthorityIsDocumented(t *testing.T) {
 	}
 	delete(documented, "konstapel-evidence-attachment-registrant") // the admission policy
 	for name := range attachmentMatrix {
-		if name == controllerRole {
+		if name == controllerRole || name == downloadServiceRole {
 			continue
 		}
 		if !documented[name] {

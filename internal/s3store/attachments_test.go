@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -419,5 +420,48 @@ func TestAttachmentReceiptIsBoundToDestination(t *testing.T) {
 	moved.Dest.ID = "new-default"
 	if _, err := moved.Committed(ctx, attRef); !errors.Is(err, attachments.ErrConflict) {
 		t.Fatalf("commitment adopted by another destination: %v", err)
+	}
+}
+
+// commitDuringDelete runs commit once, before the first DELETE it forwards:
+// an upload that passed its last withdrawal check commits while the
+// withdrawal is removing the attempts.
+type commitDuringDelete struct {
+	inner  s3.HTTPClient
+	once   sync.Once
+	commit func()
+}
+
+func (c *commitDuringDelete) Do(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodDelete {
+		c.once.Do(c.commit)
+	}
+	return c.inner.Do(r)
+}
+
+// add-supporting-evidence-attachments 3.1: a commit that lands while an
+// uncommitted record's attempts are being removed is reported as a
+// conflict, so the controller records and retains it instead of releasing
+// the record over a live commitment.
+func TestAttachmentDeleteUncommittedSeesALateCommit(t *testing.T) {
+	f := newFake()
+	uploader, _ := attachmentStore(t, f)
+	ctx := context.Background()
+	body := []byte("uploaded just before withdrawal")
+	stage(t, uploader, attRef, body, alice)
+	var committed error
+	wrap := &commitDuringDelete{commit: func() {
+		_, committed = uploader.Commit(ctx, commitReq(attRef, body, specA, time.Now().Add(time.Hour), time.Hour))
+	}}
+	withdrawer := &AttachmentStore{Dest: uploader.Dest, Now: uploader.Now,
+		Client: s3.New(uploader.Client.Options(), func(o *s3.Options) { wrap.inner = o.HTTPClient; o.HTTPClient = wrap })}
+	if _, err := withdrawer.DeleteUncommitted(ctx, attRef); !errors.Is(err, attachments.ErrConflict) {
+		t.Fatalf("withdrawal over a late commit: %v (commit: %v)", err, committed)
+	}
+	if committed != nil {
+		t.Fatal(committed)
+	}
+	if _, err := withdrawer.Committed(ctx, attRef); err != nil {
+		t.Fatalf("the late commitment was removed: %v", err)
 	}
 }

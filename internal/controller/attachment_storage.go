@@ -43,6 +43,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/attachments"
+	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
@@ -383,7 +384,7 @@ func (d *destinationStores) Store(ctx context.Context, ref v1alpha1.DestinationR
 	case string(ed.UID) != ref.UID:
 		return nil, fmt.Errorf("%w: EvidenceDestination %s was replaced; the pinned destination is never substituted", attachments.ErrUnavailable, ref.Name)
 	case ed.Status.OrphanIntent != nil:
-		return nil, fmt.Errorf("%w: EvidenceDestination %s was handed off to an operator and is no longer contacted", attachments.ErrUnavailable, ref.Name)
+		return nil, fmt.Errorf("%w: %w: EvidenceDestination %s was handed off to an operator and is no longer contacted", attachments.ErrUnavailable, publication.ErrOrphaned, ref.Name)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -404,6 +405,14 @@ func (d *destinationStores) Store(ctx context.Context, ref v1alpha1.DestinationR
 	}
 	d.cache[ref.UID] = cachedStore{generation: ed.Generation, store: st}
 	return st, nil
+}
+
+// NewAttachmentStores builds attachment stores for pinned destinations for
+// the transfer service (konstapel download-server), with the same adapter,
+// credential resolution and orphan refusal as the controller. A destination
+// handed off to an operator yields an error matching publication.ErrOrphaned.
+func NewAttachmentStores(r client.Reader, namespace string) AttachmentStores {
+	return &destinationStores{Reader: r, Namespace: namespace}
 }
 
 // attachmentStorage configures storage ownership from the assessment

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 // reviews is a fake Reviewer: tokens map to users, and grants lists the
 // "user verb ns/resource/subresource/name" tuples that are allowed.
 type reviews struct {
+	mu     sync.Mutex
 	tokens map[string]string
 	grants map[string]bool
 	down   bool
@@ -47,6 +49,8 @@ func key(user string, a authzv1.ResourceAttributes) string {
 }
 
 func (f *reviews) Authenticate(_ context.Context, token string) (authnv1.UserInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.down {
 		return authnv1.UserInfo{}, errors.New("apiserver unreachable")
 	}
@@ -58,6 +62,8 @@ func (f *reviews) Authenticate(_ context.Context, token string) (authnv1.UserInf
 }
 
 func (f *reviews) Authorize(_ context.Context, u authnv1.UserInfo, a authzv1.ResourceAttributes) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if a.Group != v1alpha1.GroupVersion.Group {
 		return false, errors.New("wrong group")
 	}

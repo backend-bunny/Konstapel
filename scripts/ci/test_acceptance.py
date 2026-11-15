@@ -62,6 +62,23 @@ class SigningAcceptanceTests(unittest.TestCase):
         self.assertIn("l.signedHandover(", text)
 
 
+class AttachmentAcceptanceTests(unittest.TestCase):
+    """add-supporting-evidence-attachments: the attachment API, storage and
+    authenticated transfer cases run in groups CI always requires, on real
+    Kubernetes APIs (admission) and with the test S3 service (storage)."""
+
+    REQUIRED = {
+        "TestLiveEvidenceAttachmentAPI": "admission",
+        "TestLiveAttachmentStorage": "storage",
+        "TestLiveAttachmentTransfer": "storage",
+    }
+
+    def test_attachment_cases_are_in_required_groups(self):
+        for test, group in self.REQUIRED.items():
+            with self.subTest(test=test):
+                self.assertIn(test, acceptance.GROUPS[group]["goTests"])
+
+
 class ReleaseGroupTests(unittest.TestCase):
     """Release acceptance (scripts/charts/acceptance.sh) runs exactly the
     groups marked "release": true against the frozen chart archives and the
