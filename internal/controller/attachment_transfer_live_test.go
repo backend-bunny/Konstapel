@@ -16,7 +16,8 @@ package controller
 //     and the declared source URL is never fetched;
 //   - transfers need the dedicated attribute and record read: other roles,
 //     a namespace team, another audience and unknown UIDs are refused;
-//   - a retry by another authorized uploader returns the first commitment;
+//   - a retry by another authorized uploader returns the first commitment,
+//     and two uploaders racing on one record both get the one commitment;
 //   - mismatching and interrupted uploads store nothing; an oversized
 //     registration is refused;
 //   - revoking a role stops the next transfer;
@@ -48,7 +49,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	authnv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -67,16 +67,8 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
-// apiToken issues a service account token for the API server's audience.
-func (l *live) apiToken(ns, sa string) string {
-	tr := &authnv1.TokenRequest{}
-	if err := l.c.SubResource("token").Create(l.ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa}}, tr); err != nil {
-		l.t.Fatal(err)
-	}
-	return tr.Status.Token
-}
-
-// bindSA binds a service account to a role, test-owned.
+// bindSA binds a service account to a role, test-owned. API-audience tokens
+// come from apiToken (metrics_helm_live_test.go).
 func (l *live) bindSA(name, ns, sa string, role rbacv1.RoleRef, namespace string) client.Object {
 	subjects := []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: ns, Name: sa}}
 	var o client.Object
@@ -517,6 +509,50 @@ spec:
 		return c != nil && c.Reason == v1alpha1.ReasonAwaitingUpload && pending.Status.Storage.Commitment == nil, toJSON(pending.Status)
 	})
 	l.record("intake", map[string]any{"mismatch": 409, "interrupted": "no objects", "oversized": 413, "limit": srv.AttachmentLimits.MaxBytes})
+
+	// Two uploaders race on one record (as on two replicas): both are
+	// answered with the one commitment real storage created, which the
+	// controller records.
+	raceBody := []byte("<html>DC North audit, uploaded twice at once</html>")
+	raced := register("at-concurrent", raceBody, validUntil.Add(-24*time.Hour), validUntil)
+	type raceResult struct {
+		code int
+		body []byte
+		err  error
+	}
+	results := make(chan raceResult, 2)
+	for _, who := range []string{"at-uploader", "at-uploader-2"} {
+		go func() {
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPut, ts.URL+"/v1/evidenceattachments/"+string(raced.UID)+"/upload", bytes.NewReader(raceBody))
+			req.Header.Set("Authorization", "Bearer "+tokens[who])
+			resp, err := hc.Do(req)
+			if err != nil {
+				results <- raceResult{err: err}
+				return
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			results <- raceResult{code: resp.StatusCode, body: b}
+		}()
+	}
+	var raceReceipts []download.UploadReceipt
+	for range 2 {
+		r := <-results
+		var rc download.UploadReceipt
+		if r.err != nil || r.code != http.StatusOK || json.Unmarshal(r.body, &rc) != nil {
+			t.Fatalf("concurrent upload: %d %s %v", r.code, r.body, r.err)
+		}
+		raceReceipts = append(raceReceipts, rc)
+	}
+	if a, b := raceReceipts[0], raceReceipts[1]; !a.CommittedAt.Equal(b.CommittedAt) || a.Uploader != b.Uploader || !a.ExpiresAt.Equal(b.ExpiresAt) {
+		t.Fatalf("concurrent uploads answered with different commitments: %+v %+v", a, b)
+	}
+	l.eventually("concurrent upload's commitment recorded", func() (bool, string) {
+		_ = l.c.Get(ctx, client.ObjectKeyFromObject(raced), raced)
+		cm := raced.Status.Storage.Commitment
+		return cm != nil && cm.Uploader.Username == raceReceipts[0].Uploader.Username && cm.CommittedAt.Time.Equal(raceReceipts[0].CommittedAt), toJSON(raced.Status)
+	})
+	l.record("concurrent", map[string]any{"uploads": 2, "committedBy": raceReceipts[0].Uploader.Username, "committedAt": raceReceipts[0].CommittedAt})
 
 	// Revocation stops the next transfer.
 	if r := transfer(http.MethodPut, uid, "upload", tokens["at-uploader-2"], doc); r.code != http.StatusOK {
