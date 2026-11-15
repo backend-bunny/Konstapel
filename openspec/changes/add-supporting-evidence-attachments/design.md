@@ -204,6 +204,46 @@ External Object Lock or deletion errors remain explicit; finalizers are removed
 only after owned cleanup is confirmed. Do not use owner references to bindings
 or namespaces, since their deletion must not lose document retention work.
 
+Implementation (task group 4):
+
+- **Status axes.** Additive, optional status fields: `validity`
+  (`NotYetValid`/`Current`/`Expired` and `nextTransition`), `content`
+  (`Pending`/`Available`/`Unavailable` with a CamelCase reason and a
+  transition time), and `withdrawal.withdrawnAt`. A CEL transition rule keeps
+  a recorded withdrawal unchanged. `cleanup.attempts` is added. Records
+  written by groups 1-3 round-trip byte for byte. Withdrawal no longer
+  overwrites `AssociationsValid`; associations keep their last resolution.
+- **Validity.** Computed from `spec.validity` and the controller clock only
+  (`attachments.Temporal`). The reconciler requeues at the next boundary,
+  capped at a day, so expiry needs no event and survives restarts.
+- **Content.** A metadata-only check of the committed version
+  (`Store.Health`) on start or leader change, then every
+  `IntegrityInterval` (24h, shared with retained packages) while
+  `Available`, and on every reconcile (at least each minute) while
+  `Unavailable`. At `expiresAt` the content is `Unavailable/SourceExpired`
+  without a storage call. A live record's bytes stay until withdrawal.
+- **Associations.** Validation follows the binding's resolved profile
+  revision: an unobserved binding edit, or a newer revision of the same
+  profile with the same bundle digest, keeps the association as it was. This
+  replaces group 1's requirement that the binding observed its generation
+  and the profile generation matched, which made reporting-only and
+  policy-parameter edits flip associations to Pending.
+- **Coverage input.** `attachments.ForBinding` is the input group 5 maps
+  into the coverage owner's `SupportingEvidenceContext`: it never selects a
+  withdrawn record and reports the other three states of every other record
+  naming the binding's exact UID, with validity computed at the caller's
+  instant.
+- **Withdrawal and cleanup.** Retention-active passes write nothing (a
+  `NotDue` cleanup has no `lastAttempt`) and contact storage only for the
+  content check. Failed or refused cleanups count `attempts` and back off
+  from one minute doubling to an hour (as for runs); a pass inside the
+  backoff neither contacts storage nor writes status. Owned attempt deletion
+  removes the document before `attempt.json` and `intent.json`, stops at the
+  first refusal, and deletes only those three names, so a refused deletion
+  keeps the ownership needed by its retry and unrelated objects inside an
+  owned directory stay. The commit manifest goes only once nothing owned
+  remains.
+
 ### 5. Freeze independent copies into authorized assessment packages
 
 The assessment producer reads attachment associations for the frozen run scope
