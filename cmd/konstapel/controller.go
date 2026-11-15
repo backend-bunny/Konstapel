@@ -85,7 +85,9 @@ func (b bundleFlags) options(fs *flag.FlagSet, namespace string) (stack.Options,
 func runController(args []string) error {
 	fs := flag.NewFlagSet("controller", flag.ContinueOnError)
 	root := fs.String("content-root", "/usr/share/konstapel/content", "directory with the vendored content and its SHA256SUMS")
-	metrics := fs.String("metrics-bind-address", "0", "metrics address; \"0\" disables the metrics server")
+	metrics := fs.String("metrics-bind-address", "0", "HTTPS metrics address, authenticated with TokenReview and authorized with SubjectAccessReview; \"0\" disables the metrics server")
+	metricsCertDir := fs.String("metrics-cert-dir", "", "directory with tls.crt, tls.key and ca.crt for the metrics server; required when it serves")
+	metricsServerName := fs.String("metrics-server-name", "", "name the metrics certificate must cover, such as konstapel-controller-metrics.<namespace>.svc")
 	probes := fs.String("health-probe-bind-address", ":8081", "address for /healthz and /readyz")
 	leader := fs.Bool("leader-elect", true, "use a Lease so only one replica reconciles")
 	leaseDuration := fs.Duration("leader-election-lease-duration", controller.DefaultLeaseDuration, "how long a non-leader waits before taking over an unrenewed Lease")
@@ -137,6 +139,7 @@ func runController(args []string) error {
 		Content: targeting.LocalContent{Root: *root, Name: VendoredBundle,
 			Policies: assessment.ShippedPolicies},
 		MetricsAddr:             *metrics,
+		MetricsTLS:              &controller.MetricsTLS{CertDir: *metricsCertDir, ServerName: *metricsServerName},
 		ProbeAddr:               *probes,
 		LeaderElection:          *leader,
 		LeaderElectionNamespace: *leaderNS,

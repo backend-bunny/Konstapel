@@ -1,0 +1,7 @@
+# expect: interval
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 0s

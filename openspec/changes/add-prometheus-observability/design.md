@@ -251,7 +251,10 @@ support certificate reload and CA rotation. Do not use `insecureSkipVerify` as
 the install path, or reuse a certificate for an unrelated service identity.
 
 Grant the controller TokenReview and SubjectAccessReview create permissions,
-reusing existing role rules where already supplied. Provide a reader ClusterRole
+reusing existing role rules where already supplied. The grant is a separate
+ClusterRole bound only while `metrics.enabled`; the controller's generated
+role is unchanged. A certificate that is missing or fails verification at
+start stops the controller instead of falling back to a self-signed one. Provide a reader ClusterRole
 granting `get` on non-resource URL `/metrics`; bind only explicitly configured
 monitoring ServiceAccount subjects, with their namespaces. Namespace exception
 and assessment-request roles do not inherit it. This endpoint provides
@@ -275,7 +278,9 @@ Operator versions and validate the actual selected schema in acceptance.
 
 ### 6. Make Helm integrations independently optional
 
-Add `metrics.enabled` (default true), `metrics.serviceMonitor.enabled` (default
+Add `metrics.enabled` (default **false**, an owner decision: the endpoint
+gives the controller ServiceAccount cluster-scoped TokenReview and
+SubjectAccessReview `create`, so it is opt-in), `metrics.serviceMonitor.enabled` (default
 false), and `metrics.prometheusRule.enabled` (default false) to the implemented
 controller chart. Monitoring integrations require metrics to be enabled. The
 two Operator resources use `monitoring.coreos.com/v1`; each requires its own API
@@ -297,6 +302,28 @@ both disabled options render successfully without them. Use values.schema.json
 for incompatible option checks and safe bounded configuration. A ServiceMonitor
 is owned by the controller release, not the CRD chart. Extend certificate/config
 templates only after rebasing onto the Helm implementation.
+
+As implemented (group 4):
+
+- The ServiceMonitor selects by `app.kubernetes.io/name`, `instance` (release)
+  and `component=controller-metrics` within the release namespace, and copies
+  the release onto targets with `targetLabels`. The CA is a Secret (or
+  ConfigMap) reference to the certificate Secret's `ca.crt`, so no file access
+  is needed in either certificate mode; `tls.ca.file` is an explicit
+  alternative. Authorization is `mode: serviceAccountToken` (`bearerTokenFile`,
+  the only file option of the ServiceMonitor API, deprecated upstream and
+  rejected by Operators that deny file access) or `mode: secret`
+  (`authorization.credentials`). `insecureSkipVerify` is not offered.
+- Scrape `interval` is at most 2m (validated with a shorter timeout) so the
+  5m availability windows contain several scrapes.
+- `metrics.prometheusRule.groups` is a map of group to rule maps, so a rule is
+  tuned with one value; `expr` may use `__scope__` (exact-match release or
+  external-job matchers; no regular expressions) and `__threshold__`. The chart
+  ships no rule yet: enabling it renders a PrometheusRule only when a group
+  has an enabled rule. Group 5 adds the seven starter rules as default values.
+- Tests validate rendered objects against the vendored CRDs of the Operator
+  version pinned in `scripts/runtime.env` (checksum-verified by
+  `task deps:check`).
 
 ### 7. Ship conservative configurable rules with an availability prerequisite
 

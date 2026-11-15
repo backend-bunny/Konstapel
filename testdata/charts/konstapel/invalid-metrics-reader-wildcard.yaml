@@ -1,0 +1,6 @@
+# expect: /metrics/readers/0/namespace
+metrics:
+  enabled: true
+  readers:
+    - namespace: "*"
+      name: prometheus

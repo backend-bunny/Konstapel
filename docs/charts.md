@@ -34,6 +34,7 @@ and doesn't need the charts.
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
 | Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
 | Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination`; the upload/download transfer service is not implemented yet ([supporting evidence](supporting-evidence.md)) |
+| Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
 
 ## Chart input contract
@@ -48,7 +49,7 @@ release can't substitute a fixture or a guess for it.
 | Controller RBAC | `config/rbac/controller/role.yaml` (generated ClusterRole and the `konstapel-system` Role from `+kubebuilder:rbac` markers) | the API/controller owners | resolved |
 | Role catalog | `config/rbac/{compliance-admin,compliance-viewer,assessment-operator,assessment-requester,exception-editor,evidence-download,evidence-attachments,controller-assessments}.yaml` | the feature owners | resolved |
 | Admission policies | `config/admission/*.yaml` (Mutating/ValidatingAdmissionPolicies; MutatingAdmissionPolicy needs Kubernetes ≥ 1.36, hence `kubeVersion: >=1.36.0-0`) | continuous-assessments, s3-evidence-publishing, supporting-evidence-attachments | resolved |
-| Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
+| Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`; with `metrics.enabled`, `:8443` plus `--metrics-cert-dir` and `--metrics-server-name`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
 | Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` fails while the manager shuts down; engine health is reported in Conditions, not readiness. | targeting, add-controller-high-availability | resolved; further replica serving readiness belongs to high availability (pending) |
 | Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
 | Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`; HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing | resolved |
@@ -433,6 +434,7 @@ with all of these grants. The bindings are:
 | ClusterRoleBinding `konstapel-controller-assessments` | ClusterRole `konstapel-controller-assessments` | cluster | `config/rbac/controller-assessments.yaml` |
 | RoleBinding `konstapel-controller` | Role `konstapel-controller` | `konstapel-system` | the same markers (`namespace=konstapel-system`) |
 | RoleBinding `konstapel-controller-bundles` (only with `bundles.sourcesConfigMap`) | Role `konstapel-controller-bundles` | `konstapel-system` | `templates/bundles.yaml` |
+| ClusterRoleBinding `konstapel-controller-metrics-auth` (only with `metrics.enabled`) | ClusterRole `konstapel-controller-metrics-auth` | cluster | `templates/metrics.yaml` |
 
 Neither ClusterRole grants Secrets or ConfigMaps, so all such access is in
 `konstapel-system`. The effective Secret and ConfigMap access, and the
@@ -505,6 +507,190 @@ grants through Lease creation on a fresh install, renewal while a second
 replica contends, takeover after a rolling replacement, a restart from zero
 replicas and abrupt leader loss, failing on any refused Lease request in a
 controller log.
+
+**Metrics reviews (only with `metrics.enabled`).** The controller
+ServiceAccount gains exactly two cluster-scoped grants, `create` on
+`authentication.k8s.io/tokenreviews` and `create` on
+`authorization.k8s.io/subjectaccessreviews`. Each one is a request that
+returns an answer and stores nothing:
+
+- With TokenReview it can learn whether any token it is shown is valid, and
+  for whom (user, groups, audiences).
+- With SubjectAccessReview it can ask whether any user or ServiceAccount may
+  perform any action. A defect could use this to map other identities'
+  permissions.
+
+Neither grant reads, writes or impersonates anything. They are cluster
+resources, so they cannot be limited to a namespace or a name, and RBAC
+cannot restrict which questions a review asks. The metrics filter only asks
+whether the presenting identity may `get` the non-resource URL `/metrics`.
+With metrics disabled, nothing is bound.
+`TestRuntimeChartMetricsEnabled` asserts that these two grants are all that
+`metrics.enabled` adds.
+
+### Controller metrics
+
+With `metrics.enabled`, every controller replica serves Prometheus metrics
+over HTTPS at `konstapel-controller-metrics.<namespace>.svc:443` (port name
+`https`, container port 8443). The contract is in the
+[metrics guide](integration/metrics.md). There is no plaintext mode and no
+self-signed fallback:
+
+- **Certificate.** In `certManager` mode the chart issues
+  `konstapel-controller-metrics-tls` from the same issuer as the download
+  server. In `secret` mode, set `metrics.tls.secretName`.
+- **Verified at start.** The controller refuses to start unless the
+  certificate chains to `ca.crt`, is valid now and covers the Service name.
+- **Reloaded while serving.** A rotated Secret is served within about a
+  minute, without a restart. A rotation that fails verification is rejected,
+  and the last valid certificate keeps serving.
+- **Authentication and authorization.** Each scrape is authenticated with a
+  TokenReview and authorized with a SubjectAccessReview for `get` on
+  `/metrics`, by controller-runtime's filter.
+- **Who may scrape.** The `konstapel-metrics-reader` ClusterRole grants only
+  that `get`. `metrics.readers` binds it to the ServiceAccounts you list;
+  with an empty list, bind it yourself.
+- **Namespace roles cannot scrape.** The exception editor and assessment
+  requester roles do not include `/metrics`: these are platform-wide
+  summaries, not a namespace self-service API.
+
+**Revocation is bounded, not immediate.** The pinned controller-runtime
+v0.25.2 filter caches decisions:
+
+| Cached decision | How long |
+| --- | --- |
+| Token authentication | 1 minute |
+| Allowed authorization | 5 minutes |
+| Denied authorization | 30 seconds |
+
+Each replica caches separately. Removing a reader's binding, or deleting its
+ServiceAccount, therefore stops its scrapes within about 5 minutes; the
+token's own expiry also applies. A token the API server rejects is refused,
+reported as `500 invalid bearer token`. If the API server cannot be reached,
+any request without a cached answer is refused: failures close, never open.
+Check these bounds again when upgrading controller-runtime.
+
+`TestLiveHelmMetrics` (the `charts` group) installs the chart with
+cert-manager TLS and a reader in another namespace, and checks:
+
+- the reader scrapes;
+- a namespace ServiceAccount gets 403 and an anonymous client 401;
+- another service name or CA fails the TLS handshake;
+- a certificate reissued by cert-manager is served without a pod restart;
+- deleting the reader binding stops scraping within the 5-minute bound.
+
+Credential access, rotation and reader identities for the monitoring system
+are in [Monitoring integration](#monitoring-integration), which also covers
+the optional ServiceMonitor and PrometheusRule.
+
+### Monitoring integration
+
+Both integrations are off by default, independent of each other, and need
+`metrics.enabled`. Neither chart installs Prometheus, the Prometheus Operator
+or their CRDs, and neither declares a dependency on them. Konstapel's own
+chart tests (`internal/charttest`) validate every rendered object against the
+CRD schemas of the Operator version pinned by
+`KONSTAPEL_PROMETHEUS_OPERATOR_VERSION` in `scripts/runtime.env` (vendored in
+`testdata/charts/prometheus-operator`; `task deps:check` verifies the
+checksum, and `scripts/fetch-operator-crds.sh --refresh` renews the files
+after Renovate bumps the version). The objects use `monitoring.coreos.com/v1`.
+
+| Values | Result |
+| --- | --- |
+| `metrics.enabled=false` (default) | no metrics Service, RBAC or monitoring object; the integration values are refused if enabled |
+| `metrics.enabled=true` | metrics Service and RBAC only; scrape it from any Prometheus, for example with an external scrape job |
+| `+ metrics.serviceMonitor.enabled` | a ServiceMonitor `konstapel-controller`; needs the `ServiceMonitor` API |
+| `+ metrics.prometheusRule.enabled` | a PrometheusRule `konstapel-controller` when at least one rule is enabled; needs the `PrometheusRule` API. The chart ships no rules until the starter alerts (group 5), so only rules you define render |
+
+Rendering rules:
+
+- The cluster must serve each enabled resource. `helm install` checks the live
+  cluster; an offline `helm template` (and tools that render without a cluster)
+  need `--api-versions monitoring.coreos.com/v1/ServiceMonitor` and
+  `--api-versions monitoring.coreos.com/v1/PrometheusRule`. A missing API,
+  or an integration without `metrics.enabled`, fails the render with a message
+  naming the value. With both integrations disabled, no API is needed.
+- `metrics.serviceMonitor.interval` (default `30s`, at most `2m`) and
+  `scrapeTimeout` (default `10s`, shorter than the interval) are whole
+  seconds or minutes. Zero, unitless or longer values are refused.
+- `insecureSkipVerify` is not a value; unknown values fail schema validation.
+
+**ServiceMonitor.** It selects only this release's `konstapel-controller-metrics`
+Service: `matchLabels` of `app.kubernetes.io/name`, `app.kubernetes.io/instance`
+(the release name) and `app.kubernetes.io/component=controller-metrics`, with
+`namespaceSelector.matchNames` the release namespace. It scrapes the named port
+`https` over HTTPS at `/metrics` and copies the release onto each target
+(`app_kubernetes_io_instance`). Verification:
+
+- **Server name:** `konstapel-controller-metrics.<namespace>.svc`
+  (`metrics.serviceMonitor.serverName` to change it, if you front the Service).
+- **CA:** `ca.crt` of the certificate Secret in the release namespace, read
+  by the Operator as a Secret reference (no file access). That is
+  `konstapel-controller-metrics-tls` in `certManager` mode and
+  `metrics.tls.secretName` in `secret` mode. Set exactly one of
+  `metrics.serviceMonitor.tls.ca.secret`, `.configMap` or `.file` when your
+  issuer does not put the CA in `ca.crt`.
+- **Authorization:** `authorization.mode: serviceAccountToken` (default) sets
+  `bearerTokenFile` to the Prometheus Pod's own mounted ServiceAccount token.
+  The ServiceMonitor API offers no non-deprecated file option, and an
+  Operator that denies file access from ServiceMonitors rejects it. Use
+  `mode: secret` with a Secret holding a token for the reader ServiceAccount
+  in the release namespace, which the Operator reads. You create and rotate
+  that Secret; the chart never creates a long-lived token.
+
+**Reader access.** Prometheus's ServiceAccount, which need not live in the
+release namespace, must be listed in `metrics.readers` (or bound to
+`konstapel-metrics-reader` by you). ServiceAccount tokens are projected and
+rotated by the kubelet; a file-based token follows rotation, a Secret
+token follows whatever rotation you run. The controller accepts a rotated
+token within the cache bounds in [Controller metrics](#controller-metrics).
+
+**Discovery is not guaranteed by the object.** Prometheus selects
+ServiceMonitors by its `serviceMonitorSelector` (labels; put them in
+`metrics.serviceMonitor.labels`, for example
+`release: kube-prometheus-stack`) and `serviceMonitorNamespaceSelector`
+(which must admit `konstapel-system`). The same two settings exist for rules
+(`ruleSelector`, `ruleNamespaceSelector`; `metrics.prometheusRule.labels`).
+Check the Prometheus object's selectors and its Targets page; creating the
+object does not prove discovery. Labels under `app.kubernetes.io/` cannot be
+set through these values: the chart owns them.
+
+**External scrape jobs.** Without a ServiceMonitor (VictoriaMetrics, a
+hand-written scrape config, a different Operator), scrape
+`https://konstapel-controller-metrics.<namespace>.svc:443/metrics` with a
+bearer token of a listed reader, the CA from the certificate Secret and the
+server name above. Rules still work: set `metrics.prometheusRule.scope.matchers`
+to labels your job puts on its series (exact values only, no regular
+expressions), for example `{job: konstapel, cluster: prod}`. Without
+a ServiceMonitor and without matchers, the scope is
+`job="konstapel-controller-metrics", namespace="<namespace>"`; with one it
+also adds the release instance label.
+
+**Rules.** `metrics.prometheusRule.groups` is a map of group name to
+`{enabled, interval, rules}`, and `rules` a map of alert name to `{enabled,
+expr, for, threshold, severity, labels, annotations, runbookURL}`. Maps merge
+across values files, so one value tunes one rule
+(`--set metrics.prometheusRule.groups.<group>.rules.<Alert>.for=15m`). In `expr`,
+`__scope__` expands to the scope matchers and `__threshold__` to the rule's
+threshold. `severity` is `info`, `warning` (default) or `critical`; a
+`severity` or `alertname` label is refused. The `runbook_url` annotation is
+`runbookURL`, or `runbookBaseURL/<Alert>`. Tuning rules changes only
+the PrometheusRule: workload, RBAC and assessment settings render identically.
+
+**Disabling and uninstalling.** Set the integration's `enabled` to `false` and
+upgrade: Helm deletes only the ServiceMonitor or PrometheusRule it owns.
+Metrics keep being served and the reader bindings stay; `metrics.enabled=false`
+removes those too (the integrations must be disabled first, or in the same
+upgrade). `helm uninstall` removes all of them. Prometheus keeps the series
+it already stored under its own retention. The Operator, its CRDs and your
+Prometheus are never touched.
+
+`internal/charttest` covers the defaults, incompatible options, each missing
+API, rendering with both integrations disabled and no monitoring CRDs, both
+certificate modes, other release names, the schema of every rendered object,
+and that threshold, hold, severity, runbook, scope and enablement change the
+rendered rule content. A live scrape through a real Operator is the end-to-end
+monitoring acceptance (tasks 6.x of `add-prometheus-observability`).
 
 ### OCI policy bundles
 
@@ -616,6 +802,11 @@ retention.
   - `shutdownDrainSeconds` (20): must be below the grace period.
   - `resources`.
 
+- **`metrics`:** authenticated controller metrics, off by default.
+  - `enabled` (false).
+  - `readers`: monitoring ServiceAccounts `{namespace, name}` bound to `konstapel-metrics-reader`. Explicit names only. Set only with `enabled`.
+  - `tls.secretName`: required with `tls.mode=secret`; a `kubernetes.io/tls` Secret for `konstapel-controller-metrics.<namespace>.svc`.
+  - `serviceMonitor`, `prometheusRule`: independent optional Prometheus Operator objects, off by default; each needs `enabled` metrics and its API. Timing, CA, authorization, scope matchers and rule groups: [Monitoring integration](#monitoring-integration).
 - **`bundles`:** verified OCI policy bundles, off while `sourcesConfigMap` is empty (the default).
   - `sourcesConfigMap`: the operator-created sources ConfigMap in `konstapel-system`.
   - `cache.capacity` (1Gi) and `cache.sizeLimit` (1536Mi, must be larger): the per-pod content cache and its `emptyDir`.
@@ -781,7 +972,8 @@ devbox run -- python3 -m unittest scripts/ci/test_chart_versions.py
 - `helm lint --strict`;
 - every values fixture under `testdata/charts/<chart>/`. The first line,
   `# expect: ok` or `# expect: <error text>`, states whether the render must
-  succeed, or which schema error it must fail with.
+  succeed, or which schema error it must fail with. An optional second line,
+  `# api-versions: a,b`, supplies cluster APIs (the Operator's) to the render.
 
 Fixtures stay outside `charts/` so they are never packaged.
 

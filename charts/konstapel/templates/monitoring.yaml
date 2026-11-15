@@ -1,0 +1,114 @@
+{{- $_ := include "konstapel.validate" . }}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+{{- $sm := .Values.metrics.serviceMonitor }}
+{{- $ns := .Release.Namespace }}
+# Optional ServiceMonitor for the Prometheus Operator (docs/charts.md,
+# "Monitoring integration"). It selects only this release's metrics Service
+# in this namespace, by its stable selector labels.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: konstapel-controller
+  namespace: {{ $ns }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-metrics
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: konstapel
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: controller-metrics
+  namespaceSelector:
+    matchNames:
+      - {{ $ns }}
+  # Copy the release onto each target so rules can scope to it.
+  targetLabels:
+    - app.kubernetes.io/instance
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+      tlsConfig:
+        serverName: {{ $sm.serverName | default (printf "konstapel-controller-metrics.%s.svc" $ns) | quote }}
+        {{- $ca := $sm.tls.ca | default dict }}
+        {{- if $ca.file }}
+        caFile: {{ $ca.file | quote }}
+        {{- else if ($ca.configMap | default dict).name }}
+        ca:
+          configMap:
+            name: {{ $ca.configMap.name | quote }}
+            key: {{ $ca.configMap.key | quote }}
+        {{- else }}
+        ca:
+          secret:
+            name: {{ ($ca.secret | default dict).name | default (include "konstapel.metricsTLSSecret" .) | quote }}
+            key: {{ ($ca.secret | default dict).key | default "ca.crt" | quote }}
+        {{- end }}
+      {{- if eq $sm.authorization.mode "secret" }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ $sm.authorization.secret.name | quote }}
+          key: {{ $sm.authorization.secret.key | quote }}
+      {{- else }}
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      {{- end }}
+{{- end }}
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+{{- $pr := .Values.metrics.prometheusRule }}
+{{- $scope := include "konstapel.metricsScope" . }}
+{{- $groups := list }}
+{{- range $gname, $g := $pr.groups }}
+{{- if ne ($g.enabled | toString) "false" }}
+{{- $rules := list }}
+{{- range $rname, $r := $g.rules }}
+{{- if ne ($r.enabled | toString) "false" }}
+{{- $expr := replace "__scope__" $scope $r.expr }}
+{{- if hasKey $r "threshold" }}{{- $expr = replace "__threshold__" (printf "%v" $r.threshold) $expr }}{{- end }}
+{{- $labels := merge (dict "severity" ($r.severity | default "warning")) ($r.labels | default dict) }}
+{{- $annotations := $r.annotations | default dict }}
+{{- if $r.runbookURL }}
+{{- $annotations = merge (dict "runbook_url" $r.runbookURL) $annotations }}
+{{- else if $pr.runbookBaseURL }}
+{{- $annotations = merge (dict "runbook_url" (printf "%s/%s" (trimSuffix "/" $pr.runbookBaseURL) $rname)) $annotations }}
+{{- end }}
+{{- $rule := dict "alert" $rname "expr" $expr "labels" $labels }}
+{{- if $r.for }}{{- $_ := set $rule "for" $r.for }}{{- end }}
+{{- if $annotations }}{{- $_ := set $rule "annotations" $annotations }}{{- end }}
+{{- $rules = append $rules $rule }}
+{{- end }}
+{{- end }}
+{{- if $rules }}
+{{- $group := dict "name" $gname "rules" $rules }}
+{{- if $g.interval }}{{- $_ := set $group "interval" $g.interval }}{{- end }}
+{{- $groups = append $groups $group }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $groups }}
+---
+# Optional PrometheusRule (docs/charts.md, "Monitoring integration"). Rule
+# content comes from metrics.prometheusRule.groups; thresholds, holds,
+# severity and enablement are chart values.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: konstapel-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-metrics
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    {{- toYaml $groups | nindent 4 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,5 @@
+# expect: ok
+metrics:
+  enabled: true
+  serviceMonitor: {enabled: false}
+  prometheusRule: {enabled: false}

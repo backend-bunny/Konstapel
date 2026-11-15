@@ -1,0 +1,84 @@
+{{- if .Values.metrics.enabled }}
+# Authenticated controller metrics (docs/charts.md, "Controller metrics").
+apiVersion: v1
+kind: Service
+metadata:
+  name: konstapel-controller-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-metrics
+spec:
+  selector:
+    {{- include "konstapel.controllerSelector" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: metrics
+      protocol: TCP
+---
+# The controller authenticates each scrape with a TokenReview and
+# authorizes it with a SubjectAccessReview. Both are cluster-scoped create
+# requests that return an answer about the presented token or user and
+# store nothing; they grant no access to any object.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-controller-metrics-auth
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-controller-metrics-auth
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-controller-metrics-auth
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+---
+# Scrape access: get on the non-resource URL /metrics, nothing else. It is
+# platform-wide data, not a namespace self-service API; namespace roles do
+# not include it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-metrics-reader
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs: [/metrics]
+    verbs: [get]
+{{- with .Values.metrics.readers }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-metrics-reader
+  labels:
+    {{- include "konstapel.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-metrics-reader
+subjects:
+  {{- range . }}
+  - kind: ServiceAccount
+    name: {{ .name }}
+    namespace: {{ .namespace }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,5 @@
+# expect: namespace
+metrics:
+  enabled: true
+  readers:
+    - name: prometheus

@@ -50,15 +50,16 @@ changes SHALL NOT alter policy enforcement or exception identity.
 ### Requirement: Destination location is immutable and access can rotate
 
 The API SHALL reject changes to a destination's endpoint, bucket, region, or
-prefix. Credentials and CA trust SHALL remain rotatable, including during
-retirement. A new location SHALL require a new destination and explicit reference
-changes. Historical evidence SHALL retain its original destination UID and
-location; name reuse SHALL NOT redirect it.
+prefix, while credentials, CA trust, and the evidence signing policy and key
+reference SHALL remain changeable, including during retirement. Historical
+evidence SHALL retain its original destination UID and location, and name reuse
+SHALL NOT redirect it.
 
 #### Scenario: Change location or rotate credentials
 
 - **WHEN** an administrator edits an existing destination
-- **THEN** location changes are rejected while valid credential and CA trust rotation is accepted
+- **THEN** location changes are rejected while valid credential, CA trust, and signing key rotation is accepted
+- **AND** a new location requires a new destination and explicit reference changes
 - **AND** rotation preserves historical reads and cleanup at the same location
 
 #### Scenario: Recreate a destination name
@@ -66,6 +67,12 @@ location; name reuse SHALL NOT redirect it.
 - **WHEN** a destination name is reused with a new UID
 - **THEN** old references do not resolve to the new resource
 - **AND** retained or orphaned evidence is not automatically adopted even at the same bucket and prefix
+
+#### Scenario: Leave signing unconfigured
+
+- **WHEN** an existing destination has no signing configuration
+- **THEN** the destination keeps its existing specification and status unchanged: the API adds no signing field and the controller adds no signing status or condition
+- **AND** its publication, readiness, retention, and retirement behave as before
 
 ### Requirement: Runs pin destinations before storage work
 

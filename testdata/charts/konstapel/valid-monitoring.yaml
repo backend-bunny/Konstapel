@@ -1,0 +1,20 @@
+# expect: ok
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels: {release: kube-prometheus-stack}
+    interval: 1m
+    scrapeTimeout: 20s
+    authorization:
+      mode: secret
+      secret: {name: prometheus-token}
+  prometheusRule:
+    enabled: true
+    runbookBaseURL: https://example.org/runbooks
+    groups:
+      example:
+        interval: 1m
+        rules:
+          ExampleDown: {expr: "up{__scope__} == 0", for: 5m, severity: critical}

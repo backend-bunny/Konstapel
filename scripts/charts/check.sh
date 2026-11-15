@@ -30,7 +30,12 @@ for chart in konstapel-crds konstapel; do
     # Only the error text is kept: a rendered chart can exceed the 128 KiB
     # limit on one environment string, and a shell that exports variables
     # (allexport) would then fail to exec the next command.
-    if out=$(helm template fixture "$dir" --namespace konstapel-system "${base[@]}" -f "$values" 2>&1 >/dev/null); then
+    # An optional second line "# api-versions: a,b" supplies cluster APIs
+    # (optional Operator resources) to the offline render.
+    apis=()
+    api_line=$(sed -n '2s/^# api-versions: //p' "$values")
+    [[ -z $api_line ]] || apis=(--api-versions "$api_line")
+    if out=$(helm template fixture "$dir" --namespace konstapel-system "${base[@]}" "${apis[@]}" -f "$values" 2>&1 >/dev/null); then
       [[ $expect == ok ]] || fail "$values: rendered, expected an error containing '$expect'"
     else
       [[ $expect != ok ]] || { fail "$values: $out"; continue; }

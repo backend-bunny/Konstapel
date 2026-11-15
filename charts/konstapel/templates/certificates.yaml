@@ -1,4 +1,4 @@
-{{- if and .Values.download.enabled (eq .Values.tls.mode "certManager") }}
+{{- if and (or .Values.download.enabled .Values.metrics.enabled) (eq .Values.tls.mode "certManager") }}
 {{- $issuer := (.Values.tls.certManager | default dict).issuerRef | default dict }}
 {{- if not $issuer.name }}
 # Without a platform issuer, the chart issues from its own self-signed CA.
@@ -44,6 +44,7 @@ spec:
     secretName: konstapel-ca
 ---
 {{- end }}
+{{- if .Values.download.enabled }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -72,4 +73,36 @@ spec:
     kind: Issuer
     group: cert-manager.io
     {{- end }}
+{{- end }}
+{{- if .Values.metrics.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: konstapel-controller-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  secretName: konstapel-controller-metrics-tls
+  dnsNames:
+    - konstapel-controller-metrics
+    - konstapel-controller-metrics.{{ .Release.Namespace }}
+    - konstapel-controller-metrics.{{ .Release.Namespace }}.svc
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [server auth, digital signature, key encipherment]
+  issuerRef:
+    {{- if $issuer.name }}
+    name: {{ $issuer.name }}
+    kind: {{ $issuer.kind }}
+    group: cert-manager.io
+    {{- else }}
+    name: konstapel-ca
+    kind: Issuer
+    group: cert-manager.io
+    {{- end }}
+{{- end }}
 {{- end }}

@@ -36,22 +36,22 @@ integration boundaries.
 
 ## 3. Authenticated metrics serving
 
-- [ ] 3.1 Integrate the manager's authenticated TLS metrics server with certificate reload and the existing controller-runtime filter; test authorized/unauthorized scrapes, invalid CA/server identity, rotated certificates and passive behavior during dependency outages.
+- [x] 3.1 Integrate the manager's authenticated TLS metrics server with certificate reload and the existing controller-runtime filter; test authorized/unauthorized scrapes, invalid CA/server identity, rotated certificates and passive behavior during dependency outages.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
-- [ ] 3.2 Add narrowly scoped reader RBAC for configured monitoring ServiceAccounts and reuse controller TokenReview/SubjectAccessReview permissions; test namespace roles cannot scrape and revoked access stops within the pinned authentication/authorization cache bounds.
+- [x] 3.2 Add narrowly scoped reader RBAC for configured monitoring ServiceAccounts and reuse controller TokenReview/SubjectAccessReview permissions; test namespace roles cannot scrape and revoked access stops within the pinned authentication/authorization cache bounds.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
 - [ ] 3.3 Document metrics access, token rotation, filter cache durations and Prometheus authorization options; verify the documented setup using a monitoring identity in another namespace and an Operator configuration that exercises its credential-access policy.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Optional Helm monitoring integration
 
-- [ ] 4.1 After the controller chart lands, add metrics Service/TLS configuration and independently optional ServiceMonitor/PrometheusRule values; test defaults, incompatible options, missing enabled APIs and rendering with both integrations disabled without monitoring CRDs.
+- [x] 4.1 After the controller chart lands, add metrics Service/TLS configuration and independently optional ServiceMonitor/PrometheusRule values; test defaults, incompatible options, missing enabled APIs and rendering with both integrations disabled without monitoring CRDs.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 4.2 Add release-scoped ServiceMonitor selectors, named HTTPS port, verified CA/server-name, authorization and validated scrape timing; verify rendered resources against the selected Operator schema and cover both certificate-management modes.
+- [x] 4.2 Add release-scoped ServiceMonitor selectors, named HTTPS port, verified CA/server-name, authorization and validated scrape timing; verify rendered resources against the selected Operator schema and cover both certificate-management modes.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 4.3 Add configurable rule-group/per-rule settings, safe release/namespace selectors and runbook annotations; verify actual rendered rule content changes with thresholds, holds, severity and enablement without altering workload or assessment settings.
+- [x] 4.3 Add configurable rule-group/per-rule settings, safe release/namespace selectors and runbook annotations; verify actual rendered rule content changes with thresholds, holds, severity and enablement without altering workload or assessment settings.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 4.4 Document Prometheus namespace/label discovery, external scrape-job support and disabling/uninstalling integrations; test the rendering matrix and confirm neither Konstapel chart installs a monitoring stack or its CRDs.
+- [x] 4.4 Document Prometheus namespace/label discovery, external scrape-job support and disabling/uninstalling integrations; test the rendering matrix and confirm neither Konstapel chart installs a monitoring stack or its CRDs.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 5. Starter alert rules and runbooks

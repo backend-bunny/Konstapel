@@ -116,7 +116,13 @@ spec:
             - controller
             - --leader-elect=true
             - --health-probe-bind-address=:8081
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:8443
+            - --metrics-cert-dir=/etc/konstapel/metrics-tls
+            - --metrics-server-name=konstapel-controller-metrics.{{ .Release.Namespace }}.svc
+            {{- else }}
             - --metrics-bind-address=0
+            {{- end }}
             - --evidence-staging-dir=/var/lib/konstapel/staging
             - --shutdown-timeout={{ .Values.controller.shutdownTimeoutSeconds }}s
             {{- if include "konstapel.bundlesEnabled" . }}
@@ -133,6 +139,10 @@ spec:
           ports:
             - name: probes
               containerPort: 8081
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: 8443
+            {{- end }}
           startupProbe:
             httpGet:
               path: /healthz
@@ -167,6 +177,11 @@ spec:
             - name: bundle-cache
               mountPath: /var/lib/konstapel/bundles
             {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: metrics-tls
+              mountPath: /etc/konstapel/metrics-tls
+              readOnly: true
+            {{- end }}
       volumes:
         # Per-pod bounded working storage. Durable state lives in Kubernetes
         # and the evidence destination; a successor recovers from those.
@@ -183,6 +198,13 @@ spec:
         - name: bundle-cache
           emptyDir:
             sizeLimit: {{ .Values.bundles.cache.sizeLimit }}
+        {{- end }}
+        {{- if .Values.metrics.enabled }}
+        # The metrics certificate, verified at start and re-read while
+        # serving; a rotation that fails verification keeps the last one.
+        - name: metrics-tls
+          secret:
+            secretName: {{ include "konstapel.metricsTLSSecret" . }}
         {{- end }}
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
 ---

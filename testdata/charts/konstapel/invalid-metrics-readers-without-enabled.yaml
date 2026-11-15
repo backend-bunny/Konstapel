@@ -1,0 +1,5 @@
+# expect: metrics.readers grants scrape access only to the metrics endpoint
+metrics:
+  readers:
+    - namespace: monitoring
+      name: prometheus

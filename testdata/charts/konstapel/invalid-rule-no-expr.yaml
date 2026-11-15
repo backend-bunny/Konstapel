@@ -1,0 +1,10 @@
+# expect: has no expr
+# api-versions: monitoring.coreos.com/v1/ServiceMonitor,monitoring.coreos.com/v1/PrometheusRule
+metrics:
+  enabled: true
+  prometheusRule:
+    enabled: true
+    groups:
+      g:
+        rules:
+          A: {for: 5m}
