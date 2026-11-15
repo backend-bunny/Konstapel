@@ -292,7 +292,9 @@ Implementation (task group 3):
   It repeats authorization and the record check (same UID, not withdrawn,
   same pin) and answers a retry with the existing commitment. Otherwise it
   stages through the pinned destination's `attachments.Store`, re-checks
-  withdrawal immediately before `Commit`, and checks it once more after.
+  withdrawal and the destination's orphan handoff (an uncached read; the
+  controller's fence covers only its own process) immediately before
+  `Commit`, and checks withdrawal once more after.
 - **Withdrawal race.** `DeleteUncommitted` re-reads the commitment after
   removing attempts. A commit that landed meanwhile returns `ErrConflict`,
   so the controller records and retains it until its expiry rather than

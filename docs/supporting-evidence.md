@@ -347,7 +347,8 @@ Then it holds one of the replica's transfer slots and:
 3. answers a retry with the existing commitment if there is one;
 4. otherwise stages the bytes in the record's pinned destination, never
    another one. Staging verifies the stored version (see above);
-5. checks once more that the record isn't withdrawn, then commits.
+5. checks once more that the record isn't withdrawn and that its destination
+   wasn't handed off to an operator, then commits.
 
 The answer is the commitment: document digest and size, uploader,
 `committedAt`, retention and `expiresAt`. A retry after a lost response, or a
@@ -531,7 +532,10 @@ A destination handed off with `deletionPolicy: Orphan` is never contacted
 again. Its attachments are not part of the orphan inventory yet (a tracked
 follow-up of this change), so the handoff fails safe:
 
-- transfers for its attachments answer 410;
+- transfers for its attachments answer 410. An upload already in progress
+  re-reads the destination just before it commits; only a commit already
+  under way at that moment can still land, inside the attachment's own
+  prefix, which the administrator takes over below;
 - each pinned attachment keeps its finalizer, its pin and its commitment;
   cleanup reports `DeletionFailed` and is retried without contacting storage;
 - the destination keeps counting them (committed ones as packages, the rest
