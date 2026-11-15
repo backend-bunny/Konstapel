@@ -310,9 +310,18 @@ func TestEvidenceWorkflow(t *testing.T) {
 		}
 	}
 	e.serve = nil
-	// Status shows the three identities distinctly.
+	// Status shows the three identities distinctly, and the separately
+	// reconciled validity and content states.
+	rec := e.record("dc-north-2026")
+	next := metav1.NewTime(rec.Spec.Validity.ValidUntil.Time)
+	rec.Status.Validity = &v1alpha1.AttachmentValidityStatus{State: v1alpha1.TemporalCurrent, NextTransition: &next}
+	rec.Status.Content = &v1alpha1.AttachmentContentStatus{State: v1alpha1.ContentAvailable, Reason: v1alpha1.ReasonContentVerified, Message: "present"}
+	if err := e.c.Status().Update(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
 	out, err = e.run("status", "dc-north-2026", "--uid", uid)
-	for _, want := range []string{"Registered by: platform-registrar", "by platform-uploader", "Example Audit AB (declared, not authenticated)", "(informational; never fetched)", "binding baseline-audit (uid uid-binding-1)"} {
+	for _, want := range []string{"Registered by: platform-registrar", "by platform-uploader", "Example Audit AB (declared, not authenticated)", "(informational; never fetched)", "binding baseline-audit (uid uid-binding-1)",
+		"(declared); Current until " + next.UTC().Format(time.RFC3339), "Content:       Available/Verified: present"} {
 		if err != nil || !strings.Contains(out, want) {
 			t.Fatalf("status lacks %q: %v\n%s", want, err, out)
 		}
@@ -342,6 +351,9 @@ func TestEvidenceWorkflow(t *testing.T) {
 	if _, err := e.transfer("upload", "dc-north-2026", uid, "up", "--file", e.path("dc-north-2026.pdf")); err == nil || !strings.Contains(err.Error(), "withdrawn") ||
 		e.requests.Load() != before {
 		t.Fatalf("withdrawn upload: %v", err)
+	}
+	if out, err := e.run("status", "dc-north-2026", "--uid", uid); err != nil || !strings.Contains(out, "Withdrawn:") || !strings.Contains(out, "never in new coverage") {
+		t.Fatalf("withdrawn status: %v\n%s", err, out)
 	}
 	if n := e.urlHits.Load(); n != 0 {
 		t.Fatalf("the declared source URL was fetched %d times", n)

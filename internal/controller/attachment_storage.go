@@ -611,5 +611,6 @@ func attachmentStorage(mgr manager.Manager, rt AssessmentRuntime, cluster string
 		return nil
 	}
 	return &AttachmentStorage{Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Cluster: cluster,
-		Stores: &destinationStores{Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace}, Fences: rt.Destinations}
+		Stores: &destinationStores{Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace}, Fences: rt.Destinations,
+		ContentInterval: rt.IntegrityInterval}
 }

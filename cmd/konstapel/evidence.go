@@ -308,7 +308,8 @@ func (e *evidenceCmd) register(file, docPath string, dry bool) error {
 }
 
 func emptyStatus(s v1alpha1.EvidenceAttachmentStatus) bool {
-	return s.ObservedGeneration == 0 && len(s.Associations) == 0 && s.Storage == nil && len(s.Conditions) == 0
+	return s.ObservedGeneration == 0 && len(s.Associations) == 0 && s.Storage == nil && len(s.Conditions) == 0 &&
+		s.Validity == nil && s.Content == nil && s.Withdrawal == nil
 }
 
 func registrant(a *v1alpha1.EvidenceAttachment) string {
@@ -547,12 +548,22 @@ func (e *evidenceCmd) status(name, uid, output string) error {
 	}
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "Name:          %s\nUID:           %s\n", a.Name, a.UID)
-	if !a.DeletionTimestamp.IsZero() {
-		fmt.Fprintf(&b, "Withdrawn:     %s\n", a.DeletionTimestamp.UTC().Format(time.RFC3339))
+	switch {
+	case a.Status.Withdrawal != nil:
+		fmt.Fprintf(&b, "Withdrawn:     %s (never in new coverage; a committed source is retained until its expiry)\n", a.Status.Withdrawal.WithdrawnAt.UTC().Format(time.RFC3339))
+	case !a.DeletionTimestamp.IsZero():
+		fmt.Fprintf(&b, "Withdrawn:     %s (never in new coverage; a committed source is retained until its expiry)\n", a.DeletionTimestamp.UTC().Format(time.RFC3339))
 	}
 	d := a.Spec.Document
 	fmt.Fprintf(&b, "Document:      %s (%s, %d bytes, %s)\n", d.Title, d.MediaType, d.Size, d.SHA256)
-	fmt.Fprintf(&b, "Validity:      %s to %s (declared)\n", a.Spec.Validity.ValidFrom.UTC().Format(time.RFC3339), a.Spec.Validity.ValidUntil.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "Validity:      %s to %s (declared)", a.Spec.Validity.ValidFrom.UTC().Format(time.RFC3339), a.Spec.Validity.ValidUntil.UTC().Format(time.RFC3339))
+	if v := a.Status.Validity; v != nil {
+		fmt.Fprintf(&b, "; %s", v.State)
+		if v.NextTransition != nil {
+			fmt.Fprintf(&b, " until %s", v.NextTransition.UTC().Format(time.RFC3339))
+		}
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "Source:        %s (declared, not authenticated)\n", a.Spec.Source.Issuer)
 	if a.Spec.Source.URL != "" {
 		fmt.Fprintf(&b, "Source URL:    %s (informational; never fetched)\n", a.Spec.Source.URL)
@@ -578,7 +589,13 @@ func (e *evidenceCmd) status(name, uid, output string) error {
 		}
 		if cl := st.Cleanup; cl != nil {
 			fmt.Fprintf(&b, "Cleanup:       %s %s\n", cl.State, cl.Message)
+			if cl.Attempts > 0 && cl.LastAttempt != nil {
+				fmt.Fprintf(&b, "               %d failed attempts, the last at %s\n", cl.Attempts, cl.LastAttempt.UTC().Format(time.RFC3339))
+			}
 		}
+	}
+	if c := a.Status.Content; c != nil {
+		fmt.Fprintf(&b, "Content:       %s/%s: %s\n", c.State, c.Reason, c.Message)
 	}
 	for _, t := range []string{v1alpha1.ConditionAssociationsValid, v1alpha1.ConditionDocumentCommitted, v1alpha1.ConditionSourceRetained} {
 		if cond := meta.FindStatusCondition(a.Status.Conditions, t); cond != nil {
