@@ -15,6 +15,12 @@
 // stored while the leader is mid-upload, and after stores it but withholds
 // the response and blackholes everything else.
 //
+// Independently, fail refuses at once, with 503 and without forwarding, every
+// request whose path has a given UID as a segment (a binding's or a run's:
+// keys are .../evidence/<cluster>/<binding UID>/<run UID>/...). Publication
+// for that binding or run then fails fast on every attempt while every other
+// request, including destination probes, passes.
+//
 // Requests are forwarded with their Host header unchanged, so SigV4
 // signatures made for the proxy's address stay valid at the backend. A
 // held or blackholed request is never forwarded; on release it fails with
@@ -67,6 +73,10 @@ type State struct {
 	Blackholed int  `json:"blackholed"`
 	// Waiting is the number of requests blocked right now.
 	Waiting int `json:"waiting"`
+	// Failing is the UID whose requests are refused at once (SetFailing);
+	// Failed counts the refused requests.
+	Failing string `json:"failing,omitempty"`
+	Failed  int    `json:"failed"`
 }
 
 // Proxy forwards S3 requests to Backend (host:port, plain HTTP) and injects
@@ -114,6 +124,13 @@ func (p *Proxy) isCommit(r *http.Request, run string) bool {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.init()
 	p.mu.Lock()
+	if p.st.Failing != "" && strings.Contains(r.URL.Path, "/"+p.st.Failing+"/") {
+		p.st.Failed++
+		p.logf("failed %s %s at once (%s)", r.Method, r.URL.Path, p.st.Failing)
+		p.mu.Unlock()
+		unavailable(w, "s3fault: request refused")
+		return
+	}
 	commit := p.isCommit(r, p.st.Run)
 	if commit {
 		p.st.CommitArrivals++
@@ -171,9 +188,14 @@ func (p *Proxy) block(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	p.st.Waiting--
 	p.mu.Unlock()
+	unavailable(w, "s3fault: request held and not forwarded")
+}
+
+// unavailable answers like an S3 service that is unavailable.
+func unavailable(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	_, _ = io.WriteString(w, "<Error><Code>ServiceUnavailable</Code><Message>s3fault: request held and not forwarded</Message></Error>")
+	_, _ = io.WriteString(w, "<Error><Code>ServiceUnavailable</Code><Message>"+msg+"</Message></Error>")
 }
 
 // forwardDiscarding sends r to the backend, independent of the client's
@@ -199,14 +221,14 @@ func (p *Proxy) forwardDiscarding(r *http.Request) int {
 func (p *Proxy) Arm(mode, run string) { p.ArmTarget(mode, run, TargetCommit) }
 
 // ArmTarget resets the observations and sets a mode for one run's commit or
-// signature object.
+// signature object. A failing UID (SetFailing) stays.
 func (p *Proxy) ArmTarget(mode, run, target string) {
 	p.init()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	close(p.released)
 	p.released = make(chan struct{})
-	p.st = State{Mode: mode, Run: run, Target: target}
+	p.st = State{Mode: mode, Run: run, Target: target, Failing: p.st.Failing}
 	p.fired = false
 	p.logf("armed %s for run %s (%s)", mode, run, target)
 }
@@ -220,6 +242,17 @@ func (p *Proxy) SetBlackhole() {
 	p.logf("blackholing every request")
 }
 
+// SetFailing refuses every further request whose path has uid as a segment
+// with 503, at once and without forwarding it, until Release. Other faults
+// and observations are unchanged.
+func (p *Proxy) SetFailing(uid string) {
+	p.init()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.st.Failing = uid
+	p.logf("failing every request for %s", uid)
+}
+
 // Release ends every fault: blocked requests fail with 503 and later ones
 // pass. Observations and the armed run are kept.
 func (p *Proxy) Release() {
@@ -228,8 +261,8 @@ func (p *Proxy) Release() {
 	defer p.mu.Unlock()
 	close(p.released)
 	p.released = make(chan struct{})
-	p.st.Mode, p.st.Blackhole = ModePass, false
-	p.logf("released: %d requests were blocked; passing", p.st.Waiting)
+	p.st.Mode, p.st.Blackhole, p.st.Failing = ModePass, false, ""
+	p.logf("released: %d requests were blocked, %d refused; passing", p.st.Waiting, p.st.Failed)
 }
 
 // Snapshot returns the current observations.
@@ -241,7 +274,7 @@ func (p *Proxy) Snapshot() State {
 }
 
 // Control serves the test's controls: GET /state, POST /arm?mode=&run=[&target=],
-// POST /blackhole and POST /release.
+// POST /fail?uid=, POST /blackhole and POST /release.
 func (p *Proxy) Control() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, _ *http.Request) {
@@ -258,6 +291,14 @@ func (p *Proxy) Control() http.Handler {
 			return
 		}
 		p.ArmTarget(mode, run, target)
+	})
+	mux.HandleFunc("POST /fail", func(w http.ResponseWriter, r *http.Request) {
+		uid := r.URL.Query().Get("uid")
+		if uid == "" || strings.Contains(uid, "/") {
+			http.Error(w, "uid must be one path segment", http.StatusBadRequest)
+			return
+		}
+		p.SetFailing(uid)
 	})
 	mux.HandleFunc("POST /blackhole", func(http.ResponseWriter, *http.Request) { p.SetBlackhole() })
 	mux.HandleFunc("POST /release", func(http.ResponseWriter, *http.Request) { p.Release() })
