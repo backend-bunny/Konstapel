@@ -1,6 +1,7 @@
 package v1alpha1_test
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -181,6 +182,80 @@ func TestEvidenceAttachmentStorageOwnershipIsImmutable(t *testing.T) {
 	updated := copyObj(base)
 	mergePatch(t, updated, `{"status":{"storage":{"cleanup":{"state":"RetentionBlocked","message":"AccessDenied"}}}}`)
 	if errs := crds["EvidenceAttachment"].ValidateUpdate(updated, copyObj(base)); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+}
+
+// add-supporting-evidence-attachments 4.1/4.2: validity, content and
+// withdrawal are separate additive status fields. A recorded withdrawal is
+// never removed or rewritten, so neither a stale leader's status write nor a
+// restart can bring a withdrawn record back into new coverage.
+func TestEvidenceAttachmentWithdrawalIsPermanent(t *testing.T) {
+	crds := crdtest.Load(t, "../../config/crd/bases")
+	base := attachment(t)
+	mergePatch(t, base, `{"status":{"validity":{"state":"Current","nextTransition":"2027-01-01T00:00:00Z"},
+		"content":{"state":"Available","reason":"Verified","lastTransitionTime":"2026-03-01T00:00:00Z"},
+		"withdrawal":{"withdrawnAt":"2026-06-01T00:00:00Z"}}}`)
+	if errs := crds["EvidenceAttachment"].Validate(copyObj(base)); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+	for name, patch := range map[string]string{
+		"withdrawal dropped":   `{"status":{"withdrawal":null}}`,
+		"withdrawal rewritten": `{"status":{"withdrawal":{"withdrawnAt":"2026-07-01T00:00:00Z"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			updated := copyObj(base)
+			mergePatch(t, updated, patch)
+			errs := crds["EvidenceAttachment"].ValidateUpdate(updated, copyObj(base))
+			if len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), "a recorded withdrawal never changes") {
+				t.Fatalf("accepted: %v", errs.ToAggregate())
+			}
+		})
+	}
+	// The other axes keep moving after withdrawal.
+	updated := copyObj(base)
+	mergePatch(t, updated, `{"status":{"validity":{"state":"Expired","nextTransition":null},"content":{"state":"Unavailable","reason":"SourceExpired"}}}`)
+	if errs := crds["EvidenceAttachment"].ValidateUpdate(updated, copyObj(base)); len(errs) > 0 {
+		t.Fatal(errs.ToAggregate())
+	}
+	for name, patch := range map[string]string{
+		"unknown validity": `{"status":{"validity":{"state":"Valid"}}}`,
+		"unknown content":  `{"status":{"content":{"state":"Compliant","reason":"Verified"}}}`,
+		"free-text reason": `{"status":{"content":{"state":"Available","reason":"looks fine to me"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := copyObj(base)
+			mergePatch(t, o, patch)
+			if errs := crds["EvidenceAttachment"].Validate(o); len(errs) == 0 {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+// Records written before task group 4 (no validity, content or withdrawal,
+// a cleanup without attempts) decode and encode byte for byte, and the CRD
+// still accepts them unchanged.
+func TestEvidenceAttachmentStatusIsByteCompatible(t *testing.T) {
+	const group3 = `{"observedGeneration":1,"associations":[{"binding":{"name":"a","uid":"u"},"state":"Valid","reason":"Valid"}],` +
+		`"storage":{"destination":{"name":"primary","uid":"dest-uid"},"destinationID":"dest-uid","pinnedAt":"2026-03-01T00:00:00Z",` +
+		`"cleanup":{"state":"NotDue","lastAttempt":"2026-06-01T00:00:00Z","message":"withdrawn"}},` +
+		`"conditions":[{"type":"AssociationsValid","status":"False","observedGeneration":1,"lastTransitionTime":"2026-06-01T00:00:00Z","reason":"Withdrawn","message":"withdrawn"}]}`
+	var s v1alpha1.EvidenceAttachmentStatus
+	if err := json.Unmarshal([]byte(group3), &s); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != group3 {
+		t.Fatalf("re-encoded differently:\n%s\n%s", out, group3)
+	}
+	crds := crdtest.Load(t, "../../config/crd/bases")
+	o := attachment(t)
+	mergePatch(t, o, `{"status":`+group3+`}`)
+	if errs := crds["EvidenceAttachment"].ValidateUpdate(copyObj(o), copyObj(o)); len(errs) > 0 {
 		t.Fatal(errs.ToAggregate())
 	}
 }
