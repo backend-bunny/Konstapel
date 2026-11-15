@@ -1,0 +1,460 @@
+# Starter-alert cases (add-prometheus-observability 5.1, 5.2). The
+# generated starter.test.yml runs them with `promtool test rules` against
+# the Helm-rendered rules (konstapel.rules.yml) in `task test`. Regenerate
+# with `go test ./internal/charttest -run TestStarterRules -update`.
+#
+# Series are written as name{@target,labels}: @target expands to the labels
+# a ServiceMonitor scrape of that pod carries. Every series must be a
+# catalog family with its exact labels (or up). Expected alerts name the
+# release instead of its scope labels; severity and annotations come from
+# the rendered rule.
+#
+# Release "konstapel" runs two replicas: konstapel-0 leads and holds every
+# owner projection, konstapel-1 follows (ready 0, no projections). Bundle
+# sources are not configured (bundle_resolution enabled 0). Times are
+# minutes after the epoch; a fresh projection's updated timestamp equals the
+# evaluation time ('0+60xN').
+rule_files: [konstapel.rules.yml]
+targets:
+  k0: {release: konstapel, pod: konstapel-0, ip: 10.0.0.10}
+  k1: {release: konstapel, pod: konstapel-1, ip: 10.0.0.11}
+  b0: {release: konstapel-b, pod: konstapel-0, ip: 10.1.0.10}
+tests:
+  - name: a healthy release fires nothing
+    interval: 1m
+    input_series:
+      - &up-k0 {series: 'up{@k0}', values: '1x90'}
+      - &up-k1 {series: 'up{@k1}', values: '1x90'}
+      - &en-k0-t {series: 'konstapel_observation_enabled{@k0,domain="targeting"}', values: '1x90'}
+      - &en-k0-a {series: 'konstapel_observation_enabled{@k0,domain="assessment"}', values: '1x90'}
+      - &en-k0-s {series: 'konstapel_observation_enabled{@k0,domain="evidence_storage"}', values: '1x90'}
+      - &en-k0-b {series: 'konstapel_observation_enabled{@k0,domain="bundle_resolution"}', values: '0x90'}
+      - &en-k1-t {series: 'konstapel_observation_enabled{@k1,domain="targeting"}', values: '1x90'}
+      - &en-k1-a {series: 'konstapel_observation_enabled{@k1,domain="assessment"}', values: '1x90'}
+      - &en-k1-s {series: 'konstapel_observation_enabled{@k1,domain="evidence_storage"}', values: '1x90'}
+      - &en-k1-b {series: 'konstapel_observation_enabled{@k1,domain="bundle_resolution"}', values: '0x90'}
+      - &rd-k0-t {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x90'}
+      - &rd-k0-a {series: 'konstapel_observation_ready{@k0,domain="assessment"}', values: '1x90'}
+      - &rd-k0-s {series: 'konstapel_observation_ready{@k0,domain="evidence_storage"}', values: '1x90'}
+      - &rd-k0-b {series: 'konstapel_observation_ready{@k0,domain="bundle_resolution"}', values: '0x90'}
+      - &rd-k1-t {series: 'konstapel_observation_ready{@k1,domain="targeting"}', values: '0x90'}
+      - &rd-k1-a {series: 'konstapel_observation_ready{@k1,domain="assessment"}', values: '0x90'}
+      - &rd-k1-s {series: 'konstapel_observation_ready{@k1,domain="evidence_storage"}', values: '0x90'}
+      - &rd-k1-b {series: 'konstapel_observation_ready{@k1,domain="bundle_resolution"}', values: '0x90'}
+      - &up-k0-t {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x90'}
+      - &up-k0-a {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="assessment"}', values: '0+60x90'}
+      - &up-k0-s {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="evidence_storage"}', values: '0+60x90'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="true"}', values: '1x90'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '0x90'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="unknown"}', values: '0x90'}
+      - &cap-k0-pd {series: 'konstapel_capability_condition{@k0,capability="policy_delivery",status="true"}', values: '1x90'}
+      - &cap-k0-as {series: 'konstapel_capability_condition{@k0,capability="assessment",status="true"}', values: '1x90'}
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="payments"}', values: '3600x90'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="payments"}', values: '300x90'}
+      - {series: 'konstapel_binding_assessment_interval_seconds{@k0,binding="payments"}', values: '3600x90'}
+      # Known-zero backlog and a process that has made no attempt yet.
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x90'}
+      - {series: 'konstapel_publication_pending{@k0}', values: '0x90'}
+      - {series: 'konstapel_cleanup_blocked{@k0}', values: '0x90'}
+      - {series: 'konstapel_cleanup_pending{@k0}', values: '0x90'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x90'}
+    alert_rule_test:
+      - {eval_time: 30m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelEngineUnavailable, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelAssessmentOverdue, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelCleanupBlocked, exp_alerts: []}
+
+  # A ServiceMonitor that discovers nothing leaves no up series: counting
+  # only up == 0 would miss it. Another release's targets do not count.
+  - name: no scrape target of the release is discovered
+    interval: 1m
+    input_series:
+      - {series: 'up{@b0}', values: '1x20'}
+    alert_rule_test:
+      - {eval_time: 4m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+      - eval_time: 5m
+        alertname: KonstapelMetricsUnavailable
+        exp_alerts: [{release: konstapel}]
+      - {eval_time: 10m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+
+  # Failed scrapes write staleness markers, so the release's other series
+  # vanish: only the availability alert reports it, nothing reads as zero.
+  - name: every target fails its scrape
+    interval: 1m
+    input_series:
+      - {series: 'up{@k0}', values: '1 1 0x20'}
+      - {series: 'up{@k1}', values: '1 1 0x20'}
+      - {series: 'konstapel_observation_enabled{@k0,domain="targeting"}', values: '1 1 stale'}
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1 1 stale'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0 60 stale'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '1 1 stale'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+      - eval_time: 7m
+        alertname: KonstapelMetricsUnavailable
+        exp_alerts: [{release: konstapel}]
+      - {eval_time: 15m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - {eval_time: 15m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+
+  - name: a follower failing its scrape, or a transient failure, is not unavailability
+    interval: 1m
+    input_series:
+      - {series: 'up{@k0}', values: '1 0 0 0 1x20'}
+      - {series: 'up{@k1}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 4m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+      - {eval_time: 10m, alertname: KonstapelMetricsUnavailable, exp_alerts: []}
+
+  # Enabled domains are expected to report even before their first data:
+  # a missing projection is unavailability, never an empty healthy input.
+  # The disabled bundle_resolution domain is not paged.
+  - name: enabled domains without a projection
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k0-a
+      - *en-k0-s
+      - *en-k0-b
+      - *en-k1-t
+      - *en-k1-a
+      - *en-k1-s
+      - *en-k1-b
+      - *rd-k0-t
+      - {series: 'konstapel_observation_ready{@k0,domain="assessment"}', values: '0x90'}
+      - {series: 'konstapel_observation_ready{@k0,domain="evidence_storage"}', values: '0x90'}
+      - *rd-k0-b
+      - *rd-k1-t
+      - *rd-k1-a
+      - *rd-k1-s
+      - *rd-k1-b
+      - *up-k0-t
+    alert_rule_test:
+      - {eval_time: 4m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - eval_time: 5m
+        alertname: KonstapelObservationUnavailable
+        exp_alerts:
+          - {release: konstapel, domain: assessment}
+          - {release: konstapel, domain: evidence_storage}
+      - {eval_time: 30m, alertname: KonstapelAssessmentOverdue, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+
+  # The exporter stops reporting ready once the owner's projection is older
+  # than 2 minutes (here at 8m). The binding's failing condition stops being
+  # read instead of being kept or turned into health, and the availability
+  # alert takes over.
+  - name: a stalled producer becomes unavailable
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k1-t
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x7 0x30'}
+      - *rd-k1-t
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x5 300x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '1x7 stale'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - {eval_time: 12m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - eval_time: 13m
+        alertname: KonstapelObservationUnavailable
+        exp_alerts: [{release: konstapel, domain: targeting}]
+
+  # The leader's samples stop at 10m without staleness markers (for
+  # example across a Prometheus restart), so they stay visible for the 5m
+  # lookback. Its projection, produced at 10m, stops being an owner at 14m
+  # (maxProjectionAge 4m): the lingering Resolved=false is not read, and the
+  # domains are reported unavailable 5m later.
+  - name: stale samples are not a current owner
+    interval: 1m
+    input_series:
+      - {series: 'up{@k0}', values: '1x10'}
+      - *up-k1
+      - {series: 'konstapel_observation_enabled{@k0,domain="targeting"}', values: '1x10'}
+      - *en-k1-t
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x10'}
+      - *rd-k1-t
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x10'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '0x3 1x7'}
+    alert_rule_test:
+      - {eval_time: 14m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - {eval_time: 18m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+      - eval_time: 19m
+        alertname: KonstapelObservationUnavailable
+        exp_alerts: [{release: konstapel, domain: targeting}]
+
+  # konstapel-0 leads until 9m, konstapel-1 from 10m (a clean Lease
+  # handover). Each reports Resolved=false while it leads; the condition
+  # started at 5m, so the hold carries across the handover and one alert
+  # fires at 15m, not one per replica.
+  - name: a leader handover keeps the hold and does not duplicate
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k1-t
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x9 0x30'}
+      - {series: 'konstapel_observation_ready{@k1,domain="targeting"}', values: '0x9 1x30'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x9 stale'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k1,domain="targeting"}', values: '_x10 600+60x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="legacy",condition="Resolved",status="false"}', values: '0x4 1x4 stale'}
+      - {series: 'konstapel_binding_condition{@k1,binding="legacy",condition="Resolved",status="false"}', values: '_x10 1x30'}
+    alert_rule_test:
+      - {eval_time: 14m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - eval_time: 15m
+        alertname: KonstapelBindingUnresolved
+        exp_alerts: [{release: konstapel, binding: legacy}]
+      - {eval_time: 15m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+
+  # Both replicas claim a fresh targeting projection from 10m to 12m.
+  # Ambiguous ownership is unavailable: neither replica's gauges are read
+  # (nothing is summed or picked), so the hold restarts at 13m. A short
+  # overlap does not page as unavailability.
+  - name: overlapping owners are ambiguous, never summed
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k1-t
+      - {series: 'konstapel_observation_ready{@k0,domain="targeting"}', values: '1x12 0x30'}
+      - {series: 'konstapel_observation_ready{@k1,domain="targeting"}', values: '0x9 1x30'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="targeting"}', values: '0+60x12 stale'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k1,domain="targeting"}', values: '_x10 600+60x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="legacy",condition="Resolved",status="false"}', values: '0x4 1x7 stale'}
+      - {series: 'konstapel_binding_condition{@k1,binding="legacy",condition="Resolved",status="false"}', values: '_x10 1x30'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - {eval_time: 22m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - eval_time: 23m
+        alertname: KonstapelBindingUnresolved
+        exp_alerts: [{release: konstapel, binding: legacy}]
+      - {eval_time: 15m, alertname: KonstapelObservationUnavailable, exp_alerts: []}
+
+  # Resolved unknown (condition observed for an older generation) counts;
+  # a capability that cannot be checked is unknown; a failure that recovers
+  # within the 10m hold does not fire.
+  - name: unresolved bindings and unavailable capabilities
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k1-t
+      - *rd-k0-t
+      - *rd-k1-t
+      - *up-k0-t
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="unknown"}', values: '1x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="true"}', values: '0x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="ledger",condition="Resolved",status="false"}', values: '1x5 0x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="ledger",condition="Resolved",status="true"}', values: '0x5 1x30'}
+      - {series: 'konstapel_binding_condition{@k0,binding="ledger",condition="EngineReady",status="false"}', values: '1x30'}
+      - {series: 'konstapel_capability_condition{@k0,capability="policy_delivery",status="false"}', values: '1x5 0x30'}
+      - {series: 'konstapel_capability_condition{@k0,capability="policy_delivery",status="true"}', values: '0x5 1x30'}
+      - {series: 'konstapel_capability_condition{@k0,capability="assessment",status="unknown"}', values: '1x30'}
+    alert_rule_test:
+      - {eval_time: 9m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - eval_time: 10m
+        alertname: KonstapelBindingUnresolved
+        exp_alerts: [{release: konstapel, binding: payments}]
+      - eval_time: 10m
+        alertname: KonstapelEngineUnavailable
+        exp_alerts: [{release: konstapel, capability: assessment}]
+
+  # Each binding follows its own due time (design §4): an hourly binding
+  # due at 60m with a 5m collection timeout is late past 75m and fires after
+  # the 5m hold; a daily binding due at 24h is not. A binding never
+  # assessed is due at its initial time (1m). Diagnostic closures advance
+  # the latest closure but not the obligation; a run that meets the
+  # obligation during the hold clears it.
+  - name: hourly, daily and initial schedules, diagnostics and recovery
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-a
+      - *en-k1-a
+      - *rd-k0-a
+      - *rd-k1-a
+      - *up-k0-a
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="hourly"}', values: '3600x90'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="hourly"}', values: '300x90'}
+      - {series: 'konstapel_binding_assessment_interval_seconds{@k0,binding="hourly"}', values: '3600x90'}
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="daily"}', values: '86400x90'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="daily"}', values: '300x90'}
+      - {series: 'konstapel_binding_assessment_interval_seconds{@k0,binding="daily"}', values: '86400x90'}
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="initial"}', values: '60x90'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="initial"}', values: '300x90'}
+      - {series: 'konstapel_binding_assessment_status{@k0,binding="initial",view="latest_closed",status="no_assessment"}', values: '1x90'}
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="diagnostic"}', values: '3600x90'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="diagnostic"}', values: '300x90'}
+      - {series: 'konstapel_binding_last_closed_timestamp_seconds{@k0,binding="diagnostic"}', values: '_x65 3900x10 4500x14'}
+      - {series: 'konstapel_binding_scheduled_due_timestamp_seconds{@k0,binding="recovered"}', values: '3600x76 7200x13'}
+      - {series: 'konstapel_binding_collection_timeout_seconds{@k0,binding="recovered"}', values: '300x90'}
+    alert_rule_test:
+      - {eval_time: 21m, alertname: KonstapelAssessmentOverdue, exp_alerts: []}
+      - eval_time: 22m
+        alertname: KonstapelAssessmentOverdue
+        exp_alerts: [{release: konstapel, binding: initial}]
+      - eval_time: 80m
+        alertname: KonstapelAssessmentOverdue
+        exp_alerts: [{release: konstapel, binding: initial}]
+      - eval_time: 81m
+        alertname: KonstapelAssessmentOverdue
+        exp_alerts:
+          - {release: konstapel, binding: diagnostic}
+          - {release: konstapel, binding: hourly}
+          - {release: konstapel, binding: initial}
+
+  # A run closes at 5m and its publication fails every 15s (4 attempts a
+  # minute) until the 5-minute publish timeout fails it at 11m; then it is a
+  # historical failure. The alert fires after the 2m hold and resolves when
+  # nothing is actionable any more, which is not recovery.
+  - name: persistent publication failure
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1x5 0x20'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 4+4x5 24x20'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - eval_time: 7m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+      - eval_time: 10m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+      - {eval_time: 11m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+
+  # A run fails twice and keeps retrying from 5m to 8m: below the
+  # 3-attempt threshold. A failure with many attempts that succeeds within
+  # the hold (20m) does not fire. Failed attempts of a run that already
+  # failed (historical, not counted in konstapel_publication_failed) do not
+  # fire.
+  - name: transient and historical publication failures do not fire
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1x3 0x10 1 0x30'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 1 2x13 6 10 14x30'}
+    alert_rule_test:
+      - {eval_time: 7m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 8m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 22m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 40m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+
+  # The leader restarts at 7m: its attempt counter resets to zero. increase
+  # follows the reset, so the failures keep counting.
+  - name: a process reset keeps counting failed attempts
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1x5 0x20'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 4 8 0 4 8 12 12x20'}
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+      - eval_time: 9m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+
+  # Leadership moves at 6m. Each replica made 2 failed attempts: neither
+  # reaches 3, their sum after increase does. The failing gauge is read only
+  # from the replica that owns the projection.
+  - name: failed attempts are summed across replicas after increase
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - {series: 'konstapel_observation_ready{@k0,domain="evidence_storage"}', values: '1x5 0x20'}
+      - {series: 'konstapel_observation_ready{@k1,domain="evidence_storage"}', values: '0x5 1x20'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k0,domain="evidence_storage"}', values: '0+60x5 stale'}
+      - {series: 'konstapel_observation_updated_timestamp_seconds{@k1,domain="evidence_storage"}', values: '_x6 360+60x20'}
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1 stale'}
+      - {series: 'konstapel_publication_failed{@k1}', values: '_x6 1x3 0x10'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 2x20'}
+      - {series: 'konstapel_operation_attempts_total{@k1,operation="evidence_publication",result="failure"}', values: '0x5 2x20'}
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+
+  # Storage refuses deletion (RetentionBlocked). The run records outlive
+  # the binding deleted at 5m: its series go, the backlog stays, and the
+  # alert fires after its 15m hold.
+  - name: blocked cleanup survives binding deletion
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-t
+      - *en-k0-s
+      - *en-k1-t
+      - *en-k1-s
+      - *rd-k0-t
+      - *rd-k0-s
+      - *rd-k1-t
+      - *rd-k1-s
+      - *up-k0-t
+      - *up-k0-s
+      - {series: 'konstapel_binding_condition{@k0,binding="payments",condition="Resolved",status="false"}', values: '1x4 stale'}
+      - {series: 'konstapel_binding_created_timestamp_seconds{@k0,binding="payments"}', values: '0x4 stale'}
+      - {series: 'konstapel_cleanup_blocked{@k0}', values: '1x30'}
+      - {series: 'konstapel_cleanup_pending{@k0}', values: '0x30'}
+      - {series: 'konstapel_cleanup_oldest_expiry_timestamp_seconds{@k0}', values: '0x30'}
+    alert_rule_test:
+      - {eval_time: 10m, alertname: KonstapelBindingUnresolved, exp_alerts: []}
+      - {eval_time: 14m, alertname: KonstapelCleanupBlocked, exp_alerts: []}
+      - eval_time: 15m
+        alertname: KonstapelCleanupBlocked
+        exp_alerts: [{release: konstapel}]
+
+  # Deletion retried with backoff (DeletionFailed) is pending, not
+  # blocked: it alerts once the oldest expiry is over an hour old, after
+  # the 15m hold. A blocked cleanup resolved within the hold does not fire.
+  - name: pending cleanup past expiry, and transient blocking
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_cleanup_blocked{@k0}', values: '1x10 0x80'}
+      - {series: 'konstapel_cleanup_pending{@k0}', values: '1x90'}
+      - {series: 'konstapel_cleanup_oldest_expiry_timestamp_seconds{@k0}', values: '0x90'}
+    alert_rule_test:
+      - {eval_time: 15m, alertname: KonstapelCleanupBlocked, exp_alerts: []}
+      - {eval_time: 75m, alertname: KonstapelCleanupBlocked, exp_alerts: []}
+      - eval_time: 76m
+        alertname: KonstapelCleanupBlocked
+        exp_alerts: [{release: konstapel}]

@@ -56,14 +56,20 @@ integration boundaries.
 
 ## 5. Starter alert rules and runbooks
 
-- [ ] 5.1 Implement the seven starter rules from the design with source-availability gates and scoped replica aggregation; use Prometheus fixtures to verify default thresholds and detection of absent scrape targets or missing enabled-domain projections.
+- [x] 5.1 Implement the seven starter rules from the design with source-availability gates and scoped replica aggregation; use Prometheus fixtures to verify default thresholds and detection of absent scrape targets or missing enabled-domain projections.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 5.2 Add rule cases for hourly/daily/initial scheduling, diagnostics, transient recovery, stale samples, process resets, replica transitions, two releases with identical binding names and cleanup after binding deletion; verify firing and resolution with `promtool test rules`.
+- [x] 5.2 Add rule cases for hourly/daily/initial scheduling, diagnostics, transient recovery, stale samples, process resets, replica transitions, two releases with identical binding names and cleanup after binding deletion; verify firing and resolution with `promtool test rules`.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 5.3 Write one actionable runbook per starter alert and framework-neutral outcome-query examples; verify links and commands against the owning status contracts and distinguish lost observability from actual operational recovery.
+- [x] 5.3 Write one actionable runbook per starter alert and framework-neutral outcome-query examples; verify links and commands against the owning status contracts and distinguish lost observability from actual operational recovery.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
-- [ ] 5.4 Pin rule-testing tooling in Devbox and validate the exact Helm-rendered rules with `promtool check rules` and the rule suite through existing checks; verify local/CI parity without adding a public task for each helper.
+- [x] 5.4 Pin rule-testing tooling in Devbox and validate the exact Helm-rendered rules with `promtool check rules` and the rule suite through existing checks; verify local/CI parity without adding a public task for each helper.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
+
+Group 5 notes: the rule-testing tooling is the digest-pinned promtool image
+(`scripts/promtool.sh`, `KONSTAPEL_PROMTOOL_IMAGE`) rather than a Devbox
+package, and KonstapelPublicationFailing holds 2m because the owner's
+5-minute publish timeout ends the actionable failure (design §7, "As
+implemented (group 5)").
 
 ## 6. End-to-end monitoring acceptance
 

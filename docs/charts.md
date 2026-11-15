@@ -600,7 +600,7 @@ after Renovate bumps the version). The objects use `monitoring.coreos.com/v1`.
 | `metrics.enabled=false` (default) | no metrics Service, RBAC or monitoring object; the integration values are refused if enabled |
 | `metrics.enabled=true` | metrics Service and RBAC only; scrape it from any Prometheus, for example with an external scrape job |
 | `+ metrics.serviceMonitor.enabled` | a ServiceMonitor `konstapel-controller`; needs the `ServiceMonitor` API |
-| `+ metrics.prometheusRule.enabled` | a PrometheusRule `konstapel-controller` when at least one rule is enabled; needs the `PrometheusRule` API. The chart ships no rules until the starter alerts (group 5), so only rules you define render |
+| `+ metrics.prometheusRule.enabled` | a PrometheusRule `konstapel-controller` with the seven [starter alerts](integration/alert-runbooks.md) and any rules you add; needs the `PrometheusRule` API. With every group or rule disabled, nothing renders (no empty PrometheusRule) |
 
 Rendering rules:
 
@@ -632,8 +632,10 @@ Service: `matchLabels` of `app.kubernetes.io/name`, `app.kubernetes.io/instance`
   issuer does not put the CA in `ca.crt`.
 - **Authorization:** `authorization.mode: serviceAccountToken` (default) sets
   `bearerTokenFile` to the Prometheus Pod's own mounted ServiceAccount token.
-  The ServiceMonitor API offers no non-deprecated file option, and an
-  Operator that denies file access from ServiceMonitors rejects it. Use
+  It stays the default although the field is deprecated upstream: it needs no
+  long-lived token, and the kubelet rotates it. The ServiceMonitor API offers
+  no non-deprecated file option, and an Operator that denies file access from
+  ServiceMonitors rejects it. Use
   `mode: secret` with a Secret holding a token for the reader ServiceAccount
   in the release namespace, which the Operator reads. You create and rotate
   that Secret; the chart never creates a long-lived token.
@@ -668,14 +670,38 @@ also adds the release instance label.
 
 **Rules.** `metrics.prometheusRule.groups` is a map of group name to
 `{enabled, interval, rules}`, and `rules` a map of alert name to `{enabled,
-expr, for, threshold, severity, labels, annotations, runbookURL}`. Maps merge
-across values files, so one value tunes one rule
-(`--set metrics.prometheusRule.groups.<group>.rules.<Alert>.for=15m`). In `expr`,
-`__scope__` expands to the scope matchers and `__threshold__` to the rule's
-threshold. `severity` is `info`, `warning` (default) or `critical`; a
-`severity` or `alertname` label is refused. The `runbook_url` annotation is
-`runbookURL`, or `runbookBaseURL/<Alert>`. Tuning rules changes only
-the PrometheusRule: workload, RBAC and assessment settings render identically.
+expr, for, threshold, window, severity, labels, annotations, runbookURL}`.
+Maps merge across values files, so one value tunes one rule
+(`--set metrics.prometheusRule.groups.<group>.rules.<Alert>.for=15m`). In
+`expr`:
+
+| Placeholder | Expands to |
+| --- | --- |
+| `__scope__` | the scope matchers |
+| `__scope_labels__` | their label names, for `by (...)` and `on (...)` |
+| `__threshold__`, `__window__` | the rule's `threshold` and `window` (a rule using one must set it) |
+| `__owner(<domain>)__` | the one scrape target whose `<domain>` projection is ready and younger than `metrics.prometheusRule.maxProjectionAge` (default `4m`; at least 2m plus the scrape interval); nothing when no target or several do. Join gauges to it with `and on (__scope_labels__, instance)` |
+| `__owners__` | the same for every domain, keeping the `domain` label |
+
+`severity` is `info`, `warning` (default) or `critical`; a `severity` or
+`alertname` label is refused. The `runbook_url` annotation is `runbookURL`,
+or `runbookBaseURL/<Alert>` for rules without one. Scope matchers may not
+name `instance` or a Konstapel metric label. Tuning rules changes only the
+PrometheusRule: workload, RBAC and assessment settings render identically.
+
+**Starter alerts.** The default groups `konstapel-availability`
+(`KonstapelMetricsUnavailable`, `KonstapelObservationUnavailable`) and
+`konstapel-operations` (`KonstapelBindingUnresolved`,
+`KonstapelEngineUnavailable`, `KonstapelAssessmentOverdue`,
+`KonstapelPublicationFailing`, `KonstapelCleanupBlocked`) are described,
+with their defaults and what to do, in the
+[alert runbooks](integration/alert-runbooks.md). Each sets its own
+`runbookURL` there; set it per rule to point at your own copy. Disable a
+group with `metrics.prometheusRule.groups.<group>.enabled=false`, or one
+alert with `....rules.<Alert>.enabled=false`. With every group disabled the
+chart renders no PrometheusRule. When one ruler evaluates several
+clusters, put the cluster label into `scope.matchers` so that each
+release's alerts read only its own series.
 
 **Disabling and uninstalling.** Set the integration's `enabled` to `false` and
 upgrade: Helm deletes only the ServiceMonitor or PrometheusRule it owns.
@@ -688,8 +714,13 @@ Prometheus are never touched.
 `internal/charttest` covers the defaults, incompatible options, each missing
 API, rendering with both integrations disabled and no monitoring CRDs, both
 certificate modes, other release names, the schema of every rendered object,
-and that threshold, hold, severity, runbook, scope and enablement change the
-rendered rule content. A live scrape through a real Operator is the end-to-end
+and that threshold, window, hold, severity, runbook, scope, projection age
+and enablement change the rendered rule content. It also keeps
+`testdata/observability/rules/*.rules.yml` identical to the `spec.groups`
+of the PrometheusRule an enabled default install renders (two release
+names), and generates the promtool rule tests from `*.cases.yaml`. `task
+test` runs `promtool check rules` and `promtool test rules` on those files
+with the pinned promtool image. A live scrape through a real Operator is the end-to-end
 monitoring acceptance (tasks 6.x of `add-prometheus-observability`).
 
 ### OCI policy bundles

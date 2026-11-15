@@ -77,14 +77,16 @@ func countMonitoring(docs []map[string]any) int {
 
 const smEnabled = "metrics:\n  enabled: true\n  serviceMonitor:\n    enabled: true\n"
 
-// ruleValues is a test-only rule group: the chart ships no rule of its own
-// yet, so the plumbing is exercised with this fixture.
+// ruleValues is a test-only rule group that exercises the plumbing on its
+// own: the chart's starter groups (starter_rules_test.go) are disabled.
 const ruleValues = `metrics:
   enabled: true
   prometheusRule:
     enabled: true
     runbookBaseURL: https://example.org/runbooks/
     groups:
+      konstapel-availability: {enabled: false}
+      konstapel-operations: {enabled: false}
       example:
         interval: 1m
         rules:
@@ -116,10 +118,16 @@ func TestMonitoringOffByDefaultAndWithoutCRDs(t *testing.T) {
 			}
 		}
 	}
-	// Enabled rules with no group render nothing (no empty PrometheusRule).
-	docs := mustRender(t, []string{prAPI}, "metrics:\n  enabled: true\n  prometheusRule:\n    enabled: true\n")
+	// Enabled rules render the starter alerts by default; with every group
+	// disabled they render nothing (no empty PrometheusRule).
+	enabled := "metrics:\n  enabled: true\n  prometheusRule:\n    enabled: true\n"
+	if _, pr := monitoringDocs(mustRender(t, []string{prAPI}, enabled)); pr == nil || len(rules(t, pr)) != len(starterAlerts) {
+		t.Errorf("an enabled default rule integration rendered %v", pr)
+	}
+	docs := mustRender(t, []string{prAPI}, enabled, "metrics.prometheusRule.groups.konstapel-availability.enabled=false",
+		"metrics.prometheusRule.groups.konstapel-operations.enabled=false")
 	if n := countMonitoring(docs); n != 0 {
-		t.Errorf("rule integration without groups rendered %d objects", n)
+		t.Errorf("rule integration without enabled groups rendered %d objects", n)
 	}
 }
 
