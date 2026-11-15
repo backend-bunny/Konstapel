@@ -1171,7 +1171,17 @@ func (m *obsRun) noLeader() {
 	setRules(full)
 	restored = true
 	back := time.Now()
-	newLeader := l.leaderPod(m.ns, "")
+	// The expired Lease still names the restarted pod: wait for a renewal.
+	var newLeader string
+	l.eventually("the Lease acquired again", func() (bool, string) {
+		lease := l.lease(m.ns)
+		if lease == nil || lease.Spec.HolderIdentity == nil || lease.Spec.RenewTime == nil || !lease.Spec.RenewTime.After(back) {
+			return false, toJSON(lease)
+		}
+		newLeader, _, _ = strings.Cut(*lease.Spec.HolderIdentity, "_")
+		_, running := m.controllerPods()[newLeader]
+		return running, newLeader
+	})
 	owned := m.soleOwner(newLeader, 3*time.Minute)
 	for _, d := range obsDomains {
 		m.waitAlert("KonstapelObservationUnavailable{domain="+d+"}", "inactive", 3*time.Minute)
