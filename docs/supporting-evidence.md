@@ -654,6 +654,15 @@ Once the cause is fixed (the lock expired, the permission granted, the
 destination reachable again) the next attempt completes the cleanup. Nothing
 needs to be reset.
 
+`TestLiveAttachmentLifecycle` (acceptance group `storage`) checks this
+lifecycle against a real API server and the pinned RustFS service: validity
+changing at its boundaries with no other event, policy-preserving binding and
+profile edits that never change a valid association, a removed document
+version reported `Unavailable/ObjectMissing`, a withdrawal kept across a
+controller restart until its fixed expiry, and a cleanup refused while the
+destination rejects the controller's credentials, retried after its backoff
+and completed once access returns.
+
 ### A destination handed off to an operator
 
 A destination handed off with `deletionPolicy: Orphan` is never contacted

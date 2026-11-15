@@ -63,14 +63,16 @@ class SigningAcceptanceTests(unittest.TestCase):
 
 
 class AttachmentAcceptanceTests(unittest.TestCase):
-    """add-supporting-evidence-attachments: the attachment API, storage and
-    authenticated transfer cases run in groups CI always requires, on real
-    Kubernetes APIs (admission) and with the test S3 service (storage)."""
+    """add-supporting-evidence-attachments: the attachment API, storage,
+    authenticated transfer and lifecycle cases run in groups CI always
+    requires, on real Kubernetes APIs (admission) and with the test S3
+    service (storage)."""
 
     REQUIRED = {
         "TestLiveEvidenceAttachmentAPI": "admission",
         "TestLiveAttachmentStorage": "storage",
         "TestLiveAttachmentTransfer": "storage",
+        "TestLiveAttachmentLifecycle": "storage",
     }
 
     def test_attachment_cases_are_in_required_groups(self):

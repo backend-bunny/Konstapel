@@ -43,7 +43,8 @@
       "TestLiveSignedEvidenceDownload",
       "TestLiveSignedPublicationWorkflow",
       "TestLiveAttachmentStorage",
-      "TestLiveAttachmentTransfer"
+      "TestLiveAttachmentTransfer",
+      "TestLiveAttachmentLifecycle"
     ]
   },
   "capabilities": {
