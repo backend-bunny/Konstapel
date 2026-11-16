@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
+	"path"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
@@ -59,10 +61,41 @@ type Report struct {
 	TechnicalEvidence TechnicalEvidence `json:"technicalEvidence"`
 	// Limitations are not attributable to one control row.
 	Limitations []Limitation `json:"limitations"`
+	// Sources are the package files the report was built from, by
+	// package-relative path, with their sha256: every OSCAL document read
+	// and the packaged capture and evaluation. Empty outside a package.
+	Sources []Source `json:"sources"`
+}
+
+// Source kinds.
+const (
+	SourceCapture    = "capture"
+	SourceEvaluation = "evaluation"
+)
+
+// Source is a package-relative reference to one input file. Kind is an
+// OSCAL model (catalog, profile, component-definition), SourceCapture or
+// SourceEvaluation. SHA256 is lowercase hex, as in the package descriptor.
+type Source struct {
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	SHA256 string `json:"sha256"`
+}
+
+// Packaging places a report in an assessment package.
+type Packaging struct {
+	// ContentPath is the package directory holding the content handle's
+	// files: "" for the package root (a vendored run's content/ tree), or
+	// "bundles/<hex>" for one member of a run's content set.
+	ContentPath string
+	// Evidence are the packaged capture and evaluation files.
+	Evidence []Source
 }
 
 // Scope identifies the assessment scope a report describes.
 type Scope struct {
+	// Kind is the package scope kind (Binding or Namespace), when packaged.
+	Kind       string         `json:"kind,omitempty"`
 	Cluster    string         `json:"cluster,omitempty"`
 	Binding    *ObjectRef     `json:"binding,omitempty"`
 	Namespaces []NamespaceRef `json:"namespaces,omitempty"`
@@ -88,6 +121,9 @@ type Inputs struct {
 	Selection Selection `json:"selection"`
 	// Semantics is the profile-resolution contract (Semantics).
 	Semantics string `json:"semantics"`
+	// ContentPath is the package directory of the content (Packaging);
+	// document paths of the inventory and mappings are relative to it.
+	ContentPath string `json:"contentPath,omitempty"`
 }
 
 // Inventory is the resolution state and size of the selected baseline,
@@ -144,6 +180,8 @@ func SelectionOf(spec v1alpha1.ComplianceProfileSpec) Selection {
 // ControlCoverage is one selected control's row.
 type ControlCoverage struct {
 	Control
+	// QualifiedID is the control's identity: the catalog digest and its ID.
+	QualifiedID string `json:"qualifiedId"`
 	// Automation is the control's technical coverage state.
 	Automation string `json:"automation"`
 	// Checks are the authored checks mapped to the control, by rule ID.
@@ -206,26 +244,18 @@ type Input struct {
 	// Evidence is the owner's evaluated capture; nil builds the inventory
 	// and authored coverage only.
 	Evidence *Evidence
+	// Packaging, when set, records the package-relative sources.
+	Packaging *Packaging
 }
 
 // Build resolves the baseline and mappings of in.Content and joins them to
 // the selection. An unresolved inventory yields a report with no controls
 // and its limitations, never a guessed list.
 func Build(in Input) *Report {
+	in.Selection = sortedSelection(in.Selection)
 	sel := in.Selection
-	if sel.Policies == nil {
-		sel.Policies = []SelectedPolicy{}
-	}
-	r := &Report{SchemaVersion: SchemaVersion, AsOf: in.AsOf.UTC(), Scope: in.Scope,
-		Inputs:   Inputs{Bundle: in.Content.Bundle, Selection: sel, Semantics: Semantics},
-		Mappings: MappingSummary{Definitions: []DocumentRef{}}, Controls: []ControlCoverage{}, Limitations: []Limitation{},
-		TechnicalEvidence: TechnicalEvidence{State: EvidenceNotProvided}}
-	defer func() {
-		if in.Evidence != nil {
-			joinEvidence(r, in)
-		}
-		r.Limitations = sortLimitations(r.Limitations)
-	}()
+	r := newReport(in)
+	defer finish(r, in)
 	l := newLoader(in.Content, in.Options)
 	b, err := readBaseline(l)
 	if err != nil {
@@ -255,9 +285,101 @@ func Build(in Input) *Report {
 	j := newJoin(in.Content, sel)
 	r.Limitations = append(r.Limitations, j.limitations...)
 	for _, c := range b.Controls {
-		r.Controls = append(r.Controls, j.control(c, m))
+		row := j.control(c, m)
+		row.QualifiedID = b.Qualified(c.ID)
+		r.Controls = append(r.Controls, row)
 	}
 	return r
+}
+
+// Unavailable is the report of a scope whose baseline content cannot be
+// read at all (no packaged content, no recorded selection, no profile): an
+// unresolved inventory with one blocking limitation, and the technical
+// evidence retained as recorded but attributed to no control. It is the
+// coverage diagnostic; it never lists or guesses controls.
+//
+// in.Content carries only the intended bundle reference (its zero handle
+// reads nothing), so the evidence of that bundle is reported unattributed
+// rather than as another bundle's.
+func Unavailable(in Input, code, subject, format string, a ...any) *Report {
+	in.Selection = sortedSelection(in.Selection)
+	r := newReport(in)
+	r.Limitations = append(r.Limitations, *blocking(code, "", subject, format, a...))
+	finish(r, in)
+	return r
+}
+
+func newReport(in Input) *Report {
+	r := &Report{SchemaVersion: SchemaVersion, AsOf: in.AsOf.UTC(), Scope: in.Scope,
+		Inputs:   Inputs{Bundle: in.Content.Bundle, Selection: in.Selection, Semantics: Semantics},
+		Mappings: MappingSummary{Definitions: []DocumentRef{}}, Controls: []ControlCoverage{}, Limitations: []Limitation{},
+		TechnicalEvidence: TechnicalEvidence{State: EvidenceNotProvided}, Sources: []Source{}}
+	if in.Packaging != nil {
+		r.Inputs.ContentPath = in.Packaging.ContentPath
+	}
+	return r
+}
+
+// finish joins the evidence, records the sources and orders limitations.
+func finish(r *Report, in Input) {
+	if in.Evidence != nil {
+		joinEvidence(r, in)
+	}
+	r.Limitations = sortLimitations(r.Limitations)
+	if in.Packaging != nil {
+		r.Sources = sources(r, *in.Packaging)
+	}
+}
+
+// sortedSelection orders the selected policies by name: the profile's
+// listing order carries no meaning and must not change the report.
+func sortedSelection(sel Selection) Selection {
+	sel.Policies = slices.Clone(sel.Policies)
+	if sel.Policies == nil {
+		sel.Policies = []SelectedPolicy{}
+	}
+	for i := range sel.Policies {
+		sel.Policies[i].Parameters = compactJSON(sel.Policies[i].Parameters)
+	}
+	slices.SortStableFunc(sel.Policies, func(a, b SelectedPolicy) int { return strings.Compare(a.Name, b.Name) })
+	return sel
+}
+
+// sources are the package-relative references of every document the report
+// read and of the packaged evidence, ordered by path.
+func sources(r *Report, p Packaging) []Source {
+	out := []Source{}
+	seen := map[string]bool{}
+	add := func(s Source) {
+		if s.Path == "" || seen[s.Path] {
+			return
+		}
+		seen[s.Path] = true
+		out = append(out, s)
+	}
+	doc := func(d *DocumentRef) {
+		if d == nil || d.Digest == "" {
+			return
+		}
+		add(Source{Path: path.Join(p.ContentPath, d.Path), Kind: d.Model, SHA256: strings.TrimPrefix(d.Digest, "sha256:")})
+	}
+	inv := r.Inventory
+	doc(inv.Profile)
+	doc(inv.Catalog)
+	for i := range inv.Imports {
+		doc(&inv.Imports[i])
+	}
+	for i := range inv.Documents {
+		doc(&inv.Documents[i])
+	}
+	for i := range r.Mappings.Definitions {
+		doc(&r.Mappings.Definitions[i])
+	}
+	for _, s := range p.Evidence {
+		add(s)
+	}
+	slices.SortFunc(out, func(a, b Source) int { return strings.Compare(a.Path, b.Path) })
+	return out
 }
 
 // join resolves rules to the content's policies and the selection.
@@ -284,6 +406,12 @@ func newJoin(c Content, sel Selection) *join {
 		for _, ch := range p.Checks {
 			j.policyOf[ch.RuleID] = ref
 		}
+	}
+	if sel.Bundle == (v1alpha1.BundleReference{}) {
+		j.mismatch = true
+		j.limitations = append(j.limitations, *blocking(CodeSelectionUnavailable, "", "",
+			"the binding profile's policy selection was not recorded for this scope; no check is joined, and none is assumed selected or unselected"))
+		return j
 	}
 	if sel.Bundle != c.Bundle {
 		j.mismatch = true

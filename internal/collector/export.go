@@ -53,6 +53,14 @@ type ExportRequest struct {
 	BindingConfiguration string
 	Capture              CaptureV2
 	Evaluation           Evaluation
+	// Coverage, when set, produces the package's control coverage summary
+	// (coverage.json and coverage.txt) once its kind and content are
+	// known. Without it the package is exactly as before.
+	Coverage CoverageProducer
+	// CoverageOmitted is told why a producer's coverage was left out. The
+	// package is then exported without coverage: coverage never blocks or
+	// alters the technical evidence.
+	CoverageOmitted func(error)
 }
 
 // Export writes a package for an evaluated capture. When valid OSCAL can be
@@ -124,6 +132,17 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 		return publication.Descriptor{}, err
 	}
 
+	hasCoverage := false
+	if req.Coverage != nil {
+		if err := writeCoverage(req, kind, diag); err != nil {
+			if req.CoverageOmitted != nil {
+				req.CoverageOmitted(err)
+			}
+		} else {
+			hasCoverage = true
+		}
+	}
+
 	files, err := publication.Inventory(req.Out, exportRole)
 	if err != nil {
 		return publication.Descriptor{}, err
@@ -142,6 +161,9 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 			checks = append(checks, "frozen-bundle-content")
 		}
 	}
+	if hasCoverage {
+		checks = append(checks, "coverage-references")
+	}
 	d := publication.Descriptor{
 		APIVersion: publication.APIVersion, Kind: publication.DescriptorKind, Run: req.Run, PackageKind: kind,
 		Scope: req.Scope, ScopeSHA256: req.Scope.Digest(),
@@ -159,6 +181,9 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 		return d, err
 	}
 	if err := publication.VerifyDir(req.Out, d); err != nil {
+		return d, err
+	}
+	if err := VerifyCoverage(req.Out, d); err != nil {
 		return d, err
 	}
 	if kind == publication.KindAssessment {
@@ -702,6 +727,10 @@ func exportRole(p string) publication.FileRole {
 		return publication.RoleSummary
 	case p == "diagnostic.json":
 		return publication.RoleDiagnostic
+	case p == publication.CoverageFile:
+		return publication.RoleCoverage
+	case p == publication.CoverageTextFile:
+		return publication.RoleCoverageText
 	case strings.HasPrefix(p, "content/"):
 		return publication.RoleContent
 	case strings.HasPrefix(p, bundlesDir+"/") && strings.Contains(p, "/content/"):

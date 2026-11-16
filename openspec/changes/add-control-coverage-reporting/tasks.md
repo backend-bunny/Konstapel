@@ -30,9 +30,9 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
 
 ## 3. Versioned reports and assessment integration
 
-- [ ] 3.1 Render deterministic `coverage.json` and `coverage.txt` from one model with scope, times, qualified IDs, input digests, source references, and limitations; verify equivalent content and stable ordering through complete/incomplete/no-automation golden fixtures.
+- [x] 3.1 Render deterministic `coverage.json` and `coverage.txt` from one model with scope, times, qualified IDs, input digests, source references, and limitations; verify equivalent content and stable ordering through complete/incomplete/no-automation golden fixtures.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 3.2 Integrate the production assessment producer and package inventory through its owner, using summary roles and valid relative references; verify package checksum/reference validation and explicit coverage diagnostics without fabricated OSCAL findings.
+- [x] 3.2 Integrate the production assessment producer and package inventory through its owner, using summary roles and valid relative references; verify package checksum/reference validation and explicit coverage diagnostics without fabricated OSCAL findings.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
 - [ ] 3.3 Extend the current assessment summary through its owning API/publication types with bounded coverage state and observation references; verify generated schemas, round-trip fixtures, large-baseline status bounds, and unchanged technical EvidenceComplete semantics.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->

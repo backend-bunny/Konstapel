@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/download"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/s3store"
@@ -286,6 +287,28 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		d, err := s3store.ValidatePackage(dir)
 		if err != nil {
 			t.Fatalf("%s package does not validate: %v", what, err)
+		}
+		// Every run's package carries its control coverage
+		// (add-control-coverage-reporting 3.2): the baseline inventory of
+		// its frozen content, with the run's technical evidence unchanged.
+		raw, err := os.ReadFile(filepath.Join(dir, coverage.JSONFile))
+		if err != nil {
+			t.Fatalf("%s package has no coverage: %v", what, err)
+		}
+		cov, err := coverage.Parse(raw)
+		if err != nil {
+			t.Fatalf("%s package coverage: %v", what, err)
+		}
+		// A Diagnostic package carries no content: its coverage is a
+		// coverage diagnostic, never a guessed inventory.
+		if cov.TechnicalEvidence.Evidence == nil || *cov.TechnicalEvidence.Evidence != d.Evidence || cov.Scope.Kind != string(d.Scope.Kind) ||
+			cov.Inventory.Resolved != (d.PackageKind == publication.KindAssessment) || len(cov.Controls) != cov.Inventory.Controls ||
+			(d.PackageKind == publication.KindAssessment && cov.Inventory.Controls == 0) ||
+			(d.PackageKind == publication.KindDiagnostic && !slices.ContainsFunc(cov.Limitations, func(l coverage.Limitation) bool {
+				return l.Code == coverage.CodeContentUnavailable && l.Blocking
+			})) {
+			t.Fatalf("%s %s package coverage: inventory %+v evidence %+v limitations %+v (descriptor %+v)", what, d.PackageKind, cov.Inventory,
+				cov.TechnicalEvidence.Evidence, cov.Limitations, d.Evidence)
 		}
 		var all strings.Builder
 		_ = filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {

@@ -779,9 +779,14 @@ func awaitDelivery(run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, a
 }
 
 func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, now time.Time) (ctrl.Result, error) {
-	c, limits, _, selected, awaiting, err := r.Assess.snapshotContent(ctx, b, now)
+	c, limits, _, profile, awaiting, err := r.Assess.snapshotContent(ctx, b, now)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	var selected *v1alpha1.BundleReference
+	if profile != nil {
+		ref := profile.Spec.Bundle
+		selected = &ref
 	}
 	if wait := awaitDelivery(run, b, awaiting, now, r.Runtime.Poll); wait > 0 {
 		// Nothing is frozen or written yet: the run starts once delivery
@@ -821,6 +826,10 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 	// Freeze the content the capture was resolved against before anything
 	// is collected; export and replay use only this copy.
 	if err := r.freezeContent(ctx, run, c, selected); err != nil {
+		return ctrl.Result{}, err
+	}
+	// The profile's policy selection is frozen with it, for coverage.
+	if err := r.freezeSelection(run, profile); err != nil {
 		return ctrl.Result{}, err
 	}
 	var revisions []string
@@ -986,6 +995,7 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	if err := r.exportContent(run, &req); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.exportCoverage(ctx, run, b, &req)
 	d, err := collector.Export(ctx, req)
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())

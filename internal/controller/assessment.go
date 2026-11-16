@@ -226,10 +226,11 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 	return c, limits, maxAge, err
 }
 
-// snapshotContent is snapshot that also returns the bundle the binding's
-// profile selected when it was read (nil without a profile): the desired
-// content a run records beside the content its contributions were applied
-// from, and the content its plan names when nothing was applied.
+// snapshotContent is snapshot that also returns the binding's profile as
+// it was read (nil without a profile). Its bundle is the desired content a
+// run records beside the content its contributions were applied from, and
+// the content its plan names when nothing was applied; its policy
+// selection is the run's coverage selection.
 //
 // Subjects are the desired contributions whose engine policies are
 // delivered and verify against the desired content, plus every other
@@ -247,7 +248,7 @@ func (r *AssessmentReconciler) snapshot(ctx context.Context, b *v1alpha1.Complia
 // namespace: the binding's first delivery, or a newly added policy, is
 // still rolling out, as opposed to an update whose previous revision keeps
 // enforcing and is assessed meanwhile.
-func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (_ collector.CaptureV2, _ []string, _ time.Duration, selected *v1alpha1.BundleReference, awaiting bool, _ error) {
+func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (_ collector.CaptureV2, _ []string, _ time.Duration, selectedProfile *v1alpha1.ComplianceProfile, awaiting bool, _ error) {
 	maxAge, err := bindingMaxEvidenceAge(b)
 	if err != nil {
 		return collector.CaptureV2{}, nil, 0, nil, false, err
@@ -261,10 +262,7 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 	if err != nil {
 		return collector.CaptureV2{}, nil, 0, nil, false, err
 	}
-	if profile != nil {
-		ref := profile.Spec.Bundle
-		selected = &ref
-	}
+	selectedProfile = profile
 	res := targeting.Resolve(in)
 	content := map[string]*targeting.Content{}
 	if profile != nil && len(in.Bundles) > 0 {
@@ -444,7 +442,7 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 	}
 	capture.Reports = reports
 	capture.Contributions = used
-	return capture, limits, maxAge, selected, awaiting, nil
+	return capture, limits, maxAge, selectedProfile, awaiting, nil
 }
 
 // appliedSubjects derives the subjects of the binding's applied engine
