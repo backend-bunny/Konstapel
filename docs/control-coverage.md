@@ -11,10 +11,11 @@ document never adds a control to the list or removes one from it.
 > join of the assessment owner's frozen technical evidence (group 2), and the
 > deterministic `coverage.json` and `coverage.txt` that every assessment run's
 > package now carries ([Reports in assessment packages](#reports-in-assessment-packages)).
-> Accepted risk is not joined yet: the exception owner's projection does not
-> exist, so no observation is reported as an accepted risk. Assessment status
-> has no coverage summary yet, and supporting documents are not joined; both
-> are later groups of that change.
+> Run, request and binding status carry a bounded coverage summary
+> ([Inspecting coverage](#inspecting-coverage)). Accepted risk is not joined
+> yet: the exception owner's projection does not exist, so no observation is
+> reported as an accepted risk. Supporting documents are not joined; that is
+> a later group of the change.
 
 ## Inputs
 
@@ -596,6 +597,159 @@ rendering. Export runs the first and the controller checks the second
 before handing the files to it, so a package it keeps always passes
 `s3store.ValidatePackage`, which the S3 publisher runs before staging and
 which runs both.
+
+## Inspecting coverage
+
+Coverage is read from status and from downloaded packages. There is no
+coverage dashboard, query API or extra command: status carries a bounded
+summary and a reference, and the controls live in the package, which is
+fetched with the [existing download workflow](integration/assessment-workflows.md#namespace-download-handoff).
+
+### Status summaries
+
+Every run whose package carries a coverage report records a summary of it
+in `status.summary.coverage`. A namespace run's summary is copied to its
+`AssessmentRequest`, so a team reads the summary of its own namespace's
+report without access to runs or bindings:
+
+```sh
+kubectl get assessmentrun <run> -o jsonpath='{.status.summary.coverage}'
+kubectl -n team-a get assessmentrequest nightly-check -o jsonpath='{.status.summary.coverage}'
+```
+
+The summary is the same small object for any baseline size. It counts
+controls by [automation state](#mappings-and-coverage-states) and limitations,
+and lists at most eight distinct blocking limitation codes; it names no
+control, statement, check, observation or document. No field counts
+satisfied or passing controls. `sha256` is the digest of the package's
+`coverage.json`, `asOf` its closure time, `inputsSha256` a digest of the
+binding UID, the scope's namespace UIDs and the profile selection frozen at
+run start, and `validUntil` the moment the oldest attributable observation
+the report counts exceeds the binding's `maxEvidenceAge`, as the run
+evaluated it at closure. A package without coverage leaves the field
+absent; the run's evidence, outcomes and `EvidenceComplete` condition are
+the same with or without it.
+
+Platform operators read the binding's current view in
+`status.assessment.current.coverage`:
+
+```sh
+kubectl get compliancebinding <binding> -o jsonpath='{.status.assessment.current.coverage}'
+```
+
+It names the newest committed full-binding run (`run`) and copies that run's
+summary unchanged. Namespace runs, failed or unpublished runs, and other
+bindings' runs never stand in for the binding. Its `state` is decided by the
+assessment controller every time it reconciles the binding, and the
+controller requeues the binding at `validUntil`, so expiry needs no new
+event:
+
+| State | Meaning |
+| --- | --- |
+| `Current` | The report's binding, namespaces and profile selection are the binding's current ones, its package is served, and `validUntil` has not passed. |
+| `ScopeChanged` | The binding's namespaces or its profile's bundle, policies or parameters differ from what the run assessed, or the run did not record them. Checked first. |
+| `Expired` | `validUntil` has passed, or the run's package is no longer available. |
+| `NoReport` | No committed full-binding run exists, or the newest one's package has no coverage report. An older report is never shown in its place. |
+
+A state change never rewrites the run, its summary, or its package: an
+expired or out-of-scope report still describes its own scope at its own
+`asOf`, and reading it later is not a new assessment. The binding's live
+evidence in `status.assessment.current` is evaluated independently; coverage
+never changes it. For example, the vendored Moderate run of the controller
+tests records this summary, and the binding reports it as current until
+`validUntil`:
+
+<!-- coverage-status:begin -->
+```
+{
+  "state": "Current",
+  "run": {
+    "name": "audit-prod-s-39e429111cc500b9",
+    "uid": "uid-audit-prod-s-39e429111cc500b9"
+  },
+  "summary": {
+    "asOf": "2026-11-05T12:01:30Z",
+    "sha256": "c84f3b7c971fcb998391ec8a99f463818304da0d1a6733c83c28a5e58b3b3b8e",
+    "inputsSha256": "e17942c563078477d54bf85674273b35d54102f49f4a4b98a581d2d439468f8c",
+    "bundle": {
+      "name": "konstapel-vendored",
+      "digest": "sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71"
+    },
+    "inventoryResolved": true,
+    "mappingsResolved": false,
+    "controls": 287,
+    "enhancements": 110,
+    "automation": {
+      "none": 0,
+      "unselected": 3,
+      "partial": 0,
+      "unknown": 284
+    },
+    "technicalEvidence": "resolved",
+    "validUntil": "2026-11-05T14:01:00Z",
+    "limitations": 2,
+    "blockingCodes": [
+      "DocumentUnavailable"
+    ]
+  }
+}
+```
+<!-- coverage-status:end -->
+
+That run read the vendored content, so its mappings are unresolved and most
+of its controls are `unknown` (see [What a report is built from](#what-a-report-is-built-from));
+a run of an OCI bundle reports resolved mappings.
+
+### Package files
+
+To see the controls, download the run's package as for any evidence: a team
+downloads its request's package with
+`GET /v1/namespaces/<namespace>/assessmentrequests/<name>/download?uid=<request uid>`,
+and a platform operator downloads any run with
+`GET /v1/assessmentruns/<run uid>/download` (see the
+[download handoff](integration/assessment-workflows.md#namespace-download-handoff)).
+Unpack the archive and check that the report is the one status names:
+
+```sh
+mkdir pkg && tar -xzf package.tar.gz -C pkg
+sha256sum pkg/coverage.json   # equals status.summary.coverage.sha256
+less pkg/coverage.txt
+```
+
+`coverage.txt` is the readable report. `coverage.json` holds the same report
+for tools; the queries below run against the `incomplete` golden fixture
+(`internal/coverage/testdata/golden/incomplete.json`), a binding package with
+one namespace:
+
+<!-- coverage-jq:begin -->
+```
+$ jq -r '.scope.kind, .asOf, .inventory.resolved, .inventory.controls' pkg/coverage.json
+Binding
+2026-11-16T10:10:00Z
+true
+4
+$ jq -r '.controls[] | [.id, .automation, (.evidence.evidence.completeness // "-")] | @tsv' pkg/coverage.json
+fa1	none	-
+op1	partial	Incomplete
+op1.e1	none	-
+op2	unselected	-
+$ jq -c '.technicalEvidence.evidence' pkg/coverage.json
+{"completeness":"Incomplete","expected":2,"attributable":1,"missing":1,"rejected":0,"unresolved":0}
+$ jq -r '.technicalEvidence.observations[] | [.expected.workload.namespace, .expected.workload.name, .observation.state, (.observation.outcome // "-"), (.controls | join(","))] | @tsv' pkg/coverage.json
+team-a	p1	Attributable	fail	op1
+team-a	p2	Missing	-	op1
+$ jq -r '.controls[] | select(.automation == "unselected") | .checks[] | "\(.ruleId) \(.selection) \(.policy)"' pkg/coverage.json
+no-root unselected no-root-policy
+$ jq -c '[.limitations[] | select(.blocking) | .code]' pkg/coverage.json
+[]
+```
+<!-- coverage-jq:end -->
+
+A namespace package's report has the binding's full baseline inventory but
+only that namespace's observations; a sibling namespace never appears in its
+rows or sources. The `sources` section lists every package file the report
+was built from with its sha256, so a finding in a row can be traced to the
+package's `capture.json`, `evaluation.json` and OSCAL documents.
 
 ## Framework neutrality
 
