@@ -180,6 +180,17 @@ func TestControlCoverageDocExamples(t *testing.T) {
 	if !strings.Contains(doc, "Row counts\ntherefore overlap and are **not additive**") {
 		t.Error("the documentation does not state that row counts are not additive")
 	}
+	// The text excerpt is verbatim from a golden rendering.
+	golden, err := os.ReadFile(goldenDir + "/incomplete.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex := block(t, doc, "coverage-text"); !strings.Contains(string(golden), ex) {
+		t.Errorf("the coverage-text excerpt is not part of %s/incomplete.txt", goldenDir)
+	}
+	if !strings.Contains(doc, "`Report JSON: coverage.json sha256 <hex>`") || !strings.HasPrefix(strings.Split(string(golden), "\n")[2], TextReportLine) {
+		t.Error("the documented text binding line does not match the rendering")
+	}
 	if strings.Contains(block(t, doc, "coverage-row"), "oscalParameters") {
 		t.Error("the example row presents an OSCAL parameter setting the content does not author")
 	}

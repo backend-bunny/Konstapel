@@ -7,13 +7,14 @@ the baseline is listed. A missing check, a passing check, or an attached
 document never adds a control to the list or removes one from it.
 
 > **Status.** `internal/coverage` implements the baseline reader, the mapping
-> join, the report model (`add-control-coverage-reporting` group 1) and the
-> join of the assessment owner's frozen technical evidence (group 2). Accepted
-> risk is not joined yet: the exception owner's projection does not exist, so
-> no observation is reported as an accepted risk. Assessment packages do not
-> contain `coverage.json` or `coverage.txt` yet, and assessment status has no
-> coverage summary. Rendering, supporting documents and the assessment
-> integration are later groups of that change.
+> join, the report model (`add-control-coverage-reporting` group 1), the
+> join of the assessment owner's frozen technical evidence (group 2), and the
+> deterministic `coverage.json` and `coverage.txt` that every assessment run's
+> package now carries ([Reports in assessment packages](#reports-in-assessment-packages)).
+> Accepted risk is not joined yet: the exception owner's projection does not
+> exist, so no observation is reported as an accepted risk. Assessment status
+> has no coverage summary yet, and supporting documents are not joined; both
+> are later groups of that change.
 
 ## Inputs
 
@@ -361,8 +362,9 @@ records a deduplication or a mapping that was not attributed.
 | Documents | `DocumentUnavailable`, `DocumentInvalid`, `SchemaVersionUnsupported`, `SchemaVersionMismatch` |
 | Profile | `ProfileNotDeclared`, `ProfileAmbiguous`, `ImportUnresolved`, `ImportExternal`, `ImportOutsideContent`, `ImportAmbiguous`, `ImportCycle`, `ImportDepth`, `SemanticsUnsupported`, `SelectionNotInSource`, `MultipleCatalogs`, `DuplicateCatalogID`, `EmptySelection`, `DuplicateSelection` (notice) |
 | Mappings | `MappingSourceUnresolved`, `MappingCatalogMismatch` (notice), `MappingControlUnknown` (notice), `MappingControlNotSelected` (notice), `DuplicateMapping` (notice), `StatementNotInControl`, `RuleUndeclared`, `RuleNotInContent`, `CheckUndeclared`, `ParameterUnresolved` |
-| Selection | `SelectionContentMismatch`, `PolicyNotInContent` |
+| Selection | `SelectionContentMismatch`, `PolicyNotInContent`, `SelectionUnavailable` |
 | Evidence | `EvidenceInconsistent`, `EvidenceScopeMismatch`, `EvidenceCheckAmbiguous`, `DuplicateObservation` (notice), `EvidenceOtherContent` (notice), `EvidenceNotSelected` (notice), `EvidenceUnmapped` (notice), `EvidenceUnattributed` (notice) |
+| Report diagnostics | `ContentUnavailable`, `BaselineNotSelected` |
 
 ## Examples: the pinned Moderate inventory
 
@@ -468,6 +470,132 @@ has no profile parameters, so the check has no `policyParameters` field.
 }
 ```
 <!-- coverage-row:end -->
+
+## Reports in assessment packages
+
+Every assessment run's package carries two files built from one report
+model: `coverage.json` (schema version `konstapel.io/coverage/v1`) and
+`coverage.txt`, a readable rendering of the same report. They are summary
+files of the package, inventoried in its descriptor with the roles
+`coverage-summary` and `coverage-summary-text` (see the
+[assessment contract](integration/assessment-contract.md#package-export)).
+They are never OSCAL documents and never change the package's OSCAL
+results, evidence and outcome counts, kind, or the run's `EvidenceComplete`
+condition.
+
+### What a report is built from
+
+The assessment controller builds the report when it exports the run, only
+from what the package carries:
+
+- **Baseline content.** The frozen content of the bundle the binding's
+  profile selected when the run started, read back from the package and
+  verified again: a frozen OCI bundle under `bundles/<hex>/` (its manifest,
+  layer and files), or for a vendored run the `content/` tree whose
+  `SHA256SUMS` hashes to the pinned digest. The live cache, the registry and
+  the vendored tree of the image are never read for an OCI run.
+- **Selection.** The profile's policy selection, frozen with the run when
+  it started. A profile edited during collection does not change it.
+- **Technical evidence.** The packaged capture and its evaluation, joined
+  as described in [Technical evidence](#technical-evidence).
+
+`asOf` is the capture's closure time and the observation window is the
+capture's, never the time of rendering. `scope` names the package scope kind,
+cluster, binding (name and UID) and namespaces. `inputs.contentPath` is the
+package directory of the content (empty for the package root), and the
+document paths of `inventory` and `mappings` are relative to it.
+`sources` lists every file the report was built from by package-relative
+path and sha256: each OSCAL document read, `capture.json` and
+`evaluation.json`.
+
+A vendored run's `SHA256SUMS` does not list the shipped component
+definitions (see [Inputs](#inputs)), so its report resolves the Moderate
+inventory but reports the mappings as unresolved and every control as
+`unknown`. A run of an OCI bundle resolves both.
+
+### Determinism and the text rendering
+
+Both files are deterministic: the same frozen inputs render the same bytes,
+whatever order the profile lists its policies in or the evaluation lists its
+observations in. Controls are ordered by ID, checks by rule, statements by
+ID, limitations by document, subject and code, observations by key and
+sources by path. The JSON is indented with two spaces and ends with a
+newline.
+
+The text names the JSON it renders in its third line,
+`Report JSON: coverage.json sha256 <hex>`, and then states every value of
+the report: scope, observation window, inputs and their digests, the
+inventory, mappings, the technical evidence with every observation, one
+block per control (qualified ID, automation, checks with their coverage
+limits, evidence views, limitations), the report limitations and the
+sources. Content strings have control characters replaced. This excerpt
+of the `incomplete` golden fixture (`internal/coverage/testdata/golden`)
+shows an enhancement without automation and a control whose mapped check
+the profile does not select:
+
+<!-- coverage-text:begin -->
+```
+  Control op1.e1 [none] Automated Rotation
+    Qualified ID: sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op1.e1
+    Parent: op1
+    Group: ops Operations
+    Statements: op1.e1-req
+    Checks: none
+
+  Control op2 [unselected] Privilege Limits
+    Qualified ID: sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op2
+    Group: ops Operations
+    Statements: op2-req
+    OSCAL parameter: op2-freq label review frequency values none
+    Check no-root [unselected] policy no-root-policy
+      Check ID: no-root
+      Policy sha256: sha256:c36d17088312bf951045a51c65210b17560ee4388ea8e63a31dba3112b73e728
+      Coverage limit: Partial: declared non-root execution only.
+      Requirement: Non-root only.
+      Statements: the requirement as authored (no statement named)
+      Definitions: content/alt/component-definition.json
+      OSCAL parameter setting: op2-freq values monthly
+```
+<!-- coverage-text:end -->
+
+The golden fixtures `complete`, `incomplete` and `no-automation` use the
+alternate-catalog fixture. Regenerate them after an intended change with
+`devbox run -- go test ./internal/coverage -run TestRenderGolden -update`.
+
+### Coverage diagnostics
+
+When no inventory can be read at all, the package still carries both
+files, as a coverage diagnostic: `inventory.resolved` is false, `controls`
+is empty, a blocking limitation explains why, and the technical evidence
+is kept as recorded but attributed to no control. No OSCAL finding is
+added or changed for it.
+
+| Code | When |
+| --- | --- |
+| `ContentUnavailable` | The package is a Diagnostic and carries no content; the selected bundle is not packaged with the run (no assessed contribution was applied from it); its packaged copy no longer verifies; or the controller's OSCAL schemas are unreadable. |
+| `BaselineNotSelected` | The binding selected no profile when the run started. |
+| `SelectionUnavailable` | The run's frozen selection is missing (a run started by an earlier controller); the current profile is never read in its place. |
+
+Problems inside readable content are the ordinary limitations above, for
+example an unresolved profile import or mapping.
+
+Coverage never blocks the technical evidence. If the report cannot be
+produced or its references do not verify, the controller logs why and
+publishes the package without coverage files, exactly as it was before
+coverage existed.
+
+### Verification
+
+`collector.VerifyCoverage` checks a package's coverage against its
+descriptor: a known schema version, a text bound to the JSON's sha256, and
+every source a clean relative path to an inventoried, non-coverage file
+with the same sha256, including the capture and evaluation.
+`coverage.VerifyFiles` checks that the JSON is canonical and strictly
+decodes (an unknown field fails) and that the text is exactly its
+rendering. Export runs the first and the controller checks the second
+before handing the files to it, so a package it keeps always passes
+`s3store.ValidatePackage`, which the S3 publisher runs before staging and
+which runs both.
 
 ## Framework neutrality
 

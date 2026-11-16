@@ -182,6 +182,12 @@ Kubernetes 1.36 or later; the current acceptance node image is pinned in
 - Assessment packages contain OSCAL assessment results. Diagnostic packages
   declare a reason and the missing exports, and contain no OSCAL assessment
   documents.
+- File roles are a closed set. The control coverage summary roles
+  `coverage-summary` and `coverage-summary-text` are valid only for
+  `coverage.json` and `coverage.txt`, in either package kind, and only
+  together. A reader that does not know a role rejects the descriptor
+  (fail closed), so packages with coverage are refused by verifiers that
+  predate it; packages without coverage are unchanged.
 
 **Scope projection.** The producer, not the publisher, projects evidence to the
 frozen scope before export. A namespace package contains only safely
@@ -627,6 +633,25 @@ This is the comparison delivery uses to decide a policy is current.
 - **Always present:** `capture.json`, `evaluation.json` (per-observation states
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is
   verified against the directory before `Export` returns.
+- **Control coverage summary.** With an `ExportRequest.Coverage` producer
+  (the assessment controller always sets one), the package also carries
+  `coverage.json` and `coverage.txt` with the roles above, and the producer
+  checks list `coverage-references`. Export calls the producer once the
+  package kind and its packaged content are known, so coverage is built from
+  the package's own frozen content, never from other content
+  ([control coverage](../control-coverage.md#reports-in-assessment-packages)).
+  `collector.VerifyCoverage` requires a known report version
+  (`konstapel.io/coverage/v1`), a text that names the JSON's sha256, and
+  `sources` that are clean relative paths to inventoried, non-coverage files
+  with matching checksums, including `capture.json` and `evaluation.json`;
+  `s3store.ValidatePackage` also requires the text to be exactly the JSON's
+  rendering (`coverage.VerifyFiles`). Coverage is a summary: it adds no
+  OSCAL finding, never changes the package kind, evidence or outcome counts,
+  and a producer that fails or returns files that do not verify leaves the
+  package without coverage (`ExportRequest.CoverageOmitted` is told why)
+  instead of failing the export. A Diagnostic package carries a coverage
+  diagnostic (no controls). Without a producer, the package and descriptor
+  are exactly as before.
 
 **Namespace packages.** A namespace package is exported only from
 `collector.Project(capture, namespaceUID)`, and `Export` re-checks the
