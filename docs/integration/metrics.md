@@ -365,7 +365,23 @@ disabled and later re-enabled. The controller Deployment is not touched.
 | Revocation | the `konstapel-metrics-reader` binding is deleted and a replica is replaced | every target is refused with `403` within the 5-minute allow cache (the new replica at once); `KonstapelMetricsUnavailable` fires; a run still publishes; after the binding is restored, scrapes return within the 30-second denial cache and the alert resolves |
 
 Each measured time and the full alert timeline are recorded in
-`TestLiveHelmMonitoring.json` of the group's evidence.
+`TestLiveHelmMonitoring.json` of the group's evidence. One CI run (GitHub
+runner, 15s scrape and evaluation interval, the tuned holds above) measured:
+
+| Scenario | Measured |
+| --- | --- |
+| Publication failing | pending 26s and firing 146s after the run closed, inside its 300s publish timeout, after 11 failed attempts; committed 10s and resolved 28s after storage returned |
+| Cleanup blocked | firing 106s after the package's expiry (1m hold); deleted 53s and resolved 67s after the hold was lifted (the deletion backs off from 1 minute) |
+| Binding recreated | the old object's series gone 6s after its deletion |
+| Evidence expiry | the owner re-evaluated at the expiry, so the current view showed `rejected`, never a pass; current again 54s after reporting resumed |
+| Reporting access lost | `KonstapelEngineUnavailable` firing 83s and `KonstapelAssessmentOverdue` 219s after the access was removed; both resolved 44s after it returned |
+| Leader killed | Lease taken after 14s, the successor the only owner after 20s; `KonstapelObservationUnavailable` did not fire (1m hold) |
+| No leader | the leader restarted 12s after losing Lease access; `KonstapelObservationUnavailable` firing for the three enabled domains 90s after; one owner 9s after access returned; `KonstapelBindingUnresolved` firing again 101s after that (1m hold) |
+| Certificate rotation | the new certificate served after 48s, no failed scrape |
+| Token rotation | the revoked token refused after 60s (`500 invalid bearer token`, the 1-minute authentication cache); no failed scrape |
+| Revocation | every target refused after 135s (bound: 5 minutes plus a scrape); `KonstapelMetricsUnavailable` firing after 192s; a run published 33s after the revocation; scrapes back 39s after the binding returned, and the alert resolved |
+
+The whole test takes about 30 minutes; the `monitoring` job about 35.
 
 ## Catalog
 

@@ -650,6 +650,14 @@ release namespace, must be listed in `metrics.readers` (or bound to
 rotated by the kubelet; a file-based token follows rotation, a Secret
 token follows whatever rotation you run. The controller accepts a rotated
 token within the cache bounds in [Controller metrics](#controller-metrics).
+To rotate a Secret token without a gap, put the new token into the Secret,
+wait until the Operator and the kubelet have delivered it to Prometheus (the
+acceptance waits 150 seconds; the Secret mode took about 100 to 150 seconds
+to take effect there), then revoke the old token. The controller refuses a
+revoked token once its 1-minute authentication cache expires. Acceptance
+binds the token to a Secret (TokenRequest `boundObjectRef`), so deleting
+that Secret revokes it; the kubelet's rotation of projected tokens (about an
+hour) is not shortened there.
 
 **Discovery is not guaranteed by the object.** Prometheus selects
 ServiceMonitors by its `serviceMonitorSelector` (labels; put them in
@@ -776,8 +784,10 @@ after the Prometheus API answered; the file-access policy rejected the default
 mode 66s after it was set and the Secret mode scraped again 153s after the
 `helm upgrade`; scrapes failed with `403` 313s (CI: 315s) after the binding was deleted,
 which is the 5-minute allow cache plus a scrape interval, as documented in
-[Controller metrics](#controller-metrics). Expect up to about 5 minutes and 30
-seconds, never longer.
+[Controller metrics](#controller-metrics). In the integrated run, which replaces
+a replica during the revocation, every target was refused after 135s: the new
+replica has no cached answer, and the other's cached answer was older. Expect
+up to about 5 minutes and 30 seconds, never longer.
 
 The dependency versions of every run (Operator, config-reloader, Prometheus
 and controller images, the running Prometheus version) are recorded in

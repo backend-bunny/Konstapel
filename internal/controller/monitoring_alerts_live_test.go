@@ -234,6 +234,18 @@ func (a *alertTracker) reached(id, state string, since time.Time) (time.Time, bo
 	return time.Time{}, false
 }
 
+// last is when the alert last entered state.
+func (a *alertTracker) last(id, state string) (time.Time, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := len(a.log) - 1; i >= 0; i-- {
+		if c := a.log[i]; c.Alert == id {
+			return c.At, c.State == state
+		}
+	}
+	return time.Time{}, false
+}
+
 // changes are the transitions at or after since.
 func (a *alertTracker) changes(since time.Time) []alertChange {
 	a.mu.Lock()
@@ -371,19 +383,18 @@ func (m *obsRun) wait(what string, limit time.Duration, f func() (bool, string))
 	return 0
 }
 
-// waitAlert waits until the alert is in state and returns when it was first
-// seen there.
+// waitAlert waits until the alert is in state and returns when the
+// tracker first saw it enter that state (possibly before this call).
 func (m *obsRun) waitAlert(id, state string, limit time.Duration) time.Time {
 	m.l.t.Helper()
-	since := time.Now()
 	m.wait(id+" "+state, limit, func() (bool, string) {
 		s, _ := m.alerts.state(id)
 		return s == state, s
 	})
-	if at, ok := m.alerts.reached(id, state, since.Add(-5*time.Second)); ok {
+	if at, ok := m.alerts.last(id, state); ok {
 		return at
 	}
-	return time.Now()
+	return time.Now() // inactive and never active
 }
 
 func (m *obsRun) query(q string) ([]promSample, error) { return promQuery(m.prom, q) }
@@ -806,12 +817,13 @@ func (m *obsRun) failures() {
 		"phase": done.Status.Phase})
 
 	// 2. The unresolved binding, critical as configured.
-	unresolvedAt := m.waitAlert("KonstapelBindingUnresolved{binding=obs-unresolved}", "firing", 4*time.Minute)
+	m.waitAlert("KonstapelBindingUnresolved{binding=obs-unresolved}", "firing", 4*time.Minute)
+	unresolvedAt, _ := m.alerts.reached("KonstapelBindingUnresolved{binding=obs-unresolved}", "firing", phase)
 	_, al := m.alerts.state("KonstapelBindingUnresolved{binding=obs-unresolved}")
 	if al.Labels["severity"] != "critical" {
 		t.Fatalf("BindingUnresolved severity %q, configured critical", al.Labels["severity"])
 	}
-	l.record("binding-unresolved", map[string]any{"firingAfterCreateSeconds": unresolvedAt.Sub(phase).Seconds(), "severity": "critical"})
+	l.record("binding-unresolved", map[string]any{"firingAfterFailuresStartedSeconds": unresolvedAt.Sub(phase).Seconds(), "severity": "critical"})
 
 	// 3. Cleanup blocked, and the binding deletion and recreation (6.3)
 	// while it is.
@@ -1111,7 +1123,15 @@ func (m *obsRun) noLeader() {
 	m.waitAlert(unresolved, "firing", 3*time.Minute)
 	leader := l.leaderPod(m.ns, "")
 	pods := m.controllerPods()
-	counted, _, _ := m.one(`sum(konstapel_operation_attempts_total` + sel(`,pod="`+leader+`"`) + `)`)
+	// The leader's process-local counters must be above zero, so that its
+	// restart shows as a counter reset.
+	l.publishedRun(obsAudit, l.createRun(obsAudit, "obs-audit-counted").Name)
+	var counted float64
+	m.wait("the leader's attempt counters scraped above zero", 2*time.Minute, func() (bool, string) {
+		v, ok, d := m.one(`sum(konstapel_operation_attempts_total` + sel(`,pod="`+leader+`"`) + `)`)
+		counted = v
+		return ok && v > 0, d
+	})
 	role := &rbacv1.Role{}
 	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: m.ns, Name: "konstapel-controller"}, role); err != nil {
 		t.Fatal(err)
@@ -1162,7 +1182,7 @@ func (m *obsRun) noLeader() {
 		t.Fatalf("obs-unresolved resolved meanwhile: %s", toJSON(c))
 	}
 	resets, ok, _ := m.one(`sum(resets(konstapel_operation_attempts_total` + sel(`,pod="`+leader+`"`) + `[15m]))`)
-	if counted > 0 && (!ok || resets < 1) {
+	if !ok || resets < 1 {
 		t.Fatalf("the restarted process's counters (%v before) show no reset", counted)
 	}
 	if s, _ := m.alerts.state("KonstapelPublicationFailing{}"); s != "inactive" {
