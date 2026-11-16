@@ -19,13 +19,13 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
 
 ## 2. Attributed technical evidence and findings
 
-- [ ] 2.1 Consume frozen collector observations and expected keys without reevaluating freshness; verify current, missing, rejected, unresolved, conflicting, zero-target, and changed-scope fixtures preserve the collector's results.
+- [x] 2.1 Consume frozen collector observations and expected keys without reevaluating freshness; verify current, missing, rejected, unresolved, conflicting, zero-target, and changed-scope fixtures preserve the collector's results.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.2 Add statement/control joins and deduplication by exact observation and mapping identity; verify repeated reports, shared checks, overlapping binding contributions, and distinct configurations do not inflate independent evaluation counts.
+- [x] 2.2 Add statement/control joins and deduplication by exact observation and mapping identity; verify repeated reports, shared checks, overlapping binding contributions, and distinct configurations do not inflate independent evaluation counts.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
 - [ ] 2.3 Consume the exception owner's accepted-risk projection once implemented; verify raw outcomes remain traceable, arbitrary skips do not create acceptance, Linux applicability stays check-scoped, and documents cannot change enforcement or risk disposition.
   <!-- agent: tier=deep risk=high reason="Risk attribution and namespace confidentiality" -->
-- [ ] 2.4 Document per-control versus unique-observation counts and evidence/coverage distinctions; verify a fixture with all available AC-6 checks passing still reports partial technical coverage and unassessed baseline controls.
+- [x] 2.4 Document per-control versus unique-observation counts and evidence/coverage distinctions; verify a fixture with all available AC-6 checks passing still reports partial technical coverage and unassessed baseline controls.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 3. Versioned reports and assessment integration
