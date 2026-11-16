@@ -81,6 +81,9 @@ const (
 const (
 	CoverageFile     = "coverage.json"
 	CoverageTextFile = "coverage.txt"
+	// CoverageTextReportPrefix starts the line of coverage.txt that binds it
+	// to the lowercase hex sha256 of the coverage.json it renders.
+	CoverageTextReportPrefix = "Report JSON: " + CoverageFile + " sha256 "
 )
 
 var roles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan, RoleComponentDefinition, RoleSummary, RoleEvidenceExtract, RoleCapture, RoleContent, RoleProvenance, RoleDiagnostic, RoleCoverage, RoleCoverageText}

@@ -29,6 +29,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -584,6 +585,23 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 	}
 	if err := publication.VerifyDir(dir, d); err != nil {
 		return d, err
+	}
+	// Coverage summaries: known version, references to packaged files with
+	// matching checksums, and a text that is the JSON's rendering.
+	if err := collector.VerifyCoverage(dir, d); err != nil {
+		return d, err
+	}
+	if slices.ContainsFunc(d.Files, func(f publication.File) bool { return f.Role == publication.RoleCoverage }) {
+		var f coverage.Files
+		if f.JSON, err = os.ReadFile(filepath.Join(dir, publication.CoverageFile)); err != nil {
+			return d, err
+		}
+		if f.Text, err = os.ReadFile(filepath.Join(dir, publication.CoverageTextFile)); err != nil {
+			return d, err
+		}
+		if err := coverage.VerifyFiles(f); err != nil {
+			return d, err
+		}
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "capture.json"))
 	hasCapture := err == nil

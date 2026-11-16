@@ -103,7 +103,7 @@ func VerifyFiles(f Files) error {
 
 // TextReportLine is the line of coverage.txt naming the JSON it renders,
 // followed by the JSON's lowercase hex sha256.
-const TextReportLine = "Report JSON: " + JSONFile + " sha256 "
+const TextReportLine = publication.CoverageTextReportPrefix
 
 // RenderText renders r as readable text. jsonSHA256 is the hex sha256 of
 // r's JSON rendering, named in the header. Every value of the JSON report
