@@ -30,6 +30,11 @@ const (
 
 func schemaPath(version string) string { return "content/schemas/oscal-" + version + ".json" }
 
+// NoDuplicateJSONKeys rejects any JSON object that repeats a key, as content
+// validation does; readers of verified content (internal/coverage) use it so
+// they decode the same document the validation saw.
+func NoDuplicateJSONKeys(data []byte) error { return noDuplicateJSONKeys(data) }
+
 // noDuplicateJSONKeys rejects any object that repeats a key. encoding/json
 // silently keeps the last one, which would let two readers see different
 // documents.
