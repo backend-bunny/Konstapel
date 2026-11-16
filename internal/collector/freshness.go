@@ -174,7 +174,7 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 	}
 
 	scoped := linuxOnly(c.EnginePolicies)
-	ev := Evaluation{Observations: []Observation{}, Evidence: publication.EvidenceSummary{Expected: len(c.Expected), StaleScopes: len(c.Stale)}}
+	ev := Evaluation{Observations: []Observation{}}
 	for _, e := range c.Expected {
 		o := Observation{Key: e.Key()}
 		if e.Workload.OS == "windows" && scoped[e.Check.EnginePolicy][e.Check.Index] {
@@ -195,7 +195,7 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 		if ch, changed := c.ChangeFor(e); changed {
 			o.State = Unresolved
 			o.Reasons = append(o.Reasons, fmt.Sprintf("%s during collection at %s", ch.Kind, ch.Observed.Format(time.RFC3339)))
-			ev.add(o)
+			ev.Observations = append(ev.Observations, o)
 			continue
 		}
 		boundary := c.Window.Started
@@ -239,16 +239,9 @@ func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration)
 				ev.NextExpiry = &expiry
 			}
 		}
-		ev.add(o)
+		ev.Observations = append(ev.Observations, o)
 	}
-	switch {
-	case ev.Evidence.Expected == 0 && ev.Evidence.StaleScopes == 0:
-		ev.Evidence.Completeness = publication.NoTargets
-	case ev.Evidence.Attributable == ev.Evidence.Expected && ev.Evidence.StaleScopes == 0:
-		ev.Evidence.Completeness = publication.Complete
-	default:
-		ev.Evidence.Completeness = publication.Incomplete
-	}
+	ev.Evidence, ev.Outcomes = Tally(ev.Observations, len(c.Stale))
 	slices.SortFunc(ev.Observations, func(a, b Observation) int { return cmp.Compare(a.Key, b.Key) })
 	return ev, ev.Evidence.Validate()
 }
@@ -267,34 +260,60 @@ func (ev Evaluation) OldestEvaluated() *time.Time {
 	return oldest
 }
 
-func (ev *Evaluation) add(o Observation) {
-	ev.Observations = append(ev.Observations, o)
-	switch o.State {
-	case Attributable:
-		ev.Evidence.Attributable++
-		if o.Applicability == NotApplicable {
-			ev.Outcomes.NotApplicable++
-			return
-		}
-		switch o.Outcome {
-		case "pass":
-			ev.Outcomes.Pass++
-		case "fail":
-			ev.Outcomes.Fail++
-		case "error":
-			ev.Outcomes.Error++
-		case "skip":
-			ev.Outcomes.Skip++
+// Tally counts already evaluated observations, one per entry: their evidence
+// states, and the normalized outcomes of the attributable ones. It is how
+// Evaluate summarizes its own observations, exported so consumers of a
+// frozen evaluation (control coverage) count any subset of it with the same
+// rules instead of reclassifying engine results. It never re-evaluates
+// freshness: each observation's frozen state is taken as recorded.
+//
+// An attributable observation outside its check's scope counts as
+// NotApplicable, never as a pass. Other outcomes count as pass, fail, error
+// or skip, and anything else (including Kyverno's warn) once as unknown.
+// staleScopes is the number of stale scopes whose expected checks are
+// unknown; any makes the summary Incomplete. Completeness is NoTargets when
+// nothing is expected or stale, Complete when every observation is
+// attributable and nothing is stale, and Incomplete otherwise.
+func Tally(observations []Observation, staleScopes int) (publication.EvidenceSummary, publication.OutcomeCounts) {
+	e := publication.EvidenceSummary{Expected: len(observations), StaleScopes: staleScopes}
+	var o publication.OutcomeCounts
+	for _, obs := range observations {
+		switch obs.State {
+		case Attributable:
+			e.Attributable++
+			if obs.Applicability == NotApplicable {
+				o.NotApplicable++
+				continue
+			}
+			switch obs.Outcome {
+			case "pass":
+				o.Pass++
+			case "fail":
+				o.Fail++
+			case "error":
+				o.Error++
+			case "skip":
+				o.Skip++
+			default:
+				o.Unknown++
+			}
+		case Missing:
+			e.Missing++
+		case Rejected:
+			e.Rejected++
 		default:
-			ev.Outcomes.Unknown++
+			e.Unresolved++
 		}
-	case Missing:
-		ev.Evidence.Missing++
-	case Rejected:
-		ev.Evidence.Rejected++
-	default:
-		ev.Evidence.Unresolved++
 	}
+	switch {
+	case e.Expected == 0 && e.StaleScopes == 0:
+		e.Completeness = publication.NoTargets
+	case e.Attributable == e.Expected && e.StaleScopes == 0:
+		e.Completeness = publication.Complete
+	default:
+		e.Completeness = publication.Incomplete
+	}
+	return e, o
 }
 
 // sourceIndex is a result's index in its source report: the recorded
