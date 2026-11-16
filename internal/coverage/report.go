@@ -39,10 +39,10 @@ const (
 	CheckUnresolved = "unresolved"
 )
 
-// Report is coverage report v1 for one assessment scope. Later groups of
-// add-control-coverage-reporting add the technical-evidence summary and
-// the supporting-evidence context; this version carries the inventory and
-// the authored technical coverage.
+// Report is coverage report v1 for one assessment scope: the inventory,
+// the authored technical coverage, and the assessment owner's technical
+// evidence joined to it. A later group of add-control-coverage-reporting
+// adds the supporting-evidence context.
 type Report struct {
 	SchemaVersion string `json:"schemaVersion"`
 	// AsOf is the closure/observation time of the inputs, never the
@@ -55,6 +55,8 @@ type Report struct {
 	// Controls are every selected control, ordered by identifier; empty
 	// when the inventory is unresolved (never a guessed list).
 	Controls []ControlCoverage `json:"controls"`
+	// TechnicalEvidence is the owner's evaluated capture, when provided.
+	TechnicalEvidence TechnicalEvidence `json:"technicalEvidence"`
 	// Limitations are not attributable to one control row.
 	Limitations []Limitation `json:"limitations"`
 }
@@ -146,6 +148,13 @@ type ControlCoverage struct {
 	Automation string `json:"automation"`
 	// Checks are the authored checks mapped to the control, by rule ID.
 	Checks []CheckCoverage `json:"checks"`
+	// Evidence counts the unique observations of the control's selected
+	// checks, and StatementEvidence those of each mapped statement. Both
+	// are set only with technical evidence and a selected check. They
+	// describe evidence, not satisfaction, and are not additive across
+	// rows: a shared check's observations count under every row.
+	Evidence          *EvidenceView       `json:"evidence,omitempty"`
+	StatementEvidence []StatementEvidence `json:"statementEvidence,omitempty"`
 	// Limitations explain an unknown state.
 	Limitations []Limitation `json:"limitations,omitempty"`
 }
@@ -174,6 +183,8 @@ type CheckCoverage struct {
 	RuleParameters   []RuleParameter    `json:"ruleParameters,omitempty"`
 	OSCALParameters  []ParameterSetting `json:"oscalParameters,omitempty"`
 	PolicyParameters json.RawMessage    `json:"policyParameters,omitempty"`
+	// Evidence is a selected check's technical evidence, when provided.
+	Evidence *CheckEvidence `json:"evidence,omitempty"`
 }
 
 // StatementMapping is one mapped statement and its authored description.
@@ -185,11 +196,16 @@ type StatementMapping struct {
 // Input is everything a report is built from. It is pure data: Build reads
 // no clock and no cluster.
 type Input struct {
+	// AsOf is the inputs' closure time. With Evidence it may be left zero
+	// and is then the capture's closure; any other time is a mismatch.
 	AsOf      time.Time
 	Scope     Scope
 	Content   Content
 	Selection Selection
 	Options   Options
+	// Evidence is the owner's evaluated capture; nil builds the inventory
+	// and authored coverage only.
+	Evidence *Evidence
 }
 
 // Build resolves the baseline and mappings of in.Content and joins them to
@@ -202,7 +218,14 @@ func Build(in Input) *Report {
 	}
 	r := &Report{SchemaVersion: SchemaVersion, AsOf: in.AsOf.UTC(), Scope: in.Scope,
 		Inputs:   Inputs{Bundle: in.Content.Bundle, Selection: sel, Semantics: Semantics},
-		Mappings: MappingSummary{Definitions: []DocumentRef{}}, Controls: []ControlCoverage{}, Limitations: []Limitation{}}
+		Mappings: MappingSummary{Definitions: []DocumentRef{}}, Controls: []ControlCoverage{}, Limitations: []Limitation{},
+		TechnicalEvidence: TechnicalEvidence{State: EvidenceNotProvided}}
+	defer func() {
+		if in.Evidence != nil {
+			joinEvidence(r, in)
+		}
+		r.Limitations = sortLimitations(r.Limitations)
+	}()
 	l := newLoader(in.Content, in.Options)
 	b, err := readBaseline(l)
 	if err != nil {
@@ -234,7 +257,6 @@ func Build(in Input) *Report {
 	for _, c := range b.Controls {
 		r.Controls = append(r.Controls, j.control(c, m))
 	}
-	r.Limitations = sortLimitations(r.Limitations)
 	return r
 }
 

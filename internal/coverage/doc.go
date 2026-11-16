@@ -19,7 +19,12 @@
 // one framework: NIST SP 800-53 Rev. 5 Moderate is the first real fixture, not
 // a special case.
 //
+// Technical evidence is the assessment owner's frozen, evaluated capture
+// (Evidence), joined to the controls by exact observation key and logical
+// policy. Its states, outcomes and freshness are the owner's, never
+// re-evaluated; shared checks are referenced, not counted again.
+//
 // This package is pure: it performs no Kubernetes or network access and
-// reads no clock. Evidence joins, rendering, and the supporting-evidence
-// context are added by later groups of the change.
+// reads no clock. Rendering and the supporting-evidence context are added
+// by later groups of the change.
 package coverage

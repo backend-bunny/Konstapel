@@ -7,11 +7,13 @@ the baseline is listed. A missing check, a passing check, or an attached
 document never adds a control to the list or removes one from it.
 
 > **Status.** `internal/coverage` implements the baseline reader, the mapping
-> join and the report model (`add-control-coverage-reporting` group 1). It does
-> not yet read evidence. Assessment packages do not contain `coverage.json` or
-> `coverage.txt` yet, and assessment status has no coverage summary. Joining
-> collector observations, accepted risks and supporting documents, rendering,
-> and the assessment integration are later groups of that change.
+> join, the report model (`add-control-coverage-reporting` group 1) and the
+> join of the assessment owner's frozen technical evidence (group 2). Accepted
+> risk is not joined yet: the exception owner's projection does not exist, so
+> no observation is reported as an accepted risk. Assessment packages do not
+> contain `coverage.json` or `coverage.txt` yet, and assessment status has no
+> coverage summary. Rendering, supporting documents and the assessment
+> integration are later groups of that change.
 
 ## Inputs
 
@@ -111,7 +113,7 @@ Each check under a control has a selection state:
 
 | Check state | Meaning |
 | --- | --- |
-| `selected` | The profile selects the check's policy. Its observations, joined in a later group, are partial technical evidence within the authored limits. |
+| `selected` | The profile selects the check's policy. Its observations ([technical evidence](#technical-evidence)) are partial technical evidence within the authored limits. |
 | `unselected` | The check is available in the content, but the profile omits its policy. Nothing is evaluated. |
 | `unresolved` | The mapping cannot be trusted, for example because of a wrong-control statement, an undeclared rule or check, an unknown parameter, or a selection that pins other content. |
 
@@ -148,6 +150,205 @@ OSCAL parameters, and are never matched to them. A policy parameter
 contributes to a control parameter only through an authored mapping in the
 component definition.
 
+## Technical evidence
+
+Coverage joins the technical evidence of one assessment run to the control
+rows. The input (`coverage.Evidence`) is the assessment owner's frozen capture
+and its evaluation: `capture.json` and `evaluation.json` of a package, or the
+same values in memory. See the [assessment contract](integration/assessment-contract.md#collector-evidence-rules).
+
+### The owner's results, unchanged
+
+`internal/collector` decides each expected observation's state when the
+capture closes: `Attributable`, `Missing`, `Rejected` or `Unresolved`, with
+its reasons. Coverage takes those states as recorded:
+
+- It does not re-evaluate freshness, attribution or continuity. It has no
+  evidence-age setting and reads no clock. The same capture evaluated with a
+  different `maxEvidenceAge` gives a different report only because the owner's
+  evaluation differs.
+- The report's time is the capture's closure. A report built for another time
+  is refused (`EvidenceScopeMismatch`), so a later reader never renews or
+  expires the evidence.
+- Missing, rejected and unresolved observations stay what they are. They are
+  never a pass, a failure or a finding, and conflicting results stay
+  unresolved.
+- Counts use the owner's rules (`collector.Tally`, the function `Evaluate`
+  uses). A Kyverno `warn` counts once as `unknown`, and the raw `warn` stays in
+  the observation record. A Linux-only check on a workload declaring Windows
+  counts as `notApplicable` for that check. The control is not marked not
+  applicable.
+- `technicalEvidence.evidence` and `.outcomes` are the owner's summary, copied
+  verbatim. Every expected observation appears once in
+  `technicalEvidence.observations`, with the owner's expected-observation
+  identity and evaluation exactly as recorded.
+
+The evaluation must match its capture. Coverage checks that the capture's
+expected inventory is its derived inventory (`CaptureV2.Validate`). It also
+checks that each expected key has exactly one evaluation and that the owner's
+summary counts those evaluations. If any check fails, the evidence is
+`unresolved` (`EvidenceInconsistent`): the observations and summary are kept as
+recorded, but none is attributed to a control. A capture of another cluster, or
+one containing a binding outside the report's binding, is
+`EvidenceScopeMismatch` and is treated the same way. An identical repeated
+evaluation entry is counted once (`DuplicateObservation`).
+
+`technicalEvidence.state` is `notProvided` when the report was built without
+evidence. Then no row has evidence, which is not the same as having no findings.
+
+### Joining observations to controls
+
+An observation belongs to a binding contribution (binding, revision, engine
+policy). The capture's subject for that contribution names the bundle it was
+applied from. Observations are joined to a row's check through:
+
+1. The contribution's bundle, which must be the report's content. A
+   contribution applied from another bundle is `otherContent`, even if its
+   policy or control identifiers coincide.
+2. The contribution's logical policy, which is the descriptor policy that
+   provides the check's rule.
+3. Every sub-validation of that policy's engine policy. A policy that declares
+   more than one check cannot assign its sub-validations to one rule, so its
+   checks' evidence is unresolved (`EvidenceCheckAmbiguous`). It is never split
+   by guess.
+
+Only `selected` checks get evidence. Each contribution in
+`technicalEvidence.contributions` records its `attribution`:
+
+| Attribution | Meaning |
+| --- | --- |
+| `attributed` | A selected check of a baseline control is provided by the policy. |
+| `otherContent` | The contribution comes from another bundle (`EvidenceOtherContent`). |
+| `notSelected` | The selection does not select the policy (`EvidenceNotSelected`). |
+| `unmapped` | No selected baseline control maps the policy's checks (`EvidenceUnmapped`). |
+| `unresolved` | The inventory, the mappings, the check, or the evidence itself is unresolved (`EvidenceUnattributed`, or a blocking evidence limitation). |
+
+Observations that are not attributed are still listed and still counted in the
+owner's summary. They are not reassigned to a guessed control.
+
+### Counts: unique observations, not evaluations per row
+
+Every count in a report counts unique expected observations (by key) with
+the owner's rules. Observations are counted at several levels:
+
+| Level | Field | Counts |
+| --- | --- | --- |
+| Report | `technicalEvidence.evidence`, `.outcomes` | The owner's summary of the whole capture. |
+| Control | row `evidence` | Unique observations of the row's selected checks. |
+| Statement | row `statementEvidence[]` | Unique observations of the selected checks mapped to the statement. A requirement-level mapping counts only for the control. |
+| Check | check `evidence` | Observations of the check's policy, with one `contributions[]` entry per binding contribution. |
+
+A check can support several statements and controls. Its observations are then
+referenced by each of those rows, and each observation record's `controls`
+lists them. They are never several independent evaluations. Row counts
+therefore overlap and are **not additive**. No count of satisfied controls
+exists, and there is no aggregate across rows.
+
+Overlapping bindings, revisions and configurations of one check stay separate
+`contributions`, each with its own observation keys. Each of them is a separate
+expected observation in the owner's inventory, so the check counts each one.
+None of them adds coverage.
+
+A stale scope makes the expected checks of its policy unknown. A binding-wide
+stale scope does the same for every policy of the binding. Each view of an
+affected check counts the stale scope (`staleScopes`) and is `Incomplete`. A
+selected check with no expected observations and no stale scope is `NoTargets`.
+It is not covered, it does not pass, and no missing observation is invented for
+it. A control with automation `none` has no evidence at all.
+
+An unresolved view (`resolved: false`) has no counts, because part of its
+evidence could not be attributed.
+
+### Evidence is not coverage
+
+Automation states and evidence are separate dimensions. A row's `automation`
+says what is mapped and selected. Its `evidence` says what the selected checks
+observed. Evidence never changes `automation`, never produces `full`, and
+never makes a control, statement or baseline satisfied.
+
+The example below is regenerated by `TestControlCoverageDocExamples`. It
+selects all four hardening checks mapped to AC-6, and every observation passes
+on both pods. The evidence for those checks is `Complete`, but AC-6 is still
+`partial`: each check keeps its authored limit. The CM-6 and CM-7 rows reference
+subsets of the same observations, so the row counts sum to more than the
+report's unique count. The remaining controls have no automated assessment.
+
+<!-- coverage-evidence:begin -->
+```
+konstapel-linux-hardening, profile selects the 4 AC-6 checks: disallow-capabilities-strict, disallow-privilege-escalation, disallow-privileged-containers, require-run-as-nonroot
+capture  1 binding, 2 pods, every expected observation passes
+report   Complete: 8 expected, 8 attributable; pass 8 (unique observations)
+
+  ac-6   partial  4 of 4 checks selected, Complete: 8 expected, pass 8
+  cm-6   partial  3 of 4 checks selected, Complete: 6 expected, pass 6
+  cm-7   partial  1 of 2 checks selected, Complete: 2 expected, pass 2
+  rows sum to 16; the report has 8 unique observations
+  none   284 controls, no automated assessment
+```
+<!-- coverage-evidence:end -->
+
+An excerpt of the `ac-6` row of that example shows the control's evidence and
+one check's contribution. Observation keys are shown with `|` in place of their
+NUL separators.
+
+<!-- coverage-evidence-row:begin -->
+```
+{
+  "id": "ac-6",
+  "automation": "partial",
+  "evidence": {
+    "resolved": true,
+    "evidence": {
+      "completeness": "Complete",
+      "expected": 8,
+      "attributable": 8,
+      "missing": 0,
+      "rejected": 0,
+      "unresolved": 0
+    },
+    "outcomes": {
+      "pass": 8,
+      "fail": 0,
+      "error": 0,
+      "skip": 0,
+      "acceptedRisk": 0,
+      "notApplicable": 0,
+      "unknown": 0
+    }
+  },
+  "checks[0].ruleId": "disallow-capabilities-strict",
+  "checks[0].evidence.contributions": [
+    {
+      "bindingUID": "bind-a",
+      "revision": "r1",
+      "enginePolicy": "konstapel-bind-a-disallow-capabilities-strict-r1",
+      "mode": "Audit",
+      "evidence": {
+        "completeness": "Complete",
+        "expected": 2,
+        "attributable": 2,
+        "missing": 0,
+        "rejected": 0,
+        "unresolved": 0
+      },
+      "outcomes": {
+        "pass": 2,
+        "fail": 0,
+        "error": 0,
+        "skip": 0,
+        "acceptedRisk": 0,
+        "notApplicable": 0,
+        "unknown": 0
+      },
+      "observations": [
+        "cluster-1|ns-uid-a|/v1/pods|uid-p1|state-p1|konstapel-bind-a-disallow-capabilities-strict-r1|0|check-konstapel-bind-a-disallow-capabilities-strict-r1-0|bind-a|r1|sha256:source-disallow-capabilities-strict|sha256:mapping",
+        "cluster-1|ns-uid-a|/v1/pods|uid-p2|state-p2|konstapel-bind-a-disallow-capabilities-strict-r1|0|check-konstapel-bind-a-disallow-capabilities-strict-r1-0|bind-a|r1|sha256:source-disallow-capabilities-strict|sha256:mapping"
+      ]
+    }
+  ]
+}
+```
+<!-- coverage-evidence-row:end -->
 ## Limitations
 
 Every limitation has a `code`, an optional `document` and `subject`, and a
@@ -161,6 +362,7 @@ records a deduplication or a mapping that was not attributed.
 | Profile | `ProfileNotDeclared`, `ProfileAmbiguous`, `ImportUnresolved`, `ImportExternal`, `ImportOutsideContent`, `ImportAmbiguous`, `ImportCycle`, `ImportDepth`, `SemanticsUnsupported`, `SelectionNotInSource`, `MultipleCatalogs`, `DuplicateCatalogID`, `EmptySelection`, `DuplicateSelection` (notice) |
 | Mappings | `MappingSourceUnresolved`, `MappingCatalogMismatch` (notice), `MappingControlUnknown` (notice), `MappingControlNotSelected` (notice), `DuplicateMapping` (notice), `StatementNotInControl`, `RuleUndeclared`, `RuleNotInContent`, `CheckUndeclared`, `ParameterUnresolved` |
 | Selection | `SelectionContentMismatch`, `PolicyNotInContent` |
+| Evidence | `EvidenceInconsistent`, `EvidenceScopeMismatch`, `EvidenceCheckAmbiguous`, `DuplicateObservation` (notice), `EvidenceOtherContent` (notice), `EvidenceNotSelected` (notice), `EvidenceUnmapped` (notice), `EvidenceUnattributed` (notice) |
 
 ## Examples: the pinned Moderate inventory
 

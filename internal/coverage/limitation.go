@@ -45,6 +45,16 @@ const (
 	CodeParameterUnresolved       = "ParameterUnresolved"
 	CodeSelectionContentMismatch  = "SelectionContentMismatch"
 	CodePolicyNotInContent        = "PolicyNotInContent"
+
+	// Technical evidence: the assessment owner's evaluated capture.
+	CodeEvidenceInconsistent   = "EvidenceInconsistent"   // the evaluation does not match its capture
+	CodeEvidenceScopeMismatch  = "EvidenceScopeMismatch"  // the capture is not of the report's scope or time
+	CodeDuplicateObservation   = "DuplicateObservation"   // non-blocking: counted once
+	CodeEvidenceCheckAmbiguous = "EvidenceCheckAmbiguous" // a policy's sub-validations cannot be attributed to one rule
+	CodeEvidenceOtherContent   = "EvidenceOtherContent"   // non-blocking: not attributed
+	CodeEvidenceNotSelected    = "EvidenceNotSelected"    // non-blocking: not attributed
+	CodeEvidenceUnmapped       = "EvidenceUnmapped"       // non-blocking: not attributed
+	CodeEvidenceUnattributed   = "EvidenceUnattributed"   // non-blocking: not attributed
 )
 
 // Limitation is a coded, bounded explanation of what could not be resolved
