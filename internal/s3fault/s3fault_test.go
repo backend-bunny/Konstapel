@@ -224,3 +224,56 @@ func TestSignatureTarget(t *testing.T) {
 		}
 	})
 }
+
+// Failing a binding UID refuses its publication requests at once and never
+// forwards them; requests for other keys, such as destination probes, pass.
+// Release lets them through again.
+func TestFailRefusesOnlyTheUIDsRequests(t *testing.T) {
+	const binding = "5d8c1f0e-2222-4b5e-9d1a-2b3c4d5e6f70"
+	p, be, url := setup(t)
+	cs := httptest.NewServer(p.Control())
+	defer cs.Close()
+	for _, bad := range []string{"/fail", "/fail?uid=a/b"} {
+		if code, _ := send(t, cs.URL, http.MethodPost, bad, "", false); code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", bad, code)
+		}
+	}
+	if code, _ := send(t, cs.URL, http.MethodPost, "/fail?uid="+binding, "", false); code != http.StatusOK {
+		t.Fatalf("fail: %d", code)
+	}
+	archive := "/bucket/p/evidence/c/" + binding + "/" + run + "/attempts/1/package.tar.gz"
+	start := time.Now()
+	if code, err := send(t, url, http.MethodPut, archive, "pkg", false); err != nil || code != http.StatusServiceUnavailable {
+		t.Fatalf("failing upload: %d %v", code, err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("a failing request was held for %s", time.Since(start))
+	}
+	probe := "/bucket/p/.konstapel-probe"
+	if code, err := send(t, url, http.MethodGet, probe, "", false); err != nil || code != http.StatusOK {
+		t.Fatalf("unrelated request while failing: %d %v", code, err)
+	}
+	// A prefix of the UID, or the UID inside a longer segment, is not a match.
+	other := "/bucket/p/evidence/c/" + binding + "x/" + run + "/commit.json"
+	if code, _ := send(t, url, http.MethodPut, other, "m", true); code != http.StatusOK {
+		t.Fatalf("other segment: %d", code)
+	}
+	p.Arm(ModeHold, "another-run")
+	if st := p.Snapshot(); st.Failing != binding {
+		t.Fatalf("arming cleared the failing UID: %+v", st)
+	}
+	if code, _ := send(t, url, http.MethodPut, archive, "pkg", false); code != http.StatusServiceUnavailable || p.Snapshot().Failed != 1 {
+		t.Fatalf("after arming: %d %+v", code, p.Snapshot())
+	}
+	for _, r := range be.seen() {
+		if strings.Contains(r, "/"+binding+"/") {
+			t.Fatalf("a refused request reached the backend: %q", r)
+		}
+	}
+	if code, _ := send(t, cs.URL, http.MethodPost, "/release", "", false); code != http.StatusOK || p.Snapshot().Failing != "" {
+		t.Fatalf("release: %d %+v", code, p.Snapshot())
+	}
+	if code, err := send(t, url, http.MethodPut, archive, "pkg", false); err != nil || code != http.StatusOK {
+		t.Fatalf("after release: %d %v", code, err)
+	}
+}

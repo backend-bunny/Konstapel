@@ -579,8 +579,9 @@ cert-manager TLS and a reader in another namespace, and checks:
 - a certificate reissued by cert-manager is served without a pod restart;
 - deleting the reader binding stops scraping within the 5-minute bound.
 
-`TestLiveHelmMonitoring` repeats the reader and revocation checks as a real
-Prometheus (see [Verified Operator setup](#verified-operator-setup)).
+`TestLiveHelmMonitoring` (the `monitoring` group) repeats the reader and
+revocation checks as a real Prometheus, while a replica is replaced (see
+[Verified Operator setup](#verified-operator-setup)).
 
 Credential access, rotation and reader identities for the monitoring system
 are in [Monitoring integration](#monitoring-integration), which also covers
@@ -649,6 +650,14 @@ release namespace, must be listed in `metrics.readers` (or bound to
 rotated by the kubelet; a file-based token follows rotation, a Secret
 token follows whatever rotation you run. The controller accepts a rotated
 token within the cache bounds in [Controller metrics](#controller-metrics).
+To rotate a Secret token without a gap, put the new token into the Secret,
+wait until the Operator and the kubelet have delivered it to Prometheus (the
+acceptance waits 150 seconds; the Secret mode took about 100 to 150 seconds
+to take effect there), then revoke the old token. The controller refuses a
+revoked token once its 1-minute authentication cache expires. Acceptance
+binds the token to a Secret (TokenRequest `boundObjectRef`), so deleting
+that Secret revokes it; the kubelet's rotation of projected tokens (about an
+hour) is not shortened there.
 
 **Discovery is not guaranteed by the object.** Prometheus selects
 ServiceMonitors by its `serviceMonitorSelector` (labels; put them in
@@ -728,7 +737,7 @@ monitoring acceptance, described next.
 
 #### Verified Operator setup
 
-`TestLiveHelmMonitoring` (the `charts` group) runs the setup above against a
+`TestLiveHelmMonitoring` (the `monitoring` group) runs the setup above against a
 real Prometheus Operator, so the documented values are exercised rather than
 only rendered. `scripts/acceptance.sh` installs the Operator from its pinned
 release bundle (`scripts/fetch-operator-crds.sh --bundle`: `bundle.yaml`
@@ -759,18 +768,26 @@ operator and config-reloader images replaced by their digest-pinned
    `serviceAccountToken` mode, which uses `bearerTokenFile`, is rejected and its
    targets vanish; `helm upgrade` to `authorization.mode=secret` with a token
    Secret in the release namespace brings them back up;
-7. deletes the `konstapel-metrics-reader` binding and measures how long until
-   the Prometheus targets report `403`;
+7. runs the [integrated acceptance](integration/metrics.md#integrated-acceptance)
+   on the same release and Prometheus: tuned rules through `helm upgrade`,
+   real producer failures and recoveries evaluated by the starter alerts,
+   binding recreation, leader loss and restart, certificate and token
+   rotation, and finally deletes the `konstapel-metrics-reader` binding while
+   a replica is replaced, measuring how long until every Prometheus target
+   reports `403`, and restores it;
 8. deletes the Prometheus and fails if any of its Pods remain. The disposable
-   cluster, and with it the Operator, is removed by the acceptance teardown.
+   cluster, and with it the Operator, is removed by the acceptance teardown;
+   the test S3 service and fault proxy containers are removed by the test.
 
 Local measurements (one run, kind, 15s scrape interval): all replicas up 9s
 after the Prometheus API answered; the file-access policy rejected the default
 mode 66s after it was set and the Secret mode scraped again 153s after the
 `helm upgrade`; scrapes failed with `403` 313s (CI: 315s) after the binding was deleted,
 which is the 5-minute allow cache plus a scrape interval, as documented in
-[Controller metrics](#controller-metrics). Expect up to about 5 minutes and 30
-seconds, never longer.
+[Controller metrics](#controller-metrics). In the integrated run, which replaces
+a replica during the revocation, every target was refused after 135s: the new
+replica has no cached answer, and the other's cached answer was older. Expect
+up to about 5 minutes and 30 seconds, never longer.
 
 The dependency versions of every run (Operator, config-reloader, Prometheus
 and controller images, the running Prometheus version) are recorded in
@@ -969,7 +986,9 @@ rebuilt or re-rendered between acceptance and the registry.
    source. It verifies the manifest against `HEAD` and the image digest, then
    runs every **release-required group**: those marked `"release": true` in
    `scripts/acceptance-groups.json` as committed at `HEAD`, today `charts`
-   (CRD chart lifecycle, installed controller, both TLS modes, downloads) and
+   (CRD chart lifecycle, installed controller, both TLS modes, downloads),
+   `monitoring` (the installed controller under a real Prometheus Operator
+   and Prometheus, with its starter alerts through real failures) and
    `availability` (multi-node placement, disruption budgets, upgrades,
    leader, pod and node loss, and recovery). Each group runs through
    `scripts/acceptance.sh` on its own fresh disposable cluster, one after

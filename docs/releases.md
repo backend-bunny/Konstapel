@@ -117,7 +117,7 @@ archive checksum and install that file. Rerunning it replaces only that
 block.
 
 Ordinary pushes to `main` publish no charts. Pull requests run the same
-`charts` and `availability` acceptance groups (with an image built from the
+`charts`, `monitoring` and `availability` acceptance groups (with an image built from the
 pull request), but never sign or write to the chart registry.
 
 **Trust identities.**
