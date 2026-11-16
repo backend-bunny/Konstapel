@@ -338,6 +338,9 @@ func sortedSelection(sel Selection) Selection {
 	if sel.Policies == nil {
 		sel.Policies = []SelectedPolicy{}
 	}
+	for i := range sel.Policies {
+		sel.Policies[i].Parameters = compactJSON(sel.Policies[i].Parameters)
+	}
 	slices.SortStableFunc(sel.Policies, func(a, b SelectedPolicy) int { return strings.Compare(a.Name, b.Name) })
 	return sel
 }

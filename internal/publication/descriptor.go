@@ -67,9 +67,26 @@ const (
 	RoleContent             FileRole = "content"
 	RoleProvenance          FileRole = "provenance"
 	RoleDiagnostic          FileRole = "diagnostic"
+	// RoleCoverage and RoleCoverageText are the control coverage summary
+	// (add-control-coverage-reporting): the versioned JSON report at
+	// CoverageFile and its readable rendering at CoverageTextFile. They are
+	// summaries, never OSCAL results, and may appear in either package
+	// kind, always together. A descriptor reader that predates them rejects
+	// them as unknown roles (fail closed).
+	RoleCoverage     FileRole = "coverage-summary"
+	RoleCoverageText FileRole = "coverage-summary-text"
 )
 
-var roles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan, RoleComponentDefinition, RoleSummary, RoleEvidenceExtract, RoleCapture, RoleContent, RoleProvenance, RoleDiagnostic}
+// Fixed package paths of the coverage summary files.
+const (
+	CoverageFile     = "coverage.json"
+	CoverageTextFile = "coverage.txt"
+)
+
+var roles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan, RoleComponentDefinition, RoleSummary, RoleEvidenceExtract, RoleCapture, RoleContent, RoleProvenance, RoleDiagnostic, RoleCoverage, RoleCoverageText}
+
+// coveragePaths fixes where each coverage role lives.
+var coveragePaths = map[FileRole]string{RoleCoverage: CoverageFile, RoleCoverageText: CoverageTextFile}
 
 // oscalRoles may only appear in assessment packages.
 var oscalRoles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan}
@@ -428,7 +445,15 @@ func (d Descriptor) Validate() error {
 		if !sha256Hex.MatchString(f.SHA256) || f.Size < 0 {
 			fail("file %q requires a lowercase SHA-256 and non-negative size", f.Path)
 		}
+		for role, p := range coveragePaths {
+			if (f.Role == role) != (f.Path == p) {
+				fail("file %q: role %s is only valid for %s", f.Path, role, p)
+			}
+		}
 		present[f.Role] = true
+	}
+	if present[RoleCoverage] != present[RoleCoverageText] {
+		fail("coverage summary requires both %s and %s", CoverageFile, CoverageTextFile)
 	}
 	if !slices.IsSortedFunc(d.Files, func(a, b File) int { return strings.Compare(a.Path, b.Path) }) {
 		fail("files must be sorted by path")

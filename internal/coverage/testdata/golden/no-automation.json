@@ -1,0 +1,199 @@
+{
+  "schemaVersion": "konstapel.io/coverage/v1",
+  "asOf": "2026-11-16T10:10:00Z",
+  "scope": {
+    "kind": "Binding",
+    "cluster": "cluster-1",
+    "binding": {
+      "name": "bind-a",
+      "uid": "bind-a"
+    },
+    "namespaces": [
+      {
+        "name": "team-a",
+        "uid": "ns-uid-a"
+      }
+    ]
+  },
+  "inputs": {
+    "bundle": {
+      "name": "fixture",
+      "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "selection": {
+      "bundle": {
+        "name": "fixture",
+        "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "policies": []
+    },
+    "semantics": "konstapel.io/oscal-profile-selection/v1",
+    "contentPath": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "inventory": {
+    "resolved": true,
+    "profile": {
+      "path": "content/alt/profile.json",
+      "model": "profile",
+      "digest": "sha256:dc6bcc2398c94fb49a84bc1b014f03adc2b0bc4e38dcbb6d2f7c4ebf978758c1",
+      "oscalVersion": "1.2.3",
+      "title": "Example tailored baseline",
+      "version": "1.0.0"
+    },
+    "catalog": {
+      "path": "content/alt/catalog.json",
+      "model": "catalog",
+      "digest": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0",
+      "oscalVersion": "1.2.3",
+      "title": "Example Secure Operations Framework",
+      "version": "1.0.0"
+    },
+    "imports": [
+      {
+        "path": "content/alt/base-profile.json",
+        "model": "profile",
+        "digest": "sha256:657f973ae7ea2aae1e2f19d087adb6df2d7594f9b492cf6509ff1bfa988aa1f5",
+        "oscalVersion": "1.2.3",
+        "title": "Example base selection",
+        "version": "1.0.0"
+      }
+    ],
+    "controls": 4,
+    "enhancements": 1,
+    "statements": 6
+  },
+  "mappings": {
+    "resolved": true,
+    "definitions": []
+  },
+  "controls": [
+    {
+      "id": "fa1",
+      "title": "Site Access",
+      "groups": [
+        {
+          "id": "fac",
+          "title": "Facilities"
+        }
+      ],
+      "statements": [
+        "fa1-req"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#fa1",
+      "automation": "none",
+      "checks": []
+    },
+    {
+      "id": "op1",
+      "label": "OP 1",
+      "title": "Key Rotation",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op1-req",
+        "op1-req-a",
+        "op1-req-b"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op1",
+      "automation": "none",
+      "checks": []
+    },
+    {
+      "id": "op1.e1",
+      "title": "Automated Rotation",
+      "parent": "op1",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op1.e1-req"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op1.e1",
+      "automation": "none",
+      "checks": []
+    },
+    {
+      "id": "op2",
+      "title": "Privilege Limits",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op2-req"
+      ],
+      "parameters": [
+        {
+          "id": "op2-freq",
+          "label": "review frequency"
+        }
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op2",
+      "automation": "none",
+      "checks": []
+    }
+  ],
+  "technicalEvidence": {
+    "state": "resolved",
+    "cluster": "cluster-1",
+    "window": {
+      "started": "2026-11-16T10:00:00Z",
+      "closed": "2026-11-16T10:10:00Z"
+    },
+    "mappingSha256": "sha256:mapping",
+    "evidence": {
+      "completeness": "NoTargets",
+      "expected": 0,
+      "attributable": 0,
+      "missing": 0,
+      "rejected": 0,
+      "unresolved": 0
+    },
+    "outcomes": {
+      "pass": 0,
+      "fail": 0,
+      "error": 0,
+      "skip": 0,
+      "acceptedRisk": 0,
+      "notApplicable": 0,
+      "unknown": 0
+    }
+  },
+  "limitations": [],
+  "sources": [
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/base-profile.json",
+      "kind": "profile",
+      "sha256": "657f973ae7ea2aae1e2f19d087adb6df2d7594f9b492cf6509ff1bfa988aa1f5"
+    },
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/catalog.json",
+      "kind": "catalog",
+      "sha256": "09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0"
+    },
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/profile.json",
+      "kind": "profile",
+      "sha256": "dc6bcc2398c94fb49a84bc1b014f03adc2b0bc4e38dcbb6d2f7c4ebf978758c1"
+    },
+    {
+      "path": "capture.json",
+      "kind": "capture",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "path": "evaluation.json",
+      "kind": "evaluation",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ]
+}

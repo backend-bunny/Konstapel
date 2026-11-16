@@ -1,0 +1,625 @@
+{
+  "schemaVersion": "konstapel.io/coverage/v1",
+  "asOf": "2026-11-16T10:10:00Z",
+  "scope": {
+    "kind": "Binding",
+    "cluster": "cluster-1",
+    "binding": {
+      "name": "bind-a",
+      "uid": "bind-a"
+    },
+    "namespaces": [
+      {
+        "name": "team-a",
+        "uid": "ns-uid-a"
+      }
+    ]
+  },
+  "inputs": {
+    "bundle": {
+      "name": "fixture",
+      "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "selection": {
+      "bundle": {
+        "name": "fixture",
+        "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "policies": [
+        {
+          "name": "no-root-policy"
+        },
+        {
+          "name": "rotate-keys-policy",
+          "parameters": {
+            "maxAgeDays": 90
+          }
+        }
+      ]
+    },
+    "semantics": "konstapel.io/oscal-profile-selection/v1",
+    "contentPath": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "inventory": {
+    "resolved": true,
+    "profile": {
+      "path": "content/alt/profile.json",
+      "model": "profile",
+      "digest": "sha256:dc6bcc2398c94fb49a84bc1b014f03adc2b0bc4e38dcbb6d2f7c4ebf978758c1",
+      "oscalVersion": "1.2.3",
+      "title": "Example tailored baseline",
+      "version": "1.0.0"
+    },
+    "catalog": {
+      "path": "content/alt/catalog.json",
+      "model": "catalog",
+      "digest": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0",
+      "oscalVersion": "1.2.3",
+      "title": "Example Secure Operations Framework",
+      "version": "1.0.0"
+    },
+    "imports": [
+      {
+        "path": "content/alt/base-profile.json",
+        "model": "profile",
+        "digest": "sha256:657f973ae7ea2aae1e2f19d087adb6df2d7594f9b492cf6509ff1bfa988aa1f5",
+        "oscalVersion": "1.2.3",
+        "title": "Example base selection",
+        "version": "1.0.0"
+      }
+    ],
+    "controls": 4,
+    "enhancements": 1,
+    "statements": 6
+  },
+  "mappings": {
+    "resolved": true,
+    "definitions": [
+      {
+        "path": "content/alt/component-definition.json",
+        "model": "component-definition",
+        "digest": "sha256:5571cbad661eac8d541f037cdb9ae94241a062913bed2aaac635133f4da98908",
+        "oscalVersion": "1.1.3",
+        "title": "Example mappings",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "controls": [
+    {
+      "id": "fa1",
+      "title": "Site Access",
+      "groups": [
+        {
+          "id": "fac",
+          "title": "Facilities"
+        }
+      ],
+      "statements": [
+        "fa1-req"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#fa1",
+      "automation": "none",
+      "checks": []
+    },
+    {
+      "id": "op1",
+      "label": "OP 1",
+      "title": "Key Rotation",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op1-req",
+        "op1-req-a",
+        "op1-req-b"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op1",
+      "automation": "partial",
+      "checks": [
+        {
+          "ruleId": "rotate-keys",
+          "checkId": "rotate-keys",
+          "policy": "rotate-keys-policy",
+          "policyDigest": "sha256:c36d17088312bf951045a51c65210b17560ee4388ea8e63a31dba3112b73e728",
+          "selection": "selected",
+          "description": "Partial: checks the declared rotation interval only.",
+          "checkDescription": "rotation check",
+          "requirementDescription": "Rotation evidence only.",
+          "statements": [
+            {
+              "id": "op1-req-a",
+              "description": "Declared interval."
+            }
+          ],
+          "definitions": [
+            "content/alt/component-definition.json"
+          ],
+          "ruleParameters": [
+            {
+              "id": "rotation_days",
+              "description": "Maximum key age in days.",
+              "values": [
+                "90"
+              ]
+            }
+          ],
+          "policyParameters": {
+            "maxAgeDays": 90
+          },
+          "evidence": {
+            "resolved": true,
+            "evidence": {
+              "completeness": "Complete",
+              "expected": 2,
+              "attributable": 2,
+              "missing": 0,
+              "rejected": 0,
+              "unresolved": 0
+            },
+            "outcomes": {
+              "pass": 2,
+              "fail": 0,
+              "error": 0,
+              "skip": 0,
+              "acceptedRisk": 0,
+              "notApplicable": 0,
+              "unknown": 0
+            },
+            "contributions": [
+              {
+                "bindingUID": "bind-a",
+                "revision": "r1",
+                "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+                "mode": "Audit",
+                "evidence": {
+                  "completeness": "Complete",
+                  "expected": 2,
+                  "attributable": 2,
+                  "missing": 0,
+                  "rejected": 0,
+                  "unresolved": 0
+                },
+                "outcomes": {
+                  "pass": 2,
+                  "fail": 0,
+                  "error": 0,
+                  "skip": 0,
+                  "acceptedRisk": 0,
+                  "notApplicable": 0,
+                  "unknown": 0
+                },
+                "observations": [
+                  "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p1\u0000state-p1\u0000konstapel-bind-a-rotate-keys-policy-r1\u00000\u0000check-konstapel-bind-a-rotate-keys-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-rotate-keys-policy\u0000sha256:mapping",
+                  "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p2\u0000state-p2\u0000konstapel-bind-a-rotate-keys-policy-r1\u00000\u0000check-konstapel-bind-a-rotate-keys-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-rotate-keys-policy\u0000sha256:mapping"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "evidence": {
+        "resolved": true,
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 2,
+          "attributable": 2,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "outcomes": {
+          "pass": 2,
+          "fail": 0,
+          "error": 0,
+          "skip": 0,
+          "acceptedRisk": 0,
+          "notApplicable": 0,
+          "unknown": 0
+        }
+      },
+      "statementEvidence": [
+        {
+          "id": "op1-req-a",
+          "rules": [
+            "rotate-keys"
+          ],
+          "resolved": true,
+          "evidence": {
+            "completeness": "Complete",
+            "expected": 2,
+            "attributable": 2,
+            "missing": 0,
+            "rejected": 0,
+            "unresolved": 0
+          },
+          "outcomes": {
+            "pass": 2,
+            "fail": 0,
+            "error": 0,
+            "skip": 0,
+            "acceptedRisk": 0,
+            "notApplicable": 0,
+            "unknown": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "op1.e1",
+      "title": "Automated Rotation",
+      "parent": "op1",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op1.e1-req"
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op1.e1",
+      "automation": "none",
+      "checks": []
+    },
+    {
+      "id": "op2",
+      "title": "Privilege Limits",
+      "groups": [
+        {
+          "id": "ops",
+          "title": "Operations"
+        }
+      ],
+      "statements": [
+        "op2-req"
+      ],
+      "parameters": [
+        {
+          "id": "op2-freq",
+          "label": "review frequency"
+        }
+      ],
+      "qualifiedId": "sha256:09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0#op2",
+      "automation": "partial",
+      "checks": [
+        {
+          "ruleId": "no-root",
+          "checkId": "no-root",
+          "policy": "no-root-policy",
+          "policyDigest": "sha256:c36d17088312bf951045a51c65210b17560ee4388ea8e63a31dba3112b73e728",
+          "selection": "selected",
+          "description": "Partial: declared non-root execution only.",
+          "requirementDescription": "Non-root only.",
+          "statements": [],
+          "definitions": [
+            "content/alt/component-definition.json"
+          ],
+          "oscalParameters": [
+            {
+              "paramId": "op2-freq",
+              "values": [
+                "monthly"
+              ]
+            }
+          ],
+          "evidence": {
+            "resolved": true,
+            "evidence": {
+              "completeness": "Complete",
+              "expected": 2,
+              "attributable": 2,
+              "missing": 0,
+              "rejected": 0,
+              "unresolved": 0
+            },
+            "outcomes": {
+              "pass": 2,
+              "fail": 0,
+              "error": 0,
+              "skip": 0,
+              "acceptedRisk": 0,
+              "notApplicable": 0,
+              "unknown": 0
+            },
+            "contributions": [
+              {
+                "bindingUID": "bind-a",
+                "revision": "r1",
+                "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+                "mode": "Audit",
+                "evidence": {
+                  "completeness": "Complete",
+                  "expected": 2,
+                  "attributable": 2,
+                  "missing": 0,
+                  "rejected": 0,
+                  "unresolved": 0
+                },
+                "outcomes": {
+                  "pass": 2,
+                  "fail": 0,
+                  "error": 0,
+                  "skip": 0,
+                  "acceptedRisk": 0,
+                  "notApplicable": 0,
+                  "unknown": 0
+                },
+                "observations": [
+                  "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p1\u0000state-p1\u0000konstapel-bind-a-no-root-policy-r1\u00000\u0000check-konstapel-bind-a-no-root-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-no-root-policy\u0000sha256:mapping",
+                  "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p2\u0000state-p2\u0000konstapel-bind-a-no-root-policy-r1\u00000\u0000check-konstapel-bind-a-no-root-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-no-root-policy\u0000sha256:mapping"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "evidence": {
+        "resolved": true,
+        "evidence": {
+          "completeness": "Complete",
+          "expected": 2,
+          "attributable": 2,
+          "missing": 0,
+          "rejected": 0,
+          "unresolved": 0
+        },
+        "outcomes": {
+          "pass": 2,
+          "fail": 0,
+          "error": 0,
+          "skip": 0,
+          "acceptedRisk": 0,
+          "notApplicable": 0,
+          "unknown": 0
+        }
+      }
+    }
+  ],
+  "technicalEvidence": {
+    "state": "resolved",
+    "cluster": "cluster-1",
+    "window": {
+      "started": "2026-11-16T10:00:00Z",
+      "closed": "2026-11-16T10:10:00Z"
+    },
+    "mappingSha256": "sha256:mapping",
+    "evidence": {
+      "completeness": "Complete",
+      "expected": 4,
+      "attributable": 4,
+      "missing": 0,
+      "rejected": 0,
+      "unresolved": 0
+    },
+    "outcomes": {
+      "pass": 4,
+      "fail": 0,
+      "error": 0,
+      "skip": 0,
+      "acceptedRisk": 0,
+      "notApplicable": 0,
+      "unknown": 0
+    },
+    "contributions": [
+      {
+        "bindingUID": "bind-a",
+        "revision": "r1",
+        "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+        "logicalPolicy": "no-root-policy",
+        "mode": "Audit",
+        "bundle": {
+          "name": "fixture",
+          "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "attribution": "attributed"
+      },
+      {
+        "bindingUID": "bind-a",
+        "revision": "r1",
+        "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+        "logicalPolicy": "rotate-keys-policy",
+        "mode": "Audit",
+        "bundle": {
+          "name": "fixture",
+          "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "attribution": "attributed"
+      }
+    ],
+    "observations": [
+      {
+        "expected": {
+          "cluster": "cluster-1",
+          "namespaceUID": "ns-uid-a",
+          "workload": {
+            "resource": "/v1/pods",
+            "namespace": "team-a",
+            "namespaceUID": "ns-uid-a",
+            "name": "p1",
+            "uid": "uid-p1",
+            "stateSha256": "state-p1"
+          },
+          "check": {
+            "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+            "validationIndex": 0,
+            "sha256": "check-konstapel-bind-a-no-root-policy-r1-0"
+          },
+          "contribution": {
+            "bindingUID": "bind-a",
+            "revision": "r1",
+            "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+            "logicalPolicy": "no-root-policy",
+            "mode": "Audit"
+          },
+          "sourceSha256": "sha256:source-no-root-policy",
+          "mappingSha256": "sha256:mapping"
+        },
+        "observation": {
+          "key": "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p1\u0000state-p1\u0000konstapel-bind-a-no-root-policy-r1\u00000\u0000check-konstapel-bind-a-no-root-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-no-root-policy\u0000sha256:mapping",
+          "state": "Attributable",
+          "outcome": "pass",
+          "evaluated": "2026-11-16T10:01:00Z",
+          "report": "report-p1",
+          "resultIndex": 0
+        },
+        "controls": [
+          "op2"
+        ]
+      },
+      {
+        "expected": {
+          "cluster": "cluster-1",
+          "namespaceUID": "ns-uid-a",
+          "workload": {
+            "resource": "/v1/pods",
+            "namespace": "team-a",
+            "namespaceUID": "ns-uid-a",
+            "name": "p1",
+            "uid": "uid-p1",
+            "stateSha256": "state-p1"
+          },
+          "check": {
+            "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+            "validationIndex": 0,
+            "sha256": "check-konstapel-bind-a-rotate-keys-policy-r1-0"
+          },
+          "contribution": {
+            "bindingUID": "bind-a",
+            "revision": "r1",
+            "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+            "logicalPolicy": "rotate-keys-policy",
+            "mode": "Audit"
+          },
+          "sourceSha256": "sha256:source-rotate-keys-policy",
+          "mappingSha256": "sha256:mapping"
+        },
+        "observation": {
+          "key": "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p1\u0000state-p1\u0000konstapel-bind-a-rotate-keys-policy-r1\u00000\u0000check-konstapel-bind-a-rotate-keys-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-rotate-keys-policy\u0000sha256:mapping",
+          "state": "Attributable",
+          "outcome": "pass",
+          "evaluated": "2026-11-16T10:01:00Z",
+          "report": "report-p1",
+          "resultIndex": 0
+        },
+        "controls": [
+          "op1"
+        ]
+      },
+      {
+        "expected": {
+          "cluster": "cluster-1",
+          "namespaceUID": "ns-uid-a",
+          "workload": {
+            "resource": "/v1/pods",
+            "namespace": "team-a",
+            "namespaceUID": "ns-uid-a",
+            "name": "p2",
+            "uid": "uid-p2",
+            "stateSha256": "state-p2"
+          },
+          "check": {
+            "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+            "validationIndex": 0,
+            "sha256": "check-konstapel-bind-a-no-root-policy-r1-0"
+          },
+          "contribution": {
+            "bindingUID": "bind-a",
+            "revision": "r1",
+            "enginePolicy": "konstapel-bind-a-no-root-policy-r1",
+            "logicalPolicy": "no-root-policy",
+            "mode": "Audit"
+          },
+          "sourceSha256": "sha256:source-no-root-policy",
+          "mappingSha256": "sha256:mapping"
+        },
+        "observation": {
+          "key": "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p2\u0000state-p2\u0000konstapel-bind-a-no-root-policy-r1\u00000\u0000check-konstapel-bind-a-no-root-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-no-root-policy\u0000sha256:mapping",
+          "state": "Attributable",
+          "outcome": "pass",
+          "evaluated": "2026-11-16T10:01:00Z",
+          "report": "report-p2",
+          "resultIndex": 0
+        },
+        "controls": [
+          "op2"
+        ]
+      },
+      {
+        "expected": {
+          "cluster": "cluster-1",
+          "namespaceUID": "ns-uid-a",
+          "workload": {
+            "resource": "/v1/pods",
+            "namespace": "team-a",
+            "namespaceUID": "ns-uid-a",
+            "name": "p2",
+            "uid": "uid-p2",
+            "stateSha256": "state-p2"
+          },
+          "check": {
+            "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+            "validationIndex": 0,
+            "sha256": "check-konstapel-bind-a-rotate-keys-policy-r1-0"
+          },
+          "contribution": {
+            "bindingUID": "bind-a",
+            "revision": "r1",
+            "enginePolicy": "konstapel-bind-a-rotate-keys-policy-r1",
+            "logicalPolicy": "rotate-keys-policy",
+            "mode": "Audit"
+          },
+          "sourceSha256": "sha256:source-rotate-keys-policy",
+          "mappingSha256": "sha256:mapping"
+        },
+        "observation": {
+          "key": "cluster-1\u0000ns-uid-a\u0000/v1/pods\u0000uid-p2\u0000state-p2\u0000konstapel-bind-a-rotate-keys-policy-r1\u00000\u0000check-konstapel-bind-a-rotate-keys-policy-r1-0\u0000bind-a\u0000r1\u0000sha256:source-rotate-keys-policy\u0000sha256:mapping",
+          "state": "Attributable",
+          "outcome": "pass",
+          "evaluated": "2026-11-16T10:01:00Z",
+          "report": "report-p2",
+          "resultIndex": 0
+        },
+        "controls": [
+          "op1"
+        ]
+      }
+    ]
+  },
+  "limitations": [],
+  "sources": [
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/base-profile.json",
+      "kind": "profile",
+      "sha256": "657f973ae7ea2aae1e2f19d087adb6df2d7594f9b492cf6509ff1bfa988aa1f5"
+    },
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/catalog.json",
+      "kind": "catalog",
+      "sha256": "09d49f9098789bece37472b4ff6693449edc0125ec15fe1ee44dabc2fa51eee0"
+    },
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/component-definition.json",
+      "kind": "component-definition",
+      "sha256": "5571cbad661eac8d541f037cdb9ae94241a062913bed2aaac635133f4da98908"
+    },
+    {
+      "path": "bundles/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/content/alt/profile.json",
+      "kind": "profile",
+      "sha256": "dc6bcc2398c94fb49a84bc1b014f03adc2b0bc4e38dcbb6d2f7c4ebf978758c1"
+    },
+    {
+      "path": "capture.json",
+      "kind": "capture",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "path": "evaluation.json",
+      "kind": "evaluation",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ]
+}
