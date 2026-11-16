@@ -423,6 +423,7 @@ has no profile parameters, so the check has no `policyParameters` field.
   "statements": [
     "ac-6_smt"
   ],
+  "qualifiedId": "sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb#ac-6",
   "automation": "partial",
   "checks": [
     {
