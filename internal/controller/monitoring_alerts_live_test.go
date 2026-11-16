@@ -1039,10 +1039,10 @@ func (m *obsRun) bindingValues(metric string) map[string]float64 {
 }
 
 // leaderKilled (6.3) force-deletes the leader pod while a run is in
-// flight: the other replica takes the Lease, reconstructs and becomes the
+// flight: a surviving replica takes the Lease, reconstructs and becomes the
 // only owner; every binding is exposed once with the same values; the
-// killed pod's series are gone, its replacement exposes no summaries and
-// fresh counters; and the run completes.
+// killed pod's series are gone, the other replica exposes no summaries and
+// zero counters; and the run completes.
 func (m *obsRun) leaderKilled() {
 	l, t := m.l, m.l.t
 	t.Helper()
@@ -1053,10 +1053,10 @@ func (m *obsRun) leaderKilled() {
 	run := l.createRun(obsAudit, "obs-audit-handover")
 	killed, follower := l.killLeader(m.ns)
 	start := time.Now()
+	// On this single-node cluster the Deployment's replacement pod can win
+	// the expired Lease before the surviving follower; either is a valid
+	// successor, and neither has led before.
 	successor := l.leaderPod(m.ns, killed)
-	if successor != follower {
-		t.Fatalf("Lease taken by %s, not the remaining replica %s", successor, follower)
-	}
 	leased := time.Since(start)
 	owned := m.soleOwner(successor, 3*time.Minute)
 	m.wait("the killed leader's series gone", 2*time.Minute, func() (bool, string) {
@@ -1078,8 +1078,10 @@ func (m *obsRun) leaderKilled() {
 			return toJSON(got) == toJSON(want), toJSON(got) + " want " + toJSON(want)
 		})
 	}
+	// The other replica, never a leader: the surviving follower or the
+	// replacement pod.
 	var replacement string
-	m.wait("a replacement replica scraped", 3*time.Minute, func() (bool, string) {
+	m.wait("the other replica scraped", 3*time.Minute, func() (bool, string) {
 		for name := range m.controllerPods() {
 			if name != killed && name != successor {
 				replacement = name
@@ -1092,17 +1094,17 @@ func (m *obsRun) leaderKilled() {
 		return ok && up == 1, d
 	})
 	if ok, d := m.none(`{__name__=~"konstapel_binding_.+|konstapel_publication_.+|konstapel_cleanup_.+",` + obsScope + `,pod="` + replacement + `"}`); !ok {
-		t.Fatalf("the replacement follower exposes owner series: %s", d)
+		t.Fatalf("the non-leading replica exposes owner series: %s", d)
 	}
 	if v, ok, d := m.one(`sum(konstapel_operation_attempts_total` + sel(`,pod="`+replacement+`"`) + `)`); !ok || v != 0 {
-		t.Fatalf("the replacement's counters do not start at zero: %s", d)
+		t.Fatalf("the never-leading replica's counters are not zero: %s", d)
 	}
 	if ready, _ := m.byLabel(`konstapel_observation_ready`+sel(`,pod="`+replacement+`"`), "domain"); len(ready) != 4 || slices.ContainsFunc(slices.Collect(maps.Values(ready)), func(v float64) bool { return v != 0 }) {
-		t.Fatalf("the replacement follower reports readiness: %v", ready)
+		t.Fatalf("the non-leading replica reports readiness: %v", ready)
 	}
 	done := l.publishedRun(obsAudit, run.Name)
 	lease := l.lease(m.ns)
-	l.record("leader-killed", map[string]any{"killed": killed, "successor": successor, "replacement": replacement, "leaseTakenAfterSeconds": leased.Seconds(),
+	l.record("leader-killed", map[string]any{"killed": killed, "successor": successor, "survivingFollower": follower, "otherReplica": replacement, "leaseTakenAfterSeconds": leased.Seconds(),
 		"soleOwnerAfterSeconds": (leased + owned).Seconds(), "leaseTransitions": transitions(lease),
 		"runCompleted": done.Name, "valuesUnchanged": before})
 }
