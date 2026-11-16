@@ -96,7 +96,14 @@ for package integration.
   explicit `include-controls`/`with-ids` selection) to the coverage owner's
   baseline reader once add-control-coverage-reporting 1.1 lands. Keep the
   catalog-digest identity and fail-closed behavior, and re-verify the
-  association states.
+  association states. The shared reader is now available:
+  `coverage.ReadBaseline(content, coverage.Options{Schemas: <controller's
+  content/schemas>})` over `coverage.FromFrozen` (OCI content) or
+  `coverage.FromVendored` (vendored tree; pass `Options.Profile`, since its
+  SHA256SUMS does not cover every entry point). Map `Baseline.Catalog.Digest`,
+  `Baseline.Control` and `Baseline.HasStatement` onto the catalog, control
+  and statement checks, and treat `errors.Is(err, coverage.ErrUnresolved)`
+  as a resolution failure (association pending), never a mismatch.
 - Expose the transfer service's attachment settings (`--attachment-max-bytes`,
   `--attachment-timeout`, `--attachment-max-concurrent`,
   `--attachment-retention`) as validated runtime chart values in 7.1; until
