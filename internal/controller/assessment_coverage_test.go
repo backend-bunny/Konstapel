@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/publication"
@@ -147,7 +149,7 @@ func TestRunCoverageDiagnosticDoesNotChangeEvidence(t *testing.T) {
 		}
 	})
 	r, d := packagedCoverage(t, dir)
-	if r.Inventory.Resolved || len(r.Controls) != 0 || r.Limitations[0].Code != coverage.CodeSelectionUnavailable || !r.Limitations[0].Blocking {
+	if r.Inventory.Resolved || len(r.Controls) != 0 || !hasLimitation(r, coverage.CodeSelectionUnavailable) {
 		t.Fatalf("coverage %+v %+v", r.Inventory, r.Limitations)
 	}
 	if *r.TechnicalEvidence.Evidence != d.Evidence || run.Status.Summary.Evidence != base.Status.Summary.Evidence || run.Status.Summary.Outcomes != base.Status.Summary.Outcomes {
@@ -218,7 +220,7 @@ func TestCoverageReportUsesOnlyPackagedContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, collector.CoveragePackage{Dir: t.TempDir(), Kind: publication.KindAssessment})
-	if r.Inventory.Resolved || r.Limitations[0].Code != coverage.CodeBaselineNotSelected {
+	if r.Inventory.Resolved || !hasLimitation(r, coverage.CodeBaselineNotSelected) {
 		t.Errorf("no profile: %+v", r.Limitations)
 	}
 }
@@ -286,4 +288,81 @@ func TestValidatePackageRejectsTamperedCoverage(t *testing.T) {
 			t.Errorf("%s: tampered coverage accepted", name)
 		}
 	}
+}
+
+// An OCI run's coverage is built from the frozen bundle packaged under its
+// member directory, verified again, and references it by package path.
+func TestCoverageReportFromFrozenMember(t *testing.T) {
+	e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+	e.deliver("audit-prod")
+	e.assess("audit-prod")
+	name := e.schedule("audit-prod").ActiveRun.Name
+	e.step(name)
+	run := e.run(name)
+
+	raw, err := os.ReadFile("../../bundles/konstapel-linux-hardening/definition.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := bundle.LoadDefinition(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def.Source.Revision = strings.Repeat("e", 40)
+	a, err := bundle.Build(def, os.DirFS("../.."), a0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := bundle.FrozenIdentity{FrozenVersion: bundle.FrozenVersion, Name: a.Descriptor.Name, Version: a.Descriptor.Version, Source: a.Descriptor.Source,
+		Digests: bundle.Digests{Revision: a.Descriptor.Source.Revision, Content: a.Descriptor.ContentDigest(), Archive: a.LayerDigest, OCI: a.ManifestDigest}}
+	ref := v1alpha1.BundleReference{Name: a.Descriptor.Name, Digest: a.ManifestDigest}
+	pkg := t.TempDir()
+	path := publication.ContentPath(ref.Digest)
+	if _, err := bundle.WriteFrozen(filepath.Join(pkg, filepath.FromSlash(path)), a.Manifest, a.Layer, id); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"capture.json", "evaluation.json"} {
+		if err := os.WriteFile(filepath.Join(pkg, f), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profile := &v1alpha1.ComplianceProfile{Spec: v1alpha1.ComplianceProfileSpec{Bundle: ref, Policies: []v1alpha1.ProfilePolicy{{Name: "require-run-as-nonroot"}}}}
+	profile.Name, profile.UID = "hardening", "uid-hardening"
+	if err := e.rr.freezeSelection(run, profile); err != nil {
+		t.Fatal(err)
+	}
+	b := epochBinding("audit-prod", nil)
+	scope := publication.Scope{Kind: publication.ScopeBinding, ClusterID: "c", BindingUID: string(b.UID), NamespaceUIDs: []string{}}
+	var c collector.CaptureV2
+	p := collector.CoveragePackage{Dir: pkg, Kind: publication.KindAssessment, Content: []collector.PackagedContent{{Ref: ref, Path: path, Applied: true}}}
+	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p)
+	if !r.Inventory.Resolved || !r.Mappings.Resolved || r.Inputs.ContentPath != path || r.Inputs.Bundle != ref {
+		t.Fatalf("frozen member: %+v %+v %v", r.Inventory, r.Mappings, r.Limitations)
+	}
+	partial := 0
+	for _, ctl := range r.Controls {
+		if ctl.Automation == coverage.AutomationPartial {
+			partial++
+		}
+	}
+	if partial == 0 {
+		t.Fatal("no selected check is mapped")
+	}
+	for _, s := range r.Sources {
+		if s.Kind != coverage.SourceCapture && s.Kind != coverage.SourceEvaluation && !strings.HasPrefix(s.Path, path+"/content/") {
+			t.Errorf("source %s is not under the member's packaged content", s.Path)
+		}
+	}
+	// A frozen copy that no longer verifies is a diagnostic, never re-read.
+	if err := os.WriteFile(filepath.Join(pkg, filepath.FromSlash(path), "content", "linux-hardening", "component-definition.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p)
+	if r.Inventory.Resolved || !hasLimitation(r, coverage.CodeContentUnavailable) {
+		t.Fatalf("altered member: %+v", r.Limitations)
+	}
+}
+
+func hasLimitation(r *coverage.Report, code string) bool {
+	return slices.ContainsFunc(r.Limitations, func(l coverage.Limitation) bool { return l.Code == code && l.Blocking })
 }
