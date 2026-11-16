@@ -74,9 +74,10 @@ type AssessmentRuntime struct {
 	// ControllerNamespace holds credentials, CA trust, and the default
 	// destination ConfigMap (default konstapel-system).
 	ControllerNamespace string
-	// IntegrityInterval is how often a retained package's storage is
-	// re-checked before expiry (default 24h). Losses or corruption mark it
-	// Unavailable without rewriting its assessment result.
+	// IntegrityInterval is how often a retained package's storage, and an
+	// available committed supporting document, is re-checked before expiry
+	// (default 24h). Losses or corruption mark it Unavailable without
+	// rewriting its assessment result or the document's commitment.
 	IntegrityInterval time.Duration
 	// MaxQueue bounds pending AssessmentRequests per binding (default 100);
 	// newer requests beyond it are rejected. Namespace ResourceQuotas on

@@ -22,7 +22,10 @@ const (
 	ReasonAssociationMismatch = "AssociationMismatch"
 	ReasonAssociationPending  = "AssociationPending"
 	// ReasonWithdrawn: the record is being deleted and no longer
-	// contributes to new current evidence.
+	// contributes to new current evidence. Controllers before task group 4
+	// set it on AssociationsValid; withdrawal is now its own state
+	// (status.withdrawal), and AssociationsValid keeps reporting the
+	// associations as they were last resolved.
 	ReasonWithdrawn = "Withdrawn"
 )
 
@@ -355,6 +358,12 @@ type AttachmentCleanup struct {
 	// +required
 	// +kubebuilder:validation:Enum=NotDue;Deleted;DeletionFailed;RetentionBlocked
 	State string `json:"state"`
+	// attempts counts failed or refused cleanup attempts. A failed cleanup
+	// is retried after a backoff of one minute, doubling up to one hour.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Attempts int32 `json:"attempts,omitempty"`
+	// lastAttempt is the time of the last attempt that contacted storage.
 	// +optional
 	LastAttempt *metav1.Time `json:"lastAttempt,omitempty"`
 	// +optional
@@ -362,19 +371,115 @@ type AttachmentCleanup struct {
 	Message string `json:"message,omitempty"`
 }
 
+// TemporalState is the declared validity of a document at an instant.
+// +kubebuilder:validation:Enum=NotYetValid;Current;Expired
+type TemporalState string
+
+const (
+	// TemporalNotYetValid: the instant is before spec.validity.validFrom.
+	TemporalNotYetValid TemporalState = "NotYetValid"
+	// TemporalCurrent: validFrom <= instant < validUntil.
+	TemporalCurrent TemporalState = "Current"
+	// TemporalExpired: the instant is at or after spec.validity.validUntil.
+	TemporalExpired TemporalState = "Expired"
+)
+
+// AttachmentValidityStatus is the declared validity at the controller's
+// last evaluation. It is computed from spec.validity and the controller's
+// clock only; upload, commitment and copy times never change it.
+type AttachmentValidityStatus struct {
+	// +required
+	State TemporalState `json:"state"`
+	// nextTransition is the next declared boundary: validFrom while
+	// NotYetValid, validUntil while Current, absent once Expired. The
+	// controller re-evaluates at that instant without waiting for another
+	// event.
+	// +optional
+	NextTransition *metav1.Time `json:"nextTransition,omitempty"`
+}
+
+// ContentState is the availability of a document's committed bytes.
+// +kubebuilder:validation:Enum=Pending;Available;Unavailable
+type ContentState string
+
+const (
+	// ContentPending: no storage commitment is known yet.
+	ContentPending ContentState = "Pending"
+	// ContentAvailable: the committed version was last found present with
+	// its registered size (and SHA-256 where storage reports it) before its
+	// source expiry.
+	ContentAvailable ContentState = "Available"
+	// ContentUnavailable: the commitment exists (or conflicts) but its bytes
+	// are missing, damaged, unreachable, handed off, or past their source
+	// expiry.
+	ContentUnavailable ContentState = "Unavailable"
+)
+
+// Content reasons on EvidenceAttachment status.content.
+const (
+	ReasonContentVerified      = "Verified"
+	ReasonContentMissing       = "ObjectMissing"
+	ReasonContentIntegrity     = "IntegrityFailed"
+	ReasonSourceExpired        = "SourceExpired"
+	ReasonDestinationHandedOff = "DestinationHandedOff"
+)
+
+// AttachmentContentStatus is the controller's view of the document bytes,
+// separate from the commitment record (which never changes).
+type AttachmentContentStatus struct {
+	// +required
+	State ContentState `json:"state"`
+	// reason is a CamelCase cause: AwaitingUpload, NoDestination or
+	// StorageUnavailable while Pending; Verified while Available;
+	// ObjectMissing, IntegrityFailed, StorageUnavailable, StorageConflict,
+	// DestinationHandedOff or SourceExpired while Unavailable.
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z]+$`
+	Reason string `json:"reason"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
+	// lastTransitionTime is when the state or reason last changed.
+	// +optional
+	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
+}
+
+// AttachmentWithdrawal records that the record was withdrawn (deleted). It
+// is never removed or changed once recorded. A withdrawn record never
+// contributes to new coverage; its retained source and cleanup ownership
+// stay until the recorded expiry.
+type AttachmentWithdrawal struct {
+	// withdrawnAt is the record's deletion time.
+	// +required
+	WithdrawnAt metav1.Time `json:"withdrawnAt"`
+}
+
 // EvidenceAttachmentStatus is written only by the Konstapel controller. It
 // never holds document bytes or credentials; storage keys are owned,
-// UID-derived and opaque.
+// UID-derived and opaque. Association, validity, content and withdrawal
+// are reconciled separately; there is no combined verdict.
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.storage) || has(self.storage)",message="storage ownership is never removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.withdrawal) || (has(self.withdrawal) && self.withdrawal == oldSelf.withdrawal)",message="a recorded withdrawal never changes"
 type EvidenceAttachmentStatus struct {
 	// observedGeneration is the generation last processed.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// associations report each spec association, in spec order.
+	// associations report each spec association, in spec order. They are
+	// kept as last resolved once the record is withdrawn.
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	Associations []AttachmentAssociationStatus `json:"associations,omitempty"`
+	// validity is the declared validity at the last evaluation.
+	// +optional
+	Validity *AttachmentValidityStatus `json:"validity,omitempty"`
+	// content is the availability of the committed document bytes.
+	// +optional
+	Content *AttachmentContentStatus `json:"content,omitempty"`
+	// withdrawal records the record's withdrawal (deletion).
+	// +optional
+	Withdrawal *AttachmentWithdrawal `json:"withdrawal,omitempty"`
 	// storage is the document's durable storage ownership.
 	// +optional
 	Storage *AttachmentStorage `json:"storage,omitempty"`
@@ -395,7 +500,10 @@ type EvidenceAttachmentStatus struct {
 // +kubebuilder:printcolumn:name="Valid From",type=string,JSONPath=`.spec.validity.validFrom`
 // +kubebuilder:printcolumn:name="Valid Until",type=string,JSONPath=`.spec.validity.validUntil`
 // +kubebuilder:printcolumn:name="Associations",type=string,JSONPath=`.status.conditions[?(@.type=="AssociationsValid")].status`
+// +kubebuilder:printcolumn:name="Validity",type=string,JSONPath=`.status.validity.state`
+// +kubebuilder:printcolumn:name="Content",type=string,JSONPath=`.status.content.state`
 // +kubebuilder:printcolumn:name="Committed",type=string,JSONPath=`.status.conditions[?(@.type=="DocumentCommitted")].status`
+// +kubebuilder:printcolumn:name="Withdrawn",type=date,JSONPath=`.status.withdrawal.withdrawnAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type EvidenceAttachment struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -33,9 +33,18 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="AssociationsValid")].status
       name: Associations
       type: string
+    - jsonPath: .status.validity.state
+      name: Validity
+      type: string
+    - jsonPath: .status.content.state
+      name: Content
+      type: string
     - jsonPath: .status.conditions[?(@.type=="DocumentCommitted")].status
       name: Committed
       type: string
+    - jsonPath: .status.withdrawal.withdrawnAt
+      name: Withdrawn
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -292,10 +301,13 @@ spec:
             description: |-
               EvidenceAttachmentStatus is written only by the Konstapel controller. It
               never holds document bytes or credentials; storage keys are owned,
-              UID-derived and opaque.
+              UID-derived and opaque. Association, validity, content and withdrawal
+              are reconciled separately; there is no combined verdict.
             properties:
               associations:
-                description: associations report each spec association, in spec order.
+                description: |-
+                  associations report each spec association, in spec order. They are
+                  kept as last resolved once the record is withdrawn.
                 items:
                   description: AttachmentAssociationStatus is the resolution of one
                     spec association.
@@ -404,6 +416,39 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              content:
+                description: content is the availability of the committed document
+                  bytes.
+                properties:
+                  lastTransitionTime:
+                    description: lastTransitionTime is when the state or reason last
+                      changed.
+                    format: date-time
+                    type: string
+                  message:
+                    maxLength: 1024
+                    type: string
+                  reason:
+                    description: |-
+                      reason is a CamelCase cause: AwaitingUpload, NoDestination or
+                      StorageUnavailable while Pending; Verified while Available;
+                      ObjectMissing, IntegrityFailed, StorageUnavailable, StorageConflict,
+                      DestinationHandedOff or SourceExpired while Unavailable.
+                    maxLength: 64
+                    pattern: ^[A-Za-z]+$
+                    type: string
+                  state:
+                    description: ContentState is the availability of a document's
+                      committed bytes.
+                    enum:
+                    - Pending
+                    - Available
+                    - Unavailable
+                    type: string
+                required:
+                - reason
+                - state
+                type: object
               observedGeneration:
                 description: observedGeneration is the generation last processed.
                 format: int64
@@ -415,7 +460,16 @@ spec:
                     description: AttachmentCleanup reports cleanup of a withdrawn
                       record's owned storage.
                     properties:
+                      attempts:
+                        description: |-
+                          attempts counts failed or refused cleanup attempts. A failed cleanup
+                          is retried after a backoff of one minute, doubling up to one hour.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       lastAttempt:
+                        description: lastAttempt is the time of the last attempt that
+                          contacted storage.
                         format: date-time
                         type: string
                       message:
@@ -543,10 +597,45 @@ spec:
                 - message: a recorded commitment never changes
                   rule: '!has(oldSelf.commitment) || (has(self.commitment) && self.commitment
                     == oldSelf.commitment)'
+              validity:
+                description: validity is the declared validity at the last evaluation.
+                properties:
+                  nextTransition:
+                    description: |-
+                      nextTransition is the next declared boundary: validFrom while
+                      NotYetValid, validUntil while Current, absent once Expired. The
+                      controller re-evaluates at that instant without waiting for another
+                      event.
+                    format: date-time
+                    type: string
+                  state:
+                    description: TemporalState is the declared validity of a document
+                      at an instant.
+                    enum:
+                    - NotYetValid
+                    - Current
+                    - Expired
+                    type: string
+                required:
+                - state
+                type: object
+              withdrawal:
+                description: withdrawal records the record's withdrawal (deletion).
+                properties:
+                  withdrawnAt:
+                    description: withdrawnAt is the record's deletion time.
+                    format: date-time
+                    type: string
+                required:
+                - withdrawnAt
+                type: object
             type: object
             x-kubernetes-validations:
             - message: storage ownership is never removed
               rule: '!has(oldSelf.storage) || has(self.storage)'
+            - message: a recorded withdrawal never changes
+              rule: '!has(oldSelf.withdrawal) || (has(self.withdrawal) && self.withdrawal
+                == oldSelf.withdrawal)'
         required:
         - spec
         type: object

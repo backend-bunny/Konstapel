@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -51,6 +52,17 @@ type attachmentFixture struct {
 	catalog string
 }
 
+// attachmentClock is the fixtures' fixed controller time, inside the
+// registered validity (2026-01-01 to 2027-01-01).
+var attachmentClock = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+func baselineProfile(digest string) *v1alpha1.ComplianceProfile {
+	return &v1alpha1.ComplianceProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "baseline", UID: "profile-uid", Generation: 1},
+		Spec:       v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: "linux-workload-hardening", Digest: digest}, Policies: []v1alpha1.ProfilePolicy{{Name: "p"}}},
+	}
+}
+
 func resolvedBinding(name, uid string, profileGen int64, digest string) *v1alpha1.ComplianceBinding {
 	return &v1alpha1.ComplianceBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(uid), Generation: 1},
@@ -63,18 +75,14 @@ func resolvedBinding(name, uid string, profileGen int64, digest string) *v1alpha
 
 func newAttachmentFixture(t *testing.T, objs ...client.Object) *attachmentFixture {
 	t.Helper()
-	digest := vendoredDigest(t)
-	profile := &v1alpha1.ComplianceProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "baseline", UID: "profile-uid", Generation: 1},
-		Spec:       v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: "linux-workload-hardening", Digest: digest}, Policies: []v1alpha1.ProfilePolicy{{Name: "p"}}},
-	}
-	all := append([]client.Object{profile}, objs...)
+	all := append([]client.Object{baselineProfile(vendoredDigest(t))}, objs...)
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(all...).
 		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.EvidenceAttachment{}).
 		WithIndex(&v1alpha1.EvidenceAttachment{}, AttachmentBindingIndex, attachmentBindingNames).
 		Build()
 	return &attachmentFixture{t: t, c: c, catalog: catalogDigest(t),
-		r: &AttachmentReconciler{Client: c, Baselines: &ContentBaselines{VendoredName: "linux-workload-hardening", ContentRoot: "../.."}}}
+		r: &AttachmentReconciler{Client: c, Baselines: &ContentBaselines{VendoredName: "linux-workload-hardening", ContentRoot: "../.."},
+			Now: func() time.Time { return attachmentClock }}}
 }
 
 func (f *attachmentFixture) association(binding, uid string, controls ...v1alpha1.AttachmentControl) v1alpha1.AttachmentAssociation {
@@ -86,10 +94,15 @@ func (f *attachmentFixture) association(binding, uid string, controls ...v1alpha
 
 func (f *attachmentFixture) create(name string, as ...v1alpha1.AttachmentAssociation) {
 	f.t.Helper()
+	f.createValid(name, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), as...)
+}
+
+func (f *attachmentFixture) createValid(name string, from, until time.Time, as ...v1alpha1.AttachmentAssociation) {
+	f.t.Helper()
 	a := &v1alpha1.EvidenceAttachment{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Generation: 1}, Spec: v1alpha1.EvidenceAttachmentSpec{
 		Document:     v1alpha1.AttachmentDocument{Title: "DC audit", MediaType: "application/pdf", Size: 10, SHA256: "sha256:" + hex.EncodeToString(make([]byte, 32))},
 		Source:       v1alpha1.AttachmentSource{Issuer: "Auditor"},
-		Validity:     v1alpha1.AttachmentValidity{ValidFrom: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), ValidUntil: metav1.NewTime(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))},
+		Validity:     v1alpha1.AttachmentValidity{ValidFrom: metav1.NewTime(from), ValidUntil: metav1.NewTime(until)},
 		Associations: as,
 		Scope:        v1alpha1.AttachmentScope{Description: "DC North"},
 		RegisteredBy: &v1alpha1.Requester{Username: "platform-operator"},
@@ -134,8 +147,10 @@ func TestAttachmentSharedFacilityEvidenceForTwoBindings(t *testing.T) {
 	f.create("dc", f.association("a", "uid-a"), f.association("b", "uid-b", v1alpha1.AttachmentControl{ID: "pe-6"}))
 	res, a := f.reconcile("dc")
 	wantAssociations(t, a, metav1.ConditionTrue, "Valid", "Valid", "Valid", "Valid")
-	if res.RequeueAfter != 0 {
-		t.Fatalf("valid associations requeue: %v", res)
+	// Valid associations are not polled; the record is re-evaluated at its
+	// next validity boundary (capped at a day).
+	if res.RequeueAfter != MaxRetentionRequeue || a.Status.Validity == nil || a.Status.Validity.State != v1alpha1.TemporalCurrent {
+		t.Fatalf("valid associations requeue: %v, validity %+v", res, a.Status.Validity)
 	}
 	if !containsString(a.Finalizers, v1alpha1.EvidenceAttachmentFinalizer) {
 		t.Fatal("retention finalizer not added")
@@ -169,8 +184,8 @@ func TestAttachmentReferencesMustMatchBaseline(t *testing.T) {
 			f.create(name, c.as)
 			res, a := f.reconcile(name)
 			wantAssociations(t, a, metav1.ConditionFalse, "Mismatched", c.reason)
-			if res.RequeueAfter != 0 {
-				t.Fatal("a mismatch is final; it is not polled")
+			if res.RequeueAfter == attachmentPendingRequeue {
+				t.Fatal("a mismatch is not polled like a pending association")
 			}
 		})
 	}
@@ -180,17 +195,19 @@ func TestAttachmentPendingUntilBindingAndContentResolve(t *testing.T) {
 	digest := vendoredDigest(t)
 	unresolved := resolvedBinding("a", "uid-a", 1, digest)
 	unresolved.Status.Conditions[0].Status = metav1.ConditionFalse
-	stale := resolvedBinding("b", "uid-b", 1, digest)
-	stale.Generation = 2 // a new spec not yet resolved
-	newerProfile := resolvedBinding("c", "uid-c", 0, digest)
+	// The binding resolved other content than its profile now pins: the
+	// new content is validated once the binding resolves it.
+	changedContent := resolvedBinding("b", "uid-b", 1, "sha256:"+strings.Repeat("1", 64))
+	recreatedProfile := resolvedBinding("c", "uid-c", 1, digest)
+	recreatedProfile.Status.Profile.UID = "old-profile-uid"
 	otherContent := resolvedBinding("d", "uid-d", 1, digest)
-	f := newAttachmentFixture(t, unresolved, stale, newerProfile, otherContent)
+	f := newAttachmentFixture(t, unresolved, changedContent, recreatedProfile, otherContent)
 	f.create("unresolved", f.association("a", "uid-a"))
-	f.create("stale", f.association("b", "uid-b"))
-	f.create("newer-profile", f.association("c", "uid-c"))
-	for name, reason := range map[string]string{"unresolved": v1alpha1.ReasonBindingUnresolved, "stale": v1alpha1.ReasonBindingUnresolved, "newer-profile": v1alpha1.ReasonBindingUnresolved} {
+	f.create("changed-content", f.association("b", "uid-b"))
+	f.create("recreated-profile", f.association("c", "uid-c"))
+	for _, name := range []string{"unresolved", "changed-content", "recreated-profile"} {
 		res, a := f.reconcile(name)
-		wantAssociations(t, a, metav1.ConditionUnknown, "Pending", reason)
+		wantAssociations(t, a, metav1.ConditionUnknown, "Pending", v1alpha1.ReasonBindingUnresolved)
 		if res.RequeueAfter != attachmentPendingRequeue {
 			t.Fatalf("%s: pending not requeued: %v", name, res)
 		}

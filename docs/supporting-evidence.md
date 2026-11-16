@@ -8,7 +8,7 @@ supporting material. It has no verdict field, and it never changes technical
 findings, expected checks, enforcement or risk acceptance.
 
 **Status.** This is the `add-supporting-evidence-attachments` change, task
-groups 1 to 3. The following are implemented:
+groups 1 to 4. The following are implemented:
 
 - the API;
 - authenticated registrant attribution;
@@ -21,12 +21,15 @@ groups 1 to 3. The following are implemented:
 - owned attempt cleanup;
 - retention-gated withdrawal (group 2);
 - authenticated upload and download routes on the download service;
-- the `konstapel evidence` CLI (group 3).
+- the `konstapel evidence` CLI (group 3);
+- separately reconciled validity, content, association and withdrawal
+  states, expiry without an event, and bounded, recoverable cleanup
+  ([Lifecycle](#lifecycle), group 4).
 
-Validity and availability status, and inclusion in assessment packages,
-come in later task groups. The runtime chart's download service serves the
-attachment routes with the default limits; chart values for the limits come
-with the chart integration (task 7.1).
+Inclusion in coverage reports and assessment packages comes in a later
+task group. The runtime chart's download service serves the attachment
+routes with the default limits; chart values for the limits come with the
+chart integration (task 7.1).
 
 Platform operators manage attachments. Application-team attachments are
 future work, and no namespace role can register or read them.
@@ -183,23 +186,31 @@ condition:
 
 | State | Reason | When |
 | --- | --- | --- |
-| `Valid` | `Valid` | The binding exists with the registered UID. It has resolved its current spec and profile revision. That revision's verified bundle has the registered catalog digest, and its Moderate baseline profile selects every control. Every statement is a `statement` or `item` part of its own control. |
-| `Pending` | `BindingUnresolved` | The binding hasn't resolved its current spec or profile revision yet. Rechecked every minute and on binding changes. |
+| `Valid` | `Valid` | The binding exists with the registered UID and has resolved a profile revision. That revision's verified bundle has the registered catalog digest, and its Moderate baseline profile selects every control. Every statement is a `statement` or `item` part of its own control. |
+| `Pending` | `BindingUnresolved` | The binding hasn't resolved a profile, its resolution failed, or it is resolving a profile revision with other bundle content. Rechecked every minute and on binding changes. |
 | `Pending` | `BaselineUnavailable` | The bundle content can't be read. The controller reads vendored content of its own digest, or a frozen copy of verified OCI content. Other content is never substituted. |
 | `Mismatched` | `BindingNotFound` | No binding has that name. |
 | `Mismatched` | `BindingReplaced` | The binding was recreated, so its UID changed. The association is never inherited. |
 | `Mismatched` | `CatalogMismatch` | The binding now resolves a different catalog revision. |
-| `Mismatched` | `ControlNotInBaseline` | A control isn't in the binding's selected baseline. |
+| `Mismatched` | `ControlNotInBaseline` | A control isn't in the binding's selected baseline, for example after new bundle content removed it. |
 | `Mismatched` | `StatementNotInControl` | A statement isn't one of its control's statement parts, for example `pe-2_smt.a` under `pe-3`, or a guidance part. |
 
 `AssociationsValid` is `True` when every association is Valid, `False` when
-any is Mismatched, and `Unknown` while any is Pending. A mismatch is final for
-that record. To correct it, register a new record.
+any is Mismatched, and `Unknown` while any is Pending. A recreated binding
+never comes back. A catalog or baseline mismatch lasts until the binding
+again resolves exactly the registered catalog and controls. To correct an
+association, register a new record.
 
-Some binding edits keep associations valid:
+The binding's resolved profile revision is the content it enforces, so the
+controller validates against it. These edits keep an association `Valid`
+the whole time, including while the binding re-resolves:
 
-- reporting-only edits (`spec.assessment`);
-- a new profile revision with the same catalog and controls.
+- reporting-only binding edits (`spec.assessment`);
+- policy-parameter and exception-setting edits of the profile: a newer
+  revision with the same bundle digest.
+
+A profile revision with other bundle content makes the association
+`Pending` until the binding resolves it, and then `Valid` or `Mismatched`.
 
 Associations can target physical or organizational controls that have no
 technical mapping. One record can support several explicitly named bindings
@@ -504,27 +515,153 @@ committed on 2026-03-01 is kept until 2026-05-30 (`committedAt` + 2160h).
 Re-registering an expired document doesn't make it current: validity is
 declared in the immutable spec.
 
+## Lifecycle
+
+The controller reconciles four states of each record separately. None of
+them is a verdict, and there is no combined "compliant" state:
+
+| State | Field | Values | Changes when |
+| --- | --- | --- | --- |
+| Validity | `status.validity.state`, `nextTransition` | `NotYetValid`, `Current`, `Expired` | the controller's clock reaches `validFrom` or `validUntil` (`validFrom <= T < validUntil`). The controller requeues itself at the next boundary, so no other event is needed. Upload, commitment, re-upload and copy times never change it. |
+| Content | `status.content` | `Pending` (`AwaitingUpload`, `NoDestination`, `StorageUnavailable`), `Available` (`Verified`), `Unavailable` (`ObjectMissing`, `IntegrityFailed`, `StorageUnavailable`, `StorageConflict`, `DestinationHandedOff`, `SourceExpired`) | a commitment is recorded; a metadata check of the committed version finds it present with its registered size (and SHA-256, where storage reports one), or not; the source reaches `expiresAt` |
+| Association | `status.associations[]`, `AssociationsValid` | `Pending`, `Valid`, `Mismatched` | binding and profile changes ([Associations](#associations)) |
+| Withdrawal | `status.withdrawal.withdrawnAt` | absent, or the deletion time | the record is deleted. It is never removed or changed afterwards. |
+
+`kubectl get evidenceattachments` shows each of them. Content is checked
+when the controller starts or a new leader takes over, then once a day while
+`Available` and every minute while `Unavailable`. The check reads object
+metadata only; downloads always verify the full bytes. At `expiresAt` the
+content becomes `Unavailable/SourceExpired` without contacting storage, and
+downloads answer 410. A live record's bytes stay in storage until the record
+is withdrawn. `DocumentCommitted` keeps attesting the recorded commitment
+whatever the content state.
+
+New coverage (task group 5) reads these states through
+`attachments.ForBinding`. It never selects a withdrawn record. It selects
+every other record associated with the binding's exact UID, with its
+validity computed at the report's own instant, so an expired, future,
+unavailable or mismatched document is explained rather than omitted.
+
+### Example timeline
+
+A record valid for 2026, with the default 2160h retention, on the
+controller's clock:
+
+| Time (UTC) | What happens | Validity | Content | Withdrawal |
+| --- | --- | --- | --- | --- |
+| 2025-12-15T09:00:00Z | registered; the controller pins the default destination | `NotYetValid` until 2026-01-01T00:00:00Z | `Pending/AwaitingUpload` | no |
+| 2025-12-20T10:00:00Z | uploaded and committed; `expiresAt` is 2027-04-01T00:00:00Z | `NotYetValid` until 2026-01-01T00:00:00Z | `Available/Verified` | no |
+| 2026-01-01T00:00:00Z | nothing: the controller's own timer | `Current` until 2027-01-01T00:00:00Z | `Available/Verified` | no |
+| 2026-12-31T23:59:59Z | nothing | `Current` until 2027-01-01T00:00:00Z | `Available/Verified` | no |
+| 2027-01-01T00:00:00Z | nothing: the controller's own timer | `Expired` | `Available/Verified` | no |
+| 2027-01-10T12:00:00Z | the same file is uploaded again | `Expired` | `Available/Verified` | no |
+| 2027-02-01T00:00:00Z | the record is deleted | `Expired` | `Available/Verified` | withdrawn; `SourceRetained=True/RetentionActive` |
+| 2027-04-01T00:00:00Z | nothing: the controller's own timer | | | released; the owned source is removed |
+
+The upload on 2027-01-10 answers with the first commitment: committed
+2025-12-20T10:00:00Z by the first uploader, `expiresAt`
+2027-04-01T00:00:00Z. `TestDocumentedAttachmentTimeline` runs this table
+against the controller with an injected clock.
+
+### Re-uploads and corrections
+
+A re-upload never renews anything. Every upload of a committed record
+returns the first commitment, with its uploader, `committedAt` and
+`expiresAt`, and validity comes only from the immutable `spec.validity`.
+An expired document uploaded today stays `Expired`; its source is kept for
+the retention tail after the upload (see [Retention](#retention)).
+
+A corrected period, a corrected document, another catalog mapping or another
+binding is a new record ([Immutable records](#immutable-records-and-replacement)).
+Register and upload the new record, then withdraw the old one:
+
+```sh
+konstapel evidence register -f attachment-2026-corrected.yaml --document dc-north-2026.pdf
+konstapel evidence upload dc-north-physical-access-2026-corrected --uid "$NEW_UID" --file dc-north-2026.pdf --server https://konstapel-download.konstapel-system.svc --ca-file ca.crt --token-file upload.token
+kubectl delete evidenceattachment dc-north-physical-access-2026 --wait=false
+```
+
+The old record leaves new coverage at once. Its source stays downloadable
+until its own `expiresAt`, and historical packages keep their copies.
+
 ## Withdrawal and cleanup
 
-Deleting a record withdraws it from new current evidence immediately
-(`AssociationsValid=False/Withdrawn`). The
-`compliance.erenius.io/evidence-attachment-retention` finalizer then keeps
-the record, and with it the storage ownership, until no owned storage
-remains:
+Deleting a record withdraws it from new current evidence immediately and
+permanently: the controller records `status.withdrawal.withdrawnAt`, the
+API rejects any later change to it, and new coverage never selects the
+record. Its associations stay as last resolved. (Controllers before task
+group 4 also set `AssociationsValid=False/Withdrawn`; that condition is now
+left alone.) The `compliance.erenius.io/evidence-attachment-retention`
+finalizer then keeps the record, and with it the storage ownership, until
+no owned storage remains:
 
 | Record | On deletion |
 | --- | --- |
 | never pinned | released at once: nothing can be stored |
 | pinned, no commitment | storage is read once more. A commitment found there (its status write was lost) is recorded and governs retention like any other. Otherwise every owned attempt and multipart upload is removed, then the record is released. |
-| committed, before `expiresAt` | kept: `SourceRetained=True/RetentionActive`, `status.storage.cleanup.state: NotDue`. Withdrawal never shortens the commitment. |
-| committed, at or after `expiresAt` | every owned version and delete marker is removed, the commit manifest last. Once storage confirms nothing owned remains, the record is released. |
+| committed, before `expiresAt` | kept: `SourceRetained=True/RetentionActive`, `status.storage.cleanup.state: NotDue`. Withdrawal never shortens the commitment. Nothing is deleted, and storage is contacted only for the content check. The retained source stays downloadable, marked withdrawn. |
+| committed, at or after `expiresAt` | downloads answer 410. Every owned object version and delete marker is removed, each attempt's document before its ownership records and the commit manifest last. Once storage confirms nothing owned remains, the record is released. |
+
+Cleanup removes only what the attachment owns: the `document`,
+`attempt.json` and `intent.json` of attempts whose records name it, and its
+`commit.json`. Other objects under its prefix, even inside one of its
+attempt directories, other attachments, and assessment packages are never
+touched. Package copies keep their own retention.
+
+### Recovery
+
+All lifecycle state is durable on the API server or in storage; the
+controller keeps nothing in memory that a restart or a new leader needs.
+After a restart or a leader change, the controller reconciles every record
+again: it re-evaluates validity at once, re-checks content, and resumes a
+withdrawal or cleanup where it stopped. Each step is repeatable:
+
+- a commitment whose status write was lost is read from storage again;
+- a withdrawal found before its status write is recorded on the next pass;
+- a deletion that removed part of the owned objects keeps the attempt's
+  ownership records and the commit manifest, so the next attempt finds the
+  rest;
+- a status write from a former leader that read the record before its
+  deletion is rejected by its resourceVersion precondition and can't undo
+  the withdrawal.
+
+`TestAttachmentRecoversFromACrashAtEveryDurableStep` stops the controller
+before each of its writes in this lifecycle and restarts it with empty
+memory. Every run ends the same way.
 
 A failed or refused deletion is never treated as cleanup. Causes include an
-unreachable destination, Object Lock, a legal hold, or missing delete
-permission. The record keeps its finalizer, its pin and its commitment.
-`status.storage.cleanup` shows `DeletionFailed` or `RetentionBlocked` with
-the storage message, the destination lists the record among its cleanup
-blockers, and the controller retries every 5 minutes.
+unreachable destination, a destination handed off to an operator, Object
+Lock, a legal hold, or missing delete permission. The record keeps its
+finalizer, its pin and its commitment, and the destination keeps its own
+finalizer and lists the record among its cleanup blockers.
+`status.storage.cleanup` shows `DeletionFailed` or `RetentionBlocked`, the
+number of failed `attempts`, the `lastAttempt` time and the storage message
+(at most 1024 characters), and `SourceRetained` says when the next attempt
+is due. Attempts back off; in between, the controller neither contacts
+storage nor writes status:
+
+| Failed attempts | Next attempt after |
+| --- | --- |
+| 1 | 1m |
+| 2 | 2m |
+| 3 | 4m |
+| 4 | 8m |
+| 5 | 16m |
+| 6 | 32m |
+| 7 or more | 1h |
+
+Once the cause is fixed (the lock expired, the permission granted, the
+destination reachable again) the next attempt completes the cleanup. Nothing
+needs to be reset.
+
+`TestLiveAttachmentLifecycle` (acceptance group `storage`) checks this
+lifecycle against a real API server and the pinned RustFS service: validity
+changing at its boundaries with no other event, policy-preserving binding and
+profile edits that never change a valid association, a removed document
+version reported `Unavailable/ObjectMissing`, a withdrawal kept across a
+controller restart until its fixed expiry, and a cleanup refused while the
+destination rejects the controller's credentials, retried after its backoff
+and completed once access returns.
 
 ### A destination handed off to an operator
 
@@ -536,8 +673,10 @@ follow-up of this change), so the handoff fails safe:
   re-reads the destination just before it commits; only a commit already
   under way at that moment can still land, inside the attachment's own
   prefix, which the administrator takes over below;
-- each pinned attachment keeps its finalizer, its pin and its commitment;
-  cleanup reports `DeletionFailed` and is retried without contacting storage;
+- each pinned attachment keeps its finalizer, its pin and its commitment.
+  Its content is `Unavailable/DestinationHandedOff`; cleanup reports
+  `DeletionFailed` and is retried with the backoff above, without contacting
+  storage;
 - the destination keeps counting them (committed ones as packages, the rest
   as cleanups) and is not released while any remains.
 

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -36,6 +37,13 @@ type memStore struct {
 	deleteErr error
 	cleanups  int
 	deleted   []attachments.Ref
+	// deletedAt is the controller time of each successful deletion.
+	deletedAt []time.Time
+	// problem and healthErr are the next Health answers.
+	problem     *attachments.Problem
+	healthErr   error
+	healthCalls int
+	deleteCalls int
 }
 
 func newMemStore(id string) *memStore {
@@ -61,7 +69,10 @@ func (m *memStore) Committed(_ context.Context, ref attachments.Ref) (attachment
 }
 func (m *memStore) Open(context.Context, attachments.Receipt) (io.ReadCloser, error) { return nil, nil }
 func (m *memStore) Health(context.Context, attachments.Receipt) (*attachments.Problem, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCalls++
+	return m.problem, m.healthErr
 }
 func (m *memStore) CleanupAttempts(context.Context, attachments.Ref, time.Time) error {
 	m.mu.Lock()
@@ -82,6 +93,7 @@ func (m *memStore) DeleteUncommitted(_ context.Context, ref attachments.Ref) (at
 func (m *memStore) Delete(_ context.Context, r attachments.Receipt, now time.Time) (attachments.Cleanup, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.deleteCalls++
 	if now.Before(r.ExpiresAt) {
 		return attachments.Cleanup{}, attachments.ErrRetentionActive
 	}
@@ -90,15 +102,21 @@ func (m *memStore) Delete(_ context.Context, r attachments.Receipt, now time.Tim
 	}
 	delete(m.committed, r.Ref)
 	m.deleted = append(m.deleted, r.Ref)
+	m.deletedAt = append(m.deletedAt, now)
 	return attachments.Cleanup{State: attachments.CleanupDeleted}, nil
 }
 
 type memStores struct {
 	stores map[string]*memStore // destination UID
 	down   bool
+	// orphaned answers as for a destination handed off to an operator.
+	orphaned bool
 }
 
 func (s *memStores) Store(_ context.Context, ref v1alpha1.DestinationReference) (attachments.Store, error) {
+	if s.orphaned {
+		return nil, fmt.Errorf("%w: %w: handed off", attachments.ErrUnavailable, publication.ErrOrphaned)
+	}
 	if s.down {
 		return nil, attachments.ErrUnavailable
 	}
@@ -127,7 +145,7 @@ func newStorageFixture(t *testing.T, objs ...client.Object) *storageFixture {
 	t.Helper()
 	f := newAttachmentFixture(t)
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.EvidenceAttachment{}, &v1alpha1.EvidenceDestination{}).
+		WithStatusSubresource(&v1alpha1.EvidenceAttachment{}, &v1alpha1.EvidenceDestination{}, &v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}).
 		WithIndex(&v1alpha1.EvidenceAttachment{}, AttachmentBindingIndex, attachmentBindingNames).
 		Build()
 	f.c = c
@@ -136,6 +154,7 @@ func newStorageFixture(t *testing.T, objs ...client.Object) *storageFixture {
 		now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)}
 	f.r.Storage = &AttachmentStorage{Reader: c, Namespace: "konstapel-system", Cluster: "kube-system:cluster", Stores: sf.stores,
 		Now: func() time.Time { return sf.now }}
+	f.r.Now = nil // the storage clock is the controller clock
 	return sf
 }
 
@@ -292,8 +311,8 @@ func TestAttachmentFinalizerWaitsForExpiryAndCleanup(t *testing.T) {
 	if a.Status.Storage.Cleanup == nil || a.Status.Storage.Cleanup.State != "NotDue" || res.RequeueAfter <= 0 || res.RequeueAfter > MaxRetentionRequeue {
 		t.Fatalf("retained: %+v %v", a.Status.Storage.Cleanup, res)
 	}
-	if c := meta.FindStatusCondition(a.Status.Conditions, v1alpha1.ConditionAssociationsValid); c == nil || c.Reason != v1alpha1.ReasonWithdrawn {
-		t.Fatalf("not withdrawn: %+v", c)
+	if a.Status.Withdrawal == nil || !a.Status.Withdrawal.WithdrawnAt.Equal(a.DeletionTimestamp) {
+		t.Fatalf("not withdrawn: %+v", a.Status.Withdrawal)
 	}
 	if c := meta.FindStatusCondition(a.Status.Conditions, v1alpha1.ConditionSourceRetained); c == nil || c.Reason != v1alpha1.ReasonRetentionActive {
 		t.Fatalf("retention: %+v", c)
@@ -311,6 +330,11 @@ func TestAttachmentFinalizerWaitsForExpiryAndCleanup(t *testing.T) {
 		t.Fatalf("blocked: %+v", a.Status.Storage)
 	}
 	f.stores.stores["dest-1"].deleteErr = nil
+	// The retry waits for its backoff (one minute after the first failure).
+	if res, _ := f.reconcile("dc"); res.RequeueAfter != time.Minute {
+		t.Fatalf("retried before its backoff: %v", res)
+	}
+	f.now = f.now.Add(time.Minute)
 	if _, err := f.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: "dc"}}); err != nil {
 		t.Fatal(err)
 	}
