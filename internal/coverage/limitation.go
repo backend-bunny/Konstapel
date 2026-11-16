@@ -45,6 +45,11 @@ const (
 	CodeParameterUnresolved       = "ParameterUnresolved"
 	CodeSelectionContentMismatch  = "SelectionContentMismatch"
 	CodePolicyNotInContent        = "PolicyNotInContent"
+	CodeSelectionUnavailable      = "SelectionUnavailable" // the profile's selection was not recorded
+
+	// Report diagnostics (Unavailable): no content could be read at all.
+	CodeContentUnavailable  = "ContentUnavailable"  // the baseline's content is not available for this scope
+	CodeBaselineNotSelected = "BaselineNotSelected" // the scope selected no profile, so it has no baseline
 
 	// Technical evidence: the assessment owner's evaluated capture.
 	CodeEvidenceInconsistent   = "EvidenceInconsistent"   // the evaluation does not match its capture
