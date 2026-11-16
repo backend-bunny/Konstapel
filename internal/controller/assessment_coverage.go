@@ -26,7 +26,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
@@ -85,10 +87,15 @@ func (r *AssessmentRunReconciler) readSelection(run *v1alpha1.AssessmentRun) (*r
 	return &rec, nil
 }
 
-// exportCoverage sets the export's coverage producer.
-func (r *AssessmentRunReconciler) exportCoverage(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, req *collector.ExportRequest) {
+// exportCoverage sets the export's coverage producer. The returned
+// function, called after the export, is the status summary of the report
+// the package actually carries: nil when the export left coverage out or
+// packaged other bytes than the producer rendered.
+func (r *AssessmentRunReconciler) exportCoverage(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, req *collector.ExportRequest) func(publication.Descriptor) *publication.CoverageSummary {
 	scope, c, ev := req.Scope, req.Capture, req.Evaluation
+	var produced *publication.CoverageSummary
 	req.Coverage = func(p collector.CoveragePackage) (collector.CoverageFiles, error) {
+		produced = nil
 		rep := r.coverageReport(run, b, scope, c, ev, p)
 		f, err := coverage.Render(rep)
 		if err != nil {
@@ -97,11 +104,40 @@ func (r *AssessmentRunReconciler) exportCoverage(ctx context.Context, run *v1alp
 		if err := coverage.VerifyFiles(f); err != nil {
 			return collector.CoverageFiles{}, err
 		}
+		h := sha256.Sum256(f.JSON)
+		sum := coverage.Summarize(rep, hex.EncodeToString(h[:]))
+		sum.InputsSHA256 = r.coverageInputs(run, scope)
+		sum.ValidUntil = ev.NextExpiry
+		produced = &sum
 		return collector.CoverageFiles{JSON: f.JSON, Text: f.Text}, nil
 	}
 	req.CoverageOmitted = func(err error) {
+		produced = nil
 		log.FromContext(ctx).Info("control coverage left out of the package; technical evidence is unaffected", "run", run.Name, "error", err.Error())
 	}
+	return func(d publication.Descriptor) *publication.CoverageSummary {
+		if produced == nil {
+			return nil
+		}
+		for _, f := range d.Files {
+			if f.Role == publication.RoleCoverage && f.Path == publication.CoverageFile && f.SHA256 == produced.SHA256 {
+				return produced
+			}
+		}
+		return nil
+	}
+}
+
+// coverageInputs is the inputs digest of a run's coverage: its binding,
+// the package scope's namespaces and the selection frozen at start. It is
+// "" when the selection was not recorded, so the report never compares
+// equal to a binding's current inputs.
+func (r *AssessmentRunReconciler) coverageInputs(run *v1alpha1.AssessmentRun, scope publication.Scope) string {
+	rec, err := r.readSelection(run)
+	if err != nil {
+		return ""
+	}
+	return coverage.InputsDigest(scope.BindingUID, scope.NamespaceUIDs, rec.Selection)
 }
 
 // coverageReport builds the run's coverage from the package p.
@@ -230,3 +266,73 @@ func vendoredPolicies() []bundle.Policy {
 }
 
 func errText(err error) string { return truncateMsg(err.Error()) }
+
+// currentCoverageInputs is the inputs digest of b's current scope: its
+// namespaces as the current capture resolves them and its profile's
+// selection now (nil without a profile), as a run starting now would
+// record them.
+func currentCoverageInputs(b *v1alpha1.ComplianceBinding, c collector.CaptureV2, profile *v1alpha1.ComplianceProfile) string {
+	set := map[string]bool{}
+	for _, s := range c.Subjects {
+		set[string(s.NamespaceUID)] = true
+	}
+	var sel *coverage.Selection
+	if profile != nil {
+		s := coverage.SelectionOf(profile.Spec)
+		sel = &s
+	}
+	return coverage.InputsDigest(string(b.UID), sortedKeys(set), sel)
+}
+
+// currentCoverage judges the binding's newest committed full-binding
+// run's coverage report at time now (add-control-coverage-reporting 3.3,
+// 3.4). The report and the run's summary of it are never changed: only
+// this view of them follows the clock and the binding's current inputs.
+// Namespace runs never stand in for the binding.
+func (r *AssessmentReconciler) currentCoverage(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time, inputs string) (*v1alpha1.CurrentCoverage, error) {
+	var runs v1alpha1.AssessmentRunList
+	if err := r.Client.List(ctx, &runs, client.MatchingLabels{LabelRunBinding: string(b.UID)}); err != nil {
+		return nil, err
+	}
+	var newest *v1alpha1.AssessmentRun
+	for i := range runs.Items {
+		run := &runs.Items[i]
+		st := run.Status
+		if run.Spec.BindingRef.Name != b.Name || run.Spec.Scope != v1alpha1.RunScopeBinding || st.Phase != v1alpha1.RunCompleted ||
+			st.Publication == nil || st.Publication.Phase != v1alpha1.PublicationPhase(publication.PhaseCommitted) || st.Window == nil || st.Window.Closed == nil {
+			continue
+		}
+		if newest == nil || st.Window.Closed.After(newest.Status.Window.Closed.Time) ||
+			st.Window.Closed.Equal(newest.Status.Window.Closed) && run.Name > newest.Name {
+			newest = run
+		}
+	}
+	if newest == nil {
+		return &v1alpha1.CurrentCoverage{State: v1alpha1.CoverageNoReport}, nil
+	}
+	out := &v1alpha1.CurrentCoverage{State: v1alpha1.CoverageNoReport, Run: &v1alpha1.RunReference{Name: newest.Name, UID: string(newest.UID)}}
+	if newest.Status.Summary == nil || newest.Status.Summary.Coverage == nil {
+		return out, nil
+	}
+	cov := newest.Status.Summary.Coverage.DeepCopy()
+	out.Summary = cov
+	switch {
+	case cov.InputsSHA256 == "" || inputs == "" || cov.InputsSHA256 != inputs:
+		out.State = v1alpha1.CoverageScopeChanged
+	case newest.Status.Publication.Availability != v1alpha1.Availability(publication.AvailabilityAvailable),
+		cov.ValidUntil != nil && !now.Before(cov.ValidUntil.Time):
+		out.State = v1alpha1.CoverageExpired
+	default:
+		out.State = v1alpha1.CoverageCurrent
+	}
+	return out, nil
+}
+
+// coverageExpiry is when a current coverage report expires, or zero when
+// it is not current or never expires by age.
+func coverageExpiry(c *v1alpha1.CurrentCoverage) time.Time {
+	if c == nil || c.State != v1alpha1.CoverageCurrent || c.Summary == nil || c.Summary.ValidUntil == nil {
+		return time.Time{}
+	}
+	return c.Summary.ValidUntil.Time
+}

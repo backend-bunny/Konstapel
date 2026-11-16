@@ -198,10 +198,11 @@ func (r *AssessmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.apply(ctx, b, &v1alpha1.BindingAssessmentStatus{Current: current, Schedule: sched, LatestRun: latest, Destination: dest}); err != nil {
 		return ctrl.Result{}, err
 	}
-	// Re-evaluate when the oldest attributable evidence becomes stale (without
-	// waiting for an event or a snapshot tick), or when the next run is due.
+	// Re-evaluate when the oldest attributable evidence becomes stale or the
+	// current coverage report expires (without waiting for an event or a
+	// snapshot tick), or when the next run is due.
 	var after time.Duration
-	for _, t := range []time.Time{nextDue, ptrTime(current.NextExpiry)} {
+	for _, t := range []time.Time{nextDue, ptrTime(current.NextExpiry), coverageExpiry(current.Coverage)} {
 		if !t.IsZero() {
 			if d := t.Sub(now) + time.Second; after == 0 || d < after {
 				after = d
@@ -502,7 +503,7 @@ func (r *AssessmentReconciler) appliedSubjects(ctx context.Context, rendered []a
 
 // evaluate builds the current-evidence status for b at time now.
 func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.ComplianceBinding, now time.Time) (*v1alpha1.CurrentEvidence, error) {
-	capture, limits, maxAge, err := r.snapshot(ctx, b, now)
+	capture, limits, maxAge, profile, _, err := r.snapshotContent(ctx, b, now)
 	if err != nil {
 		return nil, err
 	}
@@ -530,6 +531,9 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 	if ev.NextExpiry != nil {
 		t := metav1.NewTime(*ev.NextExpiry)
 		cur.NextExpiry = &t
+	}
+	if cur.Coverage, err = r.currentCoverage(ctx, b, now, currentCoverageInputs(b, capture, profile)); err != nil {
+		return nil, err
 	}
 	return cur, nil
 }
