@@ -75,10 +75,19 @@ implemented (group 5)").
 
 - [x] 6.1 Extend the existing chart acceptance workflow with pinned Prometheus Operator/Prometheus fixtures; verify actual ServiceMonitor discovery, successful TLS/authenticated scraping, unauthorized denial and task-owned teardown, recording dependency versions.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.2 Exercise implemented producer failures/recovery through a real scrape and rule evaluator; verify per-binding evidence expiry, overdue scheduling, publication/cleanup alerts, configuration overrides and availability alerts without fabricated healthy data for missing integrations.
+- [x] 6.2 Exercise implemented producer failures/recovery through a real scrape and rule evaluator; verify per-binding evidence expiry, overdue scheduling, publication/cleanup alerts, configuration overrides and availability alerts without fabricated healthy data for missing integrations.
   <!-- agent: tier=deep risk=medium reason="Temporal projections and truthful replica aggregation" -->
-- [ ] 6.3 Exercise restart/leader transition, certificate/token rotation and binding deletion/recreation in the integrated deployment; retain evidence of bounded authorization revocation, correct gauge/counter behavior and continued controller work, then run the repository's applicable checks.
+- [x] 6.3 Exercise restart/leader transition, certificate/token rotation and binding deletion/recreation in the integrated deployment; retain evidence of bounded authorization revocation, correct gauge/counter behavior and continued controller work, then run the repository's applicable checks.
   <!-- agent: tier=deep risk=high reason="Authenticated metrics and revocation during replica changes" -->
+
+Group 6 notes: 6.2 and 6.3 run in `TestLiveHelmMonitoring` on the 6.1
+fixture (same release and Prometheus; see `docs/integration/metrics.md`,
+"Integrated acceptance"), which moved from `charts` to its own release
+group `monitoring` to keep both jobs in budget. Holds are tuned through
+`helm upgrade` there (1m; PublicationFailing keeps its default 2m), so the
+run is bounded; the default holds are covered by the promtool suites.
+The kubelet's rotation of projected reader tokens is not shortened; token
+rotation is exercised with Secret-bound tokens in the Secret mode.
 
 ## Workflow follow-up
 
