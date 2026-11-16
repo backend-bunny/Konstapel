@@ -15,6 +15,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -194,6 +196,16 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			c := l.binding(b).Status.Assessment.Current
 			return c != nil && c.Evidence.Expected == want[b] && c.Evidence.Completeness == "Complete" && c.Outcomes.Fail == want[b], toJSON(c)
 		})
+		// The run's coverage summary is the binding's current coverage
+		// (add-control-coverage-reporting 3.3) until scope or clock change it.
+		if sum.Coverage == nil || !sum.Coverage.InventoryResolved || sum.Coverage.InputsSHA256 == "" {
+			t.Fatalf("scheduled run of %s has no coverage summary: %s", b, toJSON(sum))
+		}
+		l.eventually(b+" current coverage", func() (bool, string) {
+			c := l.binding(b).Status.Assessment.Current
+			return c != nil && c.Coverage != nil && c.Coverage.State == v1alpha1.CoverageCurrent && c.Coverage.Run != nil &&
+				c.Coverage.Run.UID == string(r.UID) && toJSON(c.Coverage.Summary) == toJSON(sum.Coverage), toJSON(c)
+		})
 	}
 	// Run-start pinning: the default for wide, the binding's own reference
 	// for onlyA, each committed under its destination's prefix only.
@@ -267,6 +279,16 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		c := l.binding(wide.Name).Status.Assessment.Current
 		return c != nil && c.Evidence.Expected == 1, toJSON(c)
 	})
+	// The published report no longer describes the binding's namespaces:
+	// its current coverage is ScopeChanged, the run's summary unchanged.
+	l.eventually("current coverage follows the relabel", func() (bool, string) {
+		c := l.binding(wide.Name).Status.Assessment.Current
+		return c != nil && c.Coverage != nil && c.Coverage.State == v1alpha1.CoverageScopeChanged && c.Coverage.Run != nil &&
+			c.Coverage.Run.UID == string(scheduled[wide.Name].UID), toJSON(c)
+	})
+	if got := get(scheduled[wide.Name].Name); toJSON(got.Status.Summary) != toJSON(scheduled[wide.Name].Status.Summary) {
+		t.Fatalf("relabel changed the published run's summary: %s", toJSON(got.Status.Summary))
+	}
 
 	// 4. Authorized downloads: each team gets exactly its own validated package.
 	srv := &download.Server{Reader: l.c, Reviews: download.KubeReviewer{Client: l.c, Audience: downloadAudience}, TempDir: t.TempDir(),
@@ -281,6 +303,7 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 	}
 	// validate unpacks and fully validates a package, returning its
 	// descriptor and the concatenated contents of its files.
+	coverageSHA := map[string]string{}
 	validate := func(what string, body []byte) (publication.Descriptor, string) {
 		dir := t.TempDir()
 		untar(t, body, dir)
@@ -299,6 +322,8 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s package coverage: %v", what, err)
 		}
+		h := sha256.Sum256(raw)
+		coverageSHA[what] = hex.EncodeToString(h[:])
 		// A Diagnostic package carries no content: its coverage is a
 		// coverage diagnostic, never a guessed inventory.
 		if cov.TechnicalEvidence.Evidence == nil || *cov.TechnicalEvidence.Evidence != d.Evidence || cov.Scope.Kind != string(d.Scope.Kind) ||
@@ -331,6 +356,10 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			t.Fatalf("%s download: %d %s", ns, code, body)
 		}
 		d, files := validate(ns, body)
+		// The team's request summary names exactly the downloaded report.
+		if c := reqs[ns].Status.Summary.Coverage; c == nil || c.SHA256 != coverageSHA[ns] {
+			t.Fatalf("%s request coverage summary %s does not name the downloaded coverage.json %s", ns, toJSON(c), coverageSHA[ns])
+		}
 		if d.Scope.Kind != publication.ScopeNamespace || d.Scope.Request == nil || d.Scope.Request.NamespaceUID != nsUID[ns] ||
 			strings.Contains(files, `"`+other+`"`) || strings.Contains(files, nsUID[other]) {
 			t.Fatalf("%s package scope %+v or mentions %s", ns, d.Scope, other)
@@ -351,6 +380,9 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			t.Fatalf("operator download of %s: %d %s", b, code, body)
 		}
 		d, _ := validate(b, body)
+		if c := r.Status.Summary.Coverage; c == nil || c.SHA256 != coverageSHA[b] {
+			t.Fatalf("%s run coverage summary %s does not name the downloaded coverage.json %s", b, toJSON(c), coverageSHA[b])
+		}
 		if d.Scope.Kind != publication.ScopeBinding || int32(len(d.Scope.NamespaceUIDs)) != want[b] || d.Evidence.Completeness != publication.Complete {
 			t.Fatalf("%s binding package %+v %+v", b, d.Scope, d.Evidence)
 		}
