@@ -196,3 +196,39 @@ NOT adopt prior request identities or grant access to prior evidence.
 - **WHEN** the publisher completed a snapshot but the controller did not receive confirmation
 - **THEN** recovery reconciles the same run and publication identity
 - **AND** it does not collect a different snapshot under the old identity
+
+### Requirement: Status records source-evaluation and scheduling watermarks
+
+Assessment status SHALL record the source evaluation time of the oldest
+attributable observation in current evidence and in each closed run's summary,
+never from collection, upload or report-update times. Binding schedule status
+SHALL record the earliest scheduled time whose obligation has not yet been met
+by a scheduled run that closed with an assessment export. Both fields SHALL be
+additive and SHALL NOT change scheduling, enforcement or evidence semantics.
+
+#### Scenario: Current evidence ages
+
+- **WHEN** current evidence contains attributable observations evaluated at different times
+- **THEN** status records the earliest of those source evaluation times
+- **AND** the evidence expiry remains that time plus the evidence-age limit used at evaluation
+- **AND** the field is absent when no observation is attributable, and is never taken from collection, upload or report-update times
+
+#### Scenario: Which closures meet a scheduled obligation
+
+- **WHEN** a diagnostic export, a lost capture, a deleted run, a manual run or a namespace request closes
+- **THEN** none of them meets the outstanding scheduled obligation
+- **AND** a later scheduled run that closes with an assessment export, complete or incomplete, meets every earlier obligation it caught up on, including missed times coalesced into it, while missed ranges remain recorded
+- **AND** an interval change does not discard an outstanding obligation
+- **AND** both fields are absent when they do not apply
+
+#### Scenario: A scheduled run fails to export
+
+- **WHEN** a scheduled run closes as a diagnostic or loses its capture
+- **THEN** its scheduled time remains the earliest outstanding obligation
+- **AND** the next scheduled run starts on the unchanged cadence
+
+#### Scenario: A catch-up run closes with an incomplete assessment
+
+- **WHEN** missed scheduled times were coalesced into one run that closes with an incomplete assessment export
+- **THEN** no obligation up to that run's scheduled time remains outstanding
+- **AND** the missed range stays recorded as not assessed
