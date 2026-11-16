@@ -47,13 +47,13 @@ for package integration.
 
 ## 4. Association, validity, withdrawal, and cleanup
 
-- [ ] 4.1 Reconcile temporal, content, association, and withdrawal states separately; verify exact validity boundaries, no-event expiry, unavailable bytes, removed baseline controls, binding recreation, and unchanged associations across reporting-only/policy-parameter edits.
+- [x] 4.1 Reconcile temporal, content, association, and withdrawal states separately; verify exact validity boundaries, no-event expiry, unavailable bytes, removed baseline controls, binding recreation, and unchanged associations across reporting-only/policy-parameter edits.
   <!-- agent: tier=deep risk=medium reason="Bounded transfers and cross-owner temporal evidence state" -->
-- [ ] 4.2 Withdraw deleted records from new coverage while retaining source ownership until fixed expiry; verify restart/leader changes, retention-active finalization, expired source-download denial, and owned version/marker cleanup without changing historical packages.
+- [x] 4.2 Withdraw deleted records from new coverage while retaining source ownership until fixed expiry; verify restart/leader changes, retention-active finalization, expired source-download denial, and owned version/marker cleanup without changing historical packages.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 4.3 Expose bounded failure and cleanup conditions for inaccessible destinations or retention locks; verify failed deletion is recoverable and does not lose ownership or delete unrelated data.
+- [x] 4.3 Expose bounded failure and cleanup conditions for inaccessible destinations or retention locks; verify failed deletion is recoverable and does not lose ownership or delete unrelated data.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 4.4 Document lifecycle and recovery with clock-controlled examples; verify re-upload does not implicitly renew validity and correction requires a new immutable record.
+- [x] 4.4 Document lifecycle and recovery with clock-controlled examples; verify re-upload does not implicitly renew validity and correction requires a new immutable record.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 5. Coverage and assessment packages
