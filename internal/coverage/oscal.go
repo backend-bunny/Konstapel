@@ -3,12 +3,15 @@ package coverage
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle"
 )
@@ -161,7 +164,7 @@ func (l *loader) read(p string) (*document, *Limitation) {
 		return nil, blocking(CodeDocumentInvalid, p, "", "%v", err)
 	}
 	if err := s.Validate(inst); err != nil {
-		return nil, blocking(CodeDocumentInvalid, p, "", "not valid OSCAL %s: %s", m.OSCALVersion, firstLine(err.Error()))
+		return nil, blocking(CodeDocumentInvalid, p, "", "not valid OSCAL %s: %s", m.OSCALVersion, schemaError(err))
 	}
 	return d, nil
 }
@@ -230,4 +233,24 @@ func firstLine(s string) string {
 		s = s[:300] + "..."
 	}
 	return s
+}
+
+// schemaError is a bounded explanation of a schema validation failure: the
+// deepest failing location of the first causes.
+func schemaError(err error) string {
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return firstLine(err.Error())
+	}
+	for len(ve.Causes) > 0 {
+		next := ve.Causes[0]
+		for _, c := range ve.Causes {
+			// Prefer the branch that got furthest into the document.
+			if len(c.InstanceLocation) > len(next.InstanceLocation) {
+				next = c
+			}
+		}
+		ve = next
+	}
+	return firstLine(fmt.Sprintf("at /%s: %s", strings.Join(ve.InstanceLocation, "/"), ve.ErrorKind.LocalizedString(message.NewPrinter(language.English))))
 }
