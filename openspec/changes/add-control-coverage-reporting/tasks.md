@@ -8,13 +8,13 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
 
 ## 1. Baseline and mapping inventory
 
-- [ ] 1.1 Add the coverage report/input model and schema-aware baseline reader using verified content handles; verify the pinned Moderate profile enumerates every selected control/enhancement independently of findings and mappings.
+- [x] 1.1 Add the coverage report/input model and schema-aware baseline reader using verified content handles; verify the pinned Moderate profile enumerates every selected control/enhancement independently of findings and mappings.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 1.2 Validate supported profile semantics, schema versions, local import closure, catalog-qualified IDs, and statement membership; verify missing/unsupported imports, wrong-control statements, duplicate selection edges, and catalog revision mismatches produce explicit resolution limitations rather than guessed inventories.
+- [x] 1.2 Validate supported profile semantics, schema versions, local import closure, catalog-qualified IDs, and statement membership; verify missing/unsupported imports, wrong-control statements, duplicate selection edges, and catalog revision mismatches produce explicit resolution limitations rather than guessed inventories.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 1.3 Join authored rule/check mappings to selected profile policies, retaining descriptions and parameters; verify absent, unselected, partial, and unresolved automation states plus a small alternate-catalog fixture with non-NIST identifiers.
+- [x] 1.3 Join authored rule/check mappings to selected profile policies, retaining descriptions and parameters; verify absent, unselected, partial, and unresolved automation states plus a small alternate-catalog fixture with non-NIST identifiers.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.4 Document supported OSCAL resolution semantics and the meaning of coverage states in `docs/control-coverage.md`; verify examples match the Moderate inventory and do not equate policy parameters with unmapped OSCAL parameters.
+- [x] 1.4 Document supported OSCAL resolution semantics and the meaning of coverage states in `docs/control-coverage.md`; verify examples match the Moderate inventory and do not equate policy parameters with unmapped OSCAL parameters.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 2. Attributed technical evidence and findings

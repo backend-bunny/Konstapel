@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"golang.org/x/text/language"
@@ -63,7 +64,6 @@ type loader struct {
 	c        Content
 	o        Options
 	declared map[string]string // entry-point path -> declared version
-	schemas  map[string]*jsonschema.Schema
 	docs     map[string]*document
 	failed   map[string]*Limitation
 	raws     map[string]rawFile
@@ -86,8 +86,7 @@ func (l *loader) raw(p string) ([]byte, string, error) {
 }
 
 func newLoader(c Content, o Options) *loader {
-	l := &loader{c: c, o: o, declared: map[string]string{}, schemas: map[string]*jsonschema.Schema{},
-		docs: map[string]*document{}, failed: map[string]*Limitation{}, raws: map[string]rawFile{}}
+	l := &loader{c: c, o: o, declared: map[string]string{}, docs: map[string]*document{}, failed: map[string]*Limitation{}, raws: map[string]rawFile{}}
 	for _, d := range c.OSCAL {
 		l.declared[d.Path] = d.Version
 	}
@@ -155,9 +154,13 @@ func (l *loader) read(p string) (*document, *Limitation) {
 	if want, ok := l.declared[p]; ok && want != m.OSCALVersion {
 		return nil, blocking(CodeSchemaVersionMismatch, p, "", "document states OSCAL %q but the content declares %q", m.OSCALVersion, want)
 	}
-	s, lim := l.schema(p, m.OSCALVersion)
+	s, schemaDigest, lim := l.schema(p, m.OSCALVersion)
 	if lim != nil {
 		return nil, lim
+	}
+	key := schemaDigest + " " + dig
+	if valid.has(key) {
+		return d, nil
 	}
 	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
@@ -166,34 +169,81 @@ func (l *loader) read(p string) (*document, *Limitation) {
 	if err := s.Validate(inst); err != nil {
 		return nil, blocking(CodeDocumentInvalid, p, "", "not valid OSCAL %s: %s", m.OSCALVersion, schemaError(err))
 	}
+	valid.add(key)
 	return d, nil
 }
 
-// schema compiles the trusted schema of version once per read.
-func (l *loader) schema(p, version string) (*jsonschema.Schema, *Limitation) {
-	if s, ok := l.schemas[version]; ok {
-		return s, nil
+// boundedSet remembers up to max keys; when full it starts over.
+type boundedSet struct {
+	mu  sync.Mutex
+	max int
+	m   map[string]bool
+}
+
+func (b *boundedSet) has(k string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.m[k]
+}
+
+func (b *boundedSet) add(k string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.m == nil || len(b.m) >= b.max {
+		b.m = map[string]bool{}
 	}
+	b.m[k] = true
+}
+
+// valid remembers successful schema validations by trusted-schema and
+// document digest: the same bytes against the same schema always validate
+// the same way, and a 10 MB catalog takes a noticeable time to validate.
+var valid = &boundedSet{max: 256}
+
+// compiled caches compiled trusted schemas by version and schema digest.
+// Compiled schemas are immutable and safe for concurrent use.
+var compiled = struct {
+	sync.Mutex
+	m map[string]*jsonschema.Schema
+}{m: map[string]*jsonschema.Schema{}}
+
+const maxCompiledSchemas = 8
+
+// schema returns the compiled trusted schema of version and its digest.
+func (l *loader) schema(p, version string) (*jsonschema.Schema, string, *Limitation) {
 	raw, ok := l.o.Schemas[version]
 	if !ok || !slices.Contains(SupportedOSCAL, version) {
-		return nil, blocking(CodeSchemaVersionUnsupported, p, "", "OSCAL %q is not supported (supported: %s, with a trusted schema)", version, strings.Join(SupportedOSCAL, ", "))
+		return nil, "", blocking(CodeSchemaVersionUnsupported, p, "", "OSCAL %q is not supported (supported: %s, with a trusted schema)", version, strings.Join(SupportedOSCAL, ", "))
+	}
+	sd := digest(raw)
+	key := version + " " + sd
+	compiled.Lock()
+	s, ok := compiled.m[key]
+	compiled.Unlock()
+	if ok {
+		return s, sd, nil
 	}
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
-		return nil, blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
+		return nil, "", blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
 	}
 	c := jsonschema.NewCompiler()
 	c.UseLoader(denyLoader{})
 	url := "konstapel:///oscal-" + version + ".json"
 	if err := c.AddResource(url, doc); err != nil {
-		return nil, blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
+		return nil, "", blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
 	}
-	s, err := c.Compile(url)
+	s, err = c.Compile(url)
 	if err != nil {
-		return nil, blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
+		return nil, "", blocking(CodeSchemaVersionUnsupported, p, "", "trusted OSCAL %s schema: %v", version, err)
 	}
-	l.schemas[version] = s
-	return s, nil
+	compiled.Lock()
+	if len(compiled.m) >= maxCompiledSchemas {
+		compiled.m = map[string]*jsonschema.Schema{}
+	}
+	compiled.m[key] = s
+	compiled.Unlock()
+	return s, sd, nil
 }
 
 type denyLoader struct{}
