@@ -299,9 +299,16 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s package coverage: %v", what, err)
 		}
-		if !cov.Inventory.Resolved || cov.Inventory.Controls == 0 || len(cov.Controls) != cov.Inventory.Controls ||
-			cov.TechnicalEvidence.Evidence == nil || *cov.TechnicalEvidence.Evidence != d.Evidence || cov.Scope.Kind != string(d.Scope.Kind) {
-			t.Fatalf("%s package coverage: inventory %+v evidence %+v (descriptor %+v)", what, cov.Inventory, cov.TechnicalEvidence.Evidence, d.Evidence)
+		// A Diagnostic package carries no content: its coverage is a
+		// coverage diagnostic, never a guessed inventory.
+		if cov.TechnicalEvidence.Evidence == nil || *cov.TechnicalEvidence.Evidence != d.Evidence || cov.Scope.Kind != string(d.Scope.Kind) ||
+			cov.Inventory.Resolved != (d.PackageKind == publication.KindAssessment) || len(cov.Controls) != cov.Inventory.Controls ||
+			(d.PackageKind == publication.KindAssessment && cov.Inventory.Controls == 0) ||
+			(d.PackageKind == publication.KindDiagnostic && !slices.ContainsFunc(cov.Limitations, func(l coverage.Limitation) bool {
+				return l.Code == coverage.CodeContentUnavailable && l.Blocking
+			})) {
+			t.Fatalf("%s %s package coverage: inventory %+v evidence %+v limitations %+v (descriptor %+v)", what, d.PackageKind, cov.Inventory,
+				cov.TechnicalEvidence.Evidence, cov.Limitations, d.Evidence)
 		}
 		var all strings.Builder
 		_ = filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
