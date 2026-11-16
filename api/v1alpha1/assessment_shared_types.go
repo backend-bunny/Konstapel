@@ -126,6 +126,85 @@ type AssessmentSummary struct {
 	// is attributable, and on summaries recorded before this field existed.
 	// +optional
 	OldestEvaluation *metav1.Time `json:"oldestEvaluation,omitempty"`
+	// coverage summarizes the control coverage report (coverage.json) the
+	// run's package carries. Absent when the package carries none (a run
+	// exported before coverage existed, or whose coverage was left out),
+	// and never a substitute for the evidence and outcomes above.
+	// +optional
+	Coverage *CoverageSummary `json:"coverage,omitempty"`
+}
+
+// CoverageEvidenceState is a coverage report's technical-evidence state.
+// +kubebuilder:validation:Enum=resolved;unresolved;notProvided
+type CoverageEvidenceState string
+
+// CoverageSummary is the bounded status summary of one control coverage
+// report (docs/control-coverage.md). It counts the selected baseline's
+// controls by automation state; no count is a satisfaction or pass count,
+// and the per-control rows, findings and observations stay in the package.
+// It mirrors internal/publication.CoverageSummary.
+type CoverageSummary struct {
+	// asOf is the report's closure time: the capture's, never a read time.
+	AsOf metav1.Time `json:"asOf"`
+	// sha256 is the lowercase hex sha256 of the package's
+	// coverage.json, as its descriptor inventories it.
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	SHA256 string `json:"sha256"`
+	// inputsSha256 identifies what the report assessed: the binding UID,
+	// the scope's namespace UIDs and the profile selection (bundle,
+	// policies, parameters) frozen when the run started. Absent when that
+	// selection was not recorded.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	InputsSHA256 string `json:"inputsSha256,omitempty"`
+	// bundle is the content the baseline was read from; absent when the
+	// scope selected no profile.
+	// +optional
+	Bundle *BundleReference `json:"bundle,omitempty"`
+	// inventoryResolved is true only when the selected baseline resolved.
+	// An unresolved inventory lists no controls (never a guessed list).
+	InventoryResolved bool `json:"inventoryResolved"`
+	// mappingsResolved is true only when the authored mappings resolved.
+	MappingsResolved bool `json:"mappingsResolved"`
+	// controls counts the selected controls including enhancements.
+	// +kubebuilder:validation:Minimum=0
+	Controls int32 `json:"controls"`
+	// +kubebuilder:validation:Minimum=0
+	Enhancements int32 `json:"enhancements"`
+	// automation counts controls by technical coverage state.
+	Automation CoverageAutomationCounts `json:"automation"`
+	// technicalEvidence is whether the run's evaluated capture was joined
+	// to the controls; the evidence counts are the run's own.
+	TechnicalEvidence CoverageEvidenceState `json:"technicalEvidence"`
+	// validUntil is when the oldest attributable observation the report
+	// counts exceeds the binding's maxEvidenceAge, as the run evaluated it
+	// at closure. Absent when no observation is attributable. It never
+	// changes the report, which stays evaluated at asOf.
+	// +optional
+	ValidUntil *metav1.Time `json:"validUntil,omitempty"`
+	// limitations counts every report and control-row limitation.
+	// +kubebuilder:validation:Minimum=0
+	Limitations int32 `json:"limitations"`
+	// blockingCodes are the distinct codes of blocking limitations, in
+	// code order; at most eight are listed, the report has them all.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=64
+	BlockingCodes []string `json:"blockingCodes,omitempty"`
+}
+
+// CoverageAutomationCounts counts controls by automation state. There is
+// deliberately no "full" or satisfied state.
+type CoverageAutomationCounts struct {
+	// +kubebuilder:validation:Minimum=0
+	None int32 `json:"none"`
+	// +kubebuilder:validation:Minimum=0
+	Unselected int32 `json:"unselected"`
+	// +kubebuilder:validation:Minimum=0
+	Partial int32 `json:"partial"`
+	// +kubebuilder:validation:Minimum=0
+	Unknown int32 `json:"unknown"`
 }
 
 // PublicationPhase is the publication lifecycle. Only Committed denotes

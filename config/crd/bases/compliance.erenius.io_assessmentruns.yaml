@@ -720,6 +720,141 @@ spec:
                   AssessmentSummary is the sanitized result summary exposed in status. It
                   contains no inventory, storage location, credential, or sibling data.
                 properties:
+                  coverage:
+                    description: |-
+                      coverage summarizes the control coverage report (coverage.json) the
+                      run's package carries. Absent when the package carries none (a run
+                      exported before coverage existed, or whose coverage was left out),
+                      and never a substitute for the evidence and outcomes above.
+                    properties:
+                      asOf:
+                        description: 'asOf is the report''s closure time: the capture''s,
+                          never a read time.'
+                        format: date-time
+                        type: string
+                      automation:
+                        description: automation counts controls by technical coverage
+                          state.
+                        properties:
+                          none:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          partial:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          unknown:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          unselected:
+                            format: int32
+                            minimum: 0
+                            type: integer
+                        required:
+                        - none
+                        - partial
+                        - unknown
+                        - unselected
+                        type: object
+                      blockingCodes:
+                        description: |-
+                          blockingCodes are the distinct codes of blocking limitations, in
+                          code order; at most eight are listed, the report has them all.
+                        items:
+                          maxLength: 64
+                          type: string
+                        maxItems: 8
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      bundle:
+                        description: |-
+                          bundle is the content the baseline was read from; absent when the
+                          scope selected no profile.
+                        properties:
+                          digest:
+                            description: digest is the sha256 digest of the bundle
+                              content.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
+                          name:
+                            description: name identifies the bundle, for example "linux-workload-hardening".
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - digest
+                        - name
+                        type: object
+                      controls:
+                        description: controls counts the selected controls including
+                          enhancements.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      enhancements:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      inputsSha256:
+                        description: |-
+                          inputsSha256 identifies what the report assessed: the binding UID,
+                          the scope's namespace UIDs and the profile selection (bundle,
+                          policies, parameters) frozen when the run started. Absent when that
+                          selection was not recorded.
+                        pattern: ^[0-9a-f]{64}$
+                        type: string
+                      inventoryResolved:
+                        description: |-
+                          inventoryResolved is true only when the selected baseline resolved.
+                          An unresolved inventory lists no controls (never a guessed list).
+                        type: boolean
+                      limitations:
+                        description: limitations counts every report and control-row
+                          limitation.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      mappingsResolved:
+                        description: mappingsResolved is true only when the authored
+                          mappings resolved.
+                        type: boolean
+                      sha256:
+                        description: |-
+                          sha256 is the lowercase hex sha256 of the package's
+                          coverage.json, as its descriptor inventories it.
+                        pattern: ^[0-9a-f]{64}$
+                        type: string
+                      technicalEvidence:
+                        description: |-
+                          technicalEvidence is whether the run's evaluated capture was joined
+                          to the controls; the evidence counts are the run's own.
+                        enum:
+                        - resolved
+                        - unresolved
+                        - notProvided
+                        type: string
+                      validUntil:
+                        description: |-
+                          validUntil is when the oldest attributable observation the report
+                          counts exceeds the binding's maxEvidenceAge, as the run evaluated it
+                          at closure. Absent when no observation is attributable. It never
+                          changes the report, which stays evaluated at asOf.
+                        format: date-time
+                        type: string
+                    required:
+                    - asOf
+                    - automation
+                    - controls
+                    - enhancements
+                    - inventoryResolved
+                    - limitations
+                    - mappingsResolved
+                    - sha256
+                    - technicalEvidence
+                    type: object
                   evidence:
                     description: EvidenceSummary counts expected checks by evidence
                       state.
