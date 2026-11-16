@@ -25,7 +25,10 @@ and a Prometheus in another namespace ([Verified Operator
 setup](../charts.md#verified-operator-setup)): discovery through the chart's
 ServiceMonitor, authenticated TLS scrapes, the starter rules loaded, denial
 for an unbound identity, the Operator's file-access policy with the Secret
-fallback, and revocation within the cache bound.
+fallback, and revocation within the cache bound. The
+[integrated acceptance](#integrated-acceptance) then drives real failures,
+replica changes and credential changes through that scrape and the starter
+alerts.
 
 ## Rules of the contract
 
@@ -329,6 +332,40 @@ ownership is ambiguous:
 ```promql
 count by (job, binding) (konstapel_binding_assessment_status{view="current"} == 1)
 ```
+
+## Integrated acceptance
+
+`TestLiveHelmMonitoring` (the `monitoring` acceptance group; [Verified Operator
+setup](../charts.md#verified-operator-setup)) checks these semantics end to
+end. The Helm-installed controller is scraped over verified TLS by a real
+Prometheus. Real failures, replica changes and credential changes then go
+through that scrape and Prometheus's own evaluation of the chart's rendered
+starter alerts. The test reads alert states from the Prometheus alerts API
+and series from its query API; it never evaluates a rule itself. It first
+checks that the defaults are loaded (holds 5m, 5m, 10m, 10m, 5m, 2m and 15m,
+all `warning`). It then tunes them with `helm upgrade` as an operator would:
+1-minute holds, overdue grace 30s, cleanup lateness 120s,
+`KonstapelBindingUnresolved` at `critical`, and `KonstapelCleanupBlocked`
+disabled and later re-enabled. The controller Deployment is not touched.
+`KonstapelPublicationFailing` keeps its default 2-minute hold.
+
+| Scenario | Real cause | Checked through Prometheus |
+| --- | --- | --- |
+| Baseline | three bindings: no workload, a passing and a failing Pod every 2 minutes, one passing Pod with a 90s evidence-age limit | one owner per enabled domain (the Lease holder); `bundle_resolution` disabled and never ready; followers expose no owner series; `no_targets` with zero counts and no completeness; expiry = oldest evaluation + `maxEvidenceAge`; no alert firing |
+| Publication failing | the test S3 fault proxy refuses one binding's requests during a manual run | `KonstapelPublicationFailing` fires before the 5-minute publish timeout; the gauge is 1 and at least 3 attempts failed; after storage returns, the run commits and the alert resolves |
+| Cleanup blocked | an S3 legal hold on a package in an object-lock bucket | `KonstapelCleanupBlocked` fires once the expiry deletion is refused (`RetentionBlocked`); it keeps firing after the binding is deleted; lifting the hold lets the next backed-off attempt delete the package and resolves it |
+| Binding deleted and recreated | the binding is deleted while its package's cleanup is blocked, then recreated with the same name | every series of the old object disappears; the backlog outlives it; the new object has a newer creation time, one series per view, and never the old object's latest closed run |
+| Binding unresolved | a binding names a missing profile | `KonstapelBindingUnresolved` fires with the configured `critical` severity |
+| Evidence expiry | Kyverno's reports and background controllers are stopped | once the expiry passes, the current view is `unknown` or re-evaluated as `rejected`, never a pass; a run closed afterwards counts the aged observation as `rejected` and is incomplete; after reporting resumes the view is current again |
+| Reporting access lost | the controller's ClusterRole loses `wgpolicyk8s.io` | `KonstapelEngineUnavailable` fires for `assessment` while `policy_delivery` stays true and never alerts; current evidence is never a pass; scheduling stops and `KonstapelAssessmentOverdue` fires; both resolve once access returns |
+| Leader killed | the Lease holder's pod is force-deleted while a run is in flight | the other replica takes the Lease and becomes the only owner; every binding gauge is exposed once, by it, with unchanged values; the killed pod's series are gone; its replacement exposes no owner series, readiness 0 and zero counters; the run completes |
+| No leader | the controller's Role loses Lease access, so the leader exits with `leader election lost` and restarts and no replica can lead | both targets still scrape (`up` 1); `KonstapelObservationUnavailable` fires for exactly the three enabled domains; no binding, capability or backlog series is exposed; the firing `KonstapelBindingUnresolved` resolves although nothing recovered; the restarted process's counters reset (`resets`) without an alert; after access returns, one owner is back and `KonstapelBindingUnresolved` fires again only after its full hold, then resolves when its profile exists |
+| Certificate rotation | cert-manager reissues the metrics certificate in place (manual renewal) | the new serial is served without a restart, and `min_over_time(up[…])` stays 1 for every target |
+| Token rotation | a new reader token, bound to a Secret, goes into the Secret-mode ServiceMonitor's Secret; after propagation the old token's anchor Secret is deleted | the controller refuses the old token within the 1-minute authentication cache; every target keeps scraping with the new one |
+| Revocation | the `konstapel-metrics-reader` binding is deleted and a replica is replaced | every target is refused with `403` within the 5-minute allow cache (the new replica at once); `KonstapelMetricsUnavailable` fires; a run still publishes; after the binding is restored, scrapes return within the 30-second denial cache and the alert resolves |
+
+Each measured time and the full alert timeline are recorded in
+`TestLiveHelmMonitoring.json` of the group's evidence.
 
 ## Catalog
 
