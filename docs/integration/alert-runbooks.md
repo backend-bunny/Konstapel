@@ -113,7 +113,10 @@ mean that the controller has rebuilt its projections.
 ready and fresh on exactly one replica. The causes:
 
 - No replica leads, or the new leader has not yet synchronized its cache and
-  republished.
+  republished. A controller that cannot renew or take the Lease (for example
+  its Role lost access to `leases`) exits with `leader election lost`,
+  restarts, and keeps serving metrics without owning anything, so every
+  enabled domain fires while `up` stays 1.
 - The owner withdrew its projection because it cannot read its state (watch
   or cache failure), or stopped refreshing it. The exporter reports
   `ready 0` once the projection is 2 minutes old.
