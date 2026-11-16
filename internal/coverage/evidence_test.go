@@ -33,7 +33,7 @@ func statesFixture(t *testing.T) (Content, *Evidence) {
 		result(esc.enginePolicy(), 0, p1, "pass", at), // current pass
 		result(esc.enginePolicy(), 0, p2, "fail", at), // current fail
 		// nonroot p1: no result (missing)
-		result(nonroot.enginePolicy(), 0, p2, "pass", evStarted.Add(-time.Minute)), // before the continuity boundary: rejected
+		result(nonroot.enginePolicy(), 0, p2, "pass", evStarted.Add(-time.Minute)),                     // before the continuity boundary: rejected
 		result(caps.enginePolicy(), 0, p1, "pass", at), result(caps.enginePolicy(), 0, p1, "fail", at), // conflicting
 		result(caps.enginePolicy(), 1, p1, "warn", at), // Kyverno warn: unknown
 		result(caps.enginePolicy(), 0, p2, "pass", at), result(caps.enginePolicy(), 1, p2, "pass", at),

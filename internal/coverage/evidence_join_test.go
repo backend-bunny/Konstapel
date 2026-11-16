@@ -233,4 +233,3 @@ func TestUnresolvedInventoryRetainsEvidence(t *testing.T) {
 		t.Errorf("limitations %v", r.Limitations)
 	}
 }
-
