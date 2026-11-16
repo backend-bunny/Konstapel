@@ -290,3 +290,62 @@ func TestEvidenceNotProvided(t *testing.T) {
 		}
 	}
 }
+
+// ac6AllPass selects every hardening check mapped to AC-6 and passes every
+// one of their observations on two pods.
+func ac6AllPass(t *testing.T) (*Report, []string) {
+	t.Helper()
+	c := official(t, hardening)
+	inv := Build(Input{Content: c, Selection: allHardening(c), Options: opts(t)})
+	var policies []string
+	for _, ch := range row(t, inv, "ac-6").Checks {
+		policies = append(policies, ch.Policy)
+	}
+	var contribs []contrib
+	for _, p := range policies {
+		contribs = append(contribs, contrib{binding: "bind-a", revision: "r1", policy: p, bundle: c.Bundle})
+	}
+	cap := capture(t, contribs, pod("p1"), pod("p2"))
+	reportAll(&cap, evStarted.Add(time.Minute), "pass")
+	r := Build(Input{Scope: Scope{Cluster: evCluster, Binding: &ObjectRef{Name: "bind-a", UID: "bind-a"}}, Content: c,
+		Selection: selecting(c, policies...), Options: opts(t), Evidence: evaluated(t, cap, evMaxAge)})
+	return r, policies
+}
+
+// Every available AC-6 check passing on every target is complete technical
+// evidence for those checks, and still only partial AC-6 coverage: the
+// authored limits stay, and the rest of the baseline stays unassessed.
+func TestAllAC6ChecksPassingStaysPartial(t *testing.T) {
+	r, policies := ac6AllPass(t)
+	if len(policies) < 2 || r.TechnicalEvidence.State != EvidenceResolved || len(r.Limitations) != 0 {
+		t.Fatalf("policies %v state %s limitations %v", policies, r.TechnicalEvidence.State, r.Limitations)
+	}
+	ac6 := row(t, r, "ac-6")
+	e, o := counts(t, "ac-6", *ac6.Evidence)
+	if ac6.Automation != AutomationPartial || e.Completeness != publication.Complete || o.Pass != e.Expected || o.Fail != 0 {
+		t.Fatalf("ac-6 %s %+v %+v", ac6.Automation, e, o)
+	}
+	for _, ch := range ac6.Checks {
+		if ch.Selection != CheckSelected || !strings.Contains(ch.Description, "Partial") || !strings.Contains(ch.Description, "full") {
+			t.Errorf("%s lost its authored limit: %q", ch.RuleID, ch.Description)
+		}
+	}
+	unassessed := 0
+	for _, x := range r.Controls {
+		if x.Automation == "full" || x.Automation == "satisfied" {
+			t.Fatalf("%s claims %s", x.ID, x.Automation)
+		}
+		if x.Evidence == nil {
+			unassessed++
+			if x.Automation == AutomationPartial {
+				t.Errorf("%s is partial without evidence", x.ID)
+			}
+		}
+	}
+	if unassessed < r.Inventory.Controls-3 || unassessed == 0 {
+		t.Errorf("%d of %d controls unassessed", unassessed, r.Inventory.Controls)
+	}
+	if *r.TechnicalEvidence.Evidence != *ac6.Evidence.Evidence {
+		t.Errorf("the report's unique observations %+v differ from ac-6's %+v", *r.TechnicalEvidence.Evidence, *ac6.Evidence.Evidence)
+	}
+}

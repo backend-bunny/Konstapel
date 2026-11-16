@@ -76,6 +76,66 @@ func docRow(t *testing.T) string {
 	return string(b) + "\n"
 }
 
+// docEvidence is the evidence example: every AC-6 check of the hardening
+// bundle selected, and every observation passing.
+func docEvidence(t *testing.T) string {
+	t.Helper()
+	r, policies := ac6AllPass(t)
+	var sb strings.Builder
+	te := r.TechnicalEvidence
+	fmt.Fprintf(&sb, "konstapel-linux-hardening, profile selects the %d AC-6 checks: %s\n", len(policies), strings.Join(policies, ", "))
+	fmt.Fprintf(&sb, "capture  1 binding, 2 pods, every expected observation passes\n")
+	fmt.Fprintf(&sb, "report   %s: %d expected, %d attributable; pass %d (unique observations)\n\n",
+		te.Evidence.Completeness, te.Evidence.Expected, te.Evidence.Attributable, te.Outcomes.Pass)
+	sum, none := 0, 0
+	for _, x := range r.Controls {
+		if x.Evidence == nil {
+			if x.Automation == AutomationNone {
+				none++
+			}
+			continue
+		}
+		selected := 0
+		for _, ch := range x.Checks {
+			if ch.Selection == CheckSelected {
+				selected++
+			}
+		}
+		sum += x.Evidence.Evidence.Expected
+		fmt.Fprintf(&sb, "  %-6s %-8s %d of %d checks selected, %s: %d expected, pass %d\n", x.ID, x.Automation, selected, len(x.Checks),
+			x.Evidence.Evidence.Completeness, x.Evidence.Evidence.Expected, x.Evidence.Outcomes.Pass)
+	}
+	fmt.Fprintf(&sb, "  rows sum to %d; the report has %d unique observations\n", sum, te.Evidence.Expected)
+	fmt.Fprintf(&sb, "  %-6s %d controls, no automated assessment\n", AutomationNone, none)
+	return sb.String()
+}
+
+// docEvidenceRow is an excerpt of the ac-6 row of that example: the
+// control's evidence view and one check's contributions.
+func docEvidenceRow(t *testing.T) string {
+	t.Helper()
+	r, _ := ac6AllPass(t)
+	ac6 := row(t, r, "ac-6")
+	ch := ac6.Checks[0]
+	for i := range ch.Evidence.Contributions {
+		for j, k := range ch.Evidence.Contributions[i].Observations {
+			ch.Evidence.Contributions[i].Observations[j] = strings.ReplaceAll(k, "\x00", "|")
+		}
+	}
+	v := struct {
+		ID           string                 `json:"id"`
+		Automation   string                 `json:"automation"`
+		Evidence     *EvidenceView          `json:"evidence"`
+		CheckRule    string                 `json:"checks[0].ruleId"`
+		CheckContrib []ContributionEvidence `json:"checks[0].evidence.contributions"`
+	}{ac6.ID, ac6.Automation, ac6.Evidence, ch.RuleID, ch.Evidence.Contributions}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b) + "\n"
+}
+
 // block returns the text between <!-- name:begin --> and <!-- name:end -->,
 // without the fence lines.
 func block(t *testing.T, doc, name string) string {
@@ -101,7 +161,8 @@ func TestControlCoverageDocExamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := string(raw)
-	for name, want := range map[string]string{"coverage-inventory": docInventory(t), "coverage-row": docRow(t)} {
+	for name, want := range map[string]string{"coverage-inventory": docInventory(t), "coverage-row": docRow(t),
+		"coverage-evidence": docEvidence(t), "coverage-evidence-row": docEvidenceRow(t)} {
 		if os.Getenv("KONSTAPEL_UPDATE_DOCS") != "" {
 			fmt.Printf("<!-- %s:begin -->\n```\n%s```\n<!-- %s:end -->\n", name, want, name)
 			continue
@@ -114,6 +175,10 @@ func TestControlCoverageDocExamples(t *testing.T) {
 	// and the example row shows no policy parameter as an OSCAL value.
 	if !strings.Contains(doc, "`policyParameters` hold engine configuration, never values of the control's\nOSCAL parameters") {
 		t.Error("the documentation does not separate policy parameters from OSCAL parameters")
+	}
+	// Row counts are documented as overlapping, never as a sum.
+	if !strings.Contains(doc, "Row counts\ntherefore overlap and are **not additive**") {
+		t.Error("the documentation does not state that row counts are not additive")
 	}
 	if strings.Contains(block(t, doc, "coverage-row"), "oscalParameters") {
 		t.Error("the example row presents an OSCAL parameter setting the content does not author")
