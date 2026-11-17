@@ -71,11 +71,11 @@ for package integration.
 
 ## 6. RustFS local development
 
-- [ ] 6.1 Reuse and, where needed, extend the S3 owner's disposable development helper (the digest-pinned RustFS in scripts/runtime.env used by s3-compat.sh) with attachment local credentials, bucket/prefix, and owned volume; verify start/stop commands use existing Devbox tooling, leave production Helm dependencies unchanged, and add no second S3 image.
+- [x] 6.1 Reuse and, where needed, extend the S3 owner's disposable development helper (the digest-pinned RustFS in scripts/runtime.env used by s3-compat.sh) with attachment local credentials, bucket/prefix, and owned volume; verify start/stop commands use existing Devbox tooling, leave production Helm dependencies unchanged, and add no second S3 image.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.2 Run the shared conditional-create, commit-time, checksum/readback, concurrency/recovery, and cleanup compatibility suite against the existing RustFS pin; record its version and the supported versioning modes (the S3 change's three) and reject missing required semantics without claiming untested AWS or Object Lock support.
+- [x] 6.2 Run the shared conditional-create, commit-time, checksum/readback, concurrency/recovery, and cleanup compatibility suite against the existing RustFS pin; record its version and the supported versioning modes (the S3 change's three) and reject missing required semantics without claiming untested AWS or Object Lock support.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.3 Document the local registration/upload/capture/download workflow and safe teardown in development and supporting-evidence guides; verify the production S3 adapter handles the fixture with no alternate filesystem backend or one-task-per-script expansion.
+- [x] 6.3 Document the local registration/upload/capture/download workflow and safe teardown in development and supporting-evidence guides; verify the production S3 adapter handles the fixture with no alternate filesystem backend or one-task-per-script expansion.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 7. Integrated acceptance and release wiring

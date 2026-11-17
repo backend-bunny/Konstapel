@@ -156,6 +156,14 @@ parallel jobs reduce elapsed time while repeating setup on each runner.
 Piping logs through `tee` preserves failures. `acceptance-result.json` and
 `result.txt` record the final outcome after teardown.
 
+The test S3 service for local work is `scripts/s3-compat.sh` (the digest-pinned
+RustFS of `scripts/runtime.env`). `devbox run -- bash scripts/s3-compat.sh OUTPUT`
+runs the S3 compatibility suites in all three versioning modes and records the
+RustFS version; `--serve OUTPUT` keeps it running with an attachment bucket and
+a 0600 `dev.env` of random credentials until Ctrl-C. Each run removes its own
+container and named volume, identified by label. See
+[supporting evidence](supporting-evidence.md#local-development).
+
 CI uploads test-owned evidence as `acceptance-evidence-<group>`, excluding kubeconfigs,
 compiled test binaries, rendered chart manifests, and node logs. The task tears
 down its cluster and test service on success or failure; teardown errors fail

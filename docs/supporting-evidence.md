@@ -328,9 +328,47 @@ versioning mode: unversioned, enabled and suspended. In each mode it checks:
 - full owned deletion at expiry removes null versions and delete markers in
   a suspended bucket.
 
-On 2026-11-14 it passed against
-`docker.io/rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b`.
-This makes no claim about AWS S3 or Object Lock.
+On 2026-11-17 it passed against RustFS 1.0.3
+(`docker.io/rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b`)
+in all three modes. The run records the image, the version the container
+reports (`s3-version.txt`) and the supported modes in `attachment-compat.json`,
+and fails if either result file is missing. Other services and the semantics
+this suite doesn't exercise are unsupported: a service that lacks conditional
+create, server checksums or readback fails the destination probe and blocks
+readiness rather than weakening the commit protocol. This makes no claim about
+AWS S3 or Object Lock.
+
+### Local development
+
+There is one S3 fixture: the digest-pinned RustFS service of
+`scripts/runtime.env` (`KONSTAPEL_S3_IMAGE`), driven by `scripts/s3-compat.sh`.
+The production chart doesn't ship it, and there is no second S3 image and no
+filesystem attachment backend. Controller, download service and CLI use the
+production S3 adapter with an `EvidenceDestination` that sets
+`developmentFixture: true`, the only way plain http to a loopback endpoint is
+accepted.
+
+```sh
+# Start the fixture: random credentials, a loopback port, a bucket and a
+# data volume it owns. Settings go to a 0600 file; never commit it.
+devbox run -- bash scripts/s3-compat.sh --serve /tmp/konstapel-attachments-dev
+# In another shell: source it, create a credential Secret and a destination
+# whose endpoint, bucket and prefix match, then register, upload, capture and
+# download as in "Workflow" below.
+. /tmp/konstapel-attachments-dev/dev.env
+# Stop with Ctrl-C (or EOF) in the first shell.
+```
+
+Teardown removes exactly the container and volume the run labelled
+(`konstapel.s3-compat=<name>`), also on failure or interrupt, so unrelated
+containers and volumes are untouched. Delete the output directory (it holds the
+credentials) and the Secret you created from them. For the whole flow, including
+capture into a platform package and download through the real controller, run
+`task acceptance GROUP=storage OUTPUT=/absolute/fresh/path`
+(`TestLiveAttachmentTransfer` and the lifecycle tests). To rerun just the
+compatibility suites, use
+`devbox run -- bash scripts/s3-compat.sh /absolute/fresh/path`. No Task task
+wraps this script.
 
 The transfer service (below) writes documents only through this adapter
 (`internal/s3store.AttachmentStore`) and this contract.
