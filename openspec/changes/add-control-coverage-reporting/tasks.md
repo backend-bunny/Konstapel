@@ -34,11 +34,11 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 3.2 Integrate the production assessment producer and package inventory through its owner, using summary roles and valid relative references; verify package checksum/reference validation and explicit coverage diagnostics without fabricated OSCAL findings.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 3.3 Extend the current assessment summary through its owning API/publication types with bounded coverage state and observation references; verify generated schemas, round-trip fixtures, large-baseline status bounds, and unchanged technical EvidenceComplete semantics.
+- [x] 3.3 Extend the current assessment summary through its owning API/publication types with bounded coverage state and observation references; verify generated schemas, round-trip fixtures, large-baseline status bounds, and unchanged technical EvidenceComplete semantics.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 3.4 Wire current-summary freshness/scope requeues through the assessment owner; verify clock-driven expiry updates current state while retained report bytes and original closure-time interpretation remain unchanged.
+- [x] 3.4 Wire current-summary freshness/scope requeues through the assessment owner; verify clock-driven expiry updates current state while retained report bytes and original closure-time interpretation remain unchanged.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 3.5 Document how operators and teams inspect scoped coverage in assessment packages and current summaries; verify examples using the existing download workflow without adding a new dashboard or per-helper Task commands.
+- [x] 3.5 Document how operators and teams inspect scoped coverage in assessment packages and current summaries; verify examples using the existing download workflow without adding a new dashboard or per-helper Task commands.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Supporting-evidence contract and safe projection

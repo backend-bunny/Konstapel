@@ -995,12 +995,14 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	if err := r.exportContent(run, &req); err != nil {
 		return ctrl.Result{}, err
 	}
-	r.exportCoverage(ctx, run, b, &req)
+	packaged := r.exportCoverage(ctx, run, b, &req)
 	d, err := collector.Export(ctx, req)
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())
 	}
-	sum := publication.SummaryToAPI(publication.Summarize(d, publication.Status{Phase: publication.PhasePending}))
+	ps := publication.Summarize(d, publication.Status{Phase: publication.PhasePending})
+	ps.Coverage = packaged(d)
+	sum := publication.SummaryToAPI(ps)
 	sum.OldestEvaluation = metaTime(ev.OldestEvaluated())
 	closed := metav1.NewTime(now)
 	run.Status.Window.Closed = &closed
@@ -1089,9 +1091,10 @@ func (r *AssessmentRunReconciler) commit(ctx context.Context, run *v1alpha1.Asse
 		run.Status.Summary.Export = v1alpha1.ExportState(publication.ExportAssessment)
 		if d, err := publication.LoadDescriptor(filepath.Join(r.staging(run), "package")); err == nil {
 			sum := publication.SummaryToAPI(publication.Summarize(d, st))
-			// The descriptor does not carry the oldest source evaluation;
-			// keep the one recorded at closure.
+			// The descriptor does not carry the oldest source evaluation
+			// or the coverage summary; keep those recorded at closure.
 			sum.OldestEvaluation = run.Status.Summary.OldestEvaluation
+			sum.Coverage = run.Status.Summary.Coverage
 			run.Status.Summary = &sum
 		}
 	}

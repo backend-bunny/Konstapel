@@ -1,6 +1,7 @@
 package publication
 
 import (
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,7 +82,42 @@ func SummaryToAPI(s RunSummary) v1alpha1.AssessmentSummary {
 		Evidence: v1alpha1.EvidenceSummary{Completeness: v1alpha1.EvidenceCompleteness(e.Completeness), Expected: int32(e.Expected), Attributable: int32(e.Attributable), Missing: int32(e.Missing), Rejected: int32(e.Rejected), Unresolved: int32(e.Unresolved), StaleScopes: int32(e.StaleScopes)},
 		Outcomes: v1alpha1.OutcomeCounts{Pass: int32(o.Pass), Fail: int32(o.Fail), Error: int32(o.Error), Skip: int32(o.Skip), AcceptedRisk: int32(o.AcceptedRisk), NotApplicable: int32(o.NotApplicable), Unknown: int32(o.Unknown)},
 		Export:   v1alpha1.ExportState(s.Export),
+		Coverage: CoverageToAPI(s.Coverage),
 	}
+}
+
+// CoverageToAPI converts a coverage summary to its status form.
+func CoverageToAPI(c *CoverageSummary) *v1alpha1.CoverageSummary {
+	if c == nil {
+		return nil
+	}
+	out := &v1alpha1.CoverageSummary{AsOf: metav1.NewTime(c.AsOf), SHA256: c.SHA256, InputsSHA256: c.InputsSHA256,
+		InventoryResolved: c.InventoryResolved, MappingsResolved: c.MappingsResolved, Controls: int32(c.Controls), Enhancements: int32(c.Enhancements),
+		Automation: v1alpha1.CoverageAutomationCounts{None: int32(c.Automation.None), Unselected: int32(c.Automation.Unselected),
+			Partial: int32(c.Automation.Partial), Unknown: int32(c.Automation.Unknown)},
+		TechnicalEvidence: v1alpha1.CoverageEvidenceState(c.TechnicalEvidence), ValidUntil: mt(c.ValidUntil),
+		Limitations: int32(c.Limitations), BlockingCodes: slices.Clone(c.BlockingCodes)}
+	if b := c.Bundle; b != nil {
+		out.Bundle = &v1alpha1.BundleReference{Name: b.Name, Digest: b.Digest}
+	}
+	return out
+}
+
+// CoverageFromAPI converts a status coverage summary back.
+func CoverageFromAPI(c *v1alpha1.CoverageSummary) *CoverageSummary {
+	if c == nil {
+		return nil
+	}
+	out := &CoverageSummary{AsOf: c.AsOf.UTC(), SHA256: c.SHA256, InputsSHA256: c.InputsSHA256,
+		InventoryResolved: c.InventoryResolved, MappingsResolved: c.MappingsResolved, Controls: int(c.Controls), Enhancements: int(c.Enhancements),
+		Automation: AutomationCounts{None: int(c.Automation.None), Unselected: int(c.Automation.Unselected),
+			Partial: int(c.Automation.Partial), Unknown: int(c.Automation.Unknown)},
+		TechnicalEvidence: string(c.TechnicalEvidence), ValidUntil: tm(c.ValidUntil),
+		Limitations: int(c.Limitations), BlockingCodes: slices.Clone(c.BlockingCodes)}
+	if b := c.Bundle; b != nil {
+		out.Bundle = &CoverageBundle{Name: b.Name, Digest: b.Digest}
+	}
+	return out
 }
 
 func mt(t *time.Time) *metav1.Time {

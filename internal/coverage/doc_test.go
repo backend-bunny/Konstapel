@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,6 +138,31 @@ func docEvidenceRow(t *testing.T) string {
 	return string(b) + "\n"
 }
 
+// docQueries are the documented jq queries of a downloaded coverage.json.
+var docQueries = [][]string{
+	{"-r", ".scope.kind, .asOf, .inventory.resolved, .inventory.controls"},
+	{"-r", `.controls[] | [.id, .automation, (.evidence.evidence.completeness // "-")] | @tsv`},
+	{"-c", ".technicalEvidence.evidence"},
+	{"-r", `.technicalEvidence.observations[] | [.expected.workload.namespace, .expected.workload.name, .observation.state, (.observation.outcome // "-"), (.controls | join(","))] | @tsv`},
+	{"-r", `.controls[] | select(.automation == "unselected") | .checks[] | "\(.ruleId) \(.selection) \(.policy)"`},
+	{"-c", "[.limitations[] | select(.blocking) | .code]"},
+}
+
+// docJQ runs the documented queries with the pinned jq (Devbox) against
+// the incomplete golden report and renders them as a shell session.
+func docJQ(t *testing.T) string {
+	t.Helper()
+	var sb strings.Builder
+	for _, q := range docQueries {
+		out, err := exec.Command("jq", append(slices.Clone(q), goldenDir+"/incomplete.json")...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("jq %v: %v\n%s", q, err, out)
+		}
+		fmt.Fprintf(&sb, "$ jq %s '%s' pkg/coverage.json\n%s", q[0], q[1], out)
+	}
+	return sb.String()
+}
+
 // block returns the text between <!-- name:begin --> and <!-- name:end -->,
 // without the fence lines.
 func block(t *testing.T, doc, name string) string {
@@ -162,7 +189,7 @@ func TestControlCoverageDocExamples(t *testing.T) {
 	}
 	doc := string(raw)
 	for name, want := range map[string]string{"coverage-inventory": docInventory(t), "coverage-row": docRow(t),
-		"coverage-evidence": docEvidence(t), "coverage-evidence-row": docEvidenceRow(t)} {
+		"coverage-evidence": docEvidence(t), "coverage-evidence-row": docEvidenceRow(t), "coverage-jq": docJQ(t)} {
 		if os.Getenv("KONSTAPEL_UPDATE_DOCS") != "" {
 			fmt.Printf("<!-- %s:begin -->\n```\n%s```\n<!-- %s:end -->\n", name, want, name)
 			continue

@@ -56,8 +56,9 @@ spec:
   `Rejected` with reason `NamespaceNotInScope`. It never substitutes a
   full-binding run.
 - Status holds only a sanitized summary (evidence completeness, outcome counts,
-  export state), the internal run reference, and an opaque `artifactRef`. It
-  holds no inventory, storage location, credential, or download token.
+  export state, and the bounded summary of the package's control coverage
+  report), the internal run reference, and an opaque `artifactRef`. It holds
+  no inventory, storage location, credential, or download token.
 - Deleting a request stops future team downloads through it. It does not delete
   the run record or cancel retention cleanup.
 
@@ -84,7 +85,11 @@ Run status records the frozen scope summary (cluster ID, namespace UID for
 namespace runs, namespace count, scope revision and SHA-256), binding
 configuration and enforcement revisions, the capture window, the summary, the
 package descriptor digest, and the publication record. The full inventory lives
-in the package, never in status.
+in the package, never in status. The summary's `coverage` is the bounded
+summary of the package's `coverage.json` (counts by automation state, the
+report's sha256, an inputs digest and `validUntil`); it is set at closure only
+when the package carries that exact report and is never changed afterwards
+([inspecting coverage](../control-coverage.md#inspecting-coverage)).
 
 ## Access control
 
@@ -362,6 +367,14 @@ runs are created. Current evidence status (above) works without a publisher.
   closure and keeps it after publication; the frozen package descriptor does
   not carry it. It is absent without attributable evidence and on summaries
   recorded by earlier controllers.
+- `current.coverage` names the newest committed full-binding run and copies
+  its summary's `coverage`, with a `state` of `Current`, `ScopeChanged`,
+  `Expired` or `NoReport`. The controller judges it on every reconcile
+  against the binding's current namespaces and profile selection and the
+  summary's `validUntil`, and requeues the binding at `validUntil`, like
+  `nextExpiry`. It never changes the run, its package, or the evidence and
+  outcomes of `current`
+  ([inspecting coverage](../control-coverage.md#inspecting-coverage)).
 - Each binding has at most one active run (`schedule.activeRun`). When the slot
   frees, an overdue scheduled run starts before queued platform manual runs,
   which wait as `Pending` in creation order. Manual runs never move the

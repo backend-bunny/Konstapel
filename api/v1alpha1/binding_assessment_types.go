@@ -129,4 +129,44 @@ type CurrentEvidence struct {
 	// +kubebuilder:validation:MaxItems=8
 	// +kubebuilder:validation:items:MaxLength=256
 	Limitations []string `json:"limitations,omitempty"`
+
+	// coverage is the binding's newest published full-binding coverage
+	// report, judged against the binding's current scope and clock. It is
+	// never re-evaluated and never changes the evidence above.
+	// +optional
+	Coverage *CurrentCoverage `json:"coverage,omitempty"`
+}
+
+// CurrentCoverageState is whether a published coverage report still
+// describes the binding now.
+// +kubebuilder:validation:Enum=Current;Expired;ScopeChanged;NoReport
+type CurrentCoverageState string
+
+const (
+	// CoverageCurrent: the report's scope and selection are the binding's
+	// current ones and its attributable evidence has not aged out.
+	CoverageCurrent CurrentCoverageState = "Current"
+	// CoverageExpired: the report's validUntil has passed, or its package
+	// is no longer served. It still describes its own closure time.
+	CoverageExpired CurrentCoverageState = "Expired"
+	// CoverageScopeChanged: the binding's namespaces or profile selection
+	// differ from what the report assessed, or the report's inputs were
+	// not recorded.
+	CoverageScopeChanged CurrentCoverageState = "ScopeChanged"
+	// CoverageNoReport: no committed full-binding run exists, or the
+	// newest one's package carries no coverage report.
+	CoverageNoReport CurrentCoverageState = "NoReport"
+)
+
+// CurrentCoverage references the newest committed full-binding run's
+// coverage report and states whether it is current.
+type CurrentCoverage struct {
+	State CurrentCoverageState `json:"state"`
+	// run is the full-binding run whose published package holds the
+	// report; download it to inspect the controls.
+	// +optional
+	Run *RunReference `json:"run,omitempty"`
+	// summary is that run's coverage summary, as recorded at closure.
+	// +optional
+	Summary *CoverageSummary `json:"summary,omitempty"`
 }
