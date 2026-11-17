@@ -54,7 +54,9 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
 
 - [ ] 5.1 Exercise real targeting/content, assessment, exception, and publication integrations for a full-binding run and a namespace request; verify every baseline control is represented, partial coverage survives export, and scoped downloaded packages pass validation.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 5.2 Exercise unresolved content, missing evidence, input changes, expired context, and publication failures across report generation; verify findings remain attributable and failed/unavailable inputs never become successful complete coverage.
+- [x] 5.2 Exercise unresolved content, missing evidence, input changes, expired context, and publication failures across report generation; verify findings remain attributable and failed/unavailable inputs never become successful complete coverage.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
+  Evidence: unresolved content, selection and supporting context by `internal/coverage` and `internal/controller/assessment_coverage*_test.go` plus the integrated live diagnostic package; missing evidence, publication failures, mid-run profile edits and unavailable packages by `internal/controller/assessment_coverage_failures_test.go`. Exception-dependent paths remain with 2.3/5.1.
 - [ ] 5.3 Run appropriate existing Devbox/Task checks, prototype regressions, and strict OpenSpec validation; record results and remove task-owned test resources, keeping dependent runtime tasks unfinished if only fake integrations were exercised.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+  Open: depends on 2.3 and 5.1 (exception owner's accepted-risk projection, not yet implemented); final checks and strict validation follow them.
