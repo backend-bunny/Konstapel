@@ -158,8 +158,11 @@ func TestLiveSupportingEvidencePackages(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The only reader is this test's download server, this build: it
+	// enforces document read (the chart's reader check is in
+	// TestLiveHelmSupportingEvidence).
 	ConfigureAssessments(AssessmentRuntime{StagingDir: t.TempDir(), ContentRoot: root, Poll: 3 * time.Second, PublishTimeout: time.Minute, Workers: 2,
-		ControllerNamespace: ns, Destinations: &DestinationPublishers{Reader: l.c, Namespace: ns}})
+		ControllerNamespace: ns, Destinations: &DestinationPublishers{Reader: l.c, Namespace: ns}, ProtectedReaders: NoProtectedReaders})
 	t.Cleanup(func() { ConfigureAssessments(AssessmentRuntime{}) })
 	stop := l.startManager()
 	defer stop()

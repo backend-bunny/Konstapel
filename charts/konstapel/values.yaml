@@ -89,6 +89,24 @@ download:
   maxTempBytes: 2147483648
   tempSizeLimit: 3Gi
   shutdownDrainSeconds: 20
+  # Supporting-evidence transfers (docs/supporting-evidence.md, "Uploading
+  # and downloading"); the server refuses to start with invalid values.
+  attachments:
+    # --attachment-max-bytes: the largest registered document accepted for
+    # upload, 1 byte to 1 GiB and at most maxTempBytes. Staged uploads share
+    # the temporary storage with package downloads.
+    maxBytes: 33554432
+    # --attachment-timeout: one transfer's deadline, receiving and storing
+    # included; 1s to 1h, in whole seconds or minutes.
+    timeout: 5m
+    # --attachment-max-concurrent: uploads and downloads together per
+    # replica, 1 to 64.
+    maxConcurrent: 2
+    # --attachment-retention: central source retention frozen into each new
+    # commitment, expiresAt = max(committedAt, validUntil) + retention.
+    # Whole seconds, minutes or hours. Changing it never shortens an
+    # existing commitment.
+    retention: 2160h
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 512Mi}

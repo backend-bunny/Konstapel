@@ -302,6 +302,15 @@ func (r *AssessmentRunReconciler) closeSupporting(ctx context.Context, run *v1al
 		out.Integration, out.Reason = coverage.IntegrationUnavailable, rec.Reason
 		return out
 	}
+	// A platform context naming a document makes the package protected:
+	// write one only while every deployed reader enforces document read.
+	if run.Spec.Scope != v1alpha1.RunScopeNamespace && len(rec.Entries) > 0 {
+		if err := r.protectedReaders(ctx); err != nil {
+			log.FromContext(ctx).Info("package readers not verified to enforce document read; supporting evidence is reported unavailable", "run", run.Name, "error", err.Error())
+			out.Integration, out.Reason = coverage.IntegrationUnavailable, reasonReadersUnverified
+			return out
+		}
+	}
 	var list v1alpha1.EvidenceAttachmentList
 	if err := r.attachmentReader().List(ctx, &list); err != nil {
 		// Withdrawal and changes during the capture cannot be told.

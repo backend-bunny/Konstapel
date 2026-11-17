@@ -31,9 +31,9 @@ groups 1 to 5. The following are implemented:
   ([Coverage and assessment packages](#coverage-and-assessment-packages),
   group 5).
 
-The runtime chart's download service serves the attachment routes with the
-default limits; chart values for the limits come with the chart integration
-(task 7.1).
+The runtime chart's download service serves the attachment routes; its
+limits and source retention are the `download.attachments` chart values
+([values contract](charts.md#values-contract)).
 
 Platform operators manage attachments. Application-team attachments are
 future work, and no namespace role can register or read them.
@@ -475,7 +475,10 @@ bodies never contain storage locations or credentials.
 | `--attachment-max-concurrent` | 2 | 1 to 64 | simultaneous uploads and downloads on the replica |
 | `--attachment-retention` | 2160h | positive whole seconds | the source retention frozen into each new commitment |
 
-The service refuses to start with values outside these ranges. Uploads and
+The service refuses to start with values outside these ranges. In the
+runtime chart they are `download.attachments.maxBytes`, `timeout`,
+`maxConcurrent` and `retention`, and the render refuses what the service
+would refuse. Uploads and
 downloads also share the package downloads' temporary storage budget
 (`--max-temp-bytes`). A transfer cut off by a replica shutdown is retried by
 the client; a retried upload converges on the same commitment.
@@ -799,6 +802,7 @@ reads a newer document under the run's identity.
 | Integration problem | Reported as |
 | --- | --- |
 | Records can't be read at start or at closure | `integration: unavailable`, reason `RecordsUnavailable` (a blocking coverage limitation, never an empty list) |
+| A platform run names documents but the download replicas aren't verified to enforce document read at closure ([protected-package readers](charts.md#protected-package-readers)) | `integration: unavailable`, reason `ProtectedReadersUnverified`; no context or copy is packaged |
 | A run started by an earlier controller | `integration: disabled` (documents not considered) |
 | No record names the binding | `integration: available` with no entries; the package is unchanged |
 
@@ -923,11 +927,13 @@ Read them as follows:
 | Earlier download services | Served. | **Served without the document-read check.** They don't read descriptors. |
 
 The controller and the download service ship in the same image and chart.
-Upgrade both before registering documents for bindings whose runs should
-carry them, and don't roll the download service back below this version
-while protected packages are retained: an earlier one is not a supported
-downgrade. Gating protected-document writers on the deployed readers belongs
-to the chart integration (task 7.1).
+The controller writes a protected package only while every download replica
+runs its own image ([protected-package readers](charts.md#protected-package-readers)).
+While that isn't so, during an upgrade's download rollout for example, a
+platform run's supporting evidence is reported unavailable
+(`ProtectedReadersUnverified`) and its package carries none. Don't roll the
+download service back below this version while protected packages are
+retained: an earlier one is not a supported downgrade.
 
 To roll back the feature, stop registering documents and withdraw the
 records whose copies new runs should not carry. Keep this version's

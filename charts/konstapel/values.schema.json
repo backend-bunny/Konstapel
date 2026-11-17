@@ -263,7 +263,8 @@
         "maxConcurrent",
         "maxTempBytes",
         "tempSizeLimit",
-        "shutdownDrainSeconds"
+        "shutdownDrainSeconds",
+        "attachments"
       ],
       "properties": {
         "enabled": {
@@ -292,6 +293,39 @@
         "shutdownDrainSeconds": {
           "type": "integer",
           "minimum": 1
+        },
+        "attachments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxBytes",
+            "timeout",
+            "maxConcurrent",
+            "retention"
+          ],
+          "properties": {
+            "maxBytes": {
+              "description": "Largest registered supporting document accepted for upload; at most download.maxTempBytes.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1073741824
+            },
+            "timeout": {
+              "description": "Go duration in whole seconds or minutes, 1s to 1h.",
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m)$"
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "retention": {
+              "description": "Go duration in whole seconds, minutes or hours.",
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m|h)$"
+            }
+          }
         },
         "resources": {
           "type": "object"

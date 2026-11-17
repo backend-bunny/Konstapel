@@ -80,7 +80,7 @@ for package integration.
 
 ## 7. Integrated acceptance and release wiring
 
-- [ ] 7.1 Integrate generated CRD/RBAC/admission and service settings into the existing aligned charts and controller startup through their owners; verify chart generation, permissions, serving readiness, and reader authorization are deployed before protected-document writers are enabled.
+- [x] 7.1 Integrate generated CRD/RBAC/admission and service settings into the existing aligned charts and controller startup through their owners; verify chart generation, permissions, serving readiness, and reader authorization are deployed before protected-document writers are enabled.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
 - [ ] 7.2 Run full attachment/coverage/assessment acceptance with real S3 service and namespace/platform credentials using the RustFS fixture; verify upload, multi-binding association, validity, independently authorized downloads, namespace confidentiality, and independent source/package retention.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
@@ -96,14 +96,17 @@ for package integration.
   `attachments.ReadBaseline`/`VendoredContent`), keeping the catalog-digest
   identity and fail-closed behavior; `attachments.ForBinding` feeds
   `coverage.SupportingEvidenceContext` as `coverage.Input.Supporting`.
-- Gate protected-document writers on deployed readers in the chart
-  integration (7.1): download services older than group 5 serve protected
-  packages without the document-read check (documented as an unsupported
-  downgrade in `docs/supporting-evidence.md`).
-- Expose the transfer service's attachment settings (`--attachment-max-bytes`,
-  `--attachment-timeout`, `--attachment-max-concurrent`,
-  `--attachment-retention`) as validated runtime chart values in 7.1; until
-  then the chart runs the documented defaults.
+- Done in 7.1: protected-document writers are gated on deployed readers.
+  The controller (`--protected-package-readers`, set by the chart) writes a
+  platform package naming documents only while the `konstapel-download`
+  Deployment's template and every unfinished reader Pod run the
+  controller's own image; otherwise the run's supporting context is
+  unavailable (`ProtectedReadersUnverified`) and nothing protected is
+  packaged. A download rollback below group 5 while protected packages are
+  retained stays an unsupported downgrade.
+- Done in 7.1: the transfer service's attachment settings are the validated
+  `download.attachments` chart values (`maxBytes`, `timeout`,
+  `maxConcurrent`, `retention`).
 - Extend the S3 orphan inventory to attachments in a later group, after
   group 4 (owner decision). Record each pinned attachment's owned prefix and
   commitment, mark the records handed off, and release them without

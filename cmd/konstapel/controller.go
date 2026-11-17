@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -80,6 +82,30 @@ func (b bundleFlags) options(fs *flag.FlagSet, namespace string) (stack.Options,
 	return o, nil
 }
 
+// noReaders is the --protected-package-readers value for an installation
+// without a Konstapel download service.
+const noReaders = "none"
+
+// readerCheck builds the protected-package reader check from
+// --protected-package-readers (add-supporting-evidence-attachments 7.1):
+// empty leaves it unconfigured (platform packages then carry no supporting
+// evidence), "none" declares that no Konstapel download service is
+// deployed, and a name is the download Deployment in the controller's
+// namespace, verified to run this controller's image (POD_NAME).
+func readerCheck(value, namespace, pod string, reader client.Reader) (func(context.Context) error, error) {
+	switch {
+	case value == "":
+		return nil, nil
+	case value == noReaders:
+		return controller.NoProtectedReaders, nil
+	case len(validation.IsDNS1123Subdomain(value)) > 0:
+		return nil, fmt.Errorf("--protected-package-readers %q must be %q or the name of the download Deployment", value, noReaders)
+	case namespace == "" || pod == "":
+		return nil, fmt.Errorf("--protected-package-readers=%s needs POD_NAMESPACE and POD_NAME to find this controller's image", value)
+	}
+	return controller.DeployedReaders{Reader: reader, Namespace: namespace, Deployment: value, Pod: pod}.Verify, nil
+}
+
 // runController runs the targeting manager: `konstapel controller [flags]`.
 // It uses in-cluster configuration, or KUBECONFIG/--kubeconfig outside a cluster.
 func runController(args []string) error {
@@ -98,6 +124,7 @@ func runController(args []string) error {
 	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
+	readers := fs.String("protected-package-readers", "", "the download Deployment (in the pod namespace) that must run this controller's image before platform packages carry supporting evidence, or \"none\" without a download service; empty carries none")
 	bundleOpts := addBundleFlags(fs)
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
@@ -117,6 +144,18 @@ func runController(args []string) error {
 		StagingDir: *staging, ContentDir: *root, Namespace: os.Getenv("POD_NAMESPACE")})
 	if err != nil {
 		return fmt.Errorf("evidence destination: %w", err)
+	}
+	// Uncached: a stale cache could miss a reader rollout.
+	uncached, err := client.New(cfg, client.Options{Scheme: controller.Scheme()})
+	if err != nil {
+		return err
+	}
+	rt.ProtectedReaders, err = readerCheck(*readers, os.Getenv("POD_NAMESPACE"), os.Getenv("POD_NAME"), uncached)
+	if err != nil {
+		return err
+	}
+	if rt.ProtectedReaders == nil {
+		ctrl.Log.Info("--protected-package-readers is not set: platform packages carry no supporting evidence (ProtectedReadersUnverified)")
 	}
 	controller.ConfigureAssessments(rt)
 	// The metric contract is served next to controller-runtime's collectors.
