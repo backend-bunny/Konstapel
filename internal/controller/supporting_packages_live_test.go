@@ -275,14 +275,15 @@ func TestLiveSupportingEvidencePackages(t *testing.T) {
 	// 1. Run access alone does not reach the protected platform package.
 	code, out := fetch(t, hc, platformURL, auditor)
 	if code != http.StatusForbidden || bytes.Contains(out, []byte(title)) || bytes.Contains(out, []byte("%PDF")) {
-		t.Fatalf("run reader without document read: %d %s", code, out)
+		// Never log the body: it may be the protected package.
+		t.Fatalf("run reader without document read: %d (%d bytes)", code, len(out))
 	}
 	// 2. With the cluster-wide document-read grant it is served, and the
 	// package carries the verified copy and protected context.
 	grant := l.bindSA("sp-auditor-documents", platform, "sp-auditor", cluster("konstapel-evidence-attachment-downloader"), "")
 	l.eventually("document read granted", func() (bool, string) {
 		code, out = fetch(t, hc, platformURL, auditor)
-		return code == http.StatusOK, string(out[:min(len(out), 200)])
+		return code == http.StatusOK, http.StatusText(code)
 	})
 	dir := t.TempDir()
 	if err := publication.Extract(bytes.NewReader(out), dir); err != nil {
@@ -319,7 +320,7 @@ func TestLiveSupportingEvidencePackages(t *testing.T) {
 	// 3. The team's package: sanitized context only, no protected role.
 	code, out = fetch(t, hc, teamURL, dev)
 	if code != http.StatusOK {
-		t.Fatalf("team download: %d %s", code, out)
+		t.Fatalf("team download: %d (%d bytes)", code, len(out))
 	}
 	tdir := t.TempDir()
 	if err := publication.Extract(bytes.NewReader(out), tdir); err != nil {

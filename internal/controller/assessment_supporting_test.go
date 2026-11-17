@@ -18,6 +18,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -27,6 +28,7 @@ import (
 	attfake "github.com/backend-bunny/Konstapel/internal/attachments/fake"
 	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
 const supportCluster = "kube-system:cluster"
@@ -497,5 +499,97 @@ func TestFetchSupportingRefusesDamagedBytes(t *testing.T) {
 	}
 	if left, _ := os.ReadDir(filepath.Join(e.rr.staging(run), runSupportingDir)); len(left) != 0 {
 		t.Fatalf("temporary files left: %v", left)
+	}
+}
+
+// One datacenter document supports two explicitly named bindings: each
+// binding's platform package carries its own verified copy and its own
+// entry, while the technical counts, outcomes (including accepted risk) and
+// enforcement revisions are exactly those of the same runs without it.
+func TestSharedDocumentSupportsSeveralBindings(t *testing.T) {
+	mk := func() *runEnv {
+		e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})),
+			shortTimeout(epochBinding("audit-prod-2", map[string]v1alpha1.LabelValue{"environment": "production"})))
+		for _, b := range []string{"audit-prod", "audit-prod-2"} {
+			e.deliver(b)
+			e.assess(b)
+		}
+		return e
+	}
+	publishBoth := func(e *supportEnv) map[string]publication.Descriptor {
+		out := map[string]publication.Descriptor{}
+		names := map[string]string{"audit-prod": e.schedule("audit-prod").ActiveRun.Name, "audit-prod-2": e.schedule("audit-prod-2").ActiveRun.Name}
+		for _, n := range names {
+			e.step(n)
+		}
+		reportAll(t, e.runEnv, "prod", "pod-1", "fail", a0.Add(time.Minute))
+		e.now = a0.Add(90 * time.Second)
+		for b, n := range names {
+			e.step(n)
+			r := e.run(n)
+			rc, _, err := e.pub.Open(context.Background(), e.ref(r))
+			if err != nil {
+				t.Fatalf("%s: %v (%s %+v)", b, err, r.Status.Phase, r.Status.Conditions)
+			}
+			archive, _ := io.ReadAll(rc)
+			rc.Close()
+			dir := unpackFake(t, archive)
+			rep, d := packagedCoverage(t, dir)
+			out[b] = d
+			if en := entryBySource(t, rep, "att-shared"); e.store != nil && (en == nil || en.Access != coverage.AccessIncluded || en.BindingUID != r.Status.Binding.UID ||
+				en.Attribution != coverage.SupportingAttributed) {
+				t.Fatalf("%s entry %+v", b, en)
+			}
+		}
+		return out
+	}
+	base := &supportEnv{runEnv: mk()}
+	without := publishBoth(base)
+
+	e := newSupportEnv(t, mk())
+	e.attach("shared", "audit-prod", []byte("%PDF shared datacenter audit"), func(a *v1alpha1.EvidenceAttachment) {
+		second := a.Spec.Associations[0]
+		second.Binding = v1alpha1.ExactBindingReference{Name: "audit-prod-2", UID: string(e.bindingUID("audit-prod-2"))}
+		a.Spec.Associations = append(a.Spec.Associations, second)
+		a.Status.Associations = []v1alpha1.AttachmentAssociationStatus{
+			{Binding: a.Spec.Associations[0].Binding, State: v1alpha1.AssociationValid, Reason: v1alpha1.ReasonAssociationsValid},
+			{Binding: second.Binding, State: v1alpha1.AssociationValid, Reason: v1alpha1.ReasonAssociationsValid}}
+	})
+	with := publishBoth(e)
+	for b, d := range with {
+		w := without[b]
+		if d.Evidence != w.Evidence || d.Outcomes != w.Outcomes || !slices.Equal(d.Revisions.Enforcement, w.Revisions.Enforcement) ||
+			d.Revisions.BindingConfiguration != w.Revisions.BindingConfiguration || !d.Protected() || w.Protected() {
+			t.Fatalf("%s: with %+v %+v %v, without %+v %+v %v", b, d.Evidence, d.Outcomes, d.Revisions.Enforcement, w.Evidence, w.Outcomes, w.Revisions.Enforcement)
+		}
+	}
+	if with["audit-prod"].Run.BindingUID == with["audit-prod-2"].Run.BindingUID {
+		t.Fatal("the two packages are for one binding")
+	}
+}
+
+// reportAll writes one PolicyReport for pod with a result for every engine
+// policy.
+func reportAll(t *testing.T, e *runEnv, ns, podUID, outcome string, at time.Time) {
+	t.Helper()
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(targeting.ValidatingPolicyGVK.GroupVersion().WithKind("ValidatingPolicyList"))
+	if err := e.c.List(context.Background(), list); err != nil {
+		t.Fatal(err)
+	}
+	var results []any
+	for _, p := range list.Items {
+		results = append(results, map[string]any{"policy": p.GetName(), "result": outcome, "source": "KyvernoValidatingPolicy",
+			"properties": map[string]any{"cel.validationIndex": "0"}, "timestamp": map[string]any{"seconds": at.Unix(), "nanos": int64(0)}})
+	}
+	r := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "r-" + podUID, "namespace": ns},
+		"scope":    map[string]any{"apiVersion": "v1", "kind": "Pod", "namespace": ns, "name": "web", "uid": podUID},
+		"results":  results,
+	}}
+	r.SetGroupVersionKind(PolicyReportGVK)
+	r.SetUID(types.UID("report-" + podUID))
+	if err := e.c.Create(context.Background(), r); err != nil {
+		t.Fatal(err)
 	}
 }
