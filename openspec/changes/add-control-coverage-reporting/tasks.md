@@ -43,11 +43,11 @@ consumes. Keep runtime integration tasks open until their real inputs exist.
 
 ## 4. Supporting-evidence contract and safe projection
 
-- [ ] 4.1 Define the versioned `SupportingEvidenceContext` projection with integration, availability, association, temporal, withdrawal, and access states; verify disabled, empty, unavailable, expired, future, and restricted fixtures never add technical passes or expected observations.
+- [x] 4.1 Define the versioned `SupportingEvidenceContext` projection with integration, availability, association, temporal, withdrawal, and access states; verify disabled, empty, unavailable, expired, future, and restricted fixtures never add technical passes or expected observations.
   <!-- agent: tier=deep risk=medium reason="OSCAL resolution and cross-owner evidence semantics" -->
-- [ ] 4.2 Apply namespace projection before both renderers and diagnostics, retaining baseline controls but only authorized findings and sanitized document context; verify private titles, sources, document bytes/links, and sibling evidence cannot leak through error paths.
+- [x] 4.2 Apply namespace projection before both renderers and diagnostics, retaining baseline controls but only authorized findings and sanitized document context; verify private titles, sources, document bytes/links, and sibling evidence cannot leak through error paths.
   <!-- agent: tier=deep risk=high reason="Risk attribution and namespace confidentiality" -->
-- [ ] 4.3 Document the attachment consumer contract and example physical-control row; verify no-automation plus an available document remains supporting evidence without a control verdict, and validate consumer fixtures shared with the attachment change.
+- [x] 4.3 Document the attachment consumer contract and example physical-control row; verify no-automation plus an available document remains supporting evidence without a control verdict, and validate consumer fixtures shared with the attachment change.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 5. Integrated acceptance
