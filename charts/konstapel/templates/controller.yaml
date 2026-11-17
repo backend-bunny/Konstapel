@@ -125,6 +125,14 @@ spec:
             {{- end }}
             - --evidence-staging-dir=/var/lib/konstapel/staging
             - --shutdown-timeout={{ .Values.controller.shutdownTimeoutSeconds }}s
+            # Platform packages carry supporting evidence only while every
+            # download replica runs this controller's image (it enforces the
+            # document-read check); without the download service none serves.
+            {{- if .Values.download.enabled }}
+            - --protected-package-readers=konstapel-download
+            {{- else }}
+            - --protected-package-readers=none
+            {{- end }}
             {{- if include "konstapel.bundlesEnabled" . }}
             - --bundle-sources-configmap={{ .Values.bundles.sourcesConfigMap }}
             - --bundle-cache-dir=/var/lib/konstapel/bundles
@@ -136,6 +144,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - name: probes
               containerPort: 8081

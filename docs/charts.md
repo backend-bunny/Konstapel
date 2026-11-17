@@ -33,7 +33,7 @@ and doesn't need the charts.
 | Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
 | Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
-| Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup; uploads and downloads on the download service (`download.enabled`) with its default attachment limits (no chart values yet) | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination` ([supporting evidence](supporting-evidence.md)) |
+| Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup; uploads and downloads on the download service (`download.enabled`) with its limits and source retention as `download.attachments` values; platform packages carry supporting evidence only while every download replica runs the controller's image ([Protected-package readers](#protected-package-readers)) | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination` ([supporting evidence](supporting-evidence.md)) |
 | Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
 
@@ -52,7 +52,7 @@ release can't substitute a fixture or a guess for it.
 | Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`; with `metrics.enabled`, `:8443` plus `--metrics-cert-dir` and `--metrics-server-name`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
 | Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` fails while the manager shuts down; engine health is reported in Conditions, not readiness. | targeting, add-controller-high-availability | resolved; further replica serving readiness belongs to high availability (pending) |
 | Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
-| Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`, and the attachment limits `--attachment-max-bytes`, `--attachment-timeout`, `--attachment-max-concurrent` and `--attachment-retention` (defaults; chart values belong to add-supporting-evidence-attachments 7.1); HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing, supporting-evidence-attachments | resolved |
+| Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`, and the attachment limits `--attachment-max-bytes`, `--attachment-timeout`, `--attachment-max-concurrent` and `--attachment-retention` (chart values `download.attachments`); HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing, supporting-evidence-attachments | resolved |
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
@@ -288,6 +288,8 @@ renders:
 - `podDisruptionBudget.minAvailable` that isn't below `replicaCount`, or
   below `download.replicaCount` when the download server runs more than one
   replica.
+- `download.attachments.maxBytes` above `download.maxTempBytes`, or a
+  `download.attachments.timeout` above `1h`.
 - `bundles.referencedSecrets` or `bundles.referencedConfigMaps` without
   `bundles.sourcesConfigMap`; a `bundles.cache.sizeLimit` that isn't larger
   than `bundles.cache.capacity`; a `bundles.refreshInterval` above `5m`; the
@@ -310,7 +312,57 @@ holds:
 - the certificate doesn't cover `konstapel-download.<namespace>.svc`;
 - the certificate doesn't chain to `ca.crt`.
 
-The flags are `--tls-ca-file` and `--tls-server-name`. `tls.mode` chooses
+The flags are `--tls-ca-file` and `--tls-server-name`. `download.attachments`
+sets the supporting-evidence limits (`--attachment-max-bytes`,
+`--attachment-timeout`, `--attachment-max-concurrent`) and source retention
+(`--attachment-retention`); see the [values contract](#values-contract).
+
+### Protected-package readers
+
+A platform package whose supporting context names a document is protected:
+the download service serves it only to callers who also hold the
+cluster-wide document-read grant. Download services older than this feature
+don't read package descriptors and would serve it to anyone with run
+access. The controller therefore writes supporting evidence into a package
+only after checking the readers, each time a platform run with supporting
+entries closes:
+
+- With `download.enabled`, the chart starts the controller with
+  `--protected-package-readers=konstapel-download` and its own pod name
+  (`POD_NAME`). The check passes only while the `konstapel-download`
+  Deployment's template and every unfinished Pod its selector matches,
+  terminating ones included, run the controller's own image in their
+  `download` container. Both come from `image`, so an installation or upgrade
+  passes once the download rollout is complete.
+- With `download.enabled=false` the chart passes `none`: no Konstapel
+  service serves packages.
+- Run outside the chart without the flag, the controller never writes
+  protected packages.
+
+While the check fails, during a download rollout, after an image was changed
+on one Deployment only, or when the controller can't read its own Pod or the
+Deployment, the run's supporting evidence is reported unavailable with
+reason `ProtectedReadersUnverified`. The package then carries no supporting
+context and no document copy, its coverage shows a blocking limitation, and
+its technical evidence is unaffected. The answer is frozen with the run's
+closure. The check uses the controller's existing read access to Pods and
+Deployments; the chart adds no permission. It doesn't follow a download
+service deployed outside the chart. Rolling the download service back below
+this version while protected packages are retained remains unsupported.
+
+`TestLiveHelmSupportingEvidence` (the `charts` group) installs both charts
+with non-default `download.attachments` values and checks them on every
+ready download replica. A document above the chart's upload limit is refused
+with 413, and one uploaded through the installed Service by the shipped
+uploader role is committed with the chart's retention. While the download
+Deployment declares another image (its surge replica never starts, so the
+current replicas keep serving), a platform run's package carries no
+supporting evidence and reports `ProtectedReadersUnverified`. Once the
+rollout is back on the controller's image, the next platform run's package
+holds the verified copy, and a platform operator reads it only with the
+shipped `konstapel-evidence-attachment-downloader` role.
+
+`tls.mode` chooses
 where the Secret comes from:
 
 | `tls.mode` | Secret | Requires |
@@ -902,6 +954,11 @@ retention.
   - `audience` (`konstapel-download`): the token audience callers request.
   - `maxConcurrent` (4), `maxTempBytes` (2 GiB) and `tempSizeLimit` (3Gi): download concurrency and per-pod scratch space.
   - `shutdownDrainSeconds` (20): must be below the grace period.
+  - `attachments`: supporting-evidence transfers ([supporting evidence](supporting-evidence.md#uploading-and-downloading)). The defaults are the server's own, and the render refuses what the server would refuse at startup.
+    - `maxBytes` (33554432, 32 MiB): the largest registered document accepted for upload, 1 byte to 1 GiB and at most `maxTempBytes`.
+    - `timeout` (5m): one transfer's deadline, receiving and storing included; whole seconds or minutes, 1s to 1h.
+    - `maxConcurrent` (2): uploads and downloads together per replica, 1 to 64.
+    - `retention` (2160h): central source retention frozen into each new commitment; whole seconds, minutes or hours. Changing it applies to new commitments only.
   - `resources`.
 
 - **`metrics`:** authenticated controller metrics, off by default.

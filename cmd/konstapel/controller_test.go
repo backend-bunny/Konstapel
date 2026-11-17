@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io"
 	"strings"
@@ -60,5 +61,40 @@ func TestBundleFlags(t *testing.T) {
 				t.Fatalf("options %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// --protected-package-readers: unset leaves the check unconfigured (the
+// controller then withholds supporting evidence), "none" needs no reader,
+// and a Deployment name needs the pod's own identity.
+func TestReaderCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, namespace, pod string
+		wantNil                     bool
+		wantErr                     string
+	}{
+		{name: "unset", wantNil: true},
+		{name: "no download service", value: "none"},
+		{name: "deployment", value: "konstapel-download", namespace: "konstapel-system", pod: "konstapel-controller-0"},
+		{name: "deployment without pod name", value: "konstapel-download", namespace: "konstapel-system", wantErr: "POD_NAME"},
+		{name: "deployment without namespace", value: "konstapel-download", pod: "p", wantErr: "POD_NAMESPACE"},
+		{name: "not a name", value: "deployment/konstapel-download", namespace: "ns", pod: "p", wantErr: "must be"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := readerCheck(tc.value, tc.namespace, tc.pod, nil)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || (got == nil) != tc.wantNil {
+				t.Fatalf("check %v, error %v", got != nil, err)
+			}
+		})
+	}
+	// "none" passes without contacting anything.
+	if check, _ := readerCheck("none", "", "", nil); check(context.Background()) != nil {
+		t.Fatal("none failed")
 	}
 }

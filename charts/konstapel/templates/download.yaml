@@ -113,6 +113,12 @@ spec:
             - --max-concurrent={{ .Values.download.maxConcurrent }}
             - --max-temp-bytes={{ int64 .Values.download.maxTempBytes }}
             - --shutdown-drain={{ .Values.download.shutdownDrainSeconds }}s
+            {{- with .Values.download.attachments }}
+            - --attachment-max-bytes={{ int64 .maxBytes }}
+            - --attachment-timeout={{ .timeout }}
+            - --attachment-max-concurrent={{ .maxConcurrent }}
+            - --attachment-retention={{ .retention }}
+            {{- end }}
           env:
             - name: POD_NAMESPACE
               valueFrom:

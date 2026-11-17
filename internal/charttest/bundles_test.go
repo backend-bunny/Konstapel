@@ -65,7 +65,9 @@ func TestRuntimeChartBundlesOffByDefault(t *testing.T) {
 	if len(pod["volumes"].([]any)) != 2 || len(c["volumeMounts"].([]any)) != 2 {
 		t.Fatalf("default controller volumes changed: %v", pod["volumes"])
 	}
-	if !reflect.DeepEqual(at(c, "env"), any([]any{map[string]any{"name": "POD_NAMESPACE", "valueFrom": map[string]any{"fieldRef": map[string]any{"fieldPath": "metadata.namespace"}}}})) {
+	// POD_NAME is the protected-package reader check's (attachments 7.1).
+	if !reflect.DeepEqual(at(c, "env"), any([]any{map[string]any{"name": "POD_NAMESPACE", "valueFrom": map[string]any{"fieldRef": map[string]any{"fieldPath": "metadata.namespace"}}},
+		map[string]any{"name": "POD_NAME", "valueFrom": map[string]any{"fieldRef": map[string]any{"fieldPath": "metadata.name"}}}})) {
 		t.Fatalf("controller env: %v", at(c, "env"))
 	}
 }

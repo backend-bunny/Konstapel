@@ -84,6 +84,12 @@ type AssessmentRuntime struct {
 	// newer requests beyond it are rejected. Namespace ResourceQuotas on
 	// count/assessmentrequests.compliance.erenius.io bound each team.
 	MaxQueue int
+	// ProtectedReaders reports whether every deployed reader of assessment
+	// packages enforces the document-read check (DeployedReaders.Verify,
+	// or NoProtectedReaders without a download service). While it fails, or
+	// when nil, platform packages carry no supporting evidence and report
+	// it unavailable (ProtectedReadersUnverified).
+	ProtectedReaders func(context.Context) error
 }
 
 var (

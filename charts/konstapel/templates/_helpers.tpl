@@ -38,8 +38,25 @@ app.kubernetes.io/component: controller
 {{- if and .Values.download.enabled (gt (int .Values.download.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.download.replicaCount)) -}}
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than download.replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.download.replicaCount) -}}
 {{- end -}}
+{{- include "konstapel.validateAttachments" . -}}
 {{- include "konstapel.validateBundles" . -}}
 {{- include "konstapel.validateMetrics" . -}}
+{{- end }}
+
+{{/*
+Supporting-evidence transfer limits of the download server; the schema
+checks their shapes. These mirror the server's own startup checks.
+*/}}
+{{- define "konstapel.validateAttachments" -}}
+{{- if .Values.download.enabled -}}
+{{- $a := .Values.download.attachments -}}
+{{- if gt (int64 $a.maxBytes) (int64 .Values.download.maxTempBytes) -}}
+{{- fail (printf "download.attachments.maxBytes (%v) must not exceed download.maxTempBytes (%v): an upload is staged in the temporary storage" (int64 $a.maxBytes) (int64 .Values.download.maxTempBytes)) -}}
+{{- end -}}
+{{- if gt (include "konstapel.durationSeconds" $a.timeout | int64) 3600 -}}
+{{- fail (printf "download.attachments.timeout (%v) must be at most 1h" $a.timeout) -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{- define "konstapel.downloadSelector" -}}

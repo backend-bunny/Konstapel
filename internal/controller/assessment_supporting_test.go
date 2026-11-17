@@ -57,6 +57,9 @@ func newSupportEnv(t *testing.T, e *runEnv) *supportEnv {
 	h := sha256.Sum256(raw)
 	st := attfake.New(func() time.Time { return e.now })
 	e.rr.Attachments = &AttachmentStorage{Cluster: supportCluster, Stores: oneStore{st}}
+	// The deployed readers enforce document read (this build); tests of
+	// the reader check replace it.
+	e.rr.Runtime.ProtectedReaders = NoProtectedReaders
 	return &supportEnv{runEnv: e, store: st, catalog: "sha256:" + hex.EncodeToString(h[:])}
 }
 
@@ -299,6 +302,72 @@ func TestPlatformPackageWithoutDocumentsIsUnprotected(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "supporting-evidence")); !os.IsNotExist(err) {
 		t.Fatal("an empty context left supporting files")
+	}
+}
+
+// While the deployed readers aren't shown to enforce document read (none
+// configured, an older reader, a rollout in progress), a platform package
+// carries no supporting context or copy and is not protected; coverage
+// reports the integration unavailable, never an empty list. The check is
+// asked at closure, and a later passing check doesn't change the frozen run.
+func TestUnverifiedReadersWithholdSupportingEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check func(context.Context) error
+	}{
+		{"none configured", nil},
+		{"older reader", func(context.Context) error { return errors.New("reader pod konstapel-download-0 runs an older image") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSupportEnv(t, newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"}))))
+			e.rr.Runtime.ProtectedReaders = tc.check
+			e.deliver("audit-prod")
+			e.assess("audit-prod")
+			e.attach("current", "audit-prod", []byte("%PDF current audit"))
+			run, dir, archive := e.publish("audit-prod", nil)
+			r, d := packagedCoverage(t, dir)
+			se := r.SupportingEvidence
+			if d.Protected() || se.Integration != coverage.IntegrationUnavailable || se.Reason != reasonReadersUnverified || len(se.Entries) != 0 {
+				t.Fatalf("protection %+v supporting %+v", d.Protection, se)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "supporting-evidence")); !os.IsNotExist(err) {
+				t.Fatal("supporting files were packaged")
+			}
+			for _, leak := range []string{"Private title", "Private issuer", "Private hall", "%PDF", "audit.example"} {
+				if strings.Contains(string(archive), leak) {
+					t.Errorf("package contains %q", leak)
+				}
+			}
+			if run.Status.Summary == nil || run.Status.Summary.Coverage == nil {
+				t.Fatalf("run summary %+v", run.Status.Summary)
+			}
+		})
+	}
+}
+
+// A namespace package carries no protected file, so it doesn't wait for
+// the reader check.
+func TestNamespacePackageDoesNotNeedReaderCheck(t *testing.T) {
+	e := newSupportEnv(t, newTeamEnv(t))
+	e.rr.Runtime.ProtectedReaders = nil
+	a := e.attach("dc-audit", "audit-all", []byte("%PDF team-visible? no"))
+	e.request("dev", "nightly")
+	e.assess("audit-all")
+	run := e.run(e.requestStatus("dev", "nightly").Run.Name)
+	e.step(run.Name)
+	e.report("dev", "pod-dev", e.enginePolicy(), "fail", e.now.Add(time.Minute))
+	e.now = e.now.Add(2 * time.Minute)
+	e.step(run.Name)
+	run = e.run(run.Name)
+	rc, _, err := e.pub.Open(context.Background(), e.ref(run))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, _ := io.ReadAll(rc)
+	rc.Close()
+	r, d := packagedCoverage(t, unpackFake(t, archive))
+	if en := entryBySource(t, r, a.UID); d.Protected() || r.SupportingEvidence.Integration != coverage.IntegrationAvailable || en == nil || en.Access != coverage.AccessRestricted {
+		t.Fatalf("namespace supporting %+v", r.SupportingEvidence)
 	}
 }
 
