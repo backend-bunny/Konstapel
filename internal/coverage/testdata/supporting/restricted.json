@@ -1,0 +1,28 @@
+{
+  "version": "konstapel.io/supporting-evidence-context/v1",
+  "integration": "available",
+  "entries": [
+    {
+      "source": "0f1e2d3c-aaaa-4bbb-8ccc-000000000004",
+      "observedAt": "2026-11-16T10:00:00Z",
+      "bindingUID": "bind-a",
+      "catalogDigest": "sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb",
+      "controls": [
+        {
+          "id": "pe-3",
+          "statements": [
+            "pe-3_smt.a"
+          ]
+        },
+        {
+          "id": "pe-6"
+        }
+      ],
+      "association": "valid",
+      "content": "available",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validUntil": "2027-01-01T00:00:00Z",
+      "access": "restricted"
+    }
+  ]
+}

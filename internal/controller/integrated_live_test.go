@@ -335,6 +335,18 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 			t.Fatalf("%s %s package coverage: inventory %+v evidence %+v limitations %+v (descriptor %+v)", what, d.PackageKind, cov.Inventory,
 				cov.TechnicalEvidence.Evidence, cov.Limitations, d.Evidence)
 		}
+		// The coverage is projected for its scope (add-control-coverage-
+		// reporting 4.2): a namespace package's evidence is accepted as the
+		// owner's projection, and no attachment integration feeds coverage
+		// yet, so the supporting context is disabled.
+		wantProjection := coverage.ProjectionPlatform
+		if d.Scope.Kind == publication.ScopeNamespace {
+			wantProjection = coverage.ProjectionNamespace
+		}
+		if se := cov.SupportingEvidence; se.Projection != wantProjection || se.Integration != coverage.IntegrationDisabled || len(se.Entries) != 0 ||
+			cov.TechnicalEvidence.State != coverage.EvidenceResolved {
+			t.Fatalf("%s package coverage projection %+v evidence state %s", what, se, cov.TechnicalEvidence.State)
+		}
 		var all strings.Builder
 		_ = filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
 			if err == nil && !e.IsDir() && !strings.Contains(p, "/content/") {

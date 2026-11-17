@@ -1,6 +1,6 @@
 Konstapel control coverage report
 Schema: konstapel.io/coverage/v1
-Report JSON: coverage.json sha256 e30c9ce1d013552b4affbdc259a9d7f93d6290eabcae28aa9b02f2eff50dae1c
+Report JSON: coverage.json sha256 e02b3c3158888eff490b47e898e7ae514dd2fd8e47bbabcc860a99a8d104f719
 
 This report lists every control of the selected baseline, the authored
 technical checks mapped to it, and the evidence observed for them. It is
@@ -10,7 +10,8 @@ mapped, bounded by its authored coverage limit; "none" means no technical
 mapping, so no automated assessment (not passing, not not-applicable);
 "unselected" means mapped checks exist but the profile selects none;
 "unknown" means a mapping could not be resolved. Evidence counts are
-unique observations per row and are not additive across rows.
+unique observations per row and are not additive across rows. Supporting
+documents are context only: they add no check, observation, or verdict.
 
 As of: 2026-11-16T10:10:00Z
 Scope:
@@ -72,6 +73,10 @@ Technical evidence: resolved
       Contribution: binding bind-a revision r1 logical policy rotate-keys-policy mode Audit (cluster cluster-1)
       State: Attributable outcome pass evaluated 2026-11-16T10:01:00Z report report-p2 result 0 applicability none
       Referenced by controls: op1
+
+Supporting evidence: disabled (projection platform)
+  No supporting-evidence integration: documents are not considered (this is not "no documents").
+  Entries: 0
 
 Controls: 4
 

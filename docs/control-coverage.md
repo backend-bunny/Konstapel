@@ -14,8 +14,11 @@ document never adds a control to the list or removes one from it.
 > Run, request and binding status carry a bounded coverage summary
 > ([Inspecting coverage](#inspecting-coverage)). Accepted risk is not joined
 > yet: the exception owner's projection does not exist, so no observation is
-> reported as an accepted risk. Supporting documents are not joined; that is
-> a later group of the change.
+> reported as an accepted risk. Reports carry the versioned
+> supporting-evidence section and apply the [scope projection](#scope-projection),
+> but no attachment integration feeds them yet: every package's
+> supporting context is `disabled` until `add-supporting-evidence-attachments`
+> wires its records in ([Supporting evidence](#supporting-evidence)).
 
 ## Inputs
 
@@ -669,7 +672,7 @@ tests records this summary, and the binding reports it as current until
   },
   "summary": {
     "asOf": "2026-11-05T12:01:30Z",
-    "sha256": "c84f3b7c971fcb998391ec8a99f463818304da0d1a6733c83c28a5e58b3b3b8e",
+    "sha256": "5bdd4f3cff2c5e3cf5fd82ec5788593459932b850419502e71d6dc84bcc1c5f9",
     "inputsSha256": "e17942c563078477d54bf85674273b35d54102f49f4a4b98a581d2d439468f8c",
     "bundle": {
       "name": "konstapel-vendored",
@@ -750,6 +753,220 @@ only that namespace's observations; a sibling namespace never appears in its
 rows or sources. The `sources` section lists every package file the report
 was built from with its sha256, so a finding in a row can be traced to the
 package's `capture.json`, `evaluation.json` and OSCAL documents.
+
+## Scope projection
+
+A report is built for one package scope, and its inputs are projected for
+that scope before anything reads them: the JSON, the text, every limitation
+and every coverage diagnostic see only the projected inputs.
+
+| Scope `kind` | `supportingEvidence.projection` | What the report contains |
+| --- | --- | --- |
+| `Binding` (a platform package) | `platform` | The inputs as supplied. |
+| `Namespace` (a team's package) | `namespace` | The full public baseline inventory and authored mappings; the technical evidence of that one namespace; sanitized supporting context. |
+| anything else | `namespace` | The inventory only. No namespace is authorized, so no technical evidence or supporting context is reported (`ScopeProjectionInvalid`). |
+
+The technical evidence of a namespace package is used only when it is
+verifiably the owner's projection to that namespace: the capture is
+projected to it and passes `collector.ValidateProjection`, every evaluated
+observation is one of its expected observations, and the evaluation's
+summary counts exactly those. Otherwise none of it is reported:
+`technicalEvidence.state` is `unresolved` with no summary or observations,
+and a blocking `EvidenceWithheld` limitation says so without repeating why,
+since the reason could name another namespace. The platform's binding
+package keeps the details.
+
+A coverage diagnostic of a namespace package (see
+[Coverage diagnostics](#coverage-diagnostics)) keeps its code but uses a
+fixed message for it: the controller's detail is not vetted for the scope.
+
+## Supporting evidence
+
+Supporting documents are context for a control, never evidence of its
+technical checks. The report's `supportingEvidence` section and each row's
+`supportingEvidence` references come from a separately versioned input,
+`SupportingEvidenceContext` (`konstapel.io/supporting-evidence-context/v1`,
+`internal/coverage/supporting.go`). Coverage owns this contract.
+[Supporting evidence](supporting-evidence.md) attachments own everything
+behind it: registration, attribution, storage, validity, association and
+document copies.
+
+> **Status.** No attachment integration feeds coverage yet, so every report
+> has `"integration": "disabled"`. The contract, its checks, the scope
+> projection and the consumer fixtures below are in place for
+> `add-supporting-evidence-attachments` task group 5.
+
+### The consumer contract
+
+The attachment owner supplies one context per report, frozen for the run and
+already limited to the report's binding:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | `konstapel.io/supporting-evidence-context/v1`. Any other version, or an unknown field, fails (`ParseSupportingContext`). |
+| `integration` | `disabled` (no integration: documents are not considered, which is not "no documents"), `available` (an empty `entries` list then means no document is associated), or `unavailable` (the integration could not supply its context). |
+| `reason` | A CamelCase code, required for `unavailable` and forbidden otherwise. Never free text. |
+| `entries[]` | One per document and binding, with the fields below. |
+
+| Entry field | Meaning |
+| --- | --- |
+| `source` | The document's opaque identity (the record UID). |
+| `revision` | The registration's `sha256:` digest. Platform metadata. |
+| `observedAt` | When the owner observed the entry's states; never after the report's `asOf`. |
+| `bindingUID`, `catalogDigest`, `controls[]` | The association: exact binding UID, catalog digest, controls and optional statements. |
+| `association` | `pending`, `valid` or `mismatched`: the owner's resolution. |
+| `content`, `contentReason` | `pending`, `available` or `unavailable`, with an optional CamelCase reason. |
+| `validFrom`, `validUntil` | The declared, half-open validity: a platform claim, not an evaluation time. |
+| `withdrawn`, `changed` | Withdrawn during the capture; association or content changed during the capture. |
+| `access` | `included` (an authorized copy is in the package), `notIncluded` (metadata only), or `restricted` (sanitized: no private metadata). |
+| `document` | Private platform metadata: `title`, `issuer`, `scope`, `mediaType`, `size`, `sha256`, and `copy` (a clean path under `supporting-evidence/`, only with `included`). |
+
+There is no outcome, verdict or satisfaction field, and the decoder refuses
+one. A context that breaks the contract (a free-text reason, a disabled or
+unavailable context with entries, an empty validity window, an entry
+observed after `asOf`, an `included` entry without a copy or a copy outside
+`supporting-evidence/`, a `restricted` entry with private metadata, a
+repeated source) is reported as `unavailable` with reason `ContextInvalid`
+and a blocking `SupportingContextInvalid` limitation. None of its entries
+is reported, and the message names the rule broken, never a value. An
+`unavailable` integration gives a blocking `SupportingEvidenceUnavailable`
+limitation. Neither one is reported as an empty list.
+
+Coverage adds two things to each entry. `temporal` is the declared validity
+at the report's `asOf`: `notYetValid`, `current` or `expired`, so a
+historical report keeps the state it had at closure. `attribution` is
+`attributed` only when the entry is for the report's binding, the inventory
+is resolved, `catalogDigest` is the baseline catalog's digest, every control
+is selected and every statement belongs to its control. Otherwise it is
+`otherBinding`, `unresolved`, `otherCatalog` or `notInBaseline`, with a
+`SupportingNotAttributed` notice, and no row references it. The same
+identifier in another catalog is never attributed.
+
+An attributed entry is referenced from each control row it names. A
+reference repeats the entry's states and lists the statements. It changes
+nothing else: the row's `automation`, checks, evidence views, the technical
+evidence, its counts and the status summary's automation counts are exactly
+as without the context. Whatever their states, documents never add a check,
+an expected observation or an outcome. An included copy is listed in
+`sources` with kind `supporting-document`, so package verification checks it.
+
+In a namespace package the projection removes `document` and `revision`,
+sets `access` to `restricted`, and drops entries for other bindings. A team
+sees that platform material exists for a control, with its validity and
+availability and opaque identity, but no title, issuer, scope description,
+digest, copy or link.
+
+### Example: a physical-security control
+
+The shared fixture `current` is a datacenter audit associated with `pe-3`
+(statement `pe-3_smt.a`) and `pe-6` for two bindings. Joined to a
+binding package of the hardening bundle, `pe-3` keeps `automation: none` and
+no checks or evidence. It gains a reference to the document and no verdict.
+The team-a namespace package of the same binding shows the sanitized entry
+only. These blocks are regenerated by `TestControlCoverageDocExamples`:
+
+<!-- coverage-supporting:begin -->
+```
+binding package, controls[] row pe-3:
+{
+  "id": "pe-3",
+  "title": "Physical Access Control",
+  "automation": "none",
+  "checks": [],
+  "evidence": null,
+  "supportingEvidence": [
+    {
+      "source": "0f1e2d3c-aaaa-4bbb-8ccc-000000000001",
+      "statements": [
+        "pe-3_smt.a"
+      ],
+      "temporal": "current",
+      "content": "available",
+      "association": "valid",
+      "access": "notIncluded"
+    }
+  ]
+}
+
+namespace package, supportingEvidence.entries[0]:
+{
+  "source": "0f1e2d3c-aaaa-4bbb-8ccc-000000000001",
+  "observedAt": "2026-11-16T10:00:00Z",
+  "bindingUID": "bind-a",
+  "catalogDigest": "sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb",
+  "controls": [
+    {
+      "id": "pe-3",
+      "statements": [
+        "pe-3_smt.a"
+      ]
+    },
+    {
+      "id": "pe-6"
+    }
+  ],
+  "association": "valid",
+  "content": "available",
+  "validFrom": "2026-01-01T00:00:00Z",
+  "validUntil": "2027-01-01T00:00:00Z",
+  "access": "restricted",
+  "temporal": "current",
+  "attribution": "attributed"
+}
+```
+<!-- coverage-supporting:end -->
+
+The text rendering of the binding package's section and row (the second
+entry, for `bind-b`, is `otherBinding`; OSCAL parameter lines are omitted):
+
+<!-- coverage-supporting-text:begin -->
+```
+Supporting evidence: available (projection platform)
+  Context version: konstapel.io/supporting-evidence-context/v1
+  Entries: 2
+    Entry 0f1e2d3c-aaaa-4bbb-8ccc-000000000001 [attributed] binding bind-a catalog sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb
+      Control: pe-3 statements pe-3_smt.a
+      Control: pe-6 statements none
+      Declared validity: 2026-01-01T00:00:00Z to 2027-01-01T00:00:00Z (temporal current at the report's as of)
+      Content: available; association valid; access notIncluded
+      Observed: 2026-11-16T10:00:00Z
+      Revision: sha256:7a1c0e5d9b3f2a4c6e8d0b1f3a5c7e9d1b3f5a7c9e1d3b5f7a9c1e3d5b7f9a1c
+      Document: Datacenter physical access audit 2026 (Site Alpha)
+        Issuer: Example Audit GmbH
+        Scope: Hall 3, cages 12-14: racks hosting the production clusters
+        Media type: application/pdf
+        Size: 482113; sha256 5b2e8f0a1c3d4e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7
+...
+  Control pe-3 [none] Physical Access Control
+    Qualified ID: sha256:64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb#pe-3
+    Label: PE-3
+    Class: SP800-53
+    Group: pe Physical and Environmental Protection
+    Statements: pe-3_smt, pe-3_smt.a, pe-3_smt.a.1, pe-3_smt.a.2, pe-3_smt.b, pe-3_smt.c, pe-3_smt.d, pe-3_smt.e, pe-3_smt.f, pe-3_smt.g
+    Checks: none
+    Supporting document 0f1e2d3c-aaaa-4bbb-8ccc-000000000001 (statements pe-3_smt.a): temporal current, content available, association valid, access notIncluded
+```
+<!-- coverage-supporting-text:end -->
+
+### Consumer fixtures
+
+`internal/coverage/testdata/supporting/` holds the fixtures shared with
+`add-supporting-evidence-attachments`. All are for binding `bind-a` of the
+pinned Moderate catalog:
+
+| Fixture | Shows |
+| --- | --- |
+| `disabled.json` | No integration. |
+| `empty.json` | Available, no associated document. |
+| `unavailable.json` | Enabled but unavailable (`RecordsUnavailable`). |
+| `current.json` | A current, available, valid datacenter audit for `bind-a` and `bind-b`. |
+| `expired.json`, `future.json` | The same association, expired and not yet valid at the report's `asOf`. |
+| `restricted.json` | A sanitized entry, as a namespace sees it. |
+
+`TestSupportingFixturesNeverChangeTechnicalEvidence` checks that no fixture
+changes anything technical. The attachment integration's own tests should
+produce contexts these fixtures describe, and parse them with
+`ParseSupportingContext`.
 
 ## Framework neutrality
 

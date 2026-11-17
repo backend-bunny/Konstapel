@@ -104,6 +104,14 @@ for package integration.
   `Baseline.Control` and `Baseline.HasStatement` onto the catalog, control
   and statement checks, and treat `errors.Is(err, coverage.ErrUnresolved)`
   as a resolution failure (association pending), never a mismatch.
+- Group 5.1 maps `attachments.ForBinding` onto the coverage owner's
+  `coverage.SupportingEvidenceContext`
+  (`konstapel.io/supporting-evidence-context/v1`, landed with
+  add-control-coverage-reporting group 4). Pass it as `coverage.Input.Supporting`
+  (nil stays `disabled`), and check the produced contexts against the shared
+  consumer fixtures in `internal/coverage/testdata/supporting/` with
+  `coverage.ParseSupportingContext`. Coverage projects namespace packages
+  itself; the attachment owner still supplies only the binding's entries.
 - Expose the transfer service's attachment settings (`--attachment-max-bytes`,
   `--attachment-timeout`, `--attachment-max-concurrent`,
   `--attachment-retention`) as validated runtime chart values in 7.1; until

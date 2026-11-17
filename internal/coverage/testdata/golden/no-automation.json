@@ -168,6 +168,11 @@
       "unknown": 0
     }
   },
+  "supportingEvidence": {
+    "integration": "disabled",
+    "projection": "platform",
+    "entries": []
+  },
   "limitations": [],
   "sources": [
     {

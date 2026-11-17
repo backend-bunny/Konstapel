@@ -122,7 +122,8 @@ func RenderText(r *Report, jsonSHA256 string) []byte {
 	w.line(0, "mapping, so no automated assessment (not passing, not not-applicable);")
 	w.line(0, "\"unselected\" means mapped checks exist but the profile selects none;")
 	w.line(0, "\"unknown\" means a mapping could not be resolved. Evidence counts are")
-	w.line(0, "unique observations per row and are not additive across rows.")
+	w.line(0, "unique observations per row and are not additive across rows. Supporting")
+	w.line(0, "documents are context only: they add no check, observation, or verdict.")
 	w.blank()
 
 	w.line(0, "As of: %s", ts(r.AsOf))
@@ -179,6 +180,9 @@ func RenderText(r *Report, jsonSHA256 string) []byte {
 	w.blank()
 
 	w.technical(r.TechnicalEvidence)
+	w.blank()
+
+	w.supporting(r.SupportingEvidence)
 	w.blank()
 
 	w.line(0, "Controls: %d", len(r.Controls))
@@ -253,6 +257,51 @@ func (w *textWriter) technical(te TechnicalEvidence) {
 	}
 }
 
+func (w *textWriter) supporting(se SupportingEvidence) {
+	w.line(0, "Supporting evidence: %s (projection %s)", txt(se.Integration), txt(se.Projection))
+	w.field(1, "Context version", se.ContextVersion)
+	w.field(1, "Reason", se.Reason)
+	switch se.Integration {
+	case IntegrationDisabled:
+		w.line(1, "No supporting-evidence integration: documents are not considered (this is not \"no documents\").")
+	case IntegrationUnavailable:
+		w.line(1, "The context is unavailable: this is not an empty document list.")
+	}
+	w.line(1, "Entries: %d", len(se.Entries))
+	for _, e := range se.Entries {
+		w.line(2, "Entry %s [%s] binding %s catalog %s", txt(e.Source), e.Attribution, txt(e.BindingUID), txt(e.CatalogDigest))
+		for _, c := range e.Controls {
+			w.line(3, "Control: %s statements %s", txt(c.ID), list(c.Statements))
+		}
+		w.line(3, "Declared validity: %s to %s (temporal %s at the report's as of)", ts(e.ValidFrom), ts(e.ValidUntil), e.Temporal)
+		reason := ""
+		if e.ContentReason != "" {
+			reason = " (" + txt(e.ContentReason) + ")"
+		}
+		w.line(3, "Content: %s%s; association %s; access %s%s", txt(e.Content), reason, txt(e.Association), txt(e.Access), withdrawn(e.Withdrawn))
+		if e.Changed {
+			w.line(3, "Changed during capture: yes")
+		}
+		w.line(3, "Observed: %s", ts(e.ObservedAt))
+		w.field(3, "Revision", e.Revision)
+		if d := e.Document; d != nil {
+			w.line(3, "Document: %s", txt(d.Title))
+			w.field(4, "Issuer", d.Issuer)
+			w.field(4, "Scope", d.Scope)
+			w.field(4, "Media type", d.MediaType)
+			w.line(4, "Size: %d; sha256 %s", d.Size, txt(d.SHA256))
+			w.field(4, "Copy", d.Copy)
+		}
+	}
+}
+
+func withdrawn(b bool) string {
+	if b {
+		return "; withdrawn during capture"
+	}
+	return ""
+}
+
 func (w *textWriter) control(c *ControlCoverage) {
 	w.blank()
 	w.line(1, "Control %s [%s] %s", txt(c.ID), c.Automation, txt(c.Title))
@@ -279,6 +328,10 @@ func (w *textWriter) control(c *ControlCoverage) {
 	}
 	for _, s := range c.StatementEvidence {
 		w.line(2, "Statement evidence %s (rules %s): %s", txt(s.ID), list(s.Rules), view(s.EvidenceView))
+	}
+	for _, s := range c.SupportingEvidence {
+		w.line(2, "Supporting document %s (statements %s): temporal %s, content %s, association %s, access %s%s",
+			txt(s.Source), list(s.Statements), s.Temporal, txt(s.Content), txt(s.Association), txt(s.Access), withdrawn(s.Withdrawn))
 	}
 	for _, l := range c.Limitations {
 		w.limitation(2, l)
