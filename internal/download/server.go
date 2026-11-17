@@ -317,9 +317,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.Ass
 		fail(w, problem{http.StatusConflict, "the run has no published package"})
 		return
 	}
-	if run.Status.Publication.Phase == v1alpha1.PublicationPhase(publication.PhaseOrphaned) {
+	switch publication.Phase(run.Status.Publication.Phase) {
+	case publication.PhaseOrphaned:
 		// Recorded disposition: never served, whatever storage would answer.
 		fail(w, problem{http.StatusGone, "the package's storage was handed off to an operator and is no longer served"})
+		return
+	case publication.PhaseExpired, publication.PhaseDeleting, publication.PhaseDeleted:
+		// Past its recorded expiry, and possibly deleted: refused as
+		// expired, never as a package that is not committed yet.
+		fail(w, problem{http.StatusGone, "the package expired and is no longer served"})
 		return
 	}
 	select {

@@ -392,3 +392,22 @@ func TestOrphanedPublicationIsGone(t *testing.T) {
 		t.Fatalf("orphaned publication download: %d", w.Code)
 	}
 }
+
+// A publication recorded past its expiry (Expired, Deleting, or a Deleted
+// tombstone) is refused as expired, never as an uncommitted package, and
+// never served, even through a publisher that would still answer.
+func TestExpiredPublicationIsGone(t *testing.T) {
+	for _, phase := range []publication.Phase{publication.PhaseExpired, publication.PhaseDeleting, publication.PhaseDeleted} {
+		e := newEnv(t)
+		run := &v1alpha1.AssessmentRun{}
+		_ = e.c.Get(context.Background(), client.ObjectKey{Name: "nightly-run"}, run)
+		run.Status.Publication.Phase = v1alpha1.PublicationPhase(phase)
+		run.Status.Publication.Availability = v1alpha1.Availability(publication.AvailabilityExpired)
+		if err := e.c.Status().Update(context.Background(), run); err != nil {
+			t.Fatal(err)
+		}
+		if w := e.get(teamPath, "team-token"); w.Code != http.StatusGone {
+			t.Errorf("%s publication download: %d (%d bytes)", phase, w.Code, w.Body.Len())
+		}
+	}
+}
