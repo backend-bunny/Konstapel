@@ -27,7 +27,9 @@ groups 1 to 4. The following are implemented:
   ([Lifecycle](#lifecycle), group 4).
 
 Inclusion in coverage reports and assessment packages comes in a later
-task group. The runtime chart's download service serves the attachment
+task group. Coverage reports already carry the section it will fill: the
+coverage owner's `SupportingEvidenceContext` contract and shared fixtures
+are described in [control coverage](control-coverage.md#supporting-evidence). The runtime chart's download service serves the attachment
 routes with the default limits; chart values for the limits come with the
 chart integration (task 7.1).
 
@@ -537,7 +539,8 @@ is withdrawn. `DocumentCommitted` keeps attesting the recorded commitment
 whatever the content state.
 
 New coverage (task group 5) reads these states through
-`attachments.ForBinding`. It never selects a withdrawn record. It selects
+`attachments.ForBinding` and maps them onto the coverage owner's
+[`SupportingEvidenceContext`](control-coverage.md#the-consumer-contract). It never selects a withdrawn record. It selects
 every other record associated with the binding's exact UID, with its
 validity computed at the report's own instant, so an expired, future,
 unavailable or mismatched document is explained rather than omitted.

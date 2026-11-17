@@ -138,6 +138,73 @@ func docEvidenceRow(t *testing.T) string {
 	return string(b) + "\n"
 }
 
+// docSupporting is the physical-control example: the shared "current"
+// fixture (a datacenter audit supporting pe-3 and pe-6 of bind-a and
+// bind-b) joined to bind-a's binding package, then to team-a's namespace
+// package.
+func docSupporting(t *testing.T) string {
+	t.Helper()
+	in := supportingInput(t)
+	in.Supporting = supportingFixture(t, "current")
+	r := Build(in)
+	pe3 := row(t, r, "pe-3")
+	v := struct {
+		ID                 string          `json:"id"`
+		Title              string          `json:"title"`
+		Automation         string          `json:"automation"`
+		Checks             []CheckCoverage `json:"checks"`
+		Evidence           *EvidenceView   `json:"evidence"`
+		SupportingEvidence []SupportingRef `json:"supportingEvidence"`
+	}{pe3.ID, pe3.Title, pe3.Automation, pe3.Checks, pe3.Evidence, pe3.SupportingEvidence}
+	var sb strings.Builder
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(&sb, "binding package, controls[] row pe-3:\n%s\n", b)
+	ns := namespaceInput(t)
+	e := Build(ns).SupportingEvidence.Entries[0]
+	b, err = json.MarshalIndent(e, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(&sb, "\nnamespace package, supportingEvidence.entries[0]:\n%s\n", b)
+	return sb.String()
+}
+
+// docSupportingText is the text of the binding package's entry and row.
+func docSupportingText(t *testing.T) string {
+	t.Helper()
+	in := supportingInput(t)
+	in.Supporting = supportingFixture(t, "current")
+	text := string(must(Render(Build(in))).Text)
+	var sb strings.Builder
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "Supporting evidence:") {
+			for _, x := range lines[i:] {
+				if strings.Contains(x, "bind-b") {
+					break
+				}
+				sb.WriteString(x + "\n")
+			}
+		}
+		if strings.HasPrefix(l, "  Control pe-3 ") {
+			sb.WriteString("...\n")
+			for _, x := range lines[i:] {
+				if x == "" {
+					break
+				}
+				if strings.Contains(x, "OSCAL parameter:") {
+					continue
+				}
+				sb.WriteString(x + "\n")
+			}
+		}
+	}
+	return sb.String()
+}
+
 // docQueries are the documented jq queries of a downloaded coverage.json.
 var docQueries = [][]string{
 	{"-r", ".scope.kind, .asOf, .inventory.resolved, .inventory.controls"},
@@ -189,7 +256,8 @@ func TestControlCoverageDocExamples(t *testing.T) {
 	}
 	doc := string(raw)
 	for name, want := range map[string]string{"coverage-inventory": docInventory(t), "coverage-row": docRow(t),
-		"coverage-evidence": docEvidence(t), "coverage-evidence-row": docEvidenceRow(t), "coverage-jq": docJQ(t)} {
+		"coverage-evidence": docEvidence(t), "coverage-evidence-row": docEvidenceRow(t), "coverage-jq": docJQ(t),
+		"coverage-supporting": docSupporting(t), "coverage-supporting-text": docSupportingText(t)} {
 		if os.Getenv("KONSTAPEL_UPDATE_DOCS") != "" {
 			fmt.Printf("<!-- %s:begin -->\n```\n%s```\n<!-- %s:end -->\n", name, want, name)
 			continue
@@ -217,6 +285,18 @@ func TestControlCoverageDocExamples(t *testing.T) {
 	}
 	if !strings.Contains(doc, "`Report JSON: coverage.json sha256 <hex>`") || !strings.HasPrefix(strings.Split(string(golden), "\n")[2], TextReportLine) {
 		t.Error("the documented text binding line does not match the rendering")
+	}
+	// The supporting example shows no verdict, no automation and no
+	// private metadata in the namespace entry.
+	sup := block(t, doc, "coverage-supporting")
+	ns := sup[strings.Index(sup, "namespace package"):]
+	for _, p := range privateMetadata {
+		if strings.Contains(ns, p) {
+			t.Errorf("the namespace example shows %q", p)
+		}
+	}
+	if !strings.Contains(sup, `"automation": "none"`) || strings.Contains(sup, "satisfied") {
+		t.Error("the supporting example claims coverage")
 	}
 	if strings.Contains(block(t, doc, "coverage-row"), "oscalParameters") {
 		t.Error("the example row presents an OSCAL parameter setting the content does not author")

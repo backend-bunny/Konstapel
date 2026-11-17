@@ -589,6 +589,11 @@
       }
     ]
   },
+  "supportingEvidence": {
+    "integration": "disabled",
+    "projection": "platform",
+    "entries": []
+  },
   "limitations": [],
   "sources": [
     {

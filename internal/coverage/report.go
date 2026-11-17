@@ -42,9 +42,9 @@ const (
 )
 
 // Report is coverage report v1 for one assessment scope: the inventory,
-// the authored technical coverage, and the assessment owner's technical
-// evidence joined to it. A later group of add-control-coverage-reporting
-// adds the supporting-evidence context.
+// the authored technical coverage, the assessment owner's technical
+// evidence joined to it, and the supporting-evidence context, all as the
+// scope's projection discloses them.
 type Report struct {
 	SchemaVersion string `json:"schemaVersion"`
 	// AsOf is the closure/observation time of the inputs, never the
@@ -59,6 +59,9 @@ type Report struct {
 	Controls []ControlCoverage `json:"controls"`
 	// TechnicalEvidence is the owner's evaluated capture, when provided.
 	TechnicalEvidence TechnicalEvidence `json:"technicalEvidence"`
+	// SupportingEvidence is the documentary context: never a verdict, and
+	// never part of the technical evidence.
+	SupportingEvidence SupportingEvidence `json:"supportingEvidence"`
 	// Limitations are not attributable to one control row.
 	Limitations []Limitation `json:"limitations"`
 	// Sources are the package files the report was built from, by
@@ -193,6 +196,9 @@ type ControlCoverage struct {
 	// rows: a shared check's observations count under every row.
 	Evidence          *EvidenceView       `json:"evidence,omitempty"`
 	StatementEvidence []StatementEvidence `json:"statementEvidence,omitempty"`
+	// SupportingEvidence references the supporting documents attributed
+	// to the control. They change neither Automation nor Evidence.
+	SupportingEvidence []SupportingRef `json:"supportingEvidence,omitempty"`
 	// Limitations explain an unknown state.
 	Limitations []Limitation `json:"limitations,omitempty"`
 }
@@ -246,16 +252,23 @@ type Input struct {
 	Evidence *Evidence
 	// Packaging, when set, records the package-relative sources.
 	Packaging *Packaging
+	// Supporting is the supporting-evidence context; nil is
+	// IntegrationDisabled.
+	Supporting *SupportingEvidenceContext
 }
 
 // Build resolves the baseline and mappings of in.Content and joins them to
 // the selection. An unresolved inventory yields a report with no controls
 // and its limitations, never a guessed list.
+//
+// The input is projected for its scope first (projection.go); nothing
+// else reads the unprojected input.
 func Build(in Input) *Report {
+	in, p := project(in)
 	in.Selection = sortedSelection(in.Selection)
 	sel := in.Selection
 	r := newReport(in)
-	defer finish(r, in)
+	defer finish(r, in, p)
 	l := newLoader(in.Content, in.Options)
 	b, err := readBaseline(l)
 	if err != nil {
@@ -301,11 +314,20 @@ func Build(in Input) *Report {
 // in.Content carries only the intended bundle reference (its zero handle
 // reads nothing), so the evidence of that bundle is reported unattributed
 // rather than as another bundle's.
+//
+// The input is projected for its scope first. In a namespace projection
+// the caller's subject and message are replaced by a fixed message for the
+// code: the caller's detail is not vetted for the scope.
 func Unavailable(in Input, code, subject, format string, a ...any) *Report {
+	in, p := project(in)
 	in.Selection = sortedSelection(in.Selection)
 	r := newReport(in)
-	r.Limitations = append(r.Limitations, *blocking(code, "", subject, format, a...))
-	finish(r, in)
+	l := blocking(code, "", subject, format, a...)
+	if p.kind != ProjectionPlatform {
+		l = blocking(code, "", "", "%s", restrictedMessage(code))
+	}
+	r.Limitations = append(r.Limitations, *l)
+	finish(r, in, p)
 	return r
 }
 
@@ -313,18 +335,26 @@ func newReport(in Input) *Report {
 	r := &Report{SchemaVersion: SchemaVersion, AsOf: in.AsOf.UTC(), Scope: in.Scope,
 		Inputs:   Inputs{Bundle: in.Content.Bundle, Selection: in.Selection, Semantics: Semantics},
 		Mappings: MappingSummary{Definitions: []DocumentRef{}}, Controls: []ControlCoverage{}, Limitations: []Limitation{},
-		TechnicalEvidence: TechnicalEvidence{State: EvidenceNotProvided}, Sources: []Source{}}
+		TechnicalEvidence:  TechnicalEvidence{State: EvidenceNotProvided},
+		SupportingEvidence: SupportingEvidence{Integration: IntegrationDisabled, Projection: ProjectionPlatform, Entries: []SupportingRecord{}},
+		Sources:            []Source{}}
 	if in.Packaging != nil {
 		r.Inputs.ContentPath = in.Packaging.ContentPath
 	}
 	return r
 }
 
-// finish joins the evidence, records the sources and orders limitations.
-func finish(r *Report, in Input) {
+// finish joins the evidence, then the supporting context, records the
+// sources and orders limitations.
+func finish(r *Report, in Input, p projection) {
 	if in.Evidence != nil {
 		joinEvidence(r, in)
 	}
+	if p.withheld {
+		r.TechnicalEvidence.State = EvidenceUnresolved
+	}
+	r.Limitations = append(r.Limitations, p.limitations...)
+	joinSupporting(r, in.Supporting, p)
 	r.Limitations = sortLimitations(r.Limitations)
 	if in.Packaging != nil {
 		r.Sources = sources(r, *in.Packaging)
@@ -377,6 +407,11 @@ func sources(r *Report, p Packaging) []Source {
 	}
 	for _, s := range p.Evidence {
 		add(s)
+	}
+	for _, e := range r.SupportingEvidence.Entries {
+		if d := e.Document; e.Access == AccessIncluded && d != nil && d.Copy != "" {
+			add(Source{Path: d.Copy, Kind: SourceSupportingDocument, SHA256: d.SHA256})
+		}
 	}
 	slices.SortFunc(out, func(a, b Source) int { return strings.Compare(a.Path, b.Path) })
 	return out

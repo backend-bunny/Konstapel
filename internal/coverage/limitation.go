@@ -60,6 +60,15 @@ const (
 	CodeEvidenceNotSelected    = "EvidenceNotSelected"    // non-blocking: not attributed
 	CodeEvidenceUnmapped       = "EvidenceUnmapped"       // non-blocking: not attributed
 	CodeEvidenceUnattributed   = "EvidenceUnattributed"   // non-blocking: not attributed
+
+	// Scope projection (projection.go).
+	CodeScopeProjectionInvalid = "ScopeProjectionInvalid" // a restricted scope does not name one namespace
+	CodeEvidenceWithheld       = "EvidenceWithheld"       // the evidence is not a valid projection to the namespace
+
+	// Supporting evidence (supporting.go).
+	CodeSupportingEvidenceUnavailable = "SupportingEvidenceUnavailable" // the enabled integration supplied no context
+	CodeSupportingContextInvalid      = "SupportingContextInvalid"      // the context breaks the contract
+	CodeSupportingNotAttributed       = "SupportingNotAttributed"       // non-blocking: not attributed
 )
 
 // Limitation is a coded, bounded explanation of what could not be resolved

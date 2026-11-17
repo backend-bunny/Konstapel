@@ -36,7 +36,10 @@ const (
 	EvidenceResolved = "resolved"
 	// EvidenceUnresolved: the evaluation does not match its capture or the
 	// report's scope. The owner's summary and observations are retained
-	// as recorded, but none is attributed to a control.
+	// as recorded, but none is attributed to a control. In a namespace
+	// projection, evidence that is not verifiably projected to the
+	// namespace is withheld instead: unresolved with no summary and no
+	// observations (CodeEvidenceWithheld).
 	EvidenceUnresolved = "unresolved"
 )
 

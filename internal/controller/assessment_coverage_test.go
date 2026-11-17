@@ -132,6 +132,11 @@ func TestRunPackageCarriesCoverage(t *testing.T) {
 	if len(r.Inputs.Selection.Policies) != 1 || r.Inputs.Selection.Policies[0].Name != pol {
 		t.Fatalf("selection %+v", r.Inputs.Selection)
 	}
+	// No attachment integration feeds coverage yet: the context is
+	// disabled (documents not considered), never an empty available list.
+	if se := r.SupportingEvidence; se.Integration != coverage.IntegrationDisabled || se.Projection != coverage.ProjectionPlatform || len(se.Entries) != 0 {
+		t.Fatalf("supporting evidence %+v", se)
+	}
 	// The run's status reports the technical evidence, unchanged.
 	if run.Status.Summary.Evidence.Completeness != "Complete" || run.Status.Summary.Outcomes.Fail != 1 {
 		t.Fatalf("summary %+v", run.Status.Summary)
