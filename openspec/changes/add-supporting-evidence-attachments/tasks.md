@@ -58,15 +58,15 @@ for package integration.
 
 ## 5. Coverage and assessment packages
 
-- [ ] 5.1 Consume the coverage owner's supporting-evidence projection contract and freeze attachment scope/context per run; verify datacenter evidence can support several explicit bindings without changing technical counts, outcomes, risk acceptance, or policy revisions.
+- [x] 5.1 Consume the coverage owner's supporting-evidence projection contract and freeze attachment scope/context per run; verify datacenter evidence can support several explicit bindings without changing technical counts, outcomes, risk acceptance, or policy revisions.
   <!-- agent: tier=deep risk=medium reason="Bounded transfers and cross-owner temporal evidence state" -->
-- [ ] 5.2 Add verified independent document copies, immutable context, checksummed inventory, and valid relative OSCAL back-matter references to platform packages through the producer owner; verify capture changes, storage failure, expired/future documents, source cleanup, and retry/capture-loss behavior.
+- [x] 5.2 Add verified independent document copies, immutable context, checksummed inventory, and valid relative OSCAL back-matter references to platform packages through the producer owner; verify capture changes, storage failure, expired/future documents, source cleanup, and retry/capture-loss behavior.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.3 Add explicit protected-document/context roles and versioned package protection through the publication owner; verify namespace packages reject document bytes and contain only sanitized validity/availability context without private metadata or usable links.
+- [x] 5.3 Add explicit protected-document/context roles and versioned package protection through the publication owner; verify namespace packages reject document bytes and contain only sanitized validity/availability context without private metadata or usable links.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.4 Require document-read permission as well as run/download permission for platform packages containing protected roles; verify a run reader cannot bypass attachment authorization, permission revocation is effective, and historical package access works without a live source record.
+- [x] 5.4 Require document-read permission as well as run/download permission for platform packages containing protected roles; verify a run reader cannot bypass attachment authorization, permission revocation is effective, and historical package access works without a live source record.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.5 Document report interpretation and producer/reader compatibility rollout; verify old packages remain readable, unknown protected versions fail closed, and rollback retains compatible download/cleanup service for existing commitments.
+- [x] 5.5 Document report interpretation and producer/reader compatibility rollout; verify old packages remain readable, unknown protected versions fail closed, and rollback retains compatible download/cleanup service for existing commitments.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 6. RustFS local development

@@ -337,14 +337,16 @@ func TestLiveIntegratedAssessments(t *testing.T) {
 		}
 		// The coverage is projected for its scope (add-control-coverage-
 		// reporting 4.2): a namespace package's evidence is accepted as the
-		// owner's projection, and no attachment integration feeds coverage
-		// yet, so the supporting context is disabled.
+		// owner's projection. The attachment integration feeds coverage
+		// (add-supporting-evidence-attachments 5.1); no document names these
+		// bindings, so the context is available and empty, and nothing is
+		// protected.
 		wantProjection := coverage.ProjectionPlatform
 		if d.Scope.Kind == publication.ScopeNamespace {
 			wantProjection = coverage.ProjectionNamespace
 		}
-		if se := cov.SupportingEvidence; se.Projection != wantProjection || se.Integration != coverage.IntegrationDisabled || len(se.Entries) != 0 ||
-			cov.TechnicalEvidence.State != coverage.EvidenceResolved {
+		if se := cov.SupportingEvidence; se.Projection != wantProjection || se.Integration != coverage.IntegrationAvailable || len(se.Entries) != 0 ||
+			cov.TechnicalEvidence.State != coverage.EvidenceResolved || d.Protected() {
 			t.Fatalf("%s package coverage projection %+v evidence state %s", what, se, cov.TechnicalEvidence.State)
 		}
 		var all strings.Builder
