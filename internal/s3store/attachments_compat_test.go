@@ -53,7 +53,8 @@ func TestAttachmentStoreCompatibility(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	results := map[string]any{"image": os.Getenv("KONSTAPEL_S3_IMAGE"), "date": time.Now().UTC().Format("2006-01-02")}
+	results := map[string]any{"image": os.Getenv("KONSTAPEL_S3_IMAGE"), "version": os.Getenv("KONSTAPEL_S3_VERSION"),
+		"supportedVersioning": []Versioning{Unversioned, Enabled, Suspended}, "date": time.Now().UTC().Format("2006-01-02")}
 	for _, mode := range []Versioning{Unversioned, Enabled, Suspended} {
 		t.Run(string(mode), func(t *testing.T) {
 			d := Destination{ID: "attach-compat", Endpoint: endpoint, Bucket: "konstapel-attach-" + lower(mode), Region: "us-east-1",
