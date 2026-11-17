@@ -25,7 +25,8 @@
       "TestLiveAssessmentStatus",
       "TestLiveAssessmentRuns",
       "TestLiveEngineCorrelation",
-      "TestLiveIntegratedAssessments"
+      "TestLiveIntegratedAssessments",
+      "TestLiveSupportingEvidenceAcceptance"
     ]
   },
   "storage": {
@@ -90,7 +91,8 @@
       "TestLiveAssessmentFaults",
       "TestLiveEvidenceRecovery",
       "TestLiveLeaderHandoverRecovery",
-      "TestLiveLeaderHandoverLoss"
+      "TestLiveLeaderHandoverLoss",
+      "TestLiveSupportingEvidenceRecovery"
     ]
   },
   "availability": {

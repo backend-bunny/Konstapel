@@ -82,11 +82,11 @@ for package integration.
 
 - [x] 7.1 Integrate generated CRD/RBAC/admission and service settings into the existing aligned charts and controller startup through their owners; verify chart generation, permissions, serving readiness, and reader authorization are deployed before protected-document writers are enabled.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 7.2 Run full attachment/coverage/assessment acceptance with real S3 service and namespace/platform credentials using the RustFS fixture; verify upload, multi-binding association, validity, independently authorized downloads, namespace confidentiality, and independent source/package retention.
+- [x] 7.2 Run full attachment/coverage/assessment acceptance with real S3 service and namespace/platform credentials using the RustFS fixture; verify upload, multi-binding association, validity, independently authorized downloads, namespace confidentiality, and independent source/package retention.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 7.3 Exercise replica/leader loss, interrupted upload, lost commit response, unavailable source storage, withdrawal during capture, and denied cleanup across the integrated workflow; verify durable recovery, unchanged historical bytes, and truthful unavailable states.
+- [x] 7.3 Exercise replica/leader loss, interrupted upload, lost commit response, unavailable source storage, withdrawal during capture, and denied cleanup across the integrated workflow; verify durable recovery, unchanged historical bytes, and truthful unavailable states.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 7.4 Run appropriate existing Devbox/Task checks, generated-schema/package regressions, and strict OpenSpec validation; retain sanitized test/compatibility evidence and remove task-owned RustFS containers/volumes, credentials, prefixes, clusters, and processes.
+- [x] 7.4 Run appropriate existing Devbox/Task checks, generated-schema/package regressions, and strict OpenSpec validation; retain sanitized test/compatibility evidence and remove task-owned RustFS containers/volumes, credentials, prefixes, clusters, and processes.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## Workflow follow-up
@@ -107,6 +107,17 @@ for package integration.
 - Done in 7.1: the transfer service's attachment settings are the validated
   `download.attachments` chart values (`maxBytes`, `timeout`,
   `maxConcurrent`, `retention`).
+- Done in 7.2 to 7.4: `TestLiveSupportingEvidenceAcceptance` (group
+  `assessments`) and `TestLiveSupportingEvidenceRecovery` (group `recovery`)
+  run the integrated workflow on RustFS. Both were hand-broken once (a
+  withdrawal flag not set at closure; an expired validity not reported) and
+  failed as intended.
+- Done in 7.2: the download service answers `410` for an `Expired`,
+  `Deleting` or `Deleted` publication (a deleted tombstone answered `409`
+  before), as `docs/integration/s3-evidence.md` specifies
+  (`TestExpiredPublicationIsGone`).
+- Leftover, not demanded by any requirement or task: the orphan inventory
+  below.
 - Extend the S3 orphan inventory to attachments in a later group, after
   group 4 (owner decision). Record each pinned attachment's owned prefix and
   commitment, mark the records handed off, and release them without

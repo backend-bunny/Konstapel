@@ -8,7 +8,7 @@ supporting material. It has no verdict field, and it never changes technical
 findings, expected checks, enforcement or risk acceptance.
 
 **Status.** This is the `add-supporting-evidence-attachments` change, task
-groups 1 to 5. The following are implemented:
+groups 1 to 7. The following are implemented:
 
 - the API;
 - authenticated registrant attribution;
@@ -29,7 +29,11 @@ groups 1 to 5. The following are implemented:
   platform assessment packages, protected package roles and the
   document-read check on package downloads
   ([Coverage and assessment packages](#coverage-and-assessment-packages),
-  group 5).
+  group 5);
+- the local RustFS workflow ([Local development](#local-development),
+  group 6);
+- chart integration, and integrated acceptance and recovery
+  ([Integrated acceptance](#integrated-acceptance), group 7).
 
 The runtime chart's download service serves the attachment routes; its
 limits and source retention are the `download.attachments` chart values
@@ -940,6 +944,61 @@ records whose copies new runs should not carry. Keep this version's
 download service, and keep attachment cleanup running until every
 commitment and every protected package has expired. Never delete retained
 source documents, packages or the CRDs as rollback cleanup.
+
+## Integrated acceptance
+
+Two live tests run the whole platform workflow together, against a real API
+server with its own TokenReview and SubjectAccessReview, the pinned RustFS
+service, and service accounts bound to the shipped roles.
+
+`TestLiveSupportingEvidenceAcceptance` (acceptance group `assessments`):
+
+- `konstapel evidence register` registers one facility document for two
+  bindings, filling both binding UIDs; the uploader commits it through the
+  transfer service. Expired, not-yet-valid and never-uploaded documents are
+  registered beside it. Registration changes no binding and no engine
+  policy.
+- Each binding's platform package carries the shared document under the
+  same record UID and registration digest, with the declared facility
+  scope. The expired and not-yet-valid copies carry their temporal state.
+  The never-uploaded document is reported `pending` and not included. The
+  technical evidence, outcomes, control rows and enforcement revisions are
+  those of the run before any document existed.
+- Run access alone, document read alone and namespace credentials each get
+  `403` for the protected packages and source documents they may not read.
+  Both grants together download the package. Each team's package lists
+  only its own binding's documents, as `restricted` entries without bytes,
+  private metadata or links.
+- Retention is independent. A package deleted at its expiry leaves the
+  source document, and a later run copies it again. A withdrawn source
+  deleted at its own expiry leaves the package that copied it readable and
+  valid.
+
+`TestLiveSupportingEvidenceRecovery` (acceptance group `recovery`). The
+documents' storage is an object-lock bucket behind the test's fault proxy;
+controllers are leader-elected candidates, each with its own staging
+directory:
+
+- A transfer replica lost after staging and before its commit leaves an
+  owned, uncommitted attempt, which attempt cleanup removes; the caller's
+  retry on another replica commits once. A replica lost after its commit
+  landed loses the response; the retry is answered with the original
+  commitment and uploader. A replica with another retention setting changes
+  neither. An interrupted upload stores nothing.
+- A platform run reports a pending upload as `pending`, and a document
+  whose storage refuses reads for the whole collection window as
+  `unavailable`/`NotRetrieved`; its source download answers `503`
+  meanwhile. A document withdrawn during the capture keeps its verified
+  copy, marked withdrawn, and its retained source stays downloadable.
+- A leader lost before durable staging fails the run as `CaptureLost`, with
+  nothing stored. A leader lost after durable staging is recovered by the
+  next leader, which commits the staged bytes unchanged, although documents
+  were withdrawn in between.
+- A legal hold denies a withdrawn document's source deletion at its expiry.
+  The record keeps its finalizer, pin and commitment, the destination stays,
+  the source download answers `410`, and the package's copy stays readable.
+  After the hold is lifted, the next attempt removes every owned version, and
+  the package still validates.
 
 ## Authority
 

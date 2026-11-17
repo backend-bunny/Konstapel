@@ -709,7 +709,7 @@ A successful response is `Cache-Control: private, no-store`, with
 | 401 | no token, or TokenReview did not accept it for the audience |
 | 403 | not authorized, or not found. The two are indistinguishable, so UIDs are not an existence oracle |
 | 409 | the request or run has no committed package yet |
-| 410 | the package expired and is no longer served |
+| 410 | the package expired and is no longer served, including after its deletion (an `Expired`, `Deleting` or `Deleted` publication) |
 | 429 | too many concurrent downloads (`Retry-After`) |
 | 404 | (signature routes) the package was published unsigned: `X-Konstapel-Signing: unsigned` |
 | 502 | the stored package or its signature does not match the receipt or fails verification |
