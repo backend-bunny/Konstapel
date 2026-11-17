@@ -38,6 +38,7 @@ import (
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/schedule"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -579,6 +580,10 @@ type AssessmentRunReconciler struct {
 	Instance string
 	// Observe is told each completed storage attempt; zero observes none.
 	Observe RunObserver
+	// Attachments reads committed supporting documents from their pinned
+	// destinations for platform packages; nil includes no copy (documents
+	// are then reported NotRetrieved).
+	Attachments *AttachmentStorage
 
 	checkedMu sync.Mutex
 	checked   map[types.UID]time.Time // last integrity check per retained run
@@ -611,6 +616,9 @@ func (r *AssessmentRunReconciler) integrityInterval() time.Duration {
 type closedRun struct {
 	Capture    collector.CaptureV2  `json:"capture"`
 	Evaluation collector.Evaluation `json:"evaluation"`
+	// Supporting is the supporting-evidence context frozen at closure
+	// (assessment_supporting.go); nil for a run started without one.
+	Supporting *coverage.SupportingEvidenceContext `json:"supporting,omitempty"`
 }
 
 func (r *AssessmentRunReconciler) now() time.Time {
@@ -832,6 +840,11 @@ func (r *AssessmentRunReconciler) start(ctx context.Context, run *v1alpha1.Asses
 	if err := r.freezeSelection(run, profile); err != nil {
 		return ctrl.Result{}, err
 	}
+	// And the binding's supporting documents, for coverage and the
+	// platform package.
+	if err := r.freezeSupporting(ctx, run, b, now); err != nil {
+		return ctrl.Result{}, err
+	}
 	var revisions []string
 	nsUIDs := map[string]bool{}
 	for _, s := range c.Subjects {
@@ -961,6 +974,8 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		return ctrl.Result{}, err
 	}
 	log.FromContext(ctx).V(1).Info("collecting", "run", run.Name, "completeness", ev.Evidence.Completeness, "closesAt", c.Window.Started.Add(timeout))
+	// Supporting documents are read only within the collection window.
+	r.copySupporting(ctx, run, now, c.Window.Started.Add(timeout))
 	if now.Before(c.Window.Started.Add(timeout)) && ev.Evidence.Completeness != publication.Complete {
 		if err := assessment.Write(filepath.Join(r.staging(run), "capture.json"), c); err != nil {
 			return ctrl.Result{}, err
@@ -972,7 +987,7 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		return ctrl.Result{}, err
 	}
 	// Close the bounded window: freeze the capture and its evaluation first.
-	frozen = closedRun{Capture: trial, Evaluation: ev}
+	frozen = closedRun{Capture: trial, Evaluation: ev, Supporting: r.closeSupporting(ctx, run, b, trial.Window.Closed)}
 	if err := assessment.Write(filepath.Join(r.staging(run), "closed.json"), frozen); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -995,8 +1010,17 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	if err := r.exportContent(run, &req); err != nil {
 		return ctrl.Result{}, err
 	}
-	packaged := r.exportCoverage(ctx, run, b, &req)
+	sup, err := r.supportingFiles(run, frozen.Supporting, now)
+	if err != nil {
+		// Never re-read a newer document under this run's identity.
+		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, v1alpha1.ReasonCaptureLost, "the staged supporting evidence was lost before export: "+err.Error())
+	}
+	req.Supporting = sup
+	packaged := r.exportCoverage(ctx, run, b, &req, frozen.Supporting)
 	d, err := collector.Export(ctx, req)
+	if err == nil {
+		err = coverage.VerifySupportingPackage(pkg, d)
+	}
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, run, v1alpha1.ConditionPublished, "ExportFailed", err.Error())
 	}

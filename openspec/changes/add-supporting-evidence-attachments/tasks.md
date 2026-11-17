@@ -58,15 +58,15 @@ for package integration.
 
 ## 5. Coverage and assessment packages
 
-- [ ] 5.1 Consume the coverage owner's supporting-evidence projection contract and freeze attachment scope/context per run; verify datacenter evidence can support several explicit bindings without changing technical counts, outcomes, risk acceptance, or policy revisions.
+- [x] 5.1 Consume the coverage owner's supporting-evidence projection contract and freeze attachment scope/context per run; verify datacenter evidence can support several explicit bindings without changing technical counts, outcomes, risk acceptance, or policy revisions.
   <!-- agent: tier=deep risk=medium reason="Bounded transfers and cross-owner temporal evidence state" -->
-- [ ] 5.2 Add verified independent document copies, immutable context, checksummed inventory, and valid relative OSCAL back-matter references to platform packages through the producer owner; verify capture changes, storage failure, expired/future documents, source cleanup, and retry/capture-loss behavior.
+- [x] 5.2 Add verified independent document copies, immutable context, checksummed inventory, and valid relative OSCAL back-matter references to platform packages through the producer owner; verify capture changes, storage failure, expired/future documents, source cleanup, and retry/capture-loss behavior.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.3 Add explicit protected-document/context roles and versioned package protection through the publication owner; verify namespace packages reject document bytes and contain only sanitized validity/availability context without private metadata or usable links.
+- [x] 5.3 Add explicit protected-document/context roles and versioned package protection through the publication owner; verify namespace packages reject document bytes and contain only sanitized validity/availability context without private metadata or usable links.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.4 Require document-read permission as well as run/download permission for platform packages containing protected roles; verify a run reader cannot bypass attachment authorization, permission revocation is effective, and historical package access works without a live source record.
+- [x] 5.4 Require document-read permission as well as run/download permission for platform packages containing protected roles; verify a run reader cannot bypass attachment authorization, permission revocation is effective, and historical package access works without a live source record.
   <!-- agent: tier=deep risk=high reason="Protected documents, durable ownership, and authorization" -->
-- [ ] 5.5 Document report interpretation and producer/reader compatibility rollout; verify old packages remain readable, unknown protected versions fail closed, and rollback retains compatible download/cleanup service for existing commitments.
+- [x] 5.5 Document report interpretation and producer/reader compatibility rollout; verify old packages remain readable, unknown protected versions fail closed, and rollback retains compatible download/cleanup service for existing commitments.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 
 ## 6. RustFS local development
@@ -91,27 +91,15 @@ for package integration.
 
 ## Workflow follow-up
 
-- Switch association validation from the interim baseline reader
-  (`internal/attachments.ReadBaseline`: the bundle's Moderate profile with an
-  explicit `include-controls`/`with-ids` selection) to the coverage owner's
-  baseline reader once add-control-coverage-reporting 1.1 lands. Keep the
-  catalog-digest identity and fail-closed behavior, and re-verify the
-  association states. The shared reader is now available:
-  `coverage.ReadBaseline(content, coverage.Options{Schemas: <controller's
-  content/schemas>})` over `coverage.FromFrozen` (OCI content) or
-  `coverage.FromVendored` (vendored tree; pass `Options.Profile`, since its
-  SHA256SUMS does not cover every entry point). Map `Baseline.Catalog.Digest`,
-  `Baseline.Control` and `Baseline.HasStatement` onto the catalog, control
-  and statement checks, and treat `errors.Is(err, coverage.ErrUnresolved)`
-  as a resolution failure (association pending), never a mismatch.
-- Group 5.1 maps `attachments.ForBinding` onto the coverage owner's
-  `coverage.SupportingEvidenceContext`
-  (`konstapel.io/supporting-evidence-context/v1`, landed with
-  add-control-coverage-reporting group 4). Pass it as `coverage.Input.Supporting`
-  (nil stays `disabled`), and check the produced contexts against the shared
-  consumer fixtures in `internal/coverage/testdata/supporting/` with
-  `coverage.ParseSupportingContext`. Coverage projects namespace packages
-  itself; the attachment owner still supplies only the binding's entries.
+- Done in group 5: association validation uses the coverage owner's
+  baseline reader (`coverage.ReadBaseline` through
+  `attachments.ReadBaseline`/`VendoredContent`), keeping the catalog-digest
+  identity and fail-closed behavior; `attachments.ForBinding` feeds
+  `coverage.SupportingEvidenceContext` as `coverage.Input.Supporting`.
+- Gate protected-document writers on deployed readers in the chart
+  integration (7.1): download services older than group 5 serve protected
+  packages without the document-read check (documented as an unsupported
+  downgrade in `docs/supporting-evidence.md`).
 - Expose the transfer service's attachment settings (`--attachment-max-bytes`,
   `--attachment-timeout`, `--attachment-max-concurrent`,
   `--attachment-retention`) as validated runtime chart values in 7.1; until

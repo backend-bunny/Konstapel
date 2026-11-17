@@ -4,17 +4,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 )
 
 func vendored(t *testing.T) *Baseline {
 	t.Helper()
-	b, err := ReadBaseline(os.DirFS("../.."))
+	b, err := ReadVendoredBaseline(os.DirFS("../.."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,24 +97,54 @@ func TestMismatchMessagesAreBounded(t *testing.T) {
 	}
 }
 
-func TestUnsupportedBaselinesFailClosed(t *testing.T) {
-	catalog := `{"catalog":{"groups":[{"controls":[{"id":"pe-3","parts":[{"id":"pe-3_smt","name":"statement"}]}]}]}}`
-	for name, profile := range map[string]string{
-		"include-all":     `{"profile":{"imports":[{"href":"#c","include-all":{}}]}}`,
-		"matching":        `{"profile":{"imports":[{"href":"#c","include-controls":[{"matching":[{"pattern":"pe-*"}]}]}]}}`,
-		"two imports":     `{"profile":{"imports":[{"href":"#c","include-controls":[{"with-ids":["pe-3"]}]},{"href":"#d","include-controls":[{"with-ids":["pe-3"]}]}]}}`,
-		"unknown control": `{"profile":{"imports":[{"href":"#c","include-controls":[{"with-ids":["pe-9"]}]}]}}`,
-		"all excluded":    `{"profile":{"imports":[{"href":"#c","include-controls":[{"with-ids":["pe-3"]}],"exclude-controls":[{"with-ids":["pe-3"]}]}]}}`,
-		"not json":        `{`,
+// The coverage owner's reader resolves the baseline; whatever it cannot
+// resolve is a resolution failure (pending), never a mismatch, and never a
+// guessed inventory. The digest of other content is never substituted.
+func TestUnresolvedBaselinesFailClosed(t *testing.T) {
+	src := os.DirFS("../..")
+	tree := func(edit func(m fstest.MapFS)) fstest.MapFS {
+		m := fstest.MapFS{}
+		for _, p := range []string{"content/SHA256SUMS", CatalogPath, BaselinePath} {
+			b, err := fs.ReadFile(src, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m[p] = &fstest.MapFile{Data: b}
+		}
+		for _, v := range coverage.SupportedOSCAL {
+			b, err := fs.ReadFile(src, "content/schemas/oscal-"+v+".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			m["content/schemas/oscal-"+v+".json"] = &fstest.MapFile{Data: b}
+		}
+		edit(m)
+		return m
+	}
+	if _, err := ReadVendoredBaseline(tree(func(fstest.MapFS) {})); err != nil {
+		t.Fatalf("intact copy: %v", err)
+	}
+	for name, edit := range map[string]func(fstest.MapFS){
+		"profile changed after its checksum": func(m fstest.MapFS) { m[BaselinePath].Data = append([]byte(" "), m[BaselinePath].Data...) },
+		"catalog missing":                    func(m fstest.MapFS) { delete(m, CatalogPath) },
+		"profile not json":                   func(m fstest.MapFS) { m[BaselinePath].Data = []byte("{") },
+		"no checksums":                       func(m fstest.MapFS) { delete(m, "content/SHA256SUMS") },
+		"no trusted schema":                  func(m fstest.MapFS) { delete(m, "content/schemas/oscal-1.2.3.json") },
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ReadBaseline(fstest.MapFS{CatalogPath: {Data: []byte(catalog)}, BaselinePath: {Data: []byte(profile)}})
+			_, err := ReadVendoredBaseline(tree(edit))
 			if !errors.Is(err, ErrBaseline) {
 				t.Fatalf("got %v, want ErrBaseline", err)
 			}
 		})
 	}
-	if _, err := ReadBaseline(fstest.MapFS{}); !errors.Is(err, ErrBaseline) {
-		t.Fatalf("missing content: %v", err)
+	// An unresolved coverage inventory is both ErrBaseline and
+	// coverage.ErrUnresolved: callers treat it as resolution, not mismatch.
+	_, err := ReadVendoredBaseline(tree(func(m fstest.MapFS) { delete(m, CatalogPath) }))
+	if !errors.Is(err, coverage.ErrUnresolved) {
+		t.Fatalf("got %v, want coverage.ErrUnresolved", err)
+	}
+	if _, err := ReadBaseline(coverage.Content{}, coverage.Options{}); !errors.Is(err, ErrBaseline) {
+		t.Fatalf("zero handle: %v", err)
 	}
 }

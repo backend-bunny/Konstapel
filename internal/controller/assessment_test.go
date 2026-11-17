@@ -39,7 +39,7 @@ func newAssessEnv(t *testing.T, objs ...client.Object) *assessEnv {
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(targeting.ValidatingPolicyGVK, meta.RESTScopeRoot)
 	mapper.Add(PolicyReportGVK, meta.RESTScopeNamespace)
-	for _, k := range []string{"ComplianceBinding", "ComplianceProfile", "AssessmentRun", "EvidenceDestination"} {
+	for _, k := range []string{"ComplianceBinding", "ComplianceProfile", "AssessmentRun", "EvidenceDestination", "EvidenceAttachment"} {
 		mapper.Add(v1alpha1.GroupVersion.WithKind(k), meta.RESTScopeRoot)
 	}
 	mapper.Add(v1alpha1.GroupVersion.WithKind("AssessmentRequest"), meta.RESTScopeNamespace)

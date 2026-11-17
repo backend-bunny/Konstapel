@@ -11,8 +11,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -304,19 +302,11 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 	return r.cleanup, lost(f, nil)
 }
 
-// packageBytes is the fake's archive: each file's name, length and bytes in
-// descriptor order. It is deterministic, like the real archive.
-func packageBytes(dir string, d publication.Descriptor) ([]byte, error) {
-	var b []byte
-	for _, name := range append([]string{publication.DescriptorFile}, paths(d)...) {
-		f, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
-		if err != nil {
-			return nil, err
-		}
-		b = fmt.Appendf(b, "%s\x00%d\x00", name, len(f))
-		b = append(b, f...)
-	}
-	return b, nil
+// packageBytes is the fake's archive: the real package archive format
+// (publication.Archive), so readers of downloads are exercised as in
+// production.
+func packageBytes(dir string, _ publication.Descriptor) ([]byte, error) {
+	return publication.Archive(dir)
 }
 
 func paths(d publication.Descriptor) []string {

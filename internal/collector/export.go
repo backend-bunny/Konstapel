@@ -61,6 +61,10 @@ type ExportRequest struct {
 	// package is then exported without coverage: coverage never blocks or
 	// alters the technical evidence.
 	CoverageOmitted func(error)
+	// Supporting, when set, are the platform package's protected
+	// supporting-evidence files (supporting.go). Only a Binding-scope
+	// package may carry them.
+	Supporting *SupportingFiles
 }
 
 // Export writes a package for an evaluated capture. When valid OSCAL can be
@@ -94,6 +98,10 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 		if err := assessment.Write(filepath.Join(req.Out, name), v); err != nil {
 			return publication.Descriptor{}, err
 		}
+	}
+	// Supporting files first: the OSCAL results reference the copies.
+	if err := writeSupporting(req); err != nil {
+		return publication.Descriptor{}, err
 	}
 
 	kind := publication.KindAssessment
@@ -164,6 +172,10 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	if hasCoverage {
 		checks = append(checks, "coverage-references")
 	}
+	protection := publication.ProtectionFor(files)
+	if protection != nil {
+		checks = append(checks, "supporting-evidence")
+	}
 	d := publication.Descriptor{
 		APIVersion: publication.APIVersion, Kind: publication.DescriptorKind, Run: req.Run, PackageKind: kind,
 		Scope: req.Scope, ScopeSHA256: req.Scope.Digest(),
@@ -172,7 +184,7 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 		Window:   publication.Window{Started: req.Capture.Window.Started, Closed: req.Capture.Window.Closed},
 		Evidence: req.Evaluation.Evidence, Outcomes: req.Evaluation.Outcomes, Diagnostic: diag,
 		Producer: publication.Producer{Name: "konstapel-controller", Version: ExportVersion, ValidatedAt: time.Now().UTC().Truncate(time.Second), Checks: checks},
-		Files:    files,
+		Files:    files, Protection: protection,
 	}
 	if err := d.Validate(); err != nil {
 		return d, err
@@ -316,6 +328,12 @@ func writeOSCAL(ctx context.Context, req ExportRequest) error {
 		props = append(props, parts[0].bundleProps()...)
 	}
 	ar.Metadata.Props = &props
+	if res := supportingResources(req.Supporting); len(res) > 0 {
+		if ar.BackMatter == nil {
+			ar.BackMatter = &oscal.BackMatter{}
+		}
+		join(&ar.BackMatter.Resources, &res)
+	}
 	ar.Metadata.Links = &[]oscal.Link{
 		{Href: "capture.json", Rel: "related", Text: "Frozen scope, expected inventory, and raw reports"},
 		{Href: "evaluation.json", Rel: "related", Text: "Per-observation evidence states and reasons"},
@@ -731,6 +749,10 @@ func exportRole(p string) publication.FileRole {
 		return publication.RoleCoverage
 	case p == publication.CoverageTextFile:
 		return publication.RoleCoverageText
+	case p == publication.SupportingContextFile:
+		return publication.RoleSupportingContext
+	case strings.HasPrefix(p, publication.SupportingDocumentDir):
+		return publication.RoleSupportingDocument
 	case strings.HasPrefix(p, "content/"):
 		return publication.RoleContent
 	case strings.HasPrefix(p, bundlesDir+"/") && strings.Contains(p, "/content/"):

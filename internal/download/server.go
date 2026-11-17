@@ -221,7 +221,8 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request, art artifa
 		fail(w, err)
 		return
 	}
-	s.serve(w, r, run, art)
+	// A namespace route never serves a protected package.
+	s.serve(w, r, run, art, nil)
 }
 
 func (s *Server) resolveRequest(ctx context.Context, ns, name, uid string) (*v1alpha1.AssessmentRun, error) {
@@ -283,15 +284,34 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, art artifact) 
 		fail(w, err)
 		return
 	}
-	s.serve(w, r, run, art)
+	// A protected package also requires the cluster-wide document-read
+	// grant, checked against the package's own recorded protection.
+	s.serve(w, r, run, art, func() error { return s.authorize(ctx, u, documentReadAttrs()...) })
 }
+
+// documentReadAttrs are the cluster-wide document-read grant a protected
+// package requires in addition to run access (add-supporting-evidence-
+// attachments 5.4): get on evidenceattachments/download and on
+// evidenceattachments, with no resource name, so a grant restricted to
+// some records is not enough. There are no per-document ACLs.
+func documentReadAttrs() []authzv1.ResourceAttributes { return attrs("", "evidenceattachments", "") }
+
+var errProtectionUnsupported = problem{http.StatusBadGateway, "the package's protection cannot be verified by this service; it is not served"}
 
 // serve fetches the committed archive into bounded temporary storage and
 // verifies its size and SHA-256 against the run's recorded receipt and the
 // committed status. For a signed publication it then verifies the
 // archive/signature pair (verifyPair). Only then does it stream the
 // requested artifact; nothing is served from an unverified pair.
-func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.AssessmentRun, art artifact) {
+//
+// Before either artifact is served, the verified archive's descriptor
+// decides its protection (publication.PackageProtection): a protected
+// package is served only when documentRead (nil on the namespace route)
+// grants it, checked per request so revocation applies at once. The
+// protection comes from the package itself, so historical downloads never
+// depend on the attachment records still existing. A descriptor whose
+// protection cannot be verified is never served.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.AssessmentRun, art artifact, documentRead func() error) {
 	ctx := r.Context()
 	if run.Status.Phase != v1alpha1.RunCompleted || run.Status.Publication == nil || run.Status.Scope == nil || run.Status.Binding == nil {
 		fail(w, problem{http.StatusConflict, "the run has no published package"})
@@ -377,6 +397,32 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, run *v1alpha1.Ass
 		log.FromContext(ctx).Info("signature record mismatch", "run", run.Name, "recorded", recordedSigned, "stored", storedSigned)
 		fail(w, problem{http.StatusBadGateway, "the stored package does not match the run's receipt"})
 		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		fail(w, err)
+		return
+	}
+	raw, err := publication.ArchiveDescriptor(f)
+	protected := false
+	if err == nil {
+		protected, err = publication.PackageProtection(raw)
+	}
+	if err != nil {
+		log.FromContext(ctx).Info("package protection not verifiable", "run", run.Name, "error", err.Error())
+		fail(w, errProtectionUnsupported)
+		return
+	}
+	if protected {
+		if documentRead == nil {
+			// Never reachable for a producer that keeps protected roles
+			// out of namespace packages; deny rather than redact.
+			fail(w, errForbidden)
+			return
+		}
+		if err := documentRead(); err != nil {
+			fail(w, err)
+			return
+		}
 	}
 	var bundle []byte
 	if recordedSigned {

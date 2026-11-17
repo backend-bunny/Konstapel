@@ -8,7 +8,7 @@ supporting material. It has no verdict field, and it never changes technical
 findings, expected checks, enforcement or risk acceptance.
 
 **Status.** This is the `add-supporting-evidence-attachments` change, task
-groups 1 to 4. The following are implemented:
+groups 1 to 5. The following are implemented:
 
 - the API;
 - authenticated registrant attribution;
@@ -24,14 +24,16 @@ groups 1 to 4. The following are implemented:
 - the `konstapel evidence` CLI (group 3);
 - separately reconciled validity, content, association and withdrawal
   states, expiry without an event, and bounded, recoverable cleanup
-  ([Lifecycle](#lifecycle), group 4).
+  ([Lifecycle](#lifecycle), group 4);
+- supporting context in coverage reports, verified document copies in
+  platform assessment packages, protected package roles and the
+  document-read check on package downloads
+  ([Coverage and assessment packages](#coverage-and-assessment-packages),
+  group 5).
 
-Inclusion in coverage reports and assessment packages comes in a later
-task group. Coverage reports already carry the section it will fill: the
-coverage owner's `SupportingEvidenceContext` contract and shared fixtures
-are described in [control coverage](control-coverage.md#supporting-evidence). The runtime chart's download service serves the attachment
-routes with the default limits; chart values for the limits come with the
-chart integration (task 7.1).
+The runtime chart's download service serves the attachment routes with the
+default limits; chart values for the limits come with the chart integration
+(task 7.1).
 
 Platform operators manage attachments. Application-team attachments are
 future work, and no namespace role can register or read them.
@@ -188,14 +190,25 @@ condition:
 
 | State | Reason | When |
 | --- | --- | --- |
-| `Valid` | `Valid` | The binding exists with the registered UID and has resolved a profile revision. That revision's verified bundle has the registered catalog digest, and its Moderate baseline profile selects every control. Every statement is a `statement` or `item` part of its own control. |
+| `Valid` | `Valid` | The binding exists with the registered UID and has resolved a profile revision. That revision's verified bundle has the registered catalog digest, and its baseline selects every control. Every statement is a `statement` or `item` part of its own control. |
 | `Pending` | `BindingUnresolved` | The binding hasn't resolved a profile, its resolution failed, or it is resolving a profile revision with other bundle content. Rechecked every minute and on binding changes. |
-| `Pending` | `BaselineUnavailable` | The bundle content can't be read. The controller reads vendored content of its own digest, or a frozen copy of verified OCI content. Other content is never substituted. |
+| `Pending` | `BaselineUnavailable` | The bundle's catalog and baseline don't resolve. The controller reads vendored content of its own digest, or a frozen copy of verified OCI content, with the coverage reader. Other content is never substituted. |
 | `Mismatched` | `BindingNotFound` | No binding has that name. |
 | `Mismatched` | `BindingReplaced` | The binding was recreated, so its UID changed. The association is never inherited. |
 | `Mismatched` | `CatalogMismatch` | The binding now resolves a different catalog revision. |
 | `Mismatched` | `ControlNotInBaseline` | A control isn't in the binding's selected baseline, for example after new bundle content removed it. |
 | `Mismatched` | `StatementNotInControl` | A statement isn't one of its control's statement parts, for example `pe-2_smt.a` under `pe-3`, or a guidance part. |
+
+The catalog and baseline are resolved by the same reader control coverage
+uses (`coverage.ReadBaseline`, see
+[supported profile resolution](control-coverage.md#supported-profile-resolution)).
+For OCI bundles that is the bundle's declared baseline profile; for the
+vendored content it is the Moderate profile. Every document is checked
+against the controller's own OSCAL schemas. The catalog digest is the SHA-256
+of the catalog file, the identity coverage qualifies controls with. A profile
+the reader can't resolve, for example one that selects controls with
+`matching`, keeps associations `Pending` (`BaselineUnavailable`); it is never
+read as a mismatch or as an empty baseline.
 
 `AssociationsValid` is `True` when every association is Valid, `False` when
 any is Mismatched, and `Unknown` while any is Pending. A recreated binding
@@ -710,6 +723,180 @@ If the controller isn't running, deleted records wait for it. Attachments
 have no owner references, so deleting a binding or namespace never deletes
 an attachment or its document.
 
+## Coverage and assessment packages
+
+Supporting documents reach assessments through the coverage owner's
+`SupportingEvidenceContext` contract
+(`konstapel.io/supporting-evidence-context/v1`, see
+[control coverage](control-coverage.md#supporting-evidence)). A document is
+supporting material: it never adds a check, an expected observation, a
+finding, an outcome or an automation state, and it changes no evidence
+count, policy revision or risk acceptance.
+
+### What a run freezes
+
+When a run starts, it freezes every record that names its binding's exact
+UID and isn't withdrawn, whatever its other states: the record UID and
+name, the immutable registration and its digest, the association, its last
+resolution, the content state and the recorded commitment. A record that is
+withdrawn before the run starts never enters it. A record registered later
+doesn't enter it either.
+
+While the run collects, a platform run (scope `Binding`) copies each frozen
+document whose association is `Valid` and whose content is `Available`. It
+reads the document from the record's own pinned destination and checks the
+bytes against the registered size and SHA-256 before staging them. Reads
+stop when the collection window closes. A namespace run copies nothing.
+
+At closure the run reads the records again. A record that was deleted or
+withdrawn meanwhile is marked `withdrawn`. A record whose association or
+content state changed is marked `changed`. The states reported are the ones
+frozen at start, and coverage classifies the declared validity at the
+closure time, so an expired or not-yet-valid document is reported with that
+state, never as current. The context is frozen with the closure. A re-export
+after a crash uses the same context and the same staged copies. If a staged
+copy is lost or no longer matches, the run fails with `CaptureLost`: it never
+reads a newer document under the run's identity.
+
+| Integration problem | Reported as |
+| --- | --- |
+| Records can't be read at start or at closure | `integration: unavailable`, reason `RecordsUnavailable` (a blocking coverage limitation, never an empty list) |
+| A run started by an earlier controller | `integration: disabled` (documents not considered) |
+| No record names the binding | `integration: available` with no entries; the package is unchanged |
+
+### Platform packages
+
+A platform package that reports at least one document carries two protected
+file roles:
+
+| Path | Role | Content |
+| --- | --- | --- |
+| `supporting-evidence/context.json` | `supporting-context` | The run's frozen context, with each document's private metadata (title, issuer, scope description, media type, size, SHA-256) and, for included documents, the copy's path. |
+| `supporting-evidence/documents/<record UID>` | `supporting-document` | A verified, independent copy of the document. |
+
+Nothing else may be placed under `supporting-evidence/`. The descriptor
+records the protected roles it carries:
+
+```json
+"protection": {
+  "version": "konstapel.io/package-protection/v1",
+  "roles": ["supporting-context", "supporting-document"]
+}
+```
+
+The marker is derived from the inventoried roles and must match them
+exactly; a descriptor with protected roles and no marker, or a marker
+without them, doesn't validate. The producer adds the
+`supporting-evidence` check. The OSCAL assessment results reference each
+copy from a back-matter resource, by its relative path and SHA-256. That
+resource is the only OSCAL change: there is no observation, finding or
+control result for a document, and no link to live storage. The declared
+source URL is never packaged.
+
+Each entry's `access` says what the package holds:
+
+| `access` | When | `content` |
+| --- | --- | --- |
+| `included` | A `Valid`, `Available` document that was copied and verified. | `available` |
+| `notIncluded` | An association that isn't `Valid`, content that isn't `Available` at start, a source past its expiry, or one of the reasons below. | the frozen state, or `unavailable` with a reason |
+
+| `contentReason` | Meaning |
+| --- | --- |
+| `NotRetrieved` | The document was available at start but wasn't retrieved and verified before the collection window closed (storage unavailable, damaged bytes, a fenced or handed-off destination). |
+| `PackageLimit` | The package already holds 64 copies or 256 MiB of copies. |
+
+A package copy belongs to its package. It follows the package's own
+retention and stays readable after the source record is withdrawn or its
+source bytes are deleted. Source cleanup never touches it. The package
+verifier (`s3store.ValidatePackage`, run before staging) checks that the
+context is the contract, valid at the closure, `available`, and only for the
+package's binding; that each included entry's copy is inventoried at
+`supporting-evidence/documents/<source>` with the registered SHA-256 and
+size; and that every copy is cited by exactly one included entry.
+
+A package whose context names no document carries neither file and isn't
+protected. A context that breaks the contract is never packaged: coverage
+reports it as `ContextInvalid` instead.
+
+### Namespace packages
+
+A team's namespace package never carries a document copy, the context file,
+or a protected role. The descriptor verifier rejects them, and the exporter
+refuses them. Its coverage report lists the binding's entries as
+`restricted`: the opaque record UID, the associated controls, the declared
+validity and the content, association and withdrawal states. There is no
+title, issuer, scope description, registration digest, document digest,
+copy or link. The report doesn't claim to hold the restricted evidence.
+
+### Downloading a protected package
+
+A protected package needs the cluster-wide document-read grant in addition
+to run access. `GET /v1/assessmentruns/<run uid>/download` (and
+`/signature`) checks, after the archive is verified and before any byte is
+served:
+
+1. `get assessmentruns/download` and `get assessmentruns` for the run, as
+   for every platform package;
+2. for a protected package, `get evidenceattachments/download` and `get
+   evidenceattachments` with no resource name: the
+   `konstapel-evidence-attachment-downloader` role. A grant restricted to
+   some record names isn't enough. There are no per-document ACLs.
+
+Without the second grant the answer is `403`, and the package isn't
+redacted on the fly. The check runs on every request, so removing the
+binding stops new downloads at once. Protection is read from the verified
+package's own descriptor, so downloading a historical package never
+depends on the attachment records still existing. A namespace request's
+route (`/v1/namespaces/<ns>/assessmentrequests/<name>/download`) never
+serves a protected package. A descriptor whose protection this service
+can't verify (an unknown protection version, protected files without the
+marker) gets `502` and nothing is served.
+
+```sh
+# A platform auditor who reads runs and supporting documents.
+kubectl create clusterrolebinding auditor-runs --clusterrole=konstapel-assessment-operator --serviceaccount=platform-ops:platform-auditor
+kubectl create clusterrolebinding auditor-documents --clusterrole=konstapel-evidence-attachment-downloader --serviceaccount=platform-ops:platform-auditor
+```
+
+### Reading the report
+
+In `coverage.json` and `coverage.txt`, the `supportingEvidence` section
+lists the entries, and each control row the entries name references them.
+Read them as follows:
+
+- `temporal` is the declared validity at the report's `asOf`: `current`,
+  `expired` or `notYetValid`. Upload and copy times never change it.
+- `content: available` with `access: included` means the package holds
+  verified bytes. It says nothing about the truth of the document's claims.
+- `association: valid` means the controller resolved the association
+  against the binding's baseline when the run started.
+- `withdrawn: true` means the record was withdrawn during the capture.
+  `changed: true` means its association or content state changed during
+  the capture. Neither is current, unconditional evidence.
+- A row's `automation` stays what the technical mappings make it, `none`
+  for a physical control. A document is never a verdict.
+
+### Compatibility and rollout
+
+| Reader | Package without protected roles | Package with protected roles |
+| --- | --- | --- |
+| This version | Read as before. The download service only decodes the descriptor to find its protection; it doesn't re-validate packages produced under earlier rules. | Validated fully. An unknown protection version fails closed. |
+| Earlier versions of `s3store.ValidatePackage` and `publication.LoadDescriptor` | Read as before. | Rejected: unknown roles and an unknown descriptor field. |
+| Earlier download services | Served. | **Served without the document-read check.** They don't read descriptors. |
+
+The controller and the download service ship in the same image and chart.
+Upgrade both before registering documents for bindings whose runs should
+carry them, and don't roll the download service back below this version
+while protected packages are retained: an earlier one is not a supported
+downgrade. Gating protected-document writers on the deployed readers belongs
+to the chart integration (task 7.1).
+
+To roll back the feature, stop registering documents and withdraw the
+records whose copies new runs should not carry. Keep this version's
+download service, and keep attachment cleanup running until every
+commitment and every protected package has expired. Never delete retained
+source documents, packages or the CRDs as rollback cleanup.
+
 ## Authority
 
 All roles are ClusterRoles in `config/rbac/evidence-attachments.yaml`, shipped
@@ -721,7 +908,7 @@ in the runtime chart. None is aggregated into the built-in `admin`, `edit` or
 | `konstapel-evidence-attachment-registrar` | `evidenceattachments`: get, list, watch, create, delete; `status`: get | Register and withdraw records. There is no update or patch: the spec is immutable. |
 | `konstapel-evidence-attachment-uploader` | `evidenceattachments`: get; `evidenceattachments/upload`: create | Upload a registered record's bytes through the transfer service |
 | `konstapel-evidence-attachment-reader` | `evidenceattachments` and `status`: get, list, watch | Read metadata and status, never bytes |
-| `konstapel-evidence-attachment-downloader` | `evidenceattachments`: get; `evidenceattachments/download`: get | Cluster-wide document read through the transfer service. There are no per-document ACLs. |
+| `konstapel-evidence-attachment-downloader` | `evidenceattachments`: get; `evidenceattachments/download`: get | Cluster-wide document read through the transfer service, and the extra grant a protected platform package needs (with run access). There are no per-document ACLs. |
 | `konstapel-controller` (generated) | `evidenceattachments`: get, list, watch, update, patch; `status`: get, update, patch; `finalizers`: update | Validation, the destination-pin label, status and the retention finalizer |
 | `konstapel-evidence-download` (the download service's own role) | `evidenceattachments`: get, list | Resolve a transfer's record by UID and its pinned destination. It writes nothing. |
 

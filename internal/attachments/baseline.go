@@ -4,16 +4,17 @@
 // a control verdict.
 //
 // This file validates an attachment's catalog/control/statement references
-// against the catalog and selected baseline a binding resolves. It reads the
-// same verified content the binding's bundle pins: the OSCAL catalog and the
-// Moderate baseline profile every bundle ships at fixed paths
-// (internal/bundle content validation requires them).
+// against the catalog and selected baseline a binding resolves, as the
+// coverage owner's baseline reader (coverage.ReadBaseline) resolves them
+// from the same verified content the binding's bundle pins: its declared
+// baseline profile and the one catalog it resolves to. Content that does
+// not resolve is a resolution failure (the association stays pending),
+// never a mismatch.
 package attachments
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,10 +23,12 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/assessment"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 )
 
-// Paths of the catalog and selected baseline within bundle content (the
-// payload root of an OCI bundle, or the parent of a vendored content/ tree).
+// Paths of the vendored catalog and Moderate baseline profile, relative to
+// the parent of the image's content/ tree.
 const (
 	CatalogPath  = assessment.NIST + "NIST_SP-800-53_rev5_catalog.json"
 	BaselinePath = assessment.NIST + "NIST_SP-800-53_rev5_MODERATE-baseline_profile.json"
@@ -33,7 +36,8 @@ const (
 
 // Baseline is the control inventory an association is validated against.
 type Baseline struct {
-	// CatalogDigest is "sha256:<hex>" of the catalog file bytes.
+	// CatalogDigest is "sha256:<hex>" of the catalog file bytes, the
+	// identity coverage qualifies controls with.
 	CatalogDigest string
 	// Controls maps each selected control ID to the IDs of its statement
 	// parts (the "statement" part and its nested "item" parts). A control
@@ -41,136 +45,67 @@ type Baseline struct {
 	Controls map[string]map[string]bool
 }
 
-// ErrBaseline marks content whose catalog or baseline cannot be read. It is
-// a resolution failure (the association stays pending), never a mismatch.
+// ErrBaseline marks content whose catalog or baseline cannot be resolved.
+// It is a resolution failure (the association stays pending), never a
+// mismatch. Errors from an unresolved coverage inventory also match
+// coverage.ErrUnresolved.
 var ErrBaseline = errors.New("catalog or baseline unavailable")
 
-// ReadBaseline reads the catalog and selected baseline from content. Only
-// an explicit include-controls with-ids selection is supported; include-all,
-// matching rules or an unresolved import fail closed.
-func ReadBaseline(content fs.FS) (*Baseline, error) {
-	rawCatalog, err := fs.ReadFile(content, CatalogPath)
+// ReadBaseline resolves the content's baseline with the coverage owner's
+// reader (o carries the controller's trusted OSCAL schemas and, for
+// vendored content, the profile entry point).
+func ReadBaseline(c coverage.Content, o coverage.Options) (*Baseline, error) {
+	b, err := coverage.ReadBaseline(c, o)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBaseline, err)
+		return nil, fmt.Errorf("%w: %w", ErrBaseline, err)
 	}
-	rawProfile, err := fs.ReadFile(content, BaselinePath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBaseline, err)
-	}
-	var catalog struct {
-		Catalog struct {
-			Groups   []group   `json:"groups"`
-			Controls []control `json:"controls"`
-		} `json:"catalog"`
-	}
-	if err := json.Unmarshal(rawCatalog, &catalog); err != nil {
-		return nil, fmt.Errorf("%w: catalog: %v", ErrBaseline, err)
-	}
-	var profile struct {
-		Profile struct {
-			Imports []struct {
-				Href            string `json:"href"`
-				IncludeAll      any    `json:"include-all"`
-				IncludeControls []struct {
-					WithIDs  []string `json:"with-ids"`
-					Matching any      `json:"matching"`
-				} `json:"include-controls"`
-				ExcludeControls []struct {
-					WithIDs  []string `json:"with-ids"`
-					Matching any      `json:"matching"`
-				} `json:"exclude-controls"`
-			} `json:"imports"`
-		} `json:"profile"`
-	}
-	if err := json.Unmarshal(rawProfile, &profile); err != nil {
-		return nil, fmt.Errorf("%w: baseline: %v", ErrBaseline, err)
-	}
-	statements := map[string]map[string]bool{}
-	var visit func(cs []control)
-	visit = func(cs []control) {
-		for _, c := range cs {
-			s := map[string]bool{}
-			for _, p := range c.Parts {
-				if p.Name == "statement" {
-					p.collect(s)
-				}
-			}
-			statements[c.ID] = s
-			visit(c.Controls)
+	out := &Baseline{CatalogDigest: b.Catalog.Digest, Controls: make(map[string]map[string]bool, len(b.Controls))}
+	for _, ctl := range b.Controls {
+		s := make(map[string]bool, len(ctl.Statements))
+		for _, id := range ctl.Statements {
+			s[id] = true
 		}
+		out.Controls[ctl.ID] = s
 	}
-	var groups func(gs []group)
-	groups = func(gs []group) {
-		for _, g := range gs {
-			visit(g.Controls)
-			groups(g.Groups)
-		}
-	}
-	groups(catalog.Catalog.Groups)
-	visit(catalog.Catalog.Controls)
-
-	if len(profile.Profile.Imports) != 1 {
-		return nil, fmt.Errorf("%w: baseline must import exactly one catalog, has %d imports", ErrBaseline, len(profile.Profile.Imports))
-	}
-	imp := profile.Profile.Imports[0]
-	if imp.IncludeAll != nil || len(imp.IncludeControls) == 0 {
-		return nil, fmt.Errorf("%w: baseline must select controls explicitly with include-controls", ErrBaseline)
-	}
-	selected := map[string]map[string]bool{}
-	for _, inc := range imp.IncludeControls {
-		if inc.Matching != nil {
-			return nil, fmt.Errorf("%w: baseline selection by matching is not supported", ErrBaseline)
-		}
-		for _, id := range inc.WithIDs {
-			s, ok := statements[id]
-			if !ok {
-				return nil, fmt.Errorf("%w: baseline selects %q, which is not in the catalog", ErrBaseline, id)
-			}
-			selected[id] = s
-		}
-	}
-	for _, exc := range imp.ExcludeControls {
-		if exc.Matching != nil {
-			return nil, fmt.Errorf("%w: baseline exclusion by matching is not supported", ErrBaseline)
-		}
-		for _, id := range exc.WithIDs {
-			delete(selected, id)
-		}
-	}
-	if len(selected) == 0 {
+	if len(out.Controls) == 0 {
 		return nil, fmt.Errorf("%w: baseline selects no controls", ErrBaseline)
 	}
-	sum := sha256.Sum256(rawCatalog)
-	return &Baseline{CatalogDigest: "sha256:" + hex.EncodeToString(sum[:]), Controls: selected}, nil
+	return out, nil
 }
 
-type group struct {
-	Groups   []group   `json:"groups"`
-	Controls []control `json:"controls"`
-}
-
-type control struct {
-	ID       string    `json:"id"`
-	Parts    []part    `json:"parts"`
-	Controls []control `json:"controls"`
-}
-
-type part struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Parts []part `json:"parts"`
-}
-
-// collect records a statement part and its nested item parts.
-func (p part) collect(into map[string]bool) {
-	if p.ID != "" {
-		into[p.ID] = true
+// VendoredContent is the coverage handle of the image's vendored content
+// tree at root (the parent of content/), served under name, with the
+// options that resolve its Moderate baseline against the image's own
+// trusted OSCAL schemas (content/schemas). Its digest is the sha256 of
+// content/SHA256SUMS.
+func VendoredContent(root fs.FS, name string) (coverage.Content, coverage.Options, error) {
+	sums, err := fs.ReadFile(root, "content/SHA256SUMS")
+	if err != nil {
+		return coverage.Content{}, coverage.Options{}, fmt.Errorf("%w: %v", ErrBaseline, err)
 	}
-	for _, c := range p.Parts {
-		if c.Name == "item" || c.Name == "statement" {
-			c.collect(into)
+	ref := v1alpha1.BundleReference{Name: name, Digest: bundleDigest(sums)}
+	c, err := coverage.FromVendored(root, ref, []bundle.OSCALDocument{{Path: CatalogPath, Version: "1.2.3"}, {Path: BaselinePath, Version: "1.2.3"}}, nil)
+	if err != nil {
+		return coverage.Content{}, coverage.Options{}, fmt.Errorf("%w: %v", ErrBaseline, err)
+	}
+	o := coverage.Options{Profile: BaselinePath, Schemas: map[string][]byte{}}
+	for _, v := range coverage.SupportedOSCAL {
+		b, err := fs.ReadFile(root, "content/schemas/oscal-"+v+".json")
+		if err != nil {
+			return coverage.Content{}, coverage.Options{}, fmt.Errorf("%w: %v", ErrBaseline, err)
 		}
+		o.Schemas[v] = b
 	}
+	return c, o, nil
+}
+
+// ReadVendoredBaseline resolves the vendored content's baseline.
+func ReadVendoredBaseline(root fs.FS) (*Baseline, error) {
+	c, o, err := VendoredContent(root, "vendored")
+	if err != nil {
+		return nil, err
+	}
+	return ReadBaseline(c, o)
 }
 
 // Mismatch explains why an association does not apply.
@@ -223,4 +158,9 @@ func list(ids []string) string {
 		return strings.Join(ids[:maxListed], ", ") + fmt.Sprintf(" and %d more", len(ids)-maxListed)
 	}
 	return strings.Join(ids, ", ")
+}
+
+func bundleDigest(b []byte) string {
+	h := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(h[:])
 }

@@ -108,7 +108,7 @@ func TestLiveAttachmentLifecycle(t *testing.T) {
 	}
 
 	// A binding with a valid association; it selects no namespace.
-	catalog, err := attachments.ReadBaseline(os.DirFS(root))
+	catalog, err := attachments.ReadVendoredBaseline(os.DirFS(root))
 	if err != nil {
 		t.Fatal(err)
 	}

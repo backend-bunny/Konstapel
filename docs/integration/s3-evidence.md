@@ -669,7 +669,7 @@ download service account only.
 | Route | Caller needs (SubjectAccessReview) | Serves |
 | --- | --- | --- |
 | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/download?uid=<request uid>` | `get` on `assessmentrequests/download` and `assessmentrequests`, name `<name>`, in `<ns>`, from `konstapel-assessment-requester` | that request's own namespace-scoped package |
-| `GET /v1/assessmentruns/<run uid>/download` | `get` on `assessmentruns/download` and `assessmentruns`, name of the run, from `konstapel-assessment-operator` | any run's package |
+| `GET /v1/assessmentruns/<run uid>/download` | `get` on `assessmentruns/download` and `assessmentruns`, name of the run, from `konstapel-assessment-operator`; for a package with protected supporting documents also `get` on `evidenceattachments/download` and `evidenceattachments` with no name, from `konstapel-evidence-attachment-downloader` ([supporting evidence](../supporting-evidence.md#downloading-a-protected-package)) | any run's package |
 | `GET /v1/namespaces/<ns>/assessmentrequests/<name>/signature?uid=<request uid>` and `GET /v1/assessmentruns/<run uid>/signature` | exactly the same as the matching `/download` route | the package's signature bundle ([evidence signing](evidence-signing.md#download-a-signed-package)) |
 | `PUT /v1/evidenceattachments/<uid>/upload` and `GET /v1/evidenceattachments/<uid>/download` | `create` on `evidenceattachments/upload` or `get` on `evidenceattachments/download`, plus `get` on the record | a platform supporting-evidence document ([supporting evidence](../supporting-evidence.md#uploading-and-downloading)), with its own limits and statuses |
 

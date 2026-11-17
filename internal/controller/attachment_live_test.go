@@ -83,7 +83,7 @@ func TestLiveEvidenceAttachmentAPI(t *testing.T) {
 	l.applyManifests("../../config/admission/evidence-attachment-registrant.yaml", nil)
 
 	regC := l.as(registrar, "system:authenticated")
-	catalog, err := attachments.ReadBaseline(os.DirFS(root))
+	catalog, err := attachments.ReadVendoredBaseline(os.DirFS(root))
 	if err != nil {
 		t.Fatal(err)
 	}
