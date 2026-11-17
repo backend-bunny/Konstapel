@@ -91,12 +91,13 @@ func (r *AssessmentRunReconciler) readSelection(run *v1alpha1.AssessmentRun) (*r
 // function, called after the export, is the status summary of the report
 // the package actually carries: nil when the export left coverage out or
 // packaged other bytes than the producer rendered.
-func (r *AssessmentRunReconciler) exportCoverage(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, req *collector.ExportRequest) func(publication.Descriptor) *publication.CoverageSummary {
+func (r *AssessmentRunReconciler) exportCoverage(ctx context.Context, run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, req *collector.ExportRequest,
+	supporting *coverage.SupportingEvidenceContext) func(publication.Descriptor) *publication.CoverageSummary {
 	scope, c, ev := req.Scope, req.Capture, req.Evaluation
 	var produced *publication.CoverageSummary
 	req.Coverage = func(p collector.CoveragePackage) (collector.CoverageFiles, error) {
 		produced = nil
-		rep := r.coverageReport(run, b, scope, c, ev, p)
+		rep := r.coverageReport(run, b, scope, c, ev, p, supporting)
 		f, err := coverage.Render(rep)
 		if err != nil {
 			return collector.CoverageFiles{}, err
@@ -140,11 +141,12 @@ func (r *AssessmentRunReconciler) coverageInputs(run *v1alpha1.AssessmentRun, sc
 	return coverage.InputsDigest(scope.BindingUID, scope.NamespaceUIDs, rec.Selection)
 }
 
-// coverageReport builds the run's coverage from the package p.
+// coverageReport builds the run's coverage from the package p and the
+// run's frozen supporting context (nil: no integration).
 func (r *AssessmentRunReconciler) coverageReport(run *v1alpha1.AssessmentRun, b *v1alpha1.ComplianceBinding, scope publication.Scope,
-	c collector.CaptureV2, ev collector.Evaluation, p collector.CoveragePackage) *coverage.Report {
+	c collector.CaptureV2, ev collector.Evaluation, p collector.CoveragePackage, supporting *coverage.SupportingEvidenceContext) *coverage.Report {
 	in := coverage.Input{Scope: coverageScope(b, scope, c), Evidence: &coverage.Evidence{Capture: c, Evaluation: ev},
-		Packaging: &coverage.Packaging{}}
+		Packaging: &coverage.Packaging{}, Supporting: supporting}
 	for _, s := range []struct{ path, kind string }{{"capture.json", coverage.SourceCapture}, {"evaluation.json", coverage.SourceEvaluation}} {
 		raw, err := os.ReadFile(filepath.Join(p.Dir, s.path))
 		if err != nil {

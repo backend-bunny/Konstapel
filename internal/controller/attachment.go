@@ -34,8 +34,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +54,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/attachments"
+	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -337,9 +336,13 @@ func setupAttachments(mgr manager.Manager, baselines BaselineSource, storage *At
 }
 
 // ContentBaselines reads baselines from the same verified content
-// assessments use: the image's vendored content tree for its own digest, and
-// a frozen copy of verified OCI content otherwise. Bundle content is
-// immutable per digest, so results are cached (bounded).
+// assessments use, with the coverage owner's baseline reader
+// (coverage.ReadBaseline): the image's vendored content tree for its own
+// digest (its Moderate profile), and a frozen copy of verified OCI content
+// otherwise (the bundle's declared baseline profile). Documents are checked
+// against the controller's own OSCAL schemas. Content that does not resolve
+// keeps associations pending. Bundle content is immutable per digest, so
+// results are cached (bounded).
 type ContentBaselines struct {
 	// Freezer freezes OCI content; nil serves only vendored content.
 	Freezer ContentFreezer
@@ -378,22 +381,25 @@ func (c *ContentBaselines) Baseline(ctx context.Context, ref v1alpha1.BundleRefe
 }
 
 func (c *ContentBaselines) read(ctx context.Context, ref v1alpha1.BundleReference) (*attachments.Baseline, error) {
+	if c.ContentRoot == "" {
+		return nil, fmt.Errorf("%w: no content root holds the controller's trusted OSCAL schemas", targeting.ErrContentUnavailable)
+	}
 	if c.VendoredName != "" && ref.Name == c.VendoredName {
-		if c.ContentRoot == "" {
-			return nil, fmt.Errorf("%w: no vendored content root is configured", targeting.ErrContentUnavailable)
-		}
-		sums, err := os.ReadFile(filepath.Join(c.ContentRoot, "content", "SHA256SUMS"))
+		content, opts, err := attachments.VendoredContent(os.DirFS(c.ContentRoot), ref.Name)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", targeting.ErrContentUnavailable, err)
 		}
-		h := sha256.Sum256(sums)
-		if have := "sha256:" + hex.EncodeToString(h[:]); have != ref.Digest {
-			return nil, fmt.Errorf("%w: vendored content is %s, not %s; other content is never substituted", targeting.ErrContentUnavailable, have, ref.Digest)
+		if content.Bundle.Digest != ref.Digest {
+			return nil, fmt.Errorf("%w: vendored content is %s, not %s; other content is never substituted", targeting.ErrContentUnavailable, content.Bundle.Digest, ref.Digest)
 		}
-		return attachments.ReadBaseline(os.DirFS(c.ContentRoot))
+		return attachments.ReadBaseline(content, opts)
 	}
 	if c.Freezer == nil || c.Scratch == "" {
 		return nil, fmt.Errorf("%w: %s@%s cannot be read for attachment validation", targeting.ErrContentUnavailable, ref.Name, ref.Digest)
+	}
+	schemas, err := trustedOSCALSchemas(c.ContentRoot)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the controller's OSCAL schemas: %v", targeting.ErrContentUnavailable, err)
 	}
 	if err := os.MkdirAll(c.Scratch, 0o700); err != nil {
 		return nil, err
@@ -410,7 +416,12 @@ func (c *ContentBaselines) read(ctx context.Context, ref v1alpha1.BundleReferenc
 	case vendored || frozen == nil:
 		return nil, fmt.Errorf("%w: %s@%s is not frozen OCI content", targeting.ErrContentUnavailable, ref.Name, ref.Digest)
 	}
-	return attachments.ReadBaseline(frozen.Payload)
+	content, err := coverage.FromFrozen(frozen)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", targeting.ErrContentUnavailable, err)
+	}
+	// The bundle's single declared baseline profile entry point.
+	return attachments.ReadBaseline(content, coverage.Options{Schemas: schemas})
 }
 
 // attachmentBaselines validates associations against the manager's content

@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -266,20 +265,9 @@ func (rc *runCluster) pkg(run *v1alpha1.AssessmentRun) (string, publication.Desc
 	rc.must(err)
 	raw, err := io.ReadAll(r)
 	rc.must(err)
-	// The fake publisher's archive: name NUL size NUL bytes, repeated.
+	// The publisher's archive, in the real package archive format.
 	dir := rc.t.TempDir()
-	for len(raw) > 0 {
-		parts := bytes.SplitN(raw, []byte{0}, 3)
-		if len(parts) != 3 {
-			rc.t.Fatal("malformed fake archive")
-		}
-		n, err := strconv.Atoi(string(parts[1]))
-		rc.must(err)
-		p := filepath.Join(dir, filepath.FromSlash(string(parts[0])))
-		rc.must(os.MkdirAll(filepath.Dir(p), 0o755))
-		rc.must(os.WriteFile(p, parts[2][:n], 0o644))
-		raw = parts[2][n:]
-	}
+	rc.must(publication.Extract(bytes.NewReader(raw), dir))
 	d, err := publication.LoadDescriptor(dir)
 	rc.must(err)
 	rc.must(publication.VerifyDir(dir, d))

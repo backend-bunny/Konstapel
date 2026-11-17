@@ -44,7 +44,8 @@
       "TestLiveSignedPublicationWorkflow",
       "TestLiveAttachmentStorage",
       "TestLiveAttachmentTransfer",
-      "TestLiveAttachmentLifecycle"
+      "TestLiveAttachmentLifecycle",
+      "TestLiveSupportingEvidencePackages"
     ]
   },
   "capabilities": {

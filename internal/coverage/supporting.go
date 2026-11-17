@@ -243,6 +243,12 @@ const (
 	maxText  = 2048
 )
 
+// Validate checks a context against the contract for a report as of asOf
+// (zero skips the observation-time check). Its errors name the entry index
+// and the rule broken, never a value. A producer can use it to keep an
+// invalid context out of a package; Build reports one as ContextInvalid.
+func (c *SupportingEvidenceContext) Validate(asOf time.Time) error { return c.validate(asOf) }
+
 // validate checks a context against the contract. Its errors name the
 // entry index and the rule broken, never a value: an invalid value may be
 // private metadata.

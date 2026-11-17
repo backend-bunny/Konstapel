@@ -75,6 +75,17 @@ const (
 	// them as unknown roles (fail closed).
 	RoleCoverage     FileRole = "coverage-summary"
 	RoleCoverageText FileRole = "coverage-summary-text"
+	// RoleSupportingDocument and RoleSupportingContext are protected
+	// supporting evidence (add-supporting-evidence-attachments 5.3): an
+	// authorized copy of a platform document at
+	// SupportingDocumentDir/<identity>, and the run's frozen supporting
+	// context with the documents' private metadata at
+	// SupportingContextFile. They appear only in Binding-scope (platform)
+	// packages, and their presence is recorded as the descriptor's
+	// Protection. A descriptor reader that predates them rejects them as
+	// unknown roles (fail closed).
+	RoleSupportingDocument FileRole = "supporting-document"
+	RoleSupportingContext  FileRole = "supporting-context"
 )
 
 // Fixed package paths of the coverage summary files.
@@ -86,7 +97,29 @@ const (
 	CoverageTextReportPrefix = "Report JSON: " + CoverageFile + " sha256 "
 )
 
-var roles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan, RoleComponentDefinition, RoleSummary, RoleEvidenceExtract, RoleCapture, RoleContent, RoleProvenance, RoleDiagnostic, RoleCoverage, RoleCoverageText}
+// Package paths of protected supporting evidence.
+const (
+	// SupportingDir holds every supporting-evidence file; nothing else may
+	// be placed under it.
+	SupportingDir = "supporting-evidence/"
+	// SupportingContextFile is the frozen supporting context.
+	SupportingContextFile = SupportingDir + "context.json"
+	// SupportingDocumentDir holds the document copies, one file per
+	// document named by its opaque identity.
+	SupportingDocumentDir = SupportingDir + "documents/"
+)
+
+// ProtectionVersion versions the descriptor's Protection marker. A reader
+// that does not know a package's protection version refuses the package
+// (fail closed): it cannot tell what the package's access requires.
+const ProtectionVersion = "konstapel.io/package-protection/v1"
+
+// ProtectedRoles are the file roles that make a package protected: serving
+// it requires document-read authority in addition to run access.
+var ProtectedRoles = []FileRole{RoleSupportingContext, RoleSupportingDocument}
+
+var roles = []FileRole{RoleAssessmentResults, RoleAssessmentPlan, RoleSystemSecurityPlan, RoleComponentDefinition, RoleSummary, RoleEvidenceExtract, RoleCapture, RoleContent, RoleProvenance, RoleDiagnostic, RoleCoverage, RoleCoverageText,
+	RoleSupportingDocument, RoleSupportingContext}
 
 // coveragePaths fixes where each coverage role lives.
 var coveragePaths = map[FileRole]string{RoleCoverage: CoverageFile, RoleCoverageText: CoverageTextFile}
@@ -391,6 +424,49 @@ type Descriptor struct {
 	Diagnostic  *Diagnostic     `json:"diagnostic,omitempty"`
 	Producer    Producer        `json:"producer"`
 	Files       []File          `json:"files"`
+	// Protection records the protected roles the package carries; it is
+	// derived from Files (ProtectionFor) and absent when there are none,
+	// so descriptors of unprotected packages are unchanged.
+	Protection *Protection `json:"protection,omitempty"`
+}
+
+// Protection is a package's versioned protection marker.
+type Protection struct {
+	Version string `json:"version"`
+	// Roles are the protected roles present, in ProtectedRoles order.
+	Roles []FileRole `json:"roles"`
+}
+
+// ProtectionFor derives the protection marker of a file inventory: nil
+// when no file has a protected role.
+func ProtectionFor(files []File) *Protection {
+	var out []FileRole
+	for _, r := range ProtectedRoles {
+		if slices.ContainsFunc(files, func(f File) bool { return f.Role == r }) {
+			out = append(out, r)
+		}
+	}
+	if out == nil {
+		return nil
+	}
+	return &Protection{Version: ProtectionVersion, Roles: out}
+}
+
+// Protected reports whether serving the package requires document-read
+// authority. A descriptor whose marker is not exactly the derived one does
+// not validate.
+func (d Descriptor) Protected() bool { return d.Protection != nil }
+
+// supportingRole is the only role a path under SupportingDir may have, or
+// "" when the path is not a valid supporting-evidence path.
+func supportingRole(p string) FileRole {
+	if p == SupportingContextFile {
+		return RoleSupportingContext
+	}
+	if name, ok := strings.CutPrefix(p, SupportingDocumentDir); ok && name != "" && !strings.Contains(name, "/") {
+		return RoleSupportingDocument
+	}
+	return ""
 }
 
 // Digest is the SHA-256 of the descriptor's JSON encoding.
@@ -453,10 +529,33 @@ func (d Descriptor) Validate() error {
 				fail("file %q: role %s is only valid for %s", f.Path, role, p)
 			}
 		}
+		under := strings.HasPrefix(f.Path, SupportingDir)
+		protected := slices.Contains(ProtectedRoles, f.Role)
+		switch {
+		case under && supportingRole(f.Path) != f.Role:
+			fail("file %q: only %s (at %s) and %s (under %s) may be placed under %s", f.Path, RoleSupportingContext, SupportingContextFile,
+				RoleSupportingDocument, SupportingDocumentDir, SupportingDir)
+		case protected && !under:
+			fail("file %q: role %s is only valid under %s", f.Path, f.Role, SupportingDir)
+		}
 		present[f.Role] = true
 	}
 	if present[RoleCoverage] != present[RoleCoverageText] {
 		fail("coverage summary requires both %s and %s", CoverageFile, CoverageTextFile)
+	}
+	if present[RoleSupportingDocument] && !present[RoleSupportingContext] {
+		fail("supporting documents require their context %s", SupportingContextFile)
+	}
+	p, want := d.Protection, ProtectionFor(d.Files)
+	switch {
+	case p != nil && p.Version != ProtectionVersion:
+		// Fail closed: this reader cannot tell what access the package needs.
+		fail("unsupported package protection %q", p.Version)
+	case (p == nil) != (want == nil) || p != nil && !slices.Equal(p.Roles, want.Roles):
+		fail("the package protection marker does not match its protected files")
+	}
+	if want != nil && d.Scope.Kind != ScopeBinding {
+		fail("a %s package cannot carry protected supporting evidence", d.Scope.Kind)
 	}
 	if !slices.IsSortedFunc(d.Files, func(a, b File) int { return strings.Compare(a.Path, b.Path) }) {
 		fail("files must be sorted by path")

@@ -229,7 +229,7 @@ func TestLiveAttachmentTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	regC := saClient(platform, "at-registrar")
-	catalog, err := attachments.ReadBaseline(os.DirFS(root))
+	catalog, err := attachments.ReadVendoredBaseline(os.DirFS(root))
 	if err != nil {
 		t.Fatal(err)
 	}

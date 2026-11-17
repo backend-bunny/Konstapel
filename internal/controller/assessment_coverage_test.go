@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,26 +22,12 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
-// unpackFake writes a fake publisher archive (name, length and bytes per
-// file) into a directory.
+// unpackFake writes a published package archive into a directory.
 func unpackFake(t *testing.T, archive []byte) string {
 	t.Helper()
 	dir := t.TempDir()
-	for len(archive) > 0 {
-		name, rest, ok := bytes.Cut(archive, []byte{0})
-		n, rest2, ok2 := bytes.Cut(rest, []byte{0})
-		size, err := strconv.Atoi(string(n))
-		if !ok || !ok2 || err != nil || size > len(rest2) {
-			t.Fatal("malformed fake archive")
-		}
-		p := filepath.Join(dir, filepath.FromSlash(string(name)))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, rest2[:size], 0o644); err != nil {
-			t.Fatal(err)
-		}
-		archive = rest2[size:]
+	if err := publication.Extract(bytes.NewReader(archive), dir); err != nil {
+		t.Fatalf("malformed package archive: %v", err)
 	}
 	return dir
 }
@@ -132,10 +117,11 @@ func TestRunPackageCarriesCoverage(t *testing.T) {
 	if len(r.Inputs.Selection.Policies) != 1 || r.Inputs.Selection.Policies[0].Name != pol {
 		t.Fatalf("selection %+v", r.Inputs.Selection)
 	}
-	// No attachment integration feeds coverage yet: the context is
-	// disabled (documents not considered), never an empty available list.
-	if se := r.SupportingEvidence; se.Integration != coverage.IntegrationDisabled || se.Projection != coverage.ProjectionPlatform || len(se.Entries) != 0 {
-		t.Fatalf("supporting evidence %+v", se)
+	// The attachment integration feeds coverage: no record names this
+	// binding, so the context is available with no entry (documents were
+	// considered and none is associated), and nothing is protected.
+	if se := r.SupportingEvidence; se.Integration != coverage.IntegrationAvailable || se.Projection != coverage.ProjectionPlatform || len(se.Entries) != 0 || d.Protected() {
+		t.Fatalf("supporting evidence %+v protection %+v", se, d.Protection)
 	}
 	// The run's status reports the technical evidence, unchanged.
 	if run.Status.Summary.Evidence.Completeness != "Complete" || run.Status.Summary.Outcomes.Fail != 1 {
@@ -210,7 +196,7 @@ func TestCoverageReportUsesOnlyPackagedContent(t *testing.T) {
 			{Ref: v1alpha1.BundleReference{Name: "other", Digest: "sha256:" + string(bytes.Repeat([]byte("a"), 64))}, Path: "bundles/aa", Applied: true}}},
 		"unreadable": {Dir: t.TempDir(), Kind: publication.KindAssessment, Content: []collector.PackagedContent{{Ref: v1alpha1.BundleReference{Digest: ref.Digest}, Vendored: true, Applied: true}}},
 	} {
-		r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p)
+		r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p, nil)
 		if r.Inventory.Resolved || len(r.Controls) != 0 || !slices.ContainsFunc(r.Limitations, func(l coverage.Limitation) bool {
 			return l.Code == coverage.CodeContentUnavailable && l.Blocking
 		}) {
@@ -224,7 +210,7 @@ func TestCoverageReportUsesOnlyPackagedContent(t *testing.T) {
 	if err := e.rr.freezeSelection(run, nil); err != nil {
 		t.Fatal(err)
 	}
-	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, collector.CoveragePackage{Dir: t.TempDir(), Kind: publication.KindAssessment})
+	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, collector.CoveragePackage{Dir: t.TempDir(), Kind: publication.KindAssessment}, nil)
 	if r.Inventory.Resolved || !hasLimitation(r, coverage.CodeBaselineNotSelected) {
 		t.Errorf("no profile: %+v", r.Limitations)
 	}
@@ -340,7 +326,7 @@ func TestCoverageReportFromFrozenMember(t *testing.T) {
 	scope := publication.Scope{Kind: publication.ScopeBinding, ClusterID: "c", BindingUID: string(b.UID), NamespaceUIDs: []string{}}
 	var c collector.CaptureV2
 	p := collector.CoveragePackage{Dir: pkg, Kind: publication.KindAssessment, Content: []collector.PackagedContent{{Ref: ref, Path: path, Applied: true}}}
-	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p)
+	r := e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p, nil)
 	if !r.Inventory.Resolved || !r.Mappings.Resolved || r.Inputs.ContentPath != path || r.Inputs.Bundle != ref {
 		t.Fatalf("frozen member: %+v %+v %v", r.Inventory, r.Mappings, r.Limitations)
 	}
@@ -362,7 +348,7 @@ func TestCoverageReportFromFrozenMember(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkg, filepath.FromSlash(path), "content", "linux-hardening", "component-definition.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r = e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p)
+	r = e.rr.coverageReport(run, b, scope, c, collector.Evaluation{}, p, nil)
 	if r.Inventory.Resolved || !hasLimitation(r, coverage.CodeContentUnavailable) {
 		t.Fatalf("altered member: %+v", r.Limitations)
 	}

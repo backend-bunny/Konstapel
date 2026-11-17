@@ -285,6 +285,58 @@ uses recorded package protection, so historical downloads do not depend on the
 source record still existing. Do not silently redact an immutable platform archive
 at download time; deny the request if its reader lacks the additional grant.
 
+Implementation (task group 5):
+
+- **Context.** `internal/controller/assessment_supporting.go` maps
+  `attachments.ForBinding` (exact binding UID, withdrawn records never
+  selected) onto `coverage.SupportingEvidenceContext` and passes it as
+  `coverage.Input.Supporting`. A run freezes the selected records at start
+  (`supporting-start.json`: UID, immutable spec and digest, association,
+  last resolution, content state, pinned destination and commitment), and
+  re-reads them at closure to mark `withdrawn` (deleted or gone) and
+  `changed` (association or content state differs). States stay the frozen
+  ones; coverage classifies validity at the closure. Unreadable records are
+  `unavailable` (`RecordsUnavailable`); a run started without the record is
+  `disabled`. The context is frozen in `closed.json` with the closure.
+- **Copies.** Only platform runs copy, and only documents whose association
+  is `Valid` and content `Available` at start (decision: pending and
+  mismatched associations are reported, never included). Reads go to the
+  record's own pinned destination through `AttachmentStorage` (same store
+  builder and destination fence as the attachment reconciler), are verified
+  against the registered size and SHA-256 and the recorded commitment, and
+  stop when the collection window closes. A document not copied by then is
+  `unavailable`/`NotRetrieved`; beyond 64 copies or 256 MiB it is
+  `notIncluded`/`PackageLimit`. A document withdrawn during the capture
+  keeps its already verified copy, marked `withdrawn` (decision). A staged
+  copy lost or changed before export is `CaptureLost`.
+- **Package.** `collector.ExportRequest.Supporting` places
+  `supporting-evidence/context.json` (`supporting-context`) and
+  `supporting-evidence/documents/<uid>` (`supporting-document`), only in
+  Binding-scope packages, verifying each copy; the OSCAL assessment results
+  gain one back-matter resource per copy (relative href and SHA-256). The
+  descriptor's `protection` (`konstapel.io/package-protection/v1`, roles in
+  `publication.ProtectedRoles` order) is derived from the inventoried roles
+  and must match them exactly; protected roles are confined to their paths
+  and refused in namespace packages. A package whose context names no
+  document carries neither file. `coverage.VerifySupportingPackage` (run by
+  the controller after export and by `s3store.ValidatePackage`) checks the
+  context against the contract and the inventory.
+- **Downloads.** The download service reads the verified archive's
+  descriptor (`publication.ArchiveDescriptor`, `PackageProtection`). A
+  protected package on the run route also needs `get` on
+  `evidenceattachments/download` and `evidenceattachments` with no resource
+  name (the downloader role); the namespace route never serves one. An
+  unprotected descriptor is only decoded, so packages produced under earlier
+  validation rules stay readable; a descriptor that names protection must
+  validate fully with a known version, else `502`. The fake publisher now
+  produces the real archive format (`publication.Archive`, moved from
+  `s3store`).
+- **Baseline.** Association validation uses `coverage.ReadBaseline`
+  (`attachments.ReadBaseline(content, options)`, `VendoredContent`); the
+  interim Moderate-only reader is removed. For the vendored content the
+  resolved catalog digest and control/statement map are identical to the
+  interim reader's (287 controls, checked during the switch).
+
 ### 6. Use the existing RustFS fixture for local development, with measured compatibility
 
 Reuse the S3 owner's disposable RustFS deployment (the digest-pinned image in

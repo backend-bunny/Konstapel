@@ -330,13 +330,16 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 			return nil, err
 		}
 	}
-	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun); err != nil {
+	// One attachment storage serves the attachment reconciler and the runs
+	// that copy supporting documents into platform packages.
+	attachmentStore := attachmentStorage(mgr, currentRuntime(), br.Cluster)
+	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
 		return nil, err
 	}
-	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime()), attachmentStorage(mgr, currentRuntime(), br.Cluster)); err != nil {
+	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime()), attachmentStore); err != nil {
 		return nil, err
 	}
 	if opts.WebhookCertDir != "" {

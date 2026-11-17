@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -38,7 +39,7 @@ func vendoredDigest(t *testing.T) string {
 
 func catalogDigest(t *testing.T) string {
 	t.Helper()
-	b, err := attachments.ReadBaseline(os.DirFS("../.."))
+	b, err := attachments.ReadVendoredBaseline(os.DirFS("../.."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,16 +298,23 @@ type stubFreezer struct {
 	payload map[string][]byte
 }
 
-func (s *stubFreezer) Freeze(_ context.Context, _ v1alpha1.BundleReference, dir string) (*bundle.Frozen, bool, error) {
+// Freeze returns the payload as a frozen bundle whose descriptor declares
+// the NIST catalog and Moderate profile and inventories every file.
+func (s *stubFreezer) Freeze(_ context.Context, ref v1alpha1.BundleReference, dir string) (*bundle.Frozen, bool, error) {
 	s.calls++
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, false, err
 	}
 	fs := fstest.MapFS{}
+	d := &bundle.Descriptor{Name: ref.Name, OSCAL: []bundle.OSCALDocument{{Path: attachments.CatalogPath, Version: "1.2.3"}, {Path: attachments.BaselinePath, Version: "1.2.3"}}}
 	for k, v := range s.payload {
 		fs[k] = &fstest.MapFile{Data: v}
+		h := sha256.Sum256(v)
+		d.Files = append(d.Files, bundle.File{Path: k, Size: int64(len(v)), SHA256: hex.EncodeToString(h[:])})
 	}
-	return &bundle.Frozen{Payload: fs}, false, nil
+	f := &bundle.Frozen{Descriptor: d, Payload: fs}
+	f.Identity.Name, f.Identity.Digests.OCI = ref.Name, ref.Digest
+	return f, false, nil
 }
 
 // OCI content is read from a frozen verified copy in scratch space that is
@@ -322,7 +330,8 @@ func TestContentBaselinesReadFrozenOCIContent(t *testing.T) {
 	}
 	fr := &stubFreezer{payload: payload}
 	scratch := t.TempDir()
-	c := &ContentBaselines{Freezer: fr, VendoredName: "vendored", Scratch: scratch}
+	root, _ := filepath.Abs("../..")
+	c := &ContentBaselines{Freezer: fr, VendoredName: "vendored", Scratch: scratch, ContentRoot: root}
 	ref := v1alpha1.BundleReference{Name: "org-bundle", Digest: "sha256:" + hex.EncodeToString(make([]byte, 32))}
 	for range 2 {
 		b, err := c.Baseline(context.Background(), ref)
@@ -344,5 +353,30 @@ func TestContentBaselinesReadFrozenOCIContent(t *testing.T) {
 	ref.Digest = "sha256:" + hex.EncodeToString(append(make([]byte, 31), 1))
 	if _, err := c.Baseline(context.Background(), ref); err == nil {
 		t.Fatal("content without a catalog produced a baseline")
+	}
+	// The controller's own schemas are required: without a content root
+	// nothing resolves.
+	ref.Digest = "sha256:" + hex.EncodeToString(append(make([]byte, 31), 2))
+	fr.payload = payload
+	if _, err := (&ContentBaselines{Freezer: fr, Scratch: scratch}).Baseline(context.Background(), ref); err == nil {
+		t.Fatal("resolved without the controller's trusted schemas")
+	}
+}
+
+// Vendored content is read only for its own digest: another digest under
+// the vendored name is never served by the image's tree.
+func TestContentBaselinesVendoredDigestIsExact(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	c := &ContentBaselines{VendoredName: "vendored", ContentRoot: root}
+	sums, err := os.ReadFile(filepath.Join(root, "content", "SHA256SUMS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(sums)
+	if _, err := c.Baseline(context.Background(), v1alpha1.BundleReference{Name: "vendored", Digest: "sha256:" + hex.EncodeToString(h[:])}); err != nil {
+		t.Fatalf("own digest: %v", err)
+	}
+	if _, err := c.Baseline(context.Background(), v1alpha1.BundleReference{Name: "vendored", Digest: "sha256:" + strings.Repeat("0", 64)}); err == nil {
+		t.Fatal("another digest was served from the vendored tree")
 	}
 }

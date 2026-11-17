@@ -143,7 +143,7 @@ func TestCoverageSummaryOnlyForPackagedReport(t *testing.T) {
 	run := e.run(name)
 	b := e.binding("audit-prod")
 	req := collector.ExportRequest{Scope: publication.Scope{Kind: publication.ScopeBinding, BindingUID: string(b.UID), NamespaceUIDs: []string{}}}
-	packaged := e.rr.exportCoverage(context.Background(), run, b, &req)
+	packaged := e.rr.exportCoverage(context.Background(), run, b, &req, nil)
 	files, err := req.Coverage(collector.CoveragePackage{Dir: t.TempDir(), Kind: publication.KindDiagnostic, Diagnostic: &publication.Diagnostic{Reason: "x"}})
 	if err != nil {
 		t.Fatal(err)

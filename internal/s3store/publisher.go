@@ -1,9 +1,7 @@
 package s3store
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -586,6 +583,12 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 	if err := publication.VerifyDir(dir, d); err != nil {
 		return d, err
 	}
+	// Protected supporting evidence: only in platform packages, its context
+	// the contract, every included copy inventoried with its registered
+	// digest, and no copy that the context does not include.
+	if err := coverage.VerifySupportingPackage(dir, d); err != nil {
+		return d, err
+	}
 	// Coverage summaries: known version, references to packaged files with
 	// matching checksums, and a text that is the JSON's rendering.
 	if err := collector.VerifyCoverage(dir, d); err != nil {
@@ -651,55 +654,17 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 	return d, nil
 }
 
-// Archive builds a deterministic gzip-compressed tar of a validated package
-// directory: entries in path order with fixed modes, owners, and times, and
-// no symlinks or special files. The same package yields the same bytes.
+// Archive builds the package archive of a validated package directory
+// (publication.Archive), bounded by MaxArchiveBytes.
 func Archive(dir string) ([]byte, error) {
-	var paths []string
-	err := filepath.WalkDir(dir, func(path string, e fs.DirEntry, err error) error {
-		if err != nil || e.IsDir() {
-			return err
-		}
-		if !e.Type().IsRegular() {
-			return fmt.Errorf("non-regular file %s", path)
-		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("path %s escapes the package", path)
-		}
-		paths = append(paths, filepath.ToSlash(rel))
-		return nil
-	})
+	b, err := publication.Archive(dir)
 	if err != nil {
 		return nil, err
 	}
-	slices.Sort(paths)
-	var buf bytes.Buffer
-	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	zw.ModTime = time.Time{}
-	tw := tar.NewWriter(zw)
-	for _, rel := range paths {
-		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
-		if err != nil {
-			return nil, err
-		}
-		if err := tw.WriteHeader(&tar.Header{Name: rel, Mode: 0o644, Size: int64(len(b)), ModTime: time.Unix(0, 0).UTC(), Typeflag: tar.TypeReg, Format: tar.FormatPAX}); err != nil {
-			return nil, err
-		}
-		if _, err := tw.Write(b); err != nil {
-			return nil, err
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, err
-	}
-	if err := zw.Close(); err != nil {
-		return nil, err
-	}
-	if buf.Len() > MaxArchiveBytes {
+	if len(b) > MaxArchiveBytes {
 		return nil, fmt.Errorf("package archive exceeds %d bytes", MaxArchiveBytes)
 	}
-	return buf.Bytes(), nil
+	return b, nil
 }
 
 // LoadCredentials reads static credentials from a Secret in the controller's

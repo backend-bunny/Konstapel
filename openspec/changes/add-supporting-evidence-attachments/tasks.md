@@ -91,27 +91,15 @@ for package integration.
 
 ## Workflow follow-up
 
-- Switch association validation from the interim baseline reader
-  (`internal/attachments.ReadBaseline`: the bundle's Moderate profile with an
-  explicit `include-controls`/`with-ids` selection) to the coverage owner's
-  baseline reader once add-control-coverage-reporting 1.1 lands. Keep the
-  catalog-digest identity and fail-closed behavior, and re-verify the
-  association states. The shared reader is now available:
-  `coverage.ReadBaseline(content, coverage.Options{Schemas: <controller's
-  content/schemas>})` over `coverage.FromFrozen` (OCI content) or
-  `coverage.FromVendored` (vendored tree; pass `Options.Profile`, since its
-  SHA256SUMS does not cover every entry point). Map `Baseline.Catalog.Digest`,
-  `Baseline.Control` and `Baseline.HasStatement` onto the catalog, control
-  and statement checks, and treat `errors.Is(err, coverage.ErrUnresolved)`
-  as a resolution failure (association pending), never a mismatch.
-- Group 5.1 maps `attachments.ForBinding` onto the coverage owner's
-  `coverage.SupportingEvidenceContext`
-  (`konstapel.io/supporting-evidence-context/v1`, landed with
-  add-control-coverage-reporting group 4). Pass it as `coverage.Input.Supporting`
-  (nil stays `disabled`), and check the produced contexts against the shared
-  consumer fixtures in `internal/coverage/testdata/supporting/` with
-  `coverage.ParseSupportingContext`. Coverage projects namespace packages
-  itself; the attachment owner still supplies only the binding's entries.
+- Done in group 5: association validation uses the coverage owner's
+  baseline reader (`coverage.ReadBaseline` through
+  `attachments.ReadBaseline`/`VendoredContent`), keeping the catalog-digest
+  identity and fail-closed behavior; `attachments.ForBinding` feeds
+  `coverage.SupportingEvidenceContext` as `coverage.Input.Supporting`.
+- Gate protected-document writers on deployed readers in the chart
+  integration (7.1): download services older than group 5 serve protected
+  packages without the document-read check (documented as an unsupported
+  downgrade in `docs/supporting-evidence.md`).
 - Expose the transfer service's attachment settings (`--attachment-max-bytes`,
   `--attachment-timeout`, `--attachment-max-concurrent`,
   `--attachment-retention`) as validated runtime chart values in 7.1; until

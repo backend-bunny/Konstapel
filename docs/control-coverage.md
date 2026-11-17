@@ -672,7 +672,7 @@ tests records this summary, and the binding reports it as current until
   },
   "summary": {
     "asOf": "2026-11-05T12:01:30Z",
-    "sha256": "5bdd4f3cff2c5e3cf5fd82ec5788593459932b850419502e71d6dc84bcc1c5f9",
+    "sha256": "1942d5607394eb606a04704a34b46a0810b6c44fec65feea9c6a42941e48c869",
     "inputsSha256": "e17942c563078477d54bf85674273b35d54102f49f4a4b98a581d2d439468f8c",
     "bundle": {
       "name": "konstapel-vendored",
@@ -791,10 +791,12 @@ technical checks. The report's `supportingEvidence` section and each row's
 behind it: registration, attribution, storage, validity, association and
 document copies.
 
-> **Status.** No attachment integration feeds coverage yet, so every report
-> has `"integration": "disabled"`. The contract, its checks, the scope
-> projection and the consumer fixtures below are in place for
-> `add-supporting-evidence-attachments` task group 5.
+> **Status.** The attachment integration (`add-supporting-evidence-attachments`
+> task group 5) feeds every run's report: `available` with the binding's
+> entries (or none), `unavailable` when the records can't be read, and
+> `disabled` only for a run started by an earlier controller. See
+> [coverage and assessment packages](supporting-evidence.md#coverage-and-assessment-packages)
+> for what a run freezes and what a package carries.
 
 ### The consumer contract
 

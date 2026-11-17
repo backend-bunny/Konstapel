@@ -158,7 +158,10 @@ baseline compliance.
 
 The same token cannot fetch another namespace's request, the full-binding run,
 or a run by UID. Platform operators download any run with
-`GET /v1/assessmentruns/<run uid>/download`. Removing the RoleBinding stops new
+`GET /v1/assessmentruns/<run uid>/download`; a run whose package carries
+supporting documents also needs the document-read grant (see
+[supporting evidence](../supporting-evidence.md#downloading-a-protected-package)).
+A namespace package never carries them. Removing the RoleBinding stops new
 downloads. A package is served until its `expiresAt`. After that the run keeps
 a cleanup record until storage is deleted (see
 [Retention](s3-evidence.md#retention)).
