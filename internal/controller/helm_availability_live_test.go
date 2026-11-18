@@ -22,8 +22,10 @@ package controller
 //   - abrupt leader pod loss: a successor leads and reconciles;
 //   - leader loss during an S3 outage after capture: the run stays
 //     Publishing (uncertain, not CaptureLost) and, with the capture lost
-//     with the pod, ends as a truthful CaptureLost; the next run publishes;
-//   - loss of the leader's node: the other node leads and keeps serving.
+//     with the pod, ends as a truthful CaptureLost; the next run publishes.
+//
+// Node loss under traffic is TestLiveHelmFailoverTraffic, which runs after
+// this test because it stops a worker.
 
 import (
 	"crypto/sha256"
@@ -60,7 +62,6 @@ func TestLiveHelmAvailability(t *testing.T) {
 	image, repo, digest := liveImage(t)
 	l := newLive(t)
 	const ns = "konstapel-system"
-	cluster := os.Getenv("KONSTAPEL_CLUSTER_NAME")
 	var nodes corev1.NodeList
 	_ = l.c.List(l.ctx, &nodes, client.MatchingLabels{"konstapel.dev/pool": "workload"})
 	if len(nodes.Items) < 2 {
@@ -352,43 +353,6 @@ func TestLiveHelmAvailability(t *testing.T) {
 	next := l.manualRun(b.Name, "ha-deny-next")
 	nextRun := l.publishedRun(b.Name, next)
 	l.record("capture-lost", map[string]any{"lost": lost, "next": nextRun.Name, "nextPublication": nextRun.Status.Publication.PublicationID})
-
-	// 7. Node loss: the leader's node stops. The replica on the other node
-	// leads and reconciles, and the download replica there keeps serving.
-	leader = l.leaderPod(ns, "")
-	leaderPod := &corev1.Pod{}
-	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: leader}, leaderPod); err != nil {
-		t.Fatal(err)
-	}
-	lostNode := leaderPod.Spec.NodeName
-	if !strings.HasPrefix(lostNode, cluster+"-worker") {
-		t.Fatalf("leader on unexpected node %s", lostNode)
-	}
-	start = time.Now()
-	if out, err := exec.Command("docker", "stop", lostNode).CombinedOutput(); err != nil {
-		t.Fatalf("stop node %s: %v %s", lostNode, err, out)
-	}
-	successor = l.leaderPod(ns, leader)
-	took = time.Since(start)
-	got = l.binding(b.Name)
-	got.Spec.Mode = v1alpha1.ModeAudit
-	if err := l.c.Update(l.ctx, got); err != nil {
-		t.Fatal(err)
-	}
-	l.waitReady(b.Name, 1)
-	var survivor string
-	for _, p := range l.podsReady(ns, "download") {
-		if p.Spec.NodeName != lostNode {
-			survivor = p.Name
-		}
-	}
-	if survivor == "" {
-		t.Fatal("no download replica on the surviving node")
-	}
-	if code, sum := download(l.portForward(ns, "pod/"+survivor, 8443)); code != http.StatusOK || sum != run.Status.Publication.PackageSHA256 {
-		t.Fatalf("download after node loss: %d", code)
-	}
-	l.record("node-loss", map[string]any{"node": lostNode, "from": leader, "to": successor, "seconds": took.Seconds(), "downloadFrom": survivor})
 }
 
 // podsReady lists ready pods of one chart component.
