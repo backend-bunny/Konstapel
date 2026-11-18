@@ -35,7 +35,13 @@ gives no single place to enforce "same archive, same intent, same key".
   the existing gated, conditional publication protocol.
 - Recovery never recollects evidence, changes completeness or outcomes,
   extends expiry, or substitutes a key. The recovered publication keeps the
-  expiry recorded at the signing failure (closure plus recorded retention).
+  expiry recorded at the signing failure for a new commit. Adoption of an
+  existing commit preserves that commit's original time and expiry.
+- An unpinned intent requires explicit fingerprint confirmation to authorize
+  initial key selection. Recovery requests remain as audit records after run
+  deletion and require a separate administrator grant for deletion.
+- Successful recovery moves the run and matching namespace request to
+  Completed; status repair converges across crashes between API writes.
 - Concurrent requests for one run converge on one signature and one commit.
   Expired, deleted, orphaned, lost, or otherwise unrecoverable evidence ends
   the request with an explicit terminal outcome; nothing is revived.
@@ -55,8 +61,8 @@ None.
   attribution, the recovery contract, convergence, terminal outcomes, and
   acceptance evidence.
 - `assessment-evidence`: the per-binding retention requirement states that a
-  publication recovered after a signing failure keeps the expiry recorded at
-  that failure instead of measuring a new one from the recovered commit.
+  new recovery commit keeps the failure-record expiry; an existing commit
+  retains its original expiry.
 
 ## Impact
 
@@ -73,7 +79,8 @@ None.
 - Download server: unchanged routes and pair verification; a recovered run
   becomes downloadable like any committed signed run.
 - Docs and tests: `docs/integration/evidence-signing.md`, acceptance-group
-  inventory, and an opt-in check against the isolated Sigstore test stack.
+  inventory, crash-point coverage, and a deterministic check rejecting
+  unexpected network access during recovery.
 
 Out of scope: re-signing committed or legacy unsigned packages, signing with
 any key other than the intent's, KMS/keyless signers, automatic recovery

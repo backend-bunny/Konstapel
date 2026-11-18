@@ -149,7 +149,7 @@ ClusterRoleBinding to platform subjects, never aggregated into `admin`,
 - **Retention of requests.** Requests are kept as the audit record. They have
   no owner reference to the run and are not garbage-collected with it.
   Deleting them needs a cluster-administrator grant outside these roles
-  (open question 3).
+  as an explicit administrator action.
 
 ### 4. Recovery reuses the original intent and nothing else
 
@@ -175,7 +175,9 @@ The procedure, under the destination fence as
 3. Otherwise, load the intent's Secret by its recorded name. Require the
    pinned fingerprint. If the intent has no pinned key, require it to equal
    `spec.expectedKeyFingerprint` (absent: `KeyConfirmationRequired`), then pin
-   it with the existing write-once update. Sign, store with first-writer-wins,
+   it with the existing write-once update. This authorizes initial key selection;
+   it does not prove a previously established key identity. Sign, store with
+   first-writer-wins,
    and re-read and verify the winner. This is the existing
    `signingRequirement` path.
 4. Commit through the existing gate with the intent's `publication.Signing`
@@ -199,7 +201,9 @@ other archive) is `Conflict`. Neither is ever overwritten.
   clears `active`; waiting requests may then claim and try.
 - **Late requests.** A request evaluated after `recovered` is set succeeds
   with `AlreadyRecovered` and references the same commit and signature. It
-  does no storage write.
+  does no storage write. Before completing, it reconciles the namespace
+  AssessmentRequest projection and its own request status from the recovered run.
+  This also applies to the original holder resuming after its run update.
 - **Successors.** The holder's claim survives leader changes. A successor
   resumes the claimed request. Stored signatures and the conditional commit
   make retried and overlapping attempts converge on one immutable pair, as
@@ -211,7 +215,8 @@ other archive) is `Conflict`. Neither is ever overwritten.
 
 A claimed request retries within a deadline of claim time plus the existing
 `PublishTimeout`, polling at the existing interval, with reason `Signing` or
-`Committing`. At the deadline it fails with `SigningFailed`. The run stays a
+`Committing`. At the deadline, unless durable recovery already succeeded, it fails with
+`SigningFailed`. The run stays a
 retained `SigningFailed` run with its original failure record, and a new
 request can try again.
 
@@ -263,9 +268,16 @@ On success, the controller makes one status update to the run:
 
 Evidence fields are untouched. A namespace run's AssessmentRequest gets the
 existing sanitized `finishRequest` update (Completed, artifact reference),
-with no requester details. Downloads then work unchanged, including pair
+with no requester details. These are separate API writes, not a transaction.
+The recovered run is the durable source of truth: retries must finish the
+namespace projection before marking the EvidenceSigningRequest successful.
+Transient write failures requeue, including on the AlreadyRecovered path;
+a missing or recreated namespace request is never recreated or overwritten.
+A durable recovered record takes precedence over attempt timeout and the
+retained-failure eligibility check when finishing these status writes.
+Downloads then work unchanged, including pair
 verification. Coverage views select runs by window closure, so an older
-recovered run never displaces a newer published run (open question 1).
+recovered run never displaces a newer published run.
 
 ### 9. Observability
 
@@ -289,12 +301,15 @@ recovered run never displaces a newer published run (open question 1).
   Covers successful recovery, concurrent requests, leader loss, expiry, the
   orphan fence, a lost archive, key mismatch, RBAC denials, and forged
   attribution.
-- **Isolated Sigstore stack:** an opt-in case reuses the existing stack
-  (`KONSTAPEL_SIGSTORE_STACK`). With Fulcio, Rekor, and the timestamp
-  authority reachable, a recovered bundle is still the key-based v0.3 form
-  with no certificate, log entry, or timestamp, and nothing contacts those
-  services. This proves that reachable keyless infrastructure is never a
-  recovery path. It is not part of the mandatory groups.
+- **Network boundary:** a deterministic test rejects unexpected outbound
+  requests while allowing only the required Kubernetes and S3 fixture traffic.
+  It fails on attempts to contact Fulcio, Rekor, timestamp authorities, or
+  other external services, and checks that the recovered key-based v0.3 bundle
+  contains no certificate, log entry, or timestamp. No Sigstore stack is needed.
+- **Status crash points:** live recovery injects interruption after the run
+  status write and after the namespace request write, before recovery-request
+  completion. Each restart converges all surviving matching records without
+  re-signing or rewriting the commit, even after the attempt deadline.
 
 ## Risks / Trade-offs
 
@@ -323,12 +338,13 @@ recovered run never displaces a newer published run (open question 1).
    `notAfter` support fails closed on recovered commits. Do not roll back
    while recovered publications are retained, as with signed history today.
 
-## Open Questions
+## Confirmed decisions
 
-1. Confirm that a recovered run moves to `Completed` and that a namespace
-   run's AssessmentRequest flips from Failed to Completed, rather than staying
-   `Failed` with a committed publication.
-2. Confirm `expectedKeyFingerprint` as the confirmation for intents that never
-   pinned a key, or decide that such intents are not recoverable.
-3. Confirm that request records outlive their run (no owner reference) and are
-   deleted only by cluster administrators.
+The owner confirmed these review recommendations on 2026-11-18:
+
+1. Successful recovery moves the run and its matching namespace request to
+   `Completed`, preserving assessment results and original assessment times.
+2. Unpinned intents are recoverable with explicit `expectedKeyFingerprint`.
+   This authorizes initial key selection, not restoration of a known old key.
+3. Recovery requests outlive their run without an owner reference. Deletion
+   requires an explicit cluster-administrator action outside the recovery roles.

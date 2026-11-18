@@ -28,7 +28,8 @@ Recovery SHALL need a dedicated ClusterRole that is not aggregated into
 built-in roles and is not part of namespace or compliance-admin roles.
 Requesting recovery SHALL NOT grant AssessmentRun status writes, signing
 Secret access, or destination changes. A separate read-only role SHALL
-expose requests and their status for audit.
+expose requests and their status for audit. Requests SHALL outlive their run
+without an owner reference; deletion SHALL require a separate administrator grant.
 
 #### Scenario: A namespace team or general administrator requests recovery
 
@@ -83,15 +84,16 @@ request without overwriting stored objects or the intent.
 
 - **WHEN** a request for such a run omits the expected fingerprint or states one the Secret does not hold
 - **THEN** the request fails without pinning a key
-- **AND** a request stating the Secret's actual fingerprint pins it once and proceeds
+- **AND** a request stating the Secret's actual fingerprint authorizes initial key selection, pins it once, and proceeds
 
 ### Requirement: Recovered publications keep their recorded expiry
 
-A recovered publication SHALL keep the expiry recorded when the run failed
-signing, and its publication time SHALL be the actual commit time. Recovery
-SHALL NOT start at or after that expiry. A commit landing at or after it
-SHALL be treated as expired, never served, and deleted by retention. An
-existing matching commit SHALL be adopted unchanged.
+A new recovery commit SHALL keep the signing-failure expiry and record its
+actual commit time. Recovery SHALL NOT start at or after the failure expiry.
+A new commit landing at or after that expiry SHALL never be served and SHALL
+be deleted by retention. An existing matching commit SHALL instead retain
+its original publication time and expiry, even if that expiry differs from
+the failure record; adoption SHALL NOT rewrite the commit.
 
 #### Scenario: Recover late in the retention period
 
@@ -103,6 +105,12 @@ existing matching commit SHALL be adopted unchanged.
 
 - **WHEN** a request is evaluated at or after the run's recorded expiry
 - **THEN** it fails with Expired and nothing is signed, committed, or retained longer
+
+#### Scenario: Adopt a commit whose response was lost
+
+- **WHEN** recovery before the failure expiry finds a matching earlier commit with a later expiry
+- **THEN** it adopts the commit's original publication time and expiry unchanged
+- **AND** it does not create a new commit or recalculate retention
 
 ### Requirement: Concurrent recovery requests converge
 
@@ -122,6 +130,20 @@ idempotently, referencing that publication without further storage writes.
 - **WHEN** the leader stops after storing the signature but before recording the commit
 - **THEN** the successor resumes the same request and reuses the stored signature
 - **AND** no second signature or commit is created
+
+### Requirement: Recovery status converges across API writes
+
+The recovered run SHALL be the durable source for idempotent status repair.
+Before a recovery request succeeds, its matching namespace request SHALL
+reflect Completed and the sanitized artifact reference. Transient status
+write failures SHALL retry, including after the attempt deadline. Missing or
+recreated namespace requests SHALL NOT be recreated or overwritten.
+
+#### Scenario: Crash between success status writes
+
+- **WHEN** the controller stops after updating the run or namespace request but before completing the recovery request
+- **THEN** its successor repairs the remaining matching statuses from the recovered run, even after the attempt deadline
+- **AND** it neither signs again nor rewrites the commit
 
 ### Requirement: Unrecoverable evidence ends explicitly
 
@@ -148,7 +170,7 @@ failure unchanged so that a new request can try again.
 
 ### Requirement: Recovered publications follow the normal access contract
 
-After recovery the run SHALL report a committed signed publication, and
+After recovery the run SHALL be Completed with a committed signed publication, and
 downloads SHALL use the existing authorization, scope, expiry, orphan, and
 pair-verification rules. A namespace request SHALL receive only the existing
 sanitized status. The run SHALL record which request recovered it, and
@@ -165,8 +187,9 @@ metrics SHALL use only bounded phase and reason labels.
 Mandatory acceptance SHALL exercise recovery against a real API server and
 the RustFS S3 fixture with disposable keys: offline Cosign verification of a
 recovered package, concurrent requests, leader loss, expiry, orphaning, lost
-archives, key mismatch, RBAC, and forged attribution. An opt-in case SHALL
-show that reachable keyless Sigstore services are never used.
+archives, key mismatch, RBAC, and forged attribution. Deterministic tests
+SHALL reject outbound requests beyond the required Kubernetes/S3 fixtures
+and verify that recovery uses no keyless services or keyless bundle material.
 
 #### Scenario: Validate recovery end to end
 

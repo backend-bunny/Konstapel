@@ -8,8 +8,9 @@ Konstapel SHALL apply the binding's configured retention, defaulting to 2160h
 (90 days), to scheduled and on-demand packages. The first successful publication
 SHALL record its effective retention and a fixed expiry measured from publication.
 Later retention changes SHALL apply only to new publications and SHALL NOT
-shorten or extend an already published package's expiry. A publication recovered
-after a signing failure SHALL keep the expiry recorded at that failure.
+shorten or extend an already published package's expiry. A new signing-recovery
+commit SHALL use the failure-record expiry instead; an existing commit SHALL
+retain its original expiry even when the failure record differs.
 
 #### Scenario: Shorten retention after publication
 
@@ -24,6 +25,6 @@ after a signing failure SHALL keep the expiry recorded at that failure.
 
 #### Scenario: Publish evidence through signing recovery
 
-- **WHEN** a run that failed signing is published later by an administrator's recovery request
+- **WHEN** a run that failed signing is first committed later by an administrator's recovery request
 - **THEN** its expiry stays the closure time plus the retention recorded at closure
 - **AND** it is not measured from the recovered commit time

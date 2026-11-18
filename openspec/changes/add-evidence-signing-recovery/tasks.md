@@ -30,7 +30,7 @@ permission, or Taskfile task.
 
 ## 2. Recovery controller and publication record
 
-- [ ] 2.1 Add the optional `retention.notAfter` to the signed commit and the receipt/status validation in the shared publication contract, the S3 publisher, and the fake; verify strict decoding, `expiresAt = notAfter`, rejection of `notAfter` after `publishedAt + duration`, a commit landing at or after `notAfter` reported Expired and deleted by retention, and current-release readers failing closed on the new field.
+- [ ] 2.1 Add the optional `retention.notAfter` to the signed commit and the receipt/status validation in the shared publication contract, the S3 publisher, and the fake; verify strict decoding, `expiresAt = notAfter`, rejection of `notAfter` after `publishedAt + duration`, a commit landing at or after `notAfter` reported Expired and deleted by retention, current-release readers failing closed on the new field, and adoption of a matching lost-response commit with its original time and later expiry unchanged.
   <!-- agent: tier=deep risk=high reason="Immutable publication records and retention integrity" -->
 - [ ] 2.2 Implement eligibility from an uncached run read and every terminal outcome (`RunNotFound`, `RunDeleting`, `NotRecoverable`, `Expired`, `Orphaned`, `EvidenceLost`, `Conflict`); verify each case issues no storage write, leaves the run unchanged, and is never re-evaluated after it ends.
   <!-- agent: tier=deep risk=high reason="Distributed recovery of retained evidence" -->
@@ -38,9 +38,9 @@ permission, or Taskfile task.
   <!-- agent: tier=deep risk=high reason="Concurrency and leader-change convergence" -->
 - [ ] 2.4 Run recovery through the existing `signingRequirement` and commit gate under the destination fence as `run <name> signature recovery`, including `expectedKeyFingerprint` confirmation for unpinned intents; verify that a stored signature is reused without reading a private key, and that `KeyMismatch`, `KeyConfirmationRequired`, and the destination's current policy or rotation never change the key used or allow an unsigned commit.
   <!-- agent: tier=deep risk=high reason="Cryptographic key identity and no-substitution guarantee" -->
-- [ ] 2.5 Bound each claimed attempt by `PublishTimeout` from the claim, ending with `SigningFailed`; verify the run's retained failure record, expiry, and outstanding-package accounting are unchanged, and that a new request can then succeed.
+- [ ] 2.5 Bound each claimed attempt by `PublishTimeout` from the claim, ending with `SigningFailed` unless the run already records successful recovery; verify the run's retained failure record, expiry, and outstanding-package accounting are unchanged, and that a new request can then succeed.
   <!-- agent: tier=deep risk=medium reason="Recovery retry bounds and retained-evidence state" -->
-- [ ] 2.6 Record success in one run status update (committed publication, `Completed`, `Published` True, `signingRecovery.recovered`) and the existing sanitized namespace-request update; verify the summary, completeness, outcomes, export kind, window, and `publishedAt` truthfulness, coverage ordering by closure, and pair-verified downloads through the unchanged routes.
+- [ ] 2.6 Record success in one run status update (committed publication, `Completed`, `Published` True, `signingRecovery.recovered`) and the existing sanitized namespace-request update; verify the summary, completeness, outcomes, export kind, window, and `publishedAt` truthfulness, coverage ordering by closure, and pair-verified downloads through the unchanged routes. Make AlreadyRecovered repair the remaining matching statuses before success; retry transient failures even past the attempt deadline, and never recreate or overwrite missing/recreated namespace requests.
   <!-- agent: tier=deep risk=high reason="Distributed recovery of retained evidence" -->
 
 ## 3. Observability
@@ -59,14 +59,14 @@ permission, or Taskfile task.
 
 - [ ] 5.1 Add live recovery acceptance to the mandatory storage group on the RustFS S3 fixture with disposable keys: a missing key Secret causing `SigningFailed`, restoration, and recovery; verify offline with pinned Cosign and the original trusted key, rejection with another key, unchanged evidence fields, and authorized namespace and platform downloads.
   <!-- agent: tier=deep risk=high reason="Live cryptographic verification of recovered evidence" -->
-- [ ] 5.2 Add live fault cases to the mandatory recovery group: concurrent requests, leader loss after signature storage, lost commit response, expiry during recovery, orphan handoff, lost or replaced staged archive, and key mismatch; verify exactly one signature and commit, the defined terminal outcomes, and no unsigned publication.
+- [ ] 5.2 Add live fault cases to the mandatory recovery group: concurrent requests, leader loss after signature storage, crashes after the run and namespace-request status writes (including restart after the attempt deadline), lost commit response with differing failure/commit expiries, expiry during recovery, orphan handoff, lost or replaced staged archive, and key mismatch; verify exactly one signature and commit, the defined terminal outcomes, and no unsigned publication.
   <!-- agent: tier=deep risk=high reason="Distributed recovery and concurrency under real storage" -->
 - [ ] 5.3 Add live admission and RBAC cases to the existing admission or storage group: forged requester, spec edits, user status writes, and each role's denials; verify with real Kubernetes credentials and keep the API server's denial responses as evidence.
   <!-- agent: tier=deep risk=high reason="Authorization and audit attribution" -->
-- [ ] 5.4 Add an opt-in case that reuses the existing isolated Sigstore test stack (`KONSTAPEL_SIGSTORE_STACK`), factoring its helper for reuse rather than starting a second stack; verify that with Fulcio, Rekor, and the timestamp authority reachable, a recovered bundle carries no certificate, log entry, or timestamp, and that none of those services is contacted. Keep it out of the mandatory groups.
+- [ ] 5.4 Add a deterministic network-boundary test that allows only required Kubernetes/S3 fixture traffic and fails on unexpected outbound requests, including Fulcio, Rekor, and timestamp authorities; verify the recovered key-based bundle carries no certificate, log entry, or timestamp. Run in the normal cluster-free checks without starting a Sigstore stack.
   <!-- agent: tier=deep risk=medium reason="Cryptographic trust boundary of keyless infrastructure" -->
 
 ## 6. Final checks
 
-- [ ] 6.1 Run `task check`, the generated CRD/RBAC/chart freshness checks, the affected acceptance groups, `openspec validate add-evidence-signing-recovery --strict`, `openspec validate --specs --strict`, and `python3 -I scripts/agents/select-task.py --check` through Devbox; keep sanitized evidence, and remove task-owned keys, Secrets, RustFS containers and volumes, Sigstore stack containers, clusters, and processes.
+- [ ] 6.1 Run `task check`, the generated CRD/RBAC/chart freshness checks, the affected acceptance groups, `openspec validate add-evidence-signing-recovery --strict`, `openspec validate --specs --strict`, and `python3 -I scripts/agents/select-task.py --check` through Devbox; keep sanitized evidence, and remove task-owned keys, Secrets, RustFS containers and volumes, clusters, and processes.
   <!-- agent: tier=standard risk=low reason="Run established validation and cleanup" -->
