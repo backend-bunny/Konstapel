@@ -29,9 +29,14 @@ class GroupCoverageTests(unittest.TestCase):
         )
         discovered = Counter(re.findall(r"^TestLive\w+$", output, re.MULTILINE))
         assigned = Counter(test for group in acceptance.GROUPS.values() for test in group["goTests"])
+        # The exceptionAdmission stage runs the tests its script selects.
+        script = (HERE.parents[1] / "scripts" / "exception-admission-live.sh").read_text()
+        selected = re.search(r'-test\.run "\^\(?([\w|]+)\)?\$"', script)
+        self.assertIsNotNone(selected)
         for group in acceptance.GROUPS.values():
             if group["exceptionAdmission"]:
-                assigned["TestLiveExceptionAdmission"] += 1
+                for test in selected.group(1).split("|"):
+                    assigned[test] += 1
         self.assertTrue(discovered)
         self.assertEqual(assigned, discovered)
         self.assertTrue(all(count == 1 for count in assigned.values()))

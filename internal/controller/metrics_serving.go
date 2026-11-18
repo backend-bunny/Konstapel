@@ -56,15 +56,23 @@ func metricsOptions(addr string, mtls *MetricsTLS) (metricsserver.Options, *down
 	}, certs, nil
 }
 
-// certificateReloader re-reads the metrics certificate on every replica.
-type certificateReloader struct{ certs *download.Certificates }
+// certificateReloader re-reads a serving certificate on every replica:
+// the metrics certificate, or the one named by server ("webhook").
+type certificateReloader struct {
+	certs  *download.Certificates
+	server string
+}
 
 func (certificateReloader) NeedLeaderElection() bool { return false }
 
 func (r certificateReloader) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithName("metrics-tls")
+	server := r.server
+	if server == "" {
+		server = "metrics"
+	}
+	logger := log.FromContext(ctx).WithName(server + "-tls")
 	r.certs.Watch(ctx, download.DefaultReloadInterval, func(err error) {
-		logger.Info("metrics certificate rotation rejected; serving the last valid certificate", "error", err.Error())
+		logger.Info(server+" certificate rotation rejected; serving the last valid certificate", "error", err.Error())
 	})
 	return nil
 }

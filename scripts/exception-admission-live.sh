@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Live ComplianceException admission check (add-self-service-policy-exceptions
-# task 2.2) against an existing disposable cluster from scripts/environment.sh.
+# Live ComplianceException admission checks against an existing disposable
+# cluster from scripts/environment.sh: acceptance admission
+# (add-self-service-policy-exceptions task 2.2) and admission served by each
+# of two elected replicas across leadership changes
+# (add-controller-high-availability tasks 3.1, 3.2).
 #
-# The webhook is served by an in-process manager inside the test. The test
+# The webhooks are served by in-process managers inside the test. The test
 # binary runs in a container on the kind network, so the API server reaches
 # it without host firewall exceptions.
 #
@@ -33,5 +36,5 @@ docker run --name "$container" --rm --network kind --user "$(id -u):$(id -g)" \
   -v "$PWD:/src:ro" -v "$out:/out" -w /src/internal/controller \
   -e KONSTAPEL_LIVE_KUBECONFIG=/out/kubeconfig-internal -e KONSTAPEL_LIVE_CONTEXT="kind-$name" -e KONSTAPEL_LIVE_OUTPUT=/out/live \
   -e HOME=/tmp "$KONSTAPEL_WORKLOAD_IMAGE" \
-  sh -c 'KONSTAPEL_LIVE_WEBHOOK_HOST=$(hostname -i) exec /out/controller.test -test.run "^TestLiveExceptionAdmission$" -test.v -test.count=1 -test.timeout 15m' \
+  sh -c 'KONSTAPEL_LIVE_WEBHOOK_HOST=$(hostname -i) exec /out/controller.test -test.run "^(TestLiveExceptionAdmission|TestLiveReplicaAdmission)$" -test.v -test.count=1 -test.timeout 15m' \
   2>&1 | tee "$out/exception-admission-live.log"

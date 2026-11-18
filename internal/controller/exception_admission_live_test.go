@@ -96,13 +96,18 @@ func servingCert(t *testing.T, dir, host string) []byte {
 // installExceptionWebhooks applies config/webhook/exceptions.yaml pointed at
 // this process instead of the in-cluster Service.
 func (l *live) installExceptionWebhooks(host string, caBundle []byte) {
+	l.installExceptionWebhooksAt(host, exceptionWebhookPort, caBundle)
+}
+
+// installExceptionWebhooksAt is installExceptionWebhooks for another port.
+func (l *live) installExceptionWebhooksAt(host string, port int, caBundle []byte) {
 	raw, err := os.ReadFile("../../config/webhook/exceptions.yaml")
 	if err != nil {
 		l.t.Fatal(err)
 	}
 	dec := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
 	url := func(path string) *string {
-		u := fmt.Sprintf("https://%s:%d%s", host, exceptionWebhookPort, path)
+		u := fmt.Sprintf("https://%s:%d%s", host, port, path)
 		return &u
 	}
 	mut, val := &admissionregistrationv1.MutatingWebhookConfiguration{}, &admissionregistrationv1.ValidatingWebhookConfiguration{}
