@@ -122,7 +122,8 @@ download pod also serves directly with no controller running at all (see
   shell.
 - **Leadership loss.** When the Lease is lost, controller-runtime cancels
   every leader-only runnable (reconcilers, the capability trigger, deferred
-  engine watches) and the manager exits with `leader election lost`. It doesn't
+  engine watches, metric owner projections, which are cleared) and the
+  manager exits with `leader election lost`. It doesn't
   linger as an unelected process; the pod restarts and becomes a candidate
   again.
 - **No child processes.** The controller runs no C2P child processes. Only the
@@ -139,6 +140,106 @@ download pod also serves directly with no controller running at all (see
 3. when another holder takes the Lease, the leader's work is cancelled within
    5s and the manager exits with `leader election lost`.
 
+## Metrics across leadership changes
+
+The [metrics](metrics.md) owner projections (binding summaries, capabilities,
+the storage backlog and domain readiness) are leader-scoped; operation
+counters are process-local on every replica. `NewManager` registers the
+Hub's leadership term (`observability.Leadership`) and one refresher per
+enabled domain as leader-only runnables, so they follow the same Lease as
+the reconcilers:
+
+| Transition | What a replica exposes |
+| --- | --- |
+| Follower, or a candidate that cannot take the Lease | readiness 0 for every domain, the enabled flags and its own counters; no binding, capability or backlog series |
+| Elected | nothing until each refresher has waited for the manager's cache to synchronize and published from it; a domain is ready only with the state it summarizes |
+| Lease lost (another holder, renewal failed) | the leader context is cancelled: every owner projection is cleared, a write still in flight for the old term is refused (`ErrNotLeading`), and the manager exits with `leader election lost` |
+| Graceful stop | the same clearing when the leader context ends |
+| Restart | a fresh process with counters at zero (`resets()` in PromQL) and nothing remembered; it owns projections only after it is elected again |
+
+`TestLiveLeaderObservability` (`admission` group) checks this in-process
+with the real Lease and two managers, each with its own Hub, sampled every
+25 ms. Before the leader loses the Lease, the follower exposes no owner
+series. When another holder takes the Lease, the former leader's Hub is
+cleared, a write for its old term is refused, and nothing reappears. At no
+sample do both Hubs expose owner projections. The successor never exposes a
+ready domain without that domain's binding or backlog series. Its binding
+series are equal to the former leader's, rebuilt from the API. Its Hub
+clears again when it stops. Through Prometheus on the Helm-installed chart,
+`TestLiveHelmMonitoring` covers a killed leader and a release with no
+leader ([integrated acceptance](metrics.md#integrated-acceptance)).
+
+### Inspecting the Lease
+
+```sh
+kubectl -n konstapel-system get lease konstapel-controller-leader-election \
+  -o custom-columns=HOLDER:.spec.holderIdentity,RENEWED:.spec.renewTime,ACQUIRED:.spec.acquireTime,TRANSITIONS:.spec.leaseTransitions,DURATION:.spec.leaseDurationSeconds
+kubectl -n konstapel-system get events --field-selector reason=LeaderElection
+```
+
+- **Holder.** `holderIdentity` is `<pod name>_<random>`; the part before
+  `_` is the pod that leads. Each process has its own suffix, so a
+  restarted pod shows a new identity.
+- **Liveness.** `renewTime` advances every couple of seconds while the
+  holder is healthy. A `renewTime` older than `leaseDurationSeconds` (15s)
+  means the Lease has expired and is free to take.
+- **Changes.** `leaseTransitions` counts takeovers. Expect one more per
+  leader loss, upgrade step or node failure; steady growth without such
+  events means leaders keep losing renewal (API latency, CPU starvation).
+- **Metrics.** Exactly one pod should report `konstapel_observation_ready 1`
+  per enabled domain, and it should be the holder. A ready pod that isn't
+  the holder is a stale target: check its scrape.
+
+### Permission failures
+
+The chart's Role grants Lease `get`/`update` of
+`konstapel-controller-leader-election` and Lease `create` in
+`konstapel-system`, and Event `create`/`patch` ([Leader election](#leader-election)).
+Without them:
+
+- A candidate that can't read or update the Lease is never elected and
+  never reconciles. Election is never skipped.
+- A leader that loses access can't renew: its log shows
+  `leases.coordination.k8s.io "konstapel-controller-leader-election" is forbidden`,
+  then `leader election lost`, and the pod restarts. It keeps serving probes
+  and metrics, but owns nothing, so `KonstapelObservationUnavailable` fires
+  for every enabled domain ([runbook](alert-runbooks.md#konstapelobservationunavailable)).
+  Applied engine policies stay in place.
+- Check the ServiceAccount's grants:
+
+  ```sh
+  for verb in get update; do
+    kubectl auth can-i "$verb" leases/konstapel-controller-leader-election -n konstapel-system \
+      --as=system:serviceaccount:konstapel-system:konstapel-controller
+  done
+  kubectl auth can-i create leases -n konstapel-system \
+    --as=system:serviceaccount:konstapel-system:konstapel-controller
+  ```
+
+  All three must answer `yes`. Restoring the Role lets the next candidate
+  take the Lease after it expires.
+
+### Measured recovery
+
+These are test measurements, not service levels. Takeover waits for the
+Lease to expire (15s by default; nothing releases it early), then for the
+successor's refreshers to republish. Cache sync, API latency and host load
+add to both.
+
+| Case | Setting | Measured |
+| --- | --- | --- |
+| Lease stolen from a running leader (`TestLiveLeaderObservability`, 6s test Lease) | in-process, two managers | in two runs, the former leader cleared and exited about 4.2s after the Lease was taken (its 4s renew deadline); the successor was elected 7.6–8.8s after, and all its domains were ready about 8.6s after its election |
+| Graceful leader stop (`TestLiveLeaderElection`, 15s Lease) | in-process | follower took over after about 20s |
+| Leader pod killed (`TestLiveHelmMonitoring`) | Helm, Prometheus scrape every 15s | Lease taken after 14s, successor the only owner after 20s |
+| Leader pod or worker node lost (`TestLiveHelmAvailability`) | Helm, two workers | Lease taken by the other pod 18.0–18.4s after the leader pod was force-deleted or its worker node lost, in two CI runs |
+| Lease access removed, then restored (`TestLiveHelmMonitoring`) | Helm | leader restarted 12s after losing access; `KonstapelObservationUnavailable` firing 90s after (1m hold); one owner 9s after access returned |
+
+Alerts that need an owner domain can't fire while no replica owns it, and
+one that was firing resolves without recovering. A condition that persists
+through the gap fires again only after its full hold. Under the default
+holds (`KonstapelObservationUnavailable`: 5m), a normal takeover never fires
+it.
+
 ## Delayed former leaders
 
 Leader election isn't fencing. A paused process, or a request already in
@@ -149,7 +250,7 @@ flight, can outlive its leadership. Each write therefore carries its own guard:
 | Binding and profile status | `Update` with the read `resourceVersion`; a newer object is a conflict, and the next reconcile reads it |
 | Engine policy create, repair | names are derived from the enforcement revision and never reused; repair is an `Update` with the read `resourceVersion` on a policy the binding owns at the same revision |
 | Engine policy delete (superseded revisions) | before the first write, and again after listing owned policies, the binding and profile are re-read from the API server and must still have the snapshot's UID and generation. A changed snapshot aborts the Sync, and the binding resolves again. Each delete carries the listed object's UID and `resourceVersion` as preconditions. |
-| Assessment run publication | deterministic run identities and conditional immutable S3 commits: matching bytes recover the original commit, and different bytes under the same identity are a conflict (`internal/s3store` `TestStagePublishAndRecover`, `TestConflictingContentNeverOverwrites`) |
+| Assessment run publication | deterministic run identities and conditional immutable S3 commits: matching bytes recover the original commit, and different bytes under the same identity are a conflict (`internal/s3store` `TestStagePublishAndRecover`, `TestConflictingContentNeverOverwrites`; across clients, [Publication fault fixtures](#publication-fault-fixtures)) |
 
 The order is what makes this safe. A policy delivered for a newer snapshot
 can only exist after that snapshot was committed. If it appears in the owned
@@ -167,6 +268,38 @@ Tests:
   snapshot, and one that turns stale during the attempt.
 - `TestDeleteRequiresTheListedObject` changes a policy between listing and
   delete; the result is a conflict, not a deletion.
+
+### Publication fault fixtures
+
+`publicationtest.RunPublicationFaults` (`internal/publication/publicationtest/faults.go`)
+runs the same four cases against any `Publisher` store. Each case uses fresh
+clients: another replica, or a restarted process.
+
+| Case | Fault | What must hold |
+| --- | --- | --- |
+| `lost-stage-response` | the stager's last staging write lands, but the stager gets an error (`ErrUnavailable`) and is never used again | another client recovers the bytes under the run's identity; restaging the same bytes returns the same staging; they commit once |
+| `lost-publish-response` | the commit lands, but the publisher gets an error (`ErrUnavailable`) | a second client with a shorter retention, and a third with another, both get the original receipt: publication ID, commit, `publishedAt`, retention and `expiresAt` = `publishedAt` + the committed retention. Different bytes under the identity are `ErrConflict` |
+| `same-run-conflicting-bytes` | two clients stage different packages for one run | at most one commits; every other stage or publish of the other bytes, from any client, is `ErrConflict`; the served archive stays the committed one |
+| `separate-client-recovery` | the stager is gone; four successors with different retentions race | each recovers the staging and all four get one receipt; a run that was never staged is `ErrCaptureLost` (not an outage) and has no publication |
+
+Every case then reads the commit through a fresh client: `Inspect` and the
+archive served by `Open` must match the receipt. Where the store can count
+commit writes, exactly one must have been accepted.
+
+A run is labelled with what its store can prove:
+
+| Store | Kind | Run by |
+| --- | --- | --- |
+| `fake.Publisher` (every client is the one in-memory fake) | `shared-fake-store`: the contract's semantics only | `TestPublicationFaults` in `internal/publication/fake` (`task check`) |
+| `s3store.Publisher` against an in-memory S3 server, in three versioning modes | `shared-fake-store`: the S3 publisher's handling, not real storage | `TestPublicationFaults` in `internal/s3store` (`task check`) |
+| `s3store.Publisher` against the pinned RustFS service, in three versioning modes | `durable-backend`: the only durable-backend acceptance | `TestLivePublicationFaults` (`recovery` group) |
+
+For S3, each client is a new SDK client with its own HTTP transport
+(`internal/s3store/s3storetest`), as a separate replica builds one. A lost
+response is dropped on that client only (`s3fault.LostResponses`), after
+the service has processed the request: retries inside the same call lose
+their responses too. A `durable-backend` claim is refused unless its clients
+are independent publishers (`CheckClients`).
 
 ## Recovery on leadership acquisition
 
@@ -406,7 +539,9 @@ incomplete.
 
 ```sh
 devbox run -- go test ./internal/availabilitytest/ ./internal/controller/ -run 'LifecycleMatrix|ElectionTimings'
-devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=admission   # includes TestLiveLeaderElection
+devbox run -- go test ./internal/publication/... ./internal/s3store/ -run 'PublicationFaults|DurableClaim'
+devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=admission   # includes TestLiveLeaderElection, TestLiveLeaderObservability
+devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=recovery    # includes TestLivePublicationFaults (RustFS)
 ```
 
 `TestLiveLeaderElection` starts two in-process candidates against the

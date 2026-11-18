@@ -54,13 +54,23 @@ func (c *candidate) stop() {
 // the field manager of every write.
 func (l *live) candidateAs(user, agent string) *candidate {
 	l.t.Helper()
+	return l.candidateWith(user, agent, nil)
+}
+
+// candidateWith is candidateAs with manager options adjusted by mod.
+func (l *live) candidateWith(user, agent string, mod func(*Options)) *candidate {
+	l.t.Helper()
 	cfg := rest.CopyConfig(l.cfg)
 	cfg.UserAgent = agent
 	if user != "" {
 		cfg.Impersonate = rest.ImpersonationConfig{UserName: user, UID: "uid-" + user, Groups: []string{"system:authenticated"}}
 	}
-	mgr, err := NewManager(cfg, Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second, SkipControllerNameValidation: true,
-		LeaderElection: true, LeaderElectionNamespace: "konstapel-system"})
+	opts := Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second, SkipControllerNameValidation: true,
+		LeaderElection: true, LeaderElectionNamespace: "konstapel-system"}
+	if mod != nil {
+		mod(&opts)
+	}
+	mgr, err := NewManager(cfg, opts)
 	if err != nil {
 		l.t.Fatal(err)
 	}
