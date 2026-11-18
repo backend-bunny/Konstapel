@@ -17,7 +17,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 ## 1. Establish lifecycle contracts and independent failure fixtures
 
 - [x] 1.1 Add a lifecycle fixture matrix for startup, leadership, serving, termination and recovery boundaries; verify every availability requirement maps to an expected state or observable result and name the implementing feature owner.
-- [ ] 1.2 Add fault fixtures around the existing publication contract for lost responses, same-run conflicting bytes and recovery from a separate client; verify matching operations retain identity/expiry and fixtures distinguish a shared fake store from real durable-backend acceptance.
+- [x] 1.2 Add fault fixtures around the existing publication contract for lost responses, same-run conflicting bytes and recovery from a separate client; verify matching operations retain identity/expiry and fixtures distinguish a shared fake store from real durable-backend acceptance.
   <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [x] 1.3 Document the manager/Helm integration contract, defaults, dependencies and fixture commands; verify it names existing entry points/interfaces after their owners merge and marks unimplemented services unavailable.
 
@@ -27,7 +27,7 @@ Do not create another manager, shared filesystem, or placeholder service.
 - [x] 2.2 Classify/register background workers under synchronized leadership and keep required per-replica initialization independent; verify followers start no reconciliation and unsynchronized leaders cannot expose authoritative state or mutate managed resources.
 - [x] 2.3 Propagate leadership cancellation through worker retries and owned C2P processes, retaining normal manager error/exit behavior and no early Lease release; verify leadership loss stops new work and terminates children within the configured bound.
 - [x] 2.4 Exercise delayed former-leader Kubernetes writes/deletes against newer generations and ownership; verify optimistic conflicts trigger fresh resolution and stale attempts cannot overwrite protected state or withdraw a current/unmanaged contribution.
-- [ ] 2.5 Integrate lifecycle transitions with the observability owner's projections when available; verify former-leader summaries clear, successors reconstruct before publishing, and document Lease inspection, permission failures and measured recovery limits.
+- [x] 2.5 Integrate lifecycle transitions with the observability owner's projections when available; verify former-leader summaries clear, successors reconstruct before publishing, and document Lease inspection, permission failures and measured recovery limits.
   <!-- agent: tier=deep risk=medium reason="Leadership-aware observability projections" -->
 
 ## 3. Serve and authorize requests on every ready replica
