@@ -105,7 +105,8 @@
     "release": true,
     "goTests": [
       "TestLiveHelmDurableRecovery",
-      "TestLiveHelmAvailability"
+      "TestLiveHelmAvailability",
+      "TestLiveHelmFailoverTraffic"
     ]
   },
   "bundles": {

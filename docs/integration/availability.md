@@ -253,6 +253,7 @@ add to both.
 | Graceful leader stop (`TestLiveLeaderElection`, 15s Lease) | in-process | follower took over after about 20s |
 | Leader pod killed (`TestLiveHelmMonitoring`) | Helm, Prometheus scrape every 15s | Lease taken after 14s, successor the only owner after 20s |
 | Leader pod or worker node lost (`TestLiveHelmAvailability`) | Helm, two workers | Lease taken by the other pod 18.0–18.4s after the leader pod was force-deleted or its worker node lost, in two CI runs |
+| Graceful leader removal, abrupt leader kill, node loss under traffic (`TestLiveHelmFailoverTraffic`) | Helm, two workers | Lease taken 17–23s after the graceful removal or kill and 18–21s after node loss; the gracefully removed leader exited in 1–13s ([Failover under traffic](#failover-under-traffic)) |
 | Lease access removed, then restored (`TestLiveHelmMonitoring`) | Helm | leader restarted 12s after losing access; `KonstapelObservationUnavailable` firing 90s after (1m hold); one owner 9s after access returned |
 
 Alerts that need an owner domain can't fire while no replica owns it, and
@@ -517,7 +518,6 @@ plane, so losing a worker removes Konstapel replicas but not the engine.
 | Controller outage | with the controller scaled to zero, Kyverno keeps enforcing the delivered policies and downloads keep serving; scaled back to two, a new process takes over the stale Lease (a new holder, one more transition) and renews it under contention |
 | Leader pod loss | a force-deleted leader is replaced: the other replica takes the Lease (about 16–20 s in tests; exactly one more transition) and reconciles a new binding generation |
 | Leader loss during an S3 outage | after capture, with S3 paused, the leader pod is force-deleted. The run stays `Publishing` (uncertain access, never `CaptureLost`) while S3 is down. The capture lived only in that pod's staging volume, so once S3 returns the run ends as a truthful `CaptureLost`, and the next run publishes under a new identity |
-| Node loss | the leader's worker container is stopped. The replica on the other worker takes the Lease (about 19–21 s) and reconciles, and the download replica there serves the package |
 
 `TestLiveHelmDurableRecovery` (same group, same packaged image and charts)
 proves recovery of work that the leader had already made durable in S3. A
@@ -542,6 +542,61 @@ A background watch over each run fails on any other UID, `Failed` or
 `Completed`). The proxy's log and the recorded steps are kept with the test
 evidence (`<output>/targeting/TestLiveHelmDurableRecovery*.json` and
 `…-s3fault.log`).
+
+### Failover under traffic
+
+`TestLiveHelmFailoverTraffic` (same group, last: it stops a worker) installs
+both charts again, with authenticated metrics over operator TLS, and keeps
+client traffic running while it replaces replicas. Each event is judged by
+what clients, S3 and metrics show, not by who holds the Lease.
+
+| Traffic | What must hold for every request |
+| --- | --- |
+| Admission | every second, a privileged dry-run pod in the `Deny`-bound namespace is denied by one of the delivered engine policies (named in the denial), and every fifth second a compliant pod is admitted. A privileged pod admitted or a compliant one denied fails; other probe errors are recorded and may not last 30s |
+| Downloads | every second, an authorized download through a test-owned `NodePort` Service with the chart Service's selector, on the control-plane node: kube-proxy sends each new connection to a ready endpoint, as the chart Service does. Transport errors, `503` and `429` are retried and recorded as transient; every request must return the receipt's package (same SHA-256) within 90s, and any other answer fails |
+
+| Event | What must hold |
+| --- | --- |
+| Graceful follower replacement | the follower is deleted with its normal grace and is gone within the 45s shutdown budget (+10s; never `SIGKILL`ed). The leader keeps the Lease (same holder, acquisition time and transition count) and publishes a run started during the replacement; the replacement becomes ready |
+| Graceful leader replacement, commit held | the leader has staged a run's package in S3 and the fault proxy holds its commit. The leader is deleted gracefully and is gone within the budget; its held commit ends with the process and is never forwarded. Another replica takes the Lease (one more transition, within 60s), its commit of the same run is held too, and the run stays `Publishing` with its UID. Released, it commits the same run (UID, publication ID) with the exact staged archive, once |
+| Abrupt leader failure during collection | the leader is force-deleted while a run is `Collecting`. The capture lived only in that pod's staging volume: the run ends `Failed` with `CaptureLost`, S3 has no commit for it, and the next run publishes under a new identity |
+| Node loss, commit held | with the replicas on different workers, the leader's worker container is stopped while its commit is held. The replica on the other worker takes the Lease and commits the same staged run once; the download replica there serves the package directly |
+
+After every event:
+- the binding's engine policies have the same names, UIDs and specs as
+  before (kept, never recreated), also after a reporting-only binding edit
+  (the assessment interval) that the current leader must reconcile within
+  90s;
+- the Lease holder exposes the binding's owner metrics equal to the binding
+  now (creation time, target namespaces, the edited interval) and is ready in
+  every enabled domain, while every other ready replica exposes no owner
+  series and no ready domain at any scrape.
+
+Finally the new leader rotates the binding to `Audit` after the node loss.
+The test records placement, Lease timings, termination times, run and
+publication IDs, and per event the download attempts, transient failures
+(first and last), slowest request and admission results
+(`<output>/targeting/TestLiveHelmFailoverTraffic.json`).
+
+Native exception acceptances aren't part of it: the chart deploys no
+admission webhooks yet. `TestLiveReplicaAdmission` covers acceptance
+identities across failover with in-process replicas
+([checks](#checks)).
+
+Measured in local and CI runs (test measurements, not service levels; host load
+moves them):
+- graceful removal took 1.0–13.1s for the leader and 0.5–9.4s for the
+  follower, every exit `0`, never `SIGKILL`;
+- the Lease was taken 17–23s after a graceful leader removal or an abrupt
+  leader kill, and 18–21s after node loss;
+- reporting-only edits were reconciled in about 2–5s after each event;
+- downloads saw no transient failure during graceful replacements or the
+  abrupt kill. After node loss, kube-proxy kept sending part of the new
+  connections to the stopped node's endpoint for 32–41s: 8–10 attempts timed
+  out on connect, each request succeeded on retry, the slowest after 7–15s;
+- no privileged pod was admitted and every compliant pod was. Under heavy host
+  load, single admission probes failed while Kyverno's webhook was briefly
+  unreachable (fail closed, never admitted).
 
 ## Lifecycle matrix
 
@@ -610,4 +665,5 @@ disposable cluster and checks four things:
 - Chart deployment of the exception admission webhooks, and native exception
   grants, which wait for an upstream Kyverno release
   (add-self-service-policy-exceptions).
-- Multi-replica recovery and node-loss acceptance (group 5).
+- Acceptance of leader API loss, registry and backend outages, trust rotation
+  and authorization revocation during a handover (task 5.6).
