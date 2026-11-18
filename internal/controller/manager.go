@@ -37,6 +37,7 @@ import (
 	bundlecontent "github.com/backend-bunny/Konstapel/internal/bundle/content"
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/capability"
+	"github.com/backend-bunny/Konstapel/internal/download"
 	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/observability"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -134,7 +135,9 @@ type Options struct {
 	// served, and how long an availability answer is cached.
 	EnginePoll time.Duration
 	// WebhookCertDir holds tls.crt and tls.key for the exception admission
-	// webhooks. Empty serves no webhooks and starts no webhook server.
+	// webhooks. Empty serves no webhooks and starts no webhook server. The
+	// certificate must be valid at startup; a rotation is served once it
+	// verifies, and readiness fails while it does not.
 	WebhookCertDir string
 	// WebhookPort is the webhook server's port; 0 means 9443.
 	WebhookPort int
@@ -203,8 +206,14 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		GracefulShutdownTimeout:       &shutdown,
 		Controller:                    config.Controller{SkipNameValidation: &opts.SkipControllerNameValidation},
 	}
+	// The webhook certificate is verified at startup and on every reload,
+	// like the metrics certificate; see serving.go for readiness.
+	var webhookCerts *download.Certificates
 	if opts.WebhookCertDir != "" {
-		mopts.WebhookServer = webhook.NewServer(webhook.Options{Port: opts.WebhookPort, CertDir: opts.WebhookCertDir, CertName: "tls.crt", KeyName: "tls.key"})
+		if webhookCerts, err = webhookTLS(opts.WebhookCertDir); err != nil {
+			return nil, err
+		}
+		mopts.WebhookServer = webhook.NewServer(webhook.Options{Port: opts.WebhookPort, TLSOpts: webhookTLSOptions(webhookCerts)})
 	}
 	mgr, err := ctrl.NewManager(cfg, mopts)
 	if err != nil {
@@ -215,11 +224,30 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 			return nil, err
 		}
 	}
+	if webhookCerts != nil {
+		if err := mgr.Add(certificateReloader{certs: webhookCerts, server: "webhook"}); err != nil {
+			return nil, err
+		}
+	}
+	// Liveness and startup are process checks; readiness adds this
+	// replica's local serving prerequisites, never leadership.
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		return nil, err
 	}
 	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		return nil, err
+	}
+	synced := &informerSync{wait: mgr.GetCache().WaitForCacheSync}
+	if err := mgr.Add(synced); err != nil {
+		return nil, err
+	}
+	if err := mgr.AddReadyzCheck("informers", synced.check); err != nil {
+		return nil, err
+	}
+	if webhookCerts != nil {
+		if err := mgr.AddReadyzCheck("webhook", webhookReady(webhookCerts, mgr.GetWebhookServer().StartedChecker())); err != nil {
+			return nil, err
+		}
 	}
 	if opts.Stopping != nil {
 		if err := mgr.AddReadyzCheck("shutdown", func(*http.Request) error {

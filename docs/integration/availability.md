@@ -12,9 +12,9 @@ marked unavailable.
 | Process | Command | Leadership | Status |
 | --- | --- | --- | --- |
 | Controller | `konstapel controller` (`cmd/konstapel/controller.go`, `controller.NewManager`) | Elected: reconcilers, the capability trigger and deferred engine watches run only on the Lease holder | available |
-| Exception admission webhooks | the controller's webhook server (`--webhook-cert-dir`, port 9443) | none: served on every replica | **unavailable**: add-self-service-policy-exceptions waits on an upstream Kyverno release |
+| Exception admission webhooks | the controller's webhook server (`--webhook-cert-dir`, port 9443) | none: served on every replica | acceptance admission is implemented and served by every replica when `--webhook-cert-dir` is set; the chart doesn't deploy it, because native exception enablement (add-self-service-policy-exceptions) waits on an upstream Kyverno release |
 | Evidence downloads | `konstapel download-server` (`--listen :8443`) | none: a separate stateless process reading run status and the pinned destination | available; the chart renders it as its own two-replica Deployment |
-| Probes | `GET /healthz`, `/readyz` on `--health-probe-bind-address` (`:8081`) | independent of leadership and engine health | available. The controller's `/readyz` fails while it shuts down. The download server answers `/healthz` and `/readyz` over HTTPS on `:8443`, and its `/readyz` fails while its TLS is invalid. The rest of the serving-readiness wiring is task 3.1. |
+| Probes | `GET /healthz`, `/readyz` on `--health-probe-bind-address` (`:8081`) | independent of leadership and engine health | available; see [Serving readiness versus leadership](#serving-readiness-versus-leadership). The download server answers `/healthz` and `/readyz` over HTTPS on `:8443`. |
 
 ## Leader election
 
@@ -49,6 +49,7 @@ leadership:
 | Informer caches and field indexes | every replica | a follower that takes over starts from a warm, synchronized view |
 | Probes (`/healthz`, `/readyz`) | every replica | they report serving health, not leadership |
 | Exception admission webhooks (when served) | every replica | they read through the API reader and write nothing |
+| Webhook and metrics certificate reloaders, informer readiness gate | every replica | they keep this replica's serving prerequisites current |
 | Startup reads (`kube-system` identity, evidence runtime, staging directory) | every replica | local initialization only; no cluster writes |
 
 controller-runtime (v0.25) starts and syncs the caches before it joins the
@@ -69,8 +70,24 @@ needs to know which one holds the Lease.
 
 | Process | Ready when | Not ready when | Independent of |
 | --- | --- | --- | --- |
-| Controller (`:8081/readyz`) | the manager is running | it is shutting down (termination signal or leadership loss) | leadership, Kyverno health (reported in binding Conditions), S3 |
+| Controller (`:8081/readyz`) | its informer caches finished their initial sync (`informers`), and, when webhooks are served, the webhook server answers TLS with a verified, unexpired certificate (`webhook`) | it is starting and the caches have not synced; a webhook certificate rotation was rejected or the served certificate expired; it is shutting down (termination signal or leadership loss) | leadership, Kyverno health (reported in binding Conditions), bundle sources (OCI content is unavailable per binding; exception admission denies the affected namespace's acceptances as `Unresolved`), S3 |
 | Download server (`:8443/readyz`, HTTPS) | its mounted certificate is valid and verified | the mounted TLS is invalid, the served certificate has expired, or it is shutting down | the controller, leadership, S3 (a backend outage fails only the affected downloads with `503`) |
+
+Liveness and startup (`/healthz`) check only that the process serves; they
+never depend on the API server, an external service or leadership.
+
+controller-runtime starts the probe server before the caches, so until 3.1 a
+starting replica answered `/readyz` before its view had synced. The
+`informers` check latches once the initial sync completes: informers relist
+on their own afterwards, and an informer the leader adds later for an absent
+engine API never takes a serving replica out of its Service.
+
+The webhook certificate (`tls.crt`, `tls.key` in `--webhook-cert-dir`) is
+handled like the metrics and download certificates. It must be valid at
+startup, or the controller exits. Every 10s it is re-read; a rotation is
+served only once it verifies. Until then the last good certificate keeps
+serving and `/readyz` fails, so the replica leaves its Service while
+`/healthz` keeps it alive.
 
 To see who leads, read the Lease, not readiness:
 
@@ -101,9 +118,13 @@ download pod also serves directly with no controller running at all (see
   the API server, not to Konstapel, so leadership changes don't affect them.
   A new leader reconciles everything from the current state after the Lease
   changes hands, which took about 20s in tests.
-- **Exception admission webhooks.** They aren't served yet (see below). Once
-  they are, every ready replica will serve them, and the API server retries
-  them according to the webhook's failure policy.
+- **Exception admission webhooks.** Every ready replica serves them with the
+  same checks, and none forwards to the leader. Both webhooks fail closed
+  (`failurePolicy: Fail`): a request that reaches no replica is rejected and
+  the client retries it. Admission reads profiles, bindings and namespaces
+  through the API server on every request, so a central restriction applies
+  on every replica at once, also while no replica leads. The leader only
+  persists acceptance snapshots afterwards, exactly as admitted.
 
 ## Shutdown and leadership loss
 
@@ -544,6 +565,37 @@ devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=admission   # in
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=recovery    # includes TestLivePublicationFaults (RustFS)
 ```
 
+Serving on every replica (tasks 3.1 and 3.2):
+
+```sh
+devbox run -- go test ./internal/controller/ -run 'ServingRunnables|InformerSync|WebhookReadiness|WebhookTLS'
+devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=assessments # includes TestLiveReplicaAdmission
+```
+
+`TestLiveReplicaAdmission` runs two elected in-process replicas that each
+serve the exception webhooks. The API server reaches them through a TCP
+switch in the test, so every step names the replica that answered. It checks
+that:
+1. both replicas become ready while one leads, and the follower serves
+   acceptance and dry runs attributed to the authenticated caller;
+2. a central restriction (profile eligibility `Forbidden`) denies creation,
+   renewal and dry run immediately on the leader and on the follower, and
+   lifting it accepts again at once;
+3. a namespace whose binding's OCI content is unavailable gets `Unresolved`
+   denials while the replica stays ready and other namespaces are accepted;
+4. renewal through the follower records a new revision by the renewing
+   caller; a skipped revision or a rewritten record is rejected;
+5. after the leader stops, the survivor serves acceptance, restriction and
+   dry run while no replica leads (the evidence records that it answered
+   before its election); the new leader snapshots those acceptances
+   as admitted; failover changes no earlier acceptance, expiry, revision or
+   snapshot; a replacement replica follows, becomes ready and serves renewal;
+6. an expired webhook certificate rotation on the follower makes it unready
+   but live while the leader keeps serving; a valid rotation restores it.
+
+Native exception grants aren't delivered yet (add-self-service-policy-exceptions
+groups 3 and 4), so step 5 covers acceptance records and snapshots only.
+
 `TestLiveLeaderElection` starts two in-process candidates against the
 disposable cluster and checks four things:
 1. exactly one becomes leader and stays leader;
@@ -555,7 +607,7 @@ disposable cluster and checks four things:
 
 ## Not yet available
 
-- Serving readiness for the controller's admission webhooks, which wait for
-  exception admission (task 3.1). The download server's readiness already
-  follows its TLS state.
+- Chart deployment of the exception admission webhooks, and native exception
+  grants, which wait for an upstream Kyverno release
+  (add-self-service-policy-exceptions).
 - Multi-replica recovery and node-loss acceptance (group 5).

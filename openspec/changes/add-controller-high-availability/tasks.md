@@ -32,9 +32,9 @@ Do not create another manager, shared filesystem, or placeholder service.
 
 ## 3. Serve and authorize requests on every ready replica
 
-- [ ] 3.1 Register implemented admission/download servers outside the elected worker group and wire startup/readiness/liveness to their local prerequisites; verify a ready follower serves requests, invalid TLS/unsynchronized state prevents readiness, and missing external capabilities fail only affected operations.
+- [x] 3.1 Register implemented admission/download servers outside the elected worker group and wire startup/readiness/liveness to their local prerequisites; verify a ready follower serves requests, invalid TLS/unsynchronized state prevents readiness, and missing external capabilities fail only affected operations.
   <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
-- [ ] 3.2 Exercise protected admission against each replica during central edits, renewal and leadership changes; verify authoritative scope/revision checks, authenticated attribution and dry-run behavior remain intact and no grant is broadened or renewed by failover.
+- [x] 3.2 Exercise protected admission against each replica during central edits, renewal and leadership changes; verify authoritative scope/revision checks, authenticated attribution and dry-run behavior remain intact and no grant is broadened or renewed by failover.
   <!-- agent: tier=deep risk=high reason="Replica lifecycle, authorization, and durable recovery" -->
 - [x] 3.3 Integrate follower downloads with durable request/run lookup and the S3 owner; verify identical package digests after the producing pod is removed, current authorization on retry, namespace-UID isolation and explicit expiry/backend errors without leader-local files.
 - [x] 3.4 Exercise certificate/credential rotation and authorization revocation on both serving pods; verify each uses current trust/access rules, records no secret values and does not depend on session affinity or a leader proxy.
