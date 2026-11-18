@@ -253,7 +253,7 @@ add to both.
 | Graceful leader stop (`TestLiveLeaderElection`, 15s Lease) | in-process | follower took over after about 20s |
 | Leader pod killed (`TestLiveHelmMonitoring`) | Helm, Prometheus scrape every 15s | Lease taken after 14s, successor the only owner after 20s |
 | Leader pod or worker node lost (`TestLiveHelmAvailability`) | Helm, two workers | Lease taken by the other pod 18.0–18.4s after the leader pod was force-deleted or its worker node lost, in two CI runs |
-| Graceful leader removal, abrupt leader kill, node loss under traffic (`TestLiveHelmFailoverTraffic`) | Helm, two workers | Lease taken 17–23s after the graceful removal or kill and 21s after node loss; the gracefully removed leader exited in 1–13s ([Failover under traffic](#failover-under-traffic)) |
+| Graceful leader removal, abrupt leader kill, node loss under traffic (`TestLiveHelmFailoverTraffic`) | Helm, two workers | Lease taken 17–23s after the graceful removal or kill and 18–21s after node loss; the gracefully removed leader exited in 1–13s ([Failover under traffic](#failover-under-traffic)) |
 | Lease access removed, then restored (`TestLiveHelmMonitoring`) | Helm | leader restarted 12s after losing access; `KonstapelObservationUnavailable` firing 90s after (1m hold); one owner 9s after access returned |
 
 Alerts that need an owner domain can't fire while no replica owns it, and
@@ -583,16 +583,16 @@ admission webhooks yet. `TestLiveReplicaAdmission` covers acceptance
 identities across failover with in-process replicas
 ([checks](#checks)).
 
-Measured in local runs (test measurements, not service levels; host load
+Measured in local and CI runs (test measurements, not service levels; host load
 moves them):
-- graceful removal took 1.0–13.1s for the leader and 1.6–9.4s for the
+- graceful removal took 1.0–13.1s for the leader and 0.5–9.4s for the
   follower, every exit `0`, never `SIGKILL`;
 - the Lease was taken 17–23s after a graceful leader removal or an abrupt
-  leader kill, and 21s after node loss;
+  leader kill, and 18–21s after node loss;
 - reporting-only edits were reconciled in about 2–5s after each event;
 - downloads saw no transient failure during graceful replacements or the
   abrupt kill. After node loss, kube-proxy kept sending part of the new
-  connections to the stopped node's endpoint for 34–41s: 8–10 attempts timed
+  connections to the stopped node's endpoint for 32–41s: 8–10 attempts timed
   out on connect, each request succeeded on retry, the slowest after 7–15s;
 - no privileged pod was admitted and every compliant pod was. Under heavy host
   load, single admission probes failed while Kyverno's webhook was briefly
