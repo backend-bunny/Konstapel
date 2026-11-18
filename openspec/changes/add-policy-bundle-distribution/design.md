@@ -356,6 +356,26 @@ Bindings distinguish desired resolution from their last applied revision and
 engine readiness. Network/config changes requeue affected profiles; they do not
 require profile edits merely to retry.
 
+Resolution identity is the profile's bundle name and digest together, never the
+digest alone. Every consumer that resolves, memoizes or looks up content keys it
+by name and digest: the targeting resolver's index of available bundles,
+exception admission's per-request resolution of every profile, the content
+router's memo and adoption guard, expected-evidence content lookup and the
+assessment producer's applied-content set. A reference that does not resolve
+(for example an unconfigured name pinning a digest a configured name also pins)
+makes only the profiles that pin it, and what depends on them, unresolved; it
+never hides, stands in for, or is satisfied by another name's content. Trust is
+not widened: content is accepted per name under that name's source rule, trust
+revision and compatibility revision (the acceptance key), so a name and digest
+verified under one source does not satisfy another name or another trust
+configuration. Only immutable cached bytes, their leases and retained proofs are
+shared by digest, and every name rechecks retained proofs under its own rule.
+Because a payload's descriptor name must match the requested name, a digest
+verifies under at most one configured name; run package directories named by
+manifest digest therefore never hold two frozen identities. Enforcement
+revisions keep their existing inputs: a profile's bundle-name edit already
+advances its generation, so no revision algorithm change is needed.
+
 On failed update or trust revocation, retain already applied owned policies and
 report them stale/unresolved; do not newly install or reapply rejected content.
 Unresolved eligibility cannot grant a new exception. Revocation is not automatic
@@ -367,7 +387,8 @@ The assessment producer consumes the applied content handle and verification
 receipt, copying required content into its frozen package before releasing its
 cache lease. Reports retain desired/applied differences and coverage limits.
 A run's content is the set of bundles its contributions were applied from
-(each delivered engine policy's bundle annotations, keyed by manifest digest),
+(each delivered engine policy's bundle annotations: bundle name and manifest
+digest, packaged under the manifest digest),
 not the profile's selection: a previous revision still enforcing during an
 update is assessed from its own frozen content, overlapping revisions keep
 their own bundle identities (one OSCAL result and one packaged copy per

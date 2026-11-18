@@ -22,7 +22,6 @@ package controller
 // Run through scripts/exception-admission-live.sh (assessments group).
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -202,11 +201,13 @@ func TestLiveReplicaAdmission(t *testing.T) {
 			Policies: []v1alpha1.ProfilePolicy{{Name: pol, Exceptions: v1alpha1.ExceptionSettings{Eligibility: v1alpha1.ExceptionsSelfService, MaxLifetime: &metav1.Duration{Duration: 720 * time.Hour}}}}}}
 	b := bindingObj("ra-audit", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "ra-team"})
 	bOCI := bindingObj("ra-audit-oci", p.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "ra-oci"})
-	// A distinct digest: exception admission and targeting identify bundle
-	// content by digest alone.
-	orgDigest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte("ra-org-bundle")))
+	// The same digest as ra-self-service under an OCI name with no
+	// configured source: resolution identity is the name and digest, so
+	// only ra-oci (this profile's target) is unresolved. A resolver keyed
+	// by digest alone made ra-team unresolved too whenever it saw ra-org
+	// first (it sorts first by name).
 	pOrg := &v1alpha1.ComplianceProfile{ObjectMeta: metav1.ObjectMeta{Name: "ra-org"},
-		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: "ra-org-bundle", Digest: orgDigest}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
+		Spec: v1alpha1.ComplianceProfileSpec{Bundle: v1alpha1.BundleReference{Name: "ra-org-bundle", Digest: digest(t)}, Policies: []v1alpha1.ProfilePolicy{{Name: pol}}}}
 	bOrg := bindingObj("ra-org", pOrg.Name, v1alpha1.ModeAudit, map[string]v1alpha1.LabelValue{envLabel: "ra-oci"})
 	editor := l.shippedClusterRole("../../config/rbac/exception-editor.yaml", "konstapel-exception-editor")
 	var objs []client.Object

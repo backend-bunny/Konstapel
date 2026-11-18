@@ -76,6 +76,8 @@ All work follows the ownership boundaries in [design.md](design.md).
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 - [x] 5.6 Audit the controller ServiceAccount's effective Secret/ConfigMap access across every Role and ClusterRole the chart and `config/rbac` bind to it; remove grants no implemented feature uses (the unused ConfigMap `list`), keep and document the by-any-name `get` that CR-named S3 credentials, CA trust, legacy configuration, snapshots and inventories need, and state what the bundle Role adds; assert the exact rendered union and allowed/denied requests against a real API server.
   <!-- agent: tier=deep risk=high reason="Authorization boundary shared by every controller feature" -->
+- [x] 5.7 Make the bundle name and digest the resolution identity of the targeting resolver, exception admission resolution and expected-evidence content lookup (previously keyed by digest alone, so a profile pinning a digest under an unresolvable name made every profile with that digest unresolved); keep acceptance scoped to each name's source rule, trust and compatibility revisions and share only cached bytes by digest; prove with unit regressions (targeting, exceptions, router memo, resolver acceptance) that an unavailable reference affects only its consumers and a verified name never satisfies another, and with the live replica admission test using the same digest under an unconfigured name.
+  <!-- agent: tier=deep risk=high reason="Content trust scope and exception eligibility across resolution consumers" -->
 
 ## 6. Independent release publication
 

@@ -185,6 +185,31 @@ cases:
         exception: {name: unknown, namespace: team-a, policy: no-such-policy, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
         expect: {admission: rejected, reason: UnknownPolicy, grant: none}
 
+  # Bundle resolution identity is name and digest: the org binding's profile
+  # pins the team profile's digest under a name that does not resolve, so
+  # only the namespace it targets is unresolved.
+  - id: unresolvable-name-same-digest-is-isolated
+    category: acceptance
+    boundaries: [namespace, eligibility]
+    scenarios: ["Another profile pins the same content digest under an unresolvable bundle name"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}, {name: team-org, uid: ns-o-1}]
+      contributions:
+        - {binding: team, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 720h}
+        - {binding: org, policy: disallow-privileged, revision: r1, eligibility: Unresolved}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: admitted, snapshot: recorded, grant: active}
+      - at: "2026-01-01T00:01:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-org, policy: disallow-privileged, selector: {app: debug}, reason: "debugging", expiresAt: "2026-01-08T00:00:00Z"}
+        expect: {admission: rejected, reason: Unresolved, grant: none}
+
   # --- lifetime and renewal ------------------------------------------------
   - id: lifetime-limits
     category: acceptance

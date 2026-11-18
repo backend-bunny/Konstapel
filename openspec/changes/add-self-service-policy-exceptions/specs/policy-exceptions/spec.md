@@ -58,6 +58,12 @@ able to change central eligibility through their exception permissions.
 - **THEN** the exception is ineligible and normal policy enforcement continues
 - **AND** the reported reason identifies the restrictive contribution
 
+#### Scenario: Another profile pins the same content digest under an unresolvable bundle name
+
+- **WHEN** a profile's pinned bundle name and digest do not resolve while another profile pins the same digest under a resolvable name
+- **THEN** eligibility is unresolved only in namespaces that profile's bindings target, and exceptions there are rejected as unresolved
+- **AND** eligibility elsewhere is computed from the resolvable profile exactly as if the unresolvable one did not exist
+
 ### Requirement: Bounded lifetime and explicit renewal
 
 Creation and renewal SHALL require a future expiry within the shortest applicable

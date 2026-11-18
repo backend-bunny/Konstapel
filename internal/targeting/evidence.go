@@ -60,11 +60,13 @@ type StaleScope struct {
 }
 
 // ExpectedEvidence lists the expected-evidence subjects for a resolver Result.
-// content maps bundle digests to the verified content each contribution was
-// resolved against; a contribution without content is an error, never a guess.
+// content maps bundle references (name and digest, see Bundle.Ref) to the
+// verified content each contribution was resolved against; a contribution
+// without content under its exact name and digest is an error, never a
+// guess, and content of the same digest under another name is not used.
 // Subjects are sorted by namespace UID, binding UID, logical policy and
 // revision; stale scopes by binding UID, policy and reason.
-func ExpectedEvidence(r Result, content map[string]*Content) ([]EvidenceSubject, []StaleScope, error) {
+func ExpectedEvidence(r Result, content map[v1alpha1.BundleReference]*Content) ([]EvidenceSubject, []StaleScope, error) {
 	subjects := []EvidenceSubject{}
 	stale := []StaleScope{}
 	for _, b := range r.Bindings {
@@ -72,7 +74,7 @@ func ExpectedEvidence(r Result, content map[string]*Content) ([]EvidenceSubject,
 			stale = append(stale, StaleScope{Binding: b.Binding, Policy: e.Policy, Reason: e.Reason, Message: e.Message})
 		}
 		for _, c := range b.Contributions {
-			bundle := content[c.BundleDigest]
+			bundle := content[v1alpha1.BundleReference{Name: c.BundleName, Digest: c.BundleDigest}]
 			if bundle == nil {
 				return nil, nil, fmt.Errorf("binding %s: no content for bundle %s@%s", b.Binding.Name, c.BundleName, c.BundleDigest)
 			}

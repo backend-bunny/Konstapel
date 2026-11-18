@@ -833,3 +833,49 @@ func TestObserveAttempts(t *testing.T) {
 		t.Fatalf("observed %v", got)
 	}
 }
+
+// Acceptance is scoped to the bundle name and its source's trust
+// configuration; the cached bytes are shared by digest. A verified name and
+// digest does not satisfy the same digest under another configured name:
+// that name is verified under its own source rule against the retained
+// evidence and, as its payload names the first, refused. The first name's
+// acceptance is untouched and still served without retrieval.
+func TestAcceptanceIsPerNameNotPerDigest(t *testing.T) {
+	w := newWorld(t)
+	w.mustResolve()
+	w.fetch.down.Store(true) // whatever happens, no retrieval
+	const other = "other-bundle"
+	src := w.f.Source()
+	src.Name = other
+	w.revs.edit(func(r *revs) { r.src[other] = src; r.trust[other] = "trust-1" })
+	t1, _, err := w.r.begin(provfixture.Name, w.f.Subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, _, err := w.r.begin(other, w.f.Subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.acc.Lookup(t2.Key); ok {
+		t.Fatal("the other name has an acceptance before any verification")
+	}
+	_, err = w.r.Resolve(context.Background(), Request{Name: other, Digest: w.f.Subject, Holder: bundle.HolderProfile, Owner: "profile/q"})
+	wantErr(t, err)
+	if _, ok := w.acc.Lookup(t2.Key); ok || w.acc.Len() != 1 {
+		t.Fatalf("the other name was accepted (%d acceptances)", w.acc.Len())
+	}
+	if _, ok := w.acc.Lookup(t1.Key); !ok {
+		t.Fatal("the first name lost its acceptance")
+	}
+	// The retained evidence is rechecked under the other name's rule and
+	// refused; fresh evidence is then requested (the registry is down) and
+	// never replaces the refusal with a success.
+	if !errors.Is(err, ErrUntrusted) || w.fetch.calls.Load() != 2 {
+		t.Fatalf("other name: %v after %d registry requests", err, w.fetch.calls.Load())
+	}
+	w.mustResolve()
+	if w.fetch.calls.Load() != 2 {
+		t.Fatal("the first name was retrieved again")
+	}
+	w.noLeases()
+}

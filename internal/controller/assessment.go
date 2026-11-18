@@ -265,13 +265,13 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 	}
 	selectedProfile = profile
 	res := targeting.Resolve(in)
-	content := map[string]*targeting.Content{}
+	content := map[v1alpha1.BundleReference]*targeting.Content{}
 	if profile != nil && len(in.Bundles) > 0 {
 		c, err := r.Content.Content(ctx, profile.Spec.Bundle)
 		if err != nil {
 			return collector.CaptureV2{}, nil, 0, nil, false, err
 		}
-		content[c.Bundle.Digest] = c
+		content[c.Bundle.Ref()] = c
 	}
 	subjects, stale, err := targeting.ExpectedEvidence(res, content)
 	if err != nil {

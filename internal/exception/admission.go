@@ -297,12 +297,16 @@ func (r *ClusterResolver) resolve(ctx context.Context, ns targeting.NamespaceRef
 		return nil, nil, err
 	}
 	in.Bindings, in.Profiles = bindings.Items, profiles.Items
-	seen := map[string]bool{}
+	// Content is resolved once per name and digest, the resolution identity:
+	// a reference that does not resolve (for example an unconfigured name
+	// pinning a digest another name also pins) makes only its own consumers
+	// unresolved, and never stands in for, or hides, another name's content.
+	seen := map[v1alpha1.BundleReference]bool{}
 	for _, p := range profiles.Items {
-		if seen[p.Spec.Bundle.Digest] {
+		if seen[p.Spec.Bundle] {
 			continue
 		}
-		seen[p.Spec.Bundle.Digest] = true
+		seen[p.Spec.Bundle] = true
 		c, err := r.Content.Content(ctx, p.Spec.Bundle)
 		switch {
 		case errors.Is(err, targeting.ErrContentUnavailable):

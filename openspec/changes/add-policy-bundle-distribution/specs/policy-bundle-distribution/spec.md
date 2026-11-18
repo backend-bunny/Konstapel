@@ -97,6 +97,22 @@ payload name mismatches, and content not matching the pin SHALL be unresolved.
 - **THEN** the profile still requests exactly its pinned manifest digest
 - **AND** neither change silently selects another bundle or revision
 
+### Requirement: Bundle name and digest are the resolution identity
+
+The profile's bundle name and digest together SHALL be the resolution identity
+of every consumer (targeting, exception admission and assessment): content
+SHALL be resolved, accepted, memoized and looked up per name and digest, never
+per digest alone. Whether one reference resolves SHALL NOT change whether
+another name with the same digest resolves. Immutable cached bytes MAY be
+shared by digest; acceptance SHALL NOT be.
+
+#### Scenario: Pin a digest under a name that does not resolve
+
+- **WHEN** one profile pins a digest under a resolvable name and another profile pins the same digest under a name with no configured source, or whose source rule or trust does not accept it
+- **THEN** only the second profile, and the bindings, namespaces and exception requests that depend on it, are unresolved
+- **AND** the first profile resolves and grants exactly as it would without the second, whichever is listed first
+- **AND** content accepted for the first name is never adopted, memoized or reported as resolved for the second
+
 ### Requirement: Private registry access using controller credentials
 
 Konstapel SHALL retrieve bundle content and verification metadata using its own

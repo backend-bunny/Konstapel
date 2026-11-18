@@ -40,13 +40,13 @@ func (e *env) answers(binding string, pods ...*corev1.Pod) answers {
 		e.t.Fatal(err)
 	}
 	result := targeting.Resolve(in)
-	contents := map[string]*targeting.Content{}
+	contents := map[v1alpha1.BundleReference]*targeting.Content{}
 	for _, bundle := range in.Bundles {
 		c, err := content.Content(ctx, v1alpha1.BundleReference{Name: bundle.Name, Digest: bundle.Digest})
 		if err != nil {
 			e.t.Fatal(err)
 		}
-		contents[bundle.Digest] = c
+		contents[bundle.Ref()] = c
 	}
 	subjects, stale, err := targeting.ExpectedEvidence(result, contents)
 	if err != nil {
