@@ -36,7 +36,8 @@ vendored bundle SHALL remain unchanged.
 
 An assessment run SHALL capture the exact verified content of every bundle
 an assessed contribution was applied from (the bundle identified by its
-delivered engine policy), keyed by manifest digest, including each bundle's
+delivered engine policy), identified by bundle name and manifest digest and
+packaged under its manifest digest, including each bundle's
 digests, OSCAL content, mappings and verification context. It SHALL record the
 desired bundle (the profile's selection) separately and report every
 desired/applied difference explicitly. Applied content SHALL be frozen when the

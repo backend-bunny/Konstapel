@@ -42,6 +42,8 @@ is unresolved; native grant enablement remains gated by group 1 and governance.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 2.6 Add spec.revoked defaulting to false and its schema/admission transitions, authenticated protected revocation actor/time, and finalization protection; verify omission on existing resources does not renew, creation/renewal with true and same-revision clearing are rejected, repeat revoke preserves the first actor/time, dry runs have no durable side effects, version-aware concurrent updates fail stale, and expired/Forbidden/unresolved acceptances can be revoked without fresh eligibility. Verify application identities cannot forge history or remove protected finalization safeguards.
   <!-- agent: tier=deep risk=high reason="Grant scope, revocation races, and durable acceptance history" -->
+- [x] 2.7 Resolve admission eligibility per bundle name and digest rather than per digest; verify with unit and live replica admission regressions that a profile pinning the same digest under an unconfigured name makes only its own targeted namespaces unresolved, whichever profile is listed first, while other namespaces keep their SelfService acceptance.
+  <!-- agent: tier=deep risk=high reason="Exception eligibility must not be granted or withheld through another bundle name's resolution" -->
 
 ## 3. Persist acceptances and govern native grants
 

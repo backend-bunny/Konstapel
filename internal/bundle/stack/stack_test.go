@@ -333,6 +333,36 @@ func TestRouter(t *testing.T) {
 			t.Fatalf("%d memo entries", r.MemoLen())
 		}
 	})
+
+	// The memo and the adoption guard are per name and digest: content
+	// memoized and confirmed for one name is never served, or confirmed, for
+	// the same digest under another name, and that name's failure leaves the
+	// first one's entry in place.
+	t.Run("memo is per name and digest", func(t *testing.T) {
+		oci := &fakeSource{}
+		confirmed := map[string]bool{oref.Name: true}
+		r := newRouter(local, VendoredName, oci, func(name, _ string) error {
+			if !confirmed[name] {
+				return resolve.ErrStale
+			}
+			return nil
+		})
+		if _, err := r.Content(ctx, oref); err != nil {
+			t.Fatal(err)
+		}
+		other := oref
+		other.Name = "other-bundle"
+		oci.err = &targeting.ContentError{Class: targeting.ContentErrorConfig, Err: resolve.ErrConfig}
+		if _, err := r.Content(ctx, other); targeting.ContentErrorClassOf(err) != targeting.ContentErrorConfig || oci.calls != 2 {
+			t.Fatalf("another name was served from the memo: %v, %d calls", err, oci.calls)
+		}
+		if err := r.Confirm(ctx, other); !errors.Is(err, resolve.ErrStale) {
+			t.Fatalf("another name confirmed: %v", err)
+		}
+		if c, err := r.Content(ctx, oref); err != nil || c.Bundle.Name != oref.Name || oci.calls != 2 {
+			t.Fatalf("the first name lost its memo entry: %v, %d calls", err, oci.calls)
+		}
+	})
 }
 
 // With the real stack: trust revocation, configuration loss and a removed

@@ -45,6 +45,15 @@ type Bundle struct {
 	Policies []BundlePolicy `json:"policies"`
 }
 
+// Ref is the bundle's resolution identity: its name and digest together.
+// Content is resolved, accepted and consumed per name and digest, never per
+// digest alone: the same digest under another name is another reference,
+// resolved through that name's source and trust, and whether it resolves
+// says nothing about this one.
+func (b Bundle) Ref() v1alpha1.BundleReference {
+	return v1alpha1.BundleReference{Name: b.Name, Digest: b.Digest}
+}
+
 // Namespace is the resolver's view of a Namespace.
 type Namespace struct {
 	Name   string            `json:"name"`
@@ -55,7 +64,10 @@ type Namespace struct {
 // Input is a complete snapshot of the configuration to resolve. The resolver
 // is pure: the same snapshot in any order produces the same Result.
 type Input struct {
-	Cluster    string
+	Cluster string
+	// Bundles is the content that resolved, each identified by its Ref
+	// (name and digest). A profile resolves only against the entry with its
+	// exact pinned name and digest.
 	Bundles    []Bundle
 	Profiles   []v1alpha1.ComplianceProfile
 	Bindings   []v1alpha1.ComplianceBinding
@@ -83,9 +95,9 @@ func Resolve(in Input) Result {
 	for i := range in.Profiles {
 		profiles[in.Profiles[i].Name] = &in.Profiles[i]
 	}
-	bundles := make(map[string]*Bundle, len(in.Bundles))
+	bundles := make(map[v1alpha1.BundleReference]*Bundle, len(in.Bundles))
 	for i := range in.Bundles {
-		bundles[in.Bundles[i].Digest] = &in.Bundles[i]
+		bundles[in.Bundles[i].Ref()] = &in.Bundles[i]
 	}
 	namespaces := slices.SortedFunc(slices.Values(in.Namespaces), func(a, b Namespace) int {
 		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
@@ -146,7 +158,7 @@ func Resolve(in Input) Result {
 	return res
 }
 
-func resolveBinding(cluster string, b *v1alpha1.ComplianceBinding, profiles map[string]*v1alpha1.ComplianceProfile, bundles map[string]*Bundle, namespaces []Namespace) (br BindingResult) {
+func resolveBinding(cluster string, b *v1alpha1.ComplianceBinding, profiles map[string]*v1alpha1.ComplianceProfile, bundles map[v1alpha1.BundleReference]*Bundle, namespaces []Namespace) (br BindingResult) {
 	br = BindingResult{
 		Binding:       ObjectRevision{Name: b.Name, UID: b.UID, Generation: b.Generation},
 		Targets:       []NamespaceRef{},
@@ -187,8 +199,10 @@ func resolveBinding(cluster string, b *v1alpha1.ComplianceBinding, profiles map[
 		fail(ReasonProfileNotFound, b.Spec.ProfileRef.Name, "", "ComplianceProfile %q not found", b.Spec.ProfileRef.Name)
 		return br
 	}
-	bundle := bundles[p.Spec.Bundle.Digest]
-	if bundle == nil || bundle.Name != p.Spec.Bundle.Name {
+	// Exactly the pinned name and digest: content available under another
+	// name with the same digest neither satisfies nor blocks this profile.
+	bundle := bundles[p.Spec.Bundle]
+	if bundle == nil {
 		fail(ReasonContentUnavailable, p.Name, "", "bundle %s@%s is not available", p.Spec.Bundle.Name, p.Spec.Bundle.Digest)
 		return br
 	}

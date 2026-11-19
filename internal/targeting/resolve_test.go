@@ -307,3 +307,91 @@ func TestContributionsCarryProvenance(t *testing.T) {
 		t.Fatalf("provenance mismatch: %+v", c)
 	}
 }
+
+// Resolution identity is the bundle name and digest together. A profile
+// pinning the same digest under a name whose content is unavailable is
+// unresolved on its own; it never makes another name's profile unresolved,
+// and content available under one name never satisfies another name. Every
+// input order gives the same result.
+func TestSameDigestUnderAnotherNameResolvesIndependently(t *testing.T) {
+	team := profile("team", selfService("p1", time.Hour))
+	org := profile("org", selfService("p1", time.Hour))
+	org.Spec.Bundle.Name = "org-bundle" // the same digest as team's "b"
+	in := Input{Cluster: "c", Bundles: []Bundle{testBundle()},
+		Profiles: []v1alpha1.ComplianceProfile{org, team},
+		Bindings: []v1alpha1.ComplianceBinding{
+			binding("team", "team", v1alpha1.ModeAudit, v1alpha1.NamespaceSelector{MatchLabels: map[string]v1alpha1.LabelValue{"t": "team"}}),
+			binding("org", "org", v1alpha1.ModeAudit, v1alpha1.NamespaceSelector{MatchLabels: map[string]v1alpha1.LabelValue{"t": "org"}}),
+		},
+		Namespaces: []Namespace{ns("team-ns", "t", "team"), ns("org-ns", "t", "org")}}
+	byName := func(r Result) map[string]BindingResult {
+		m := map[string]BindingResult{}
+		for _, b := range r.Bindings {
+			m[b.Binding.Name] = b
+		}
+		return m
+	}
+	eligibility := func(r Result, namespace string) Eligibility {
+		t.Helper()
+		for _, e := range r.Eligibility {
+			if e.Namespace.Name == namespace && e.Policy == "p1" {
+				return e
+			}
+		}
+		t.Fatalf("no eligibility for %s", namespace)
+		return Eligibility{}
+	}
+
+	t.Run("an unavailable name affects only its consumers", func(t *testing.T) {
+		r := resolveStable(t, in)
+		bs := byName(r)
+		if b := bs["team"]; len(b.Errors) != 0 || len(b.Contributions) != 1 || b.Contributions[0].BundleName != "b" {
+			t.Fatalf("team binding: %+v", b)
+		}
+		if b := bs["org"]; len(b.Contributions) != 0 || len(b.Errors) != 1 || b.Errors[0].Reason != ReasonContentUnavailable {
+			t.Fatalf("org binding: %+v", b)
+		}
+		if e := eligibility(r, "team-ns"); e.Effective != v1alpha1.ExceptionsSelfService || len(e.Errors) != 0 {
+			t.Fatalf("team namespace eligibility: %+v", e)
+		}
+		// org-ns gets no Eligibility entry (no contribution), and its binding
+		// error is what the exception resolver reports as unresolved.
+		for _, e := range r.Eligibility {
+			if e.Namespace.Name == "org-ns" {
+				t.Fatalf("an unresolved profile contributed eligibility: %+v", e)
+			}
+		}
+	})
+
+	t.Run("each available name resolves against its own content", func(t *testing.T) {
+		other := testBundle()
+		other.Name = "org-bundle"
+		other.Policies = []BundlePolicy{{Name: "p1", Scope: ScopeNamespaced, Parameters: true}}
+		in := in
+		in.Bundles = []Bundle{testBundle(), other}
+		r := resolveStable(t, in)
+		bs := byName(r)
+		for _, name := range []string{"team", "org"} {
+			if b := bs[name]; len(b.Errors) != 0 || len(b.Contributions) != 1 {
+				t.Fatalf("%s binding: %+v", name, b)
+			}
+		}
+		if bs["org"].Contributions[0].BundleName != "org-bundle" || bs["team"].Contributions[0].BundleName != "b" {
+			t.Fatalf("contributions name the wrong bundle: %+v", r.Bindings)
+		}
+	})
+
+	t.Run("content under another name never satisfies a pin", func(t *testing.T) {
+		other := testBundle()
+		other.Name = "org-bundle"
+		in := in
+		in.Bundles = []Bundle{other}
+		bs := byName(resolveStable(t, in))
+		if b := bs["team"]; len(b.Contributions) != 0 || len(b.Errors) != 1 || b.Errors[0].Reason != ReasonContentUnavailable {
+			t.Fatalf("team binding resolved through org-bundle: %+v", b)
+		}
+		if b := bs["org"]; len(b.Errors) != 0 || len(b.Contributions) != 1 {
+			t.Fatalf("org binding: %+v", b)
+		}
+	})
+}

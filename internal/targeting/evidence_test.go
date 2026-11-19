@@ -16,7 +16,7 @@ import (
 
 // evidenceFixture is the documented Audit-all/Deny-production example on the
 // vendored content, plus a binding whose profile is missing.
-func evidenceFixture(t *testing.T) (Input, map[string]*Content) {
+func evidenceFixture(t *testing.T) (Input, map[v1alpha1.BundleReference]*Content) {
 	t.Helper()
 	ref := v1alpha1.BundleReference{Name: "konstapel-vendored", Digest: vendoredDigest(t)}
 	c, err := vendored().Content(context.Background(), ref)
@@ -32,7 +32,7 @@ func evidenceFixture(t *testing.T) (Input, map[string]*Content) {
 			binding("dangling", "absent", v1alpha1.ModeDeny, v1alpha1.NamespaceSelector{}),
 		},
 		Namespaces: []Namespace{ns("shop-prod", "environment", "production"), ns("shop-dev", "environment", "development")}}
-	return in, map[string]*Content{c.Bundle.Digest: c}
+	return in, map[v1alpha1.BundleReference]*Content{c.Bundle.Ref(): c}
 }
 
 func TestExpectedEvidenceMatchesGolden(t *testing.T) {
@@ -127,8 +127,18 @@ func TestExpectedEvidenceReportsStaleScope(t *testing.T) {
 
 func TestExpectedEvidenceRefusesMissingContent(t *testing.T) {
 	in, _ := evidenceFixture(t)
-	if _, _, err := ExpectedEvidence(Resolve(in), map[string]*Content{}); err == nil {
+	if _, _, err := ExpectedEvidence(Resolve(in), map[v1alpha1.BundleReference]*Content{}); err == nil {
 		t.Fatal("missing content must be an error, not a guess")
+	}
+	// The same digest under another name is other content, not a match.
+	in, content := evidenceFixture(t)
+	renamed := map[v1alpha1.BundleReference]*Content{}
+	for ref, c := range content {
+		ref.Name = "other-bundle"
+		renamed[ref] = c
+	}
+	if _, _, err := ExpectedEvidence(Resolve(in), renamed); err == nil {
+		t.Fatal("content of the same digest under another name was used")
 	}
 }
 

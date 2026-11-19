@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -386,5 +387,68 @@ func TestRecreatedNamespaceIsNotResolved(t *testing.T) {
 	res, err := r.Resolve(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-1"}, "not-applied")
 	if err != nil || res.Eligibility != nil {
 		t.Errorf("unapplied policy: %v %v", res.Eligibility, err)
+	}
+}
+
+// namedContent serves the policy only under the listed bundle names, and
+// counts requests per name and digest.
+type namedContent struct {
+	names map[string]bool
+	calls map[v1alpha1.BundleReference]int
+}
+
+func (n *namedContent) Content(ctx context.Context, ref v1alpha1.BundleReference) (*targeting.Content, error) {
+	n.calls[ref]++
+	if !n.names[ref.Name] {
+		return nil, &targeting.ContentError{Class: targeting.ContentErrorConfig, Detail: ref.Name + ": no source is configured", Err: targeting.ErrContentUnavailable}
+	}
+	return content{}.Content(ctx, ref)
+}
+
+// Bundle content is resolved per name and digest. A profile pinning the
+// same digest under a name that does not resolve makes only the namespaces
+// it targets unresolved, whichever profile is listed first; the available
+// name still grants SelfService elsewhere.
+func TestUnavailableNameWithTheSameDigestAffectsOnlyItsConsumers(t *testing.T) {
+	for _, orgProfile := range []string{"a-org", "z-org"} { // listed before and after the team profile
+		t.Run(orgProfile, func(t *testing.T) {
+			org := profile(orgProfile, v1alpha1.ExceptionsSelfService, 720*time.Hour)
+			org.Spec.Bundle.Name = "org-bundle"
+			c := fake.NewClientBuilder().WithScheme(scheme(t)).WithObjects(
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", UID: "ns-a-1", Labels: map[string]string{"t": "team"}}},
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-org", UID: "ns-o-1", Labels: map[string]string{"t": "org"}}},
+				profile("m-team", v1alpha1.ExceptionsSelfService, 720*time.Hour), org,
+				binding("team", "m-team", map[string]v1alpha1.LabelValue{"t": "team"}),
+				binding("org", orgProfile, map[string]v1alpha1.LabelValue{"t": "org"}),
+			).Build()
+			src := &namedContent{names: map[string]bool{"example": true}, calls: map[v1alpha1.BundleReference]int{}}
+			r := &ClusterResolver{Reader: c, Content: src, Cluster: cluster}
+
+			res, err := r.Resolve(context.Background(), targeting.NamespaceRef{Name: "team-a", UID: "ns-a-1"}, policy)
+			if err != nil || res.Eligibility == nil || res.Eligibility.Effective != v1alpha1.ExceptionsSelfService || len(res.Eligibility.Errors) != 0 {
+				t.Fatalf("team-a: %+v %v", res.Eligibility, err)
+			}
+			want := map[v1alpha1.BundleReference]int{{Name: "example", Digest: digest}: 1, {Name: "org-bundle", Digest: digest}: 1}
+			if !maps.Equal(src.calls, want) {
+				t.Fatalf("content requests %v, want one per name and digest %v", src.calls, want)
+			}
+
+			res, err = r.Resolve(context.Background(), targeting.NamespaceRef{Name: "team-org", UID: "ns-o-1"}, policy)
+			if err != nil || res.Eligibility == nil || res.Eligibility.Effective != v1alpha1.ExceptionsForbidden ||
+				len(res.Eligibility.Errors) != 1 || res.Eligibility.Errors[0].Reason != targeting.ReasonContentUnavailable {
+				t.Fatalf("team-org must be unresolved: %+v %v", res.Eligibility, err)
+			}
+
+			// Through admission: the team namespace is accepted, the org
+			// namespace is denied as unresolved.
+			m, _ := NewHandlers(scheme(t), c, src, cluster)
+			m.Now = func() time.Time { return t0 }
+			if resp := m.Handle(context.Background(), request(t, admissionv1.Create, alice, exceptionObj("team-a", 1, nil), nil)); !resp.Allowed {
+				t.Fatalf("team-a denied: %v", resp.Result)
+			}
+			if resp := m.Handle(context.Background(), request(t, admissionv1.Create, alice, exceptionObj("team-org", 1, nil), nil)); resp.Allowed || resp.Result == nil || !strings.Contains(resp.Result.Message, ReasonUnresolved) {
+				t.Fatalf("team-org: %+v", resp.Result)
+			}
+		})
 	}
 }

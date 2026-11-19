@@ -68,7 +68,7 @@ func bundleCaptureWith(t *testing.T, extra []extraPod) exportFixture {
 	}
 	res := targeting.Resolve(targeting.Input{Cluster: cluster, Bundles: []targeting.Bundle{c.Bundle}, Profiles: []v1alpha1.ComplianceProfile{profile},
 		Bindings: bindings, Namespaces: namespaces})
-	subjects, stale, err := targeting.ExpectedEvidence(res, map[string]*targeting.Content{ref.Digest: c})
+	subjects, stale, err := targeting.ExpectedEvidence(res, map[v1alpha1.BundleReference]*targeting.Content{ref: c})
 	if err != nil {
 		t.Fatal(err)
 	}
