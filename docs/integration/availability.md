@@ -560,6 +560,7 @@ what clients, S3 and metrics show, not by who holds the Lease.
 | Graceful follower replacement | the follower is deleted with its normal grace and is gone within the 45s shutdown budget (+10s; never `SIGKILL`ed). The leader keeps the Lease (same holder, acquisition time and transition count) and publishes a run started during the replacement; the replacement becomes ready |
 | Graceful leader replacement, commit held | the leader has staged a run's package in S3 and the fault proxy holds its commit. The leader is deleted gracefully and is gone within the budget; its held commit ends with the process and is never forwarded. Another replica takes the Lease (one more transition, within 60s), its commit of the same run is held too, and the run stays `Publishing` with its UID. Released, it commits the same run (UID, publication ID) with the exact staged archive, once |
 | Abrupt leader failure during collection | the leader is force-deleted while a run is `Collecting`. The capture lived only in that pod's staging volume: the run ends `Failed` with `CaptureLost`, S3 has no commit for it, and the next run publishes under a new identity |
+| Leader API loss, commit held | the leader has staged a run and the fault proxy holds its commit. Then the leader's node drops every packet from that pod to the API server endpoints (an `iptables` rule in the node's `FORWARD` chain, so open connections stall as in a partition); S3 stays reachable. The other replica takes the Lease (one more transition, within 60s). The cut-off process exits on the lost leadership without forwarding its commit, the pod is not ready while it cannot reach the API, and no scrape of its metrics succeeds (it cannot authenticate one), so it serves nothing it remembered. Meanwhile a second operator's `ClusterRoleBinding` is deleted: every download replica refuses that operator (`403`) and still serves the first. The successor commits the same run once with the staged archive. With the rule removed, the former leader becomes ready as a follower: the Lease stays with the successor, which alone exposes owner metrics. The held run is the only new run, and the first run's receipt (publication ID, digest, `publishedAt`, `expiresAt`) is unchanged |
 | Node loss, commit held | with the replicas on different workers, the leader's worker container is stopped while its commit is held. The replica on the other worker takes the Lease and commits the same staged run once; the download replica there serves the package directly |
 
 After every event:
@@ -597,6 +598,24 @@ moves them):
 - no privileged pod was admitted and every compliant pod was. Under heavy host
   load, single admission probes failed while Kyverno's webhook was briefly
   unreachable (fail closed, never admitted).
+
+### Handovers during outages, trust changes and revocation
+
+Each case below changes a dependency or an authorization while leadership
+moves, and is checked by what clients, stored objects and metrics show:
+
+| During a handover | Test (group) | What must hold |
+| --- | --- | --- |
+| The leader loses the API server | `TestLiveHelmFailoverTraffic` leader API loss (availability) | see [Failover under traffic](#failover-under-traffic): the cut-off leader stops, commits nothing, is unready and serves no metrics; Kyverno keeps enforcing; the successor recovers the run with its staged bytes; nothing is fabricated |
+| No replica can use the Lease | `TestLiveHelmMonitoring` no leader (monitoring) | the leader restarts; no owner series and no ready domain anywhere; `KonstapelObservationUnavailable` fires; one owner after access returns ([integrated acceptance](metrics.md#integrated-acceptance)) |
+| S3 unreachable or held | `TestLiveHelmDurableRecovery`, `TestLiveHelmAvailability` S3 outage, `TestLiveHelmFailoverTraffic` held commits (availability); `TestLiveLeaderHandoverRecovery` (recovery) | the run stays `Publishing`, never `CaptureLost`, while access is uncertain; the successor commits the staged bytes once or records the original commit and expiry |
+| Registry down | `TestLiveHelmBundles` follower pins and rollback (charts) | a successor with a verified cache delivers from it; replicas with an empty cache report `ContentUnavailable` and keep the applied policies |
+| Bundle trust rotated to a key that did not sign the content, registry down | `TestLiveHelmBundles` follower pins (charts) | the successor holds the bytes and their proofs but delivers nothing for a new binding (unresolved, `ContentUnavailable`); the applied policy keeps its UID and digest; rotated back, the same successor delivers from its cache |
+| Signing key deleted while the leader is lost | `TestLiveHelmDurableRecovery` signing (availability) | the successor recovers the stored signature without any private key and commits it; the signature is uploaded once and both artifacts verify offline |
+| A download grant revoked | `TestLiveHelmFailoverTraffic` leader API loss (availability) | every download replica refuses the revoked operator at once; others keep access |
+| A central exception restriction while no replica leads | `TestLiveReplicaAdmission` (assessments) | the surviving replica denies at once; earlier acceptances, revisions and snapshots are unchanged by failover |
+
+Native exception grants are not delivered yet, so their handover is task 3.6.
 
 ## Lifecycle matrix
 
@@ -665,5 +684,3 @@ disposable cluster and checks four things:
 - Chart deployment of the exception admission webhooks, and native exception
   grants, which wait for an upstream Kyverno release
   (add-self-service-policy-exceptions).
-- Acceptance of leader API loss, registry and backend outages, trust rotation
-  and authorization revocation during a handover (task 5.6).

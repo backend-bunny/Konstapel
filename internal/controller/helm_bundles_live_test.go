@@ -20,7 +20,9 @@ package controller
 //     key changes: invalid configuration, deletion, trust revocation and
 //     recovery keep the applied policy and never deliver rejected content;
 //   - a follower pins (fetches and verifies) content itself, so after the
-//     leader is lost it delivers with the registry down;
+//     leader is lost it delivers with the registry down; while trust is
+//     rotated to a key that did not sign the bundle, that cached content
+//     delivers nothing new and the applied policy stays;
 //   - a mirror, credential rotation, a controller upgrade and a rollback
 //     (the latter during a registry outage) leave the applied revision
 //     unchanged.
@@ -805,10 +807,15 @@ func TestLiveHelmBundles(t *testing.T) {
 	l.waitReady(late.Name, 1)
 	l.record("revocation", map[string]any{"revoked": revoked, "newBindingDuringRevocation": "unresolved, no policies", "recovered": l.policiesFor(late.Name)})
 
-	// 7. A follower pins content itself: with the registry down, the leader
-	// is lost and the former follower delivers a new binding from its own
-	// verified cache (it has no webhooks and reconciles nothing as a
-	// follower, so only its Pinner can have fetched).
+	// 7. A follower pins content itself, and verifies it again under the
+	// current trust when it takes over (add-controller-high-availability
+	// 5.6). Trust is rotated to a key that did not sign the bundle, the
+	// registry goes down and the leader is lost: the former follower holds
+	// the bytes and their proofs in its own cache, yet delivers nothing for a
+	// new binding and keeps the applied policies. Rotated back, it delivers
+	// that binding from its own verified cache with the registry still down
+	// (it has no webhooks and reconciles nothing as a follower, so only its
+	// Pinner can have fetched).
 	leader := l.leaderPod(ns, "")
 	follower := ""
 	for _, p := range l.readyPods(ns, "controller", 2) {
@@ -816,6 +823,10 @@ func TestLiveHelmBundles(t *testing.T) {
 			follower = p.Name
 		}
 	}
+	l.obApply(key(f.pubOther))
+	l.obApply(sourcesCM(obSource(f, mirrored.Repository, f.fpOther)))
+	l.waitProfile(p.Name, v1alpha1.ReasonContentUnavailable, "(Untrusted)")
+	l.waitStale(b.Name)
 	l.pause(reg.name, true)
 	// Remove the leader without a replacement that could win the Lease
 	// (leadership is not released on shutdown, so a fresh pod would race
@@ -856,7 +867,24 @@ func TestLiveHelmBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 	extra[fo.Name] = fo
+	// Only the successor runs, so these statuses are its own decisions.
+	l.eventually("a new binding stays unresolved under the successor with trust rotated", func() (bool, string) {
+		lb := l.binding(fo.Name)
+		c := meta.FindStatusCondition(lb.Status.Conditions, v1alpha1.ConditionResolved)
+		return c != nil && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonContentUnavailable && c.ObservedGeneration == lb.Generation, toJSON(lb.Status)
+	})
+	untrusted := l.waitProfile(p.Name, v1alpha1.ReasonContentUnavailable, "")
+	if got := l.policiesFor(fo.Name); len(got) != 0 {
+		t.Fatalf("the successor delivered content its cache holds under rotated trust: %v", got)
+	}
+	l.waitStale(b.Name)
+	if got := l.obApplied(b.Name); got != applied0 {
+		t.Fatalf("a handover under rotated trust changed applied policies: %s", got)
+	}
+	l.obApply(key(f.pubOrg))
+	l.obApply(sourcesCM(mirrored))
 	l.waitReady(fo.Name, 1)
+	unchanged("trust rotated back after the handover")
 	if got := l.obState(b.Name); got != state {
 		t.Fatalf("failover changed applied policies: %s", got)
 	}
@@ -870,7 +898,8 @@ func TestLiveHelmBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.readyPods(ns, "controller", 2)
-	l.record("follower-pins", map[string]any{"lostLeader": leader, "newLeader": follower, "registry": "paused", "delivered": l.policiesFor(fo.Name)})
+	l.record("follower-pins", map[string]any{"lostLeader": leader, "newLeader": follower, "registry": "paused",
+		"rotatedTrust": untrusted, "newBindingUnderRotatedTrust": "unresolved, no policies", "delivered": l.policiesFor(fo.Name)})
 
 	// 8. Controller upgrade with a rotated credential: new pods start with
 	// empty caches, fetch with the new credential and verify again; the

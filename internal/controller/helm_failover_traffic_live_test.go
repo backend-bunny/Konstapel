@@ -3,7 +3,7 @@
 package controller
 
 // Failover under traffic on the Helm-installed controller
-// (add-controller-high-availability 5.3; group "availability", one control
+// (add-controller-high-availability 5.3, 5.6; group "availability", one control
 // plane running Kyverno and two workers). Both charts run the packaged
 // image with two replicas, operator TLS and authenticated metrics. Traffic
 // runs for the whole test, and each event is judged by what clients,
@@ -32,7 +32,16 @@ package controller
 //     the killed pod's staging volume, so the run ends as a truthful
 //     CaptureLost with nothing in S3, and the next run publishes under a new
 //     identity;
-//  4. loss of the leader's node while its commit is held: the replica on the
+//  4. leader API loss while its commit is held: the leader's node drops the
+//     pod's packets to the API server, while S3 stays reachable. The other
+//     replica takes the Lease; the cut-off process exits on the lost
+//     leadership without forwarding its commit, is not ready and serves no
+//     metrics scrape (it cannot authenticate one). Meanwhile a revoked
+//     operator is refused by every download replica. The successor commits
+//     the same staged run once; once the API is reachable again the former
+//     leader rejoins as a follower without owner metrics; no other run
+//     appears and the earlier receipt keeps its identity and expiry;
+//  5. loss of the leader's node while its commit is held: the replica on the
 //     other worker takes the Lease and commits the same staged run once; the
 //     download replica there serves the package.
 //
@@ -55,6 +64,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +73,7 @@ import (
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -309,7 +320,128 @@ func TestLiveHelmFailoverTraffic(t *testing.T) {
 	ev["lostRun"], ev["outcome"], ev["nextRun"], ev["nextPublicationID"] = lostRun.Name, "CaptureLost, no commit in S3", next.Name, next.Status.Publication.PublicationID
 	l.record("abrupt-leader", ev)
 
-	// 4. Loss of the leader's node while its commit is held. The replicas
+	// 4. Leader API loss during a handover. The leader has staged a run whose
+	// commit the proxy holds; then its pod alone is cut off from the API
+	// server. It still reaches S3, so only its own cancellation keeps that
+	// commit from landing. While it is cut off, an operator's download grant
+	// is revoked.
+	tr.mark("leader-api-loss")
+	retained := l.run(first.Name).Status.Publication
+	runsBefore := l.ftRuns(b.Name)
+	revoked, revokedCRB := l.downloadOperator(ns, "ft-revoked")
+	downloadAddrs := map[string]string{}
+	for _, p := range l.readyPods(ns, "download", 2) {
+		downloadAddrs[p.Name] = l.portForward(ns, "pod/"+p.Name, 8443)
+	}
+	// eachDownload asks every download replica for the first run's package
+	// as op; it reports whether every replica answered want.
+	eachDownload := func(op string, want int) (bool, map[string]int) {
+		got, all := map[string]int{}, true
+		for name, addr := range downloadAddrs {
+			code, sum := l.downloadPackage(addr, ns, op, caPEM, string(first.UID))
+			if code == http.StatusOK && sum != first.Status.Publication.PackageSHA256 {
+				t.Fatalf("download replica %s served %s for run %s, receipt %s", name, sum, first.Name, first.Status.Publication.PackageSHA256)
+			}
+			got[name] = code
+			all = all && code == want
+		}
+		return all, got
+	}
+	if ok, got := eachDownload(revoked, http.StatusOK); !ok {
+		t.Fatalf("the operator to be revoked cannot download before the revocation: %v", got)
+	}
+	held = l.ftHeld(b.Name, "ft-api-loss", proxy, store)
+	leader = l.leaderPod(ns, "")
+	cut := &corev1.Pod{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Namespace: ns, Name: leader}, cut); err != nil {
+		t.Fatal(err)
+	}
+	restartsBefore := restarts(*cut)
+	prior = l.lease(ns)
+	start = time.Now()
+	heal := l.ftCutOffAPI(cut)
+	successor = l.leaderPod(ns, leader)
+	takeover = time.Since(start)
+	l.ftTransitioned(ns, prior, takeover)
+	// The cut-off leader gave up on its own: its process exited on the lost
+	// leadership, and its held commit, which could still reach S3, was never
+	// forwarded.
+	cutPod := func() *corev1.Pod {
+		p := &corev1.Pod{}
+		if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(cut), p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	l.eventually("the cut-off former leader's process exited", func() (bool, string) {
+		return restarts(*cutPod()) > restartsBefore, l.podDiagnostics(ns)
+	})
+	exited := time.Since(start)
+	abandoned = proxy.state()
+	if abandoned.CommitsForwarded != 0 || abandoned.CommitArrivals < 1 {
+		t.Fatalf("the cut-off former leader's held commit: %s", toJSON(abandoned))
+	}
+	// Without the API it is no ready endpoint, and its metrics fail closed:
+	// it cannot authenticate a scrape, so nothing it remembers is served.
+	l.eventually("the cut-off replica not ready", func() (bool, string) { return !ftReady(cutPod()), l.podDiagnostics(ns) })
+	var refusals []string
+	for range 5 {
+		delete(metrics.addrs, cut.Name) // a port-forward may end with the restarted container
+		body, err := metrics.scrape(cut.Name)
+		if err == nil {
+			for _, s := range ftParse(body) {
+				if ftOwnerSeries(s.name) || (s.name == "konstapel_observation_ready" && s.value != 0) {
+					t.Fatalf("the cut-off former leader %s exposes %s{%s} %v", cut.Name, s.name, s.labels, s.value)
+				}
+			}
+			t.Fatalf("the cut-off former leader %s served a scrape it could not authenticate", cut.Name)
+		}
+		refusals = append(refusals, err.Error())
+		time.Sleep(2 * time.Second)
+	}
+	// Revocation during the handover: the next request through every
+	// download replica is refused, while the other operator keeps access.
+	if err := l.c.Delete(l.ctx, revokedCRB); err != nil {
+		t.Fatal(err)
+	}
+	revokedAt := time.Now()
+	l.eventually("the revoked operator refused by every download replica", func() (bool, string) {
+		ok, got := eachDownload(revoked, http.StatusForbidden)
+		return ok, fmt.Sprint(got)
+	})
+	refusedAfter := time.Since(revokedAt)
+	if ok, got := eachDownload(operator, http.StatusOK); !ok {
+		t.Fatalf("the unrevoked operator after the revocation: %v", got)
+	}
+	// While the former leader is still cut off, the successor commits the
+	// held run once, with the staged bytes, and owns the metrics.
+	rec = l.ftRecovered(b.Name, held, proxy, store, viaService, abandoned.CommitsHeld)
+	ev = after("leader-api-loss", successor, "")
+	heal()
+	healed := time.Now()
+	l.eventually("the former leader ready again with the API reachable", func() (bool, string) { return ftReady(cutPod()), l.podDiagnostics(ns) })
+	rejoined := time.Since(healed)
+	// It rejoins as a follower: the Lease stays with the successor, and only
+	// the successor exposes owner metrics.
+	if cur := l.lease(ns); transitions(cur) != transitions(prior)+1 || !strings.HasPrefix(*cur.Spec.HolderIdentity, successor+"_") {
+		t.Fatalf("the Lease after the former leader rejoined:\n before %s\n after %s", toJSON(prior.Spec), toJSON(cur.Spec))
+	}
+	delete(metrics.addrs, cut.Name)
+	metrics.owner(b.Name, successor, "")
+	// Nothing fabricated: the held run is the only new run, and the earlier
+	// receipt keeps its identity and expiry.
+	if added := ftAdded(runsBefore, l.ftRuns(b.Name)); len(added) != 1 || added[0] != held.run.Name {
+		t.Fatalf("runs added during the leader API loss: %v, want only %s", added, held.run.Name)
+	}
+	if now := l.run(first.Name).Status.Publication; toJSON(now) != toJSON(retained) {
+		t.Fatalf("the earlier receipt changed:\n before %s\n after  %s", toJSON(retained), toJSON(now))
+	}
+	ev["cutOff"], ev["successor"], ev["leaseTakenAfterSeconds"], ev["formerLeaderExitedAfterSeconds"] = leader, successor, takeover.Seconds(), exited.Seconds()
+	ev["scrapesWhileCutOff"], ev["revokedRefusedAfterSeconds"], ev["rejoinedAfterHealSeconds"] = refusals, refusedAfter.Seconds(), rejoined.Seconds()
+	ev["proxyWhenLeaderGone"], ev["recovery"], ev["retainedReceipt"] = toJSON(abandoned), rec, retained
+	l.record("leader-api-loss", ev)
+
+	// 5. Loss of the leader's node while its commit is held. The replicas
 	// must sit on different workers, or the node takes both.
 	tr.mark("node-loss")
 	l.ftSpread(ns)
@@ -453,6 +585,110 @@ func (l *live) ftTransitioned(ns string, prior *coordinationv1.Lease, took time.
 	if took > ftTakeoverBound {
 		l.t.Fatalf("takeover took %s, bound %s", took, ftTakeoverBound)
 	}
+}
+
+// ftCutOffAPI cuts pod alone off from the Kubernetes API server: its node
+// drops every packet from the pod's IP to each API server endpoint of the
+// kubernetes Service (inserted first in FORWARD, so open connections stall
+// as in a partition rather than closing). The pod keeps its other traffic
+// (S3), and port-forwards through the kubelet still reach it. The returned
+// function removes the rules; the test's cleanup does if it was not called.
+func (l *live) ftCutOffAPI(pod *corev1.Pod) (heal func()) {
+	t := l.t
+	t.Helper()
+	if pod.Status.PodIP == "" || pod.Spec.NodeName == "" {
+		t.Fatalf("pod %s has no IP or node", pod.Name)
+	}
+	var eps discoveryv1.EndpointSliceList
+	if err := l.c.List(l.ctx, &eps, client.InNamespace(metav1.NamespaceDefault), client.MatchingLabels{discoveryv1.LabelServiceName: "kubernetes"}); err != nil {
+		t.Fatal(err)
+	}
+	var rules [][]string
+	for _, s := range eps.Items {
+		for _, port := range s.Ports {
+			for _, e := range s.Endpoints {
+				for _, a := range e.Addresses {
+					if port.Port != nil && !strings.Contains(a, ":") {
+						rules = append(rules, []string{"FORWARD", "-s", pod.Status.PodIP, "-d", a, "-p", "tcp", "--dport", strconv.Itoa(int(*port.Port)), "-j", "DROP"})
+					}
+				}
+			}
+		}
+	}
+	if len(rules) == 0 {
+		t.Fatalf("no IPv4 API server endpoint: %s", toJSON(eps.Items))
+	}
+	iptables := func(op string, rule []string) error {
+		out, err := exec.Command("docker", append([]string{"exec", pod.Spec.NodeName, "iptables", op}, rule...)...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("iptables %s %v on %s: %v %s", op, rule, pod.Spec.NodeName, err, out)
+		}
+		return nil
+	}
+	healed := false
+	heal = func() {
+		t.Helper()
+		if healed {
+			return
+		}
+		healed = true
+		for _, r := range rules {
+			if err := iptables("-D", r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		if !healed {
+			for _, r := range rules {
+				_ = iptables("-D", r)
+			}
+		}
+	})
+	for _, r := range rules {
+		if err := iptables("-I", r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return heal
+}
+
+// ftReady reports the pod's Ready condition.
+func ftReady(p *corev1.Pod) bool {
+	for _, c := range p.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			return c.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// ftRuns lists the names of the binding's runs.
+func (l *live) ftRuns(binding string) map[string]bool {
+	l.t.Helper()
+	var runs v1alpha1.AssessmentRunList
+	if err := l.c.List(l.ctx, &runs); err != nil {
+		l.t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, r := range runs.Items {
+		if r.Spec.BindingRef.Name == binding {
+			out[r.Name] = true
+		}
+	}
+	return out
+}
+
+// ftAdded is the sorted names in after but not in before.
+func ftAdded(before, after map[string]bool) []string {
+	var out []string
+	for n := range after {
+		if !before[n] {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ftPolicies maps the binding's delivered engine policies to their UID and

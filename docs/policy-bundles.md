@@ -3297,10 +3297,15 @@ mirror tool. It verifies, in order:
    `ContentUnavailable (Untrusted)`; the applied policy stays; a new binding of
    the same profile stays unresolved with no policies; after restoring trust
    both resolve.
-7. Follower pins: with the registry paused, the leader is removed (scaled
-   away, so no fresh pod races for the Lease) and the former follower, which
-   reconciled nothing and serves no webhook, delivers a new binding from the
-   content its own Pinner fetched and verified.
+7. Follower pins, and trust rotated during the handover: trust is rotated
+   to another key (as in step 6) and the registry paused; then the leader is
+   removed (scaled away, so no fresh pod races for the Lease). The former
+   follower, which reconciled nothing and serves no webhook, holds the
+   content and its proofs in its own cache, yet a new binding stays
+   unresolved (`ContentUnavailable`) with no policies and the applied policy
+   keeps its UID and digest. With trust rotated back and the registry still
+   paused, it delivers that binding from the content its own Pinner fetched
+   and verified.
 8. Controller upgrade (a changed value rolls both pods) after rotating the
    credential Secret to another registry user: the new pods fetch with the
    new credential (seen in the registry log) and the applied revision is
