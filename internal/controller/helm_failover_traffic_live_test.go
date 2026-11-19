@@ -161,7 +161,10 @@ func TestLiveHelmFailoverTraffic(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = l.c.Delete(l.ctx, b); _ = l.c.Delete(l.ctx, p) })
 	l.waitReady(b.Name, 1)
-	l.setRetention(b.Name, "600s", &v1alpha1.DestinationReference{Name: ed.Name, UID: string(ed.UID)})
+	// The first run's package is downloaded until the end, and its receipt
+	// compared across the leader API loss: it must not expire meanwhile
+	// (the whole test took about 6 minutes in CI, longer under load).
+	l.setRetention(b.Name, "1800s", &v1alpha1.DestinationReference{Name: ed.Name, UID: string(ed.UID)})
 	t.Cleanup(func() { l.dropRuns(b.Name) })
 	l.waitReady(b.Name, 1)
 	first := l.publishedRun(b.Name, "")
