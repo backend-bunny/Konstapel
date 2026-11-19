@@ -4,9 +4,11 @@ package controller
 // attachments 5.1, 5.2).
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -660,5 +662,152 @@ func reportAll(t *testing.T, e *runEnv, ns, podUID, outcome string, at time.Time
 	r.SetUID(types.UID("report-" + podUID))
 	if err := e.c.Create(context.Background(), r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A run that closes while the readers are unverified keeps that answer for
+// good (docs/supporting-evidence.md, "A rollout can make the limitation
+// permanent"): its supporting context is unavailable and its package holds
+// no document or protection marker, its technical evidence is exactly that
+// of a run that closed with verified readers, and verifying the readers
+// later never rewrites the closed run's status or package. A later run
+// gets its supporting evidence normally.
+func TestClosedRunKeepsReadersUnverifiedAfterRollout(t *testing.T) {
+	mk := func() *runEnv {
+		e := newRunEnv(t, shortTimeout(epochBinding("audit-prod", map[string]v1alpha1.LabelValue{"environment": "production"})))
+		e.deliver("audit-prod")
+		e.assess("audit-prod")
+		return e
+	}
+	// Control: the same scenario closed with verified readers.
+	base := newSupportEnv(t, mk())
+	base.attach("current", "audit-prod", []byte("%PDF current audit"))
+	baseRun, baseDir, _ := base.publish("audit-prod", nil)
+	baseRep, baseDesc := packagedCoverage(t, baseDir)
+	if !baseDesc.Protected() || baseRep.SupportingEvidence.Integration != coverage.IntegrationAvailable {
+		t.Fatalf("control run is not supported: %+v", baseRep.SupportingEvidence)
+	}
+
+	e := newSupportEnv(t, mk())
+	verified := false
+	e.rr.Runtime.ProtectedReaders = func(context.Context) error {
+		if verified {
+			return nil
+		}
+		return errors.New("download rollout in progress")
+	}
+	e.attach("current", "audit-prod", []byte("%PDF current audit"))
+	run, dir, archive := e.publish("audit-prod", nil)
+
+	// (a) The closed run's supporting context is unavailable and bare.
+	rep, desc := packagedCoverage(t, dir)
+	se := rep.SupportingEvidence
+	if desc.Protected() || se.Integration != coverage.IntegrationUnavailable || se.Reason != reasonReadersUnverified || len(se.Entries) != 0 {
+		t.Fatalf("protection %+v supporting %+v", desc.Protection, se)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "supporting-evidence")); !os.IsNotExist(err) {
+		t.Fatal("supporting files were packaged")
+	}
+	if strings.Contains(string(archive), "%PDF") {
+		t.Error("package carries a document copy")
+	}
+
+	// (b) The technical evidence is the control's, untouched and not
+	// marked unavailable.
+	jsonOf := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	// Control rows differ only in the supporting references the control
+	// run attributes; every other field must match.
+	plain := func(cs []coverage.ControlCoverage) string {
+		cs = slices.Clone(cs)
+		for i := range cs {
+			cs[i].SupportingEvidence = nil
+		}
+		return jsonOf(cs)
+	}
+	for _, c := range rep.Controls {
+		if len(c.SupportingEvidence) != 0 {
+			t.Fatalf("control %s references supporting evidence: %+v", c.QualifiedID, c.SupportingEvidence)
+		}
+	}
+	if jsonOf(rep.TechnicalEvidence) != jsonOf(baseRep.TechnicalEvidence) || plain(rep.Controls) != plain(baseRep.Controls) ||
+		rep.TechnicalEvidence.State != coverage.EvidenceResolved || rep.TechnicalEvidence.Evidence == nil || rep.TechnicalEvidence.Evidence.Completeness != "Complete" {
+		t.Fatalf("technical evidence changed:\n%s\ncontrol:\n%s", jsonOf(rep.TechnicalEvidence), jsonOf(baseRep.TechnicalEvidence))
+	}
+	if desc.Evidence != baseDesc.Evidence || desc.Outcomes != baseDesc.Outcomes || !slices.Equal(desc.Revisions.Enforcement, baseDesc.Revisions.Enforcement) {
+		t.Fatalf("descriptor evidence %+v %+v, control %+v %+v", desc.Evidence, desc.Outcomes, baseDesc.Evidence, baseDesc.Outcomes)
+	}
+	if run.Status.Summary.Evidence != baseRun.Status.Summary.Evidence || run.Status.Summary.Outcomes != baseRun.Status.Summary.Outcomes {
+		t.Fatalf("run summary %+v, control %+v", run.Status.Summary, baseRun.Status.Summary)
+	}
+
+	// (c) Readers verified later: the closed run is never rewritten.
+	// One more step settles the post-publication cleanup bookkeeping, which
+	// is not part of what is compared.
+	e.step(run.Name)
+	run = e.run(run.Name)
+	verified = true
+	before, err := json.Marshal(run.Status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		e.now = e.now.Add(time.Minute)
+		e.step(run.Name)
+	}
+	after := e.run(run.Name)
+	if got, _ := json.Marshal(after.Status); !bytes.Equal(before, got) {
+		t.Fatalf("closed run status was rewritten:\n%s\n%s", before, got)
+	}
+	rc, _, err := e.pub.Open(context.Background(), e.ref(after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := io.ReadAll(rc)
+	rc.Close()
+	if !bytes.Equal(archive, again) {
+		t.Fatal("closed run's package bytes were rewritten")
+	}
+
+	// A later run closes with verified readers and carries the document.
+	e.assess("audit-prod")
+	e.now = a0.Add(24*time.Hour + time.Minute)
+	e.assess("audit-prod")
+	next := e.schedule("audit-prod").ActiveRun
+	if next == nil || next.Name == run.Name {
+		t.Fatalf("no later run: %+v", next)
+	}
+	e.step(next.Name)
+	e.rereport("prod", "pod-1", e.enginePolicy(), "fail", e.now.Add(time.Minute))
+	e.now = e.now.Add(90 * time.Second)
+	e.step(next.Name)
+	later := e.run(next.Name)
+	if later.Status.Phase != v1alpha1.RunCompleted {
+		t.Fatalf("later run %s %+v", later.Status.Phase, later.Status.Conditions)
+	}
+	lrc, _, err := e.pub.Open(context.Background(), e.ref(later))
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterArchive, _ := io.ReadAll(lrc)
+	lrc.Close()
+	lrep, ldesc := packagedCoverage(t, unpackFake(t, laterArchive))
+	if !ldesc.Protected() || lrep.SupportingEvidence.Integration != coverage.IntegrationAvailable || len(lrep.SupportingEvidence.Entries) != 1 {
+		t.Fatalf("later run protection %+v supporting %+v", ldesc.Protection, lrep.SupportingEvidence)
+	}
+	// And the earlier run is still as it closed.
+	rc, _, err = e.pub.Open(context.Background(), e.ref(e.run(run.Name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ = io.ReadAll(rc)
+	rc.Close()
+	if !bytes.Equal(archive, again) {
+		t.Fatal("closed run's package changed when a later run closed")
 	}
 }

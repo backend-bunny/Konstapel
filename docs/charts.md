@@ -407,7 +407,8 @@ Deployment, the run's supporting evidence is reported unavailable with
 reason `ProtectedReadersUnverified`. The package then carries no supporting
 context and no document copy, its coverage shows a blocking limitation, and
 its technical evidence is unaffected. The answer is frozen with the run's
-closure. The check uses the controller's existing read access to Pods and
+closure and is permanent for that run: verifying the readers later never
+rewrites a closed run ([supporting evidence](supporting-evidence.md)). The check uses the controller's existing read access to Pods and
 Deployments; the chart adds no permission. It doesn't follow a download
 service deployed outside the chart. Rolling the download service back below
 this version while protected packages are retained remains unsupported.
