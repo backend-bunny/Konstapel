@@ -55,6 +55,8 @@ attestation and GitHub provenance on each OCI subject.
 | Claim | Evidence |
 | --- | --- |
 | Leader pod loss and node loss: another replica leads within about 20 s and reconciles | `TestLiveHelmAvailability` |
+| Under admission and download traffic, graceful follower or leader replacement, an abrupt leader kill, leader API loss and node loss never admit a privileged pod, never serve a wrong package, and keep the engine policies' UIDs; a cut-off leader exits without forwarding held writes and serves no metrics; a revoked download operator is refused by every replica at once | `TestLiveHelmFailoverTraffic` (`availability` group; [measurements](integration/availability.md#failover-under-traffic)) |
+| A bundle registry outage or trust rotation during a handover delivers from verified caches only, keeps the applied policies and reports `ContentUnavailable` otherwise | `TestLiveHelmBundles` (`charts` group) |
 | Kyverno keeps enforcing, and downloads keep serving, while no controller runs | `TestLiveHelmAvailability`, `TestLiveHelmInstall` |
 | A run staged in S3 before its commit is committed by the other replica after the Lease holder's pod is removed, with the same run and publication identity and the exact staged bytes; a run committed before its Kubernetes receipt is recorded with its original commit, `publishedAt`, `expiresAt` and retention even if the binding's retention changed since; nothing is committed twice | `TestLiveHelmDurableRecovery` (`availability` group: installed image, two replicas, real S3 behind a test-owned fault proxy that holds, or forwards and withholds, the commit); also `TestLiveLeaderHandoverRecovery`, `TestLiveLeaderHandoverLoss` (in-process managers) |
 | A capture lost before durable staging is reported as `CaptureLost`, never published, and an S3 outage alone never causes it: while S3 is held or unreachable, before and after the leader pod is removed, the run stays `Publishing` | `TestLiveHelmAvailability`, `TestLiveHelmDurableRecovery` (installed image), `TestLiveLeaderHandoverLoss` |
@@ -78,7 +80,7 @@ attestation and GitHub provenance on each OCI subject.
 | The image is signed and attested, and is verified before release | the image publish workflow ([Images](images.md#verify)) |
 | Chart archives are frozen (source commit, checksums, CRD content, image digest) before acceptance, and only accepted bytes are published, write-once | `test_chart_manifest.py`, `test_chart_publish.py`, `test_chart_release_inputs.py`; release: the `charts` workflow |
 | Each chart subject is signed, with a chart-inputs attestation binding source, image, archive and acceptance; verification pulls the subject by digest and compares bytes | `test_chart_publish.py` (key pairs); release: keyless verification in the `charts` workflow |
-| Release acceptance covers every release-required group on the frozen artifacts: `charts`, `monitoring` and `availability` each run on their own disposable cluster, install the frozen archives and pull the released image by digest on every node. Per-test results come from the real test logs, and a missing, failed, cancelled, skipped, stale or mismatched record is refused before any registry write | `test_chart_evidence.py`, `test_chart_publish.py`, `test_acceptance.py`; release: `task charts:acceptance` in the `charts` workflow |
+| Release acceptance covers every release-required group on the frozen artifacts: `charts`, `monitoring` and `availability` each run on their own disposable cluster, install the frozen archives and pull the released image by digest on every node. Per-test results come from the real test logs, and a missing, failed, cancelled, skipped, stale or mismatched record is refused before any registry write. The `availability` group is the high-availability gate: `TestLiveHelmDurableRecovery`, `TestLiveHelmAvailability` and `TestLiveHelmFailoverTraffic` must all pass (`scripts/acceptance-groups.json`) | `test_chart_evidence.py`, `test_chart_publish.py`, `test_acceptance.py`; release: `task charts:acceptance` in the `charts` workflow |
 | The release notes' install commands install exactly the verified bytes | `test_documented_install_commands_pull_the_frozen_archives` |
 
 ## Known limitations
@@ -102,10 +104,17 @@ attestation and GitHub provenance on each OCI subject.
   and conditional create (`If-None-Match: *`) is required.
 - **Staging is per pod.** Captures not yet staged in S3 are lost with their
   pod and reported as `CaptureLost`.
-- **Failover under traffic.** The recovery tests check state and bytes after
-  a leader pod or node is lost (a new leader takes the Lease in about 20 s).
-  They don't measure client request success during that gap or under
-  sustained load.
+- **Failover under traffic.** `TestLiveHelmFailoverTraffic` measures admission
+  and download requests during graceful and abrupt replacement, leader API
+  loss and node loss on a two-worker cluster; the results are test
+  measurements, not service levels
+  ([availability](integration/availability.md#failover-under-traffic)). Only
+  those cases and short windows are covered, not sustained load or
+  more than two replicas. Native exception grants across failover (task 3.6 of
+  `add-controller-high-availability`) wait for the upstream Kyverno fix.
+- **Availability acceptance needs an idle host.** The three-node
+  `availability` group starves on a shared small host; CI and the release
+  workflow are the gate ([operations runbook](integration/availability.md#shared-hosts)).
 - **Not in v0.1.0:** Trivy vulnerability assessment, evidence signing,
   policy-change previews, supporting attachments, independent policy-bundle
   distribution, and control-coverage reporting.

@@ -627,7 +627,128 @@ moves, and is checked by what clients, stored objects and metrics show:
 | A download grant revoked | `TestLiveHelmFailoverTraffic` leader API loss (availability) | every download replica refuses the revoked operator at once; others keep access |
 | A central exception restriction while no replica leads | `TestLiveReplicaAdmission` (assessments) | the surviving replica denies at once; earlier acceptances, revisions and snapshots are unchanged by failover |
 
-Native exception grants are not delivered yet, so their handover is task 3.6.
+Native exception grants are not delivered yet, so their handover stays open as task 3.6. It gates exception features, not two-replica availability.
+
+## Supported versions
+
+The matrix is what the acceptance groups install and test; other versions are
+untested, not known to fail. Inputs live in `scripts/runtime.env`,
+`devbox.json` and the charts, and Renovate moves them.
+
+| Component | Tested | Source |
+| --- | --- | --- |
+| Kubernetes | 1.37.0 (`kindest/node`); the runtime chart requires `kubeVersion >=1.36.0-0` (MutatingAdmissionPolicy) | `KONSTAPEL_NODE_IMAGE`, `charts/konstapel/Chart.yaml` |
+| Cluster shape | `availability` group: one control plane and two workers (Kyverno pinned to the control plane); other groups: one node | `KONSTAPEL_CLUSTER_WORKERS` |
+| kind / kubectl | 0.33.0 / 1.37.2 | `devbox.json` |
+| Helm | 4.3.1 | `devbox.json` |
+| Kyverno | chart 3.9.2 (`policies.kyverno.io/v1`, `wgpolicyk8s.io/v1alpha2`); CLI 1.19.2 | `runtime.env`, `devbox.json` |
+| cert-manager (optional TLS mode) | v1.21.3 | `runtime.env` |
+| S3-compatible backend | RustFS 1.0.3. Other services, including AWS S3, are untested | `KONSTAPEL_S3_IMAGE` |
+| OCI registry for bundles | registry 3.1.2 (tag-schema fallback) and zot v2.1.23 (referrers API) | `runtime.env` |
+| Prometheus Operator / promtool | v0.95.2 / v3.16.0 (monitoring group) | `runtime.env` |
+
+- **Replicas.** Two controller and two download replicas is the tested default
+  (`replicaCount: 2`, PodDisruptionBudget `minAvailable: 1`, rolling update
+  `maxUnavailable: 0` and `maxSurge: 1`, preferred hostname anti-affinity,
+  60s grace with a 45s shutdown budget). One replica is the development
+  setting and gives no redundant service. More than two replicas are untested.
+- **Rolling pairs.** The old and new revisions of a supported rolling upgrade
+  share the Lease, the CRD schemas and the storage contracts, so they can lead
+  and follow each other. Increasing replicas cannot make an incompatible pair
+  safe.
+- **Not recorded.** The kube-proxy mode and container runtime of the kind
+  nodes, and real multi-zone clusters, are not recorded in the evidence and are
+  untested.
+
+## Operations runbook
+
+Measured values are in [Measured recovery](#measured-recovery) and
+[Failover under traffic](#failover-under-traffic). They are test results, not
+service levels.
+
+### Leadership
+
+- One replica holds the Lease and runs reconcilers, assessment, publication
+  and cleanup. Takeover waits for the old Lease to expire (15s; it is never
+  released early), then for the successor to resync its caches: about 17-23s
+  in the Helm tests, longer under load.
+- Expect one more `leaseTransitions` per leader loss, upgrade step or node
+  failure ([Inspecting the Lease](#inspecting-the-lease)). Steady growth
+  without such events means renewals fail (API latency or CPU starvation).
+- Check that exactly one pod reports `konstapel_observation_ready 1` per
+  enabled domain and that it is the holder. Followers report ready 0 and no
+  owner series; that is correct. A leader that cannot reach the API exits and
+  restarts rather than serving remembered state.
+- While no replica leads, Kyverno keeps enforcing the delivered policies,
+  downloads keep serving from every ready download replica, and no new run or
+  reconcile starts. Alerts needing an owner domain cannot fire
+  ([alert runbooks](alert-runbooks.md)).
+
+### Rolling upgrades and node maintenance
+
+- Upgrade the CRD chart first, then the runtime chart (`helm upgrade`, see
+  [Helm charts](../charts.md)). Each Deployment replaces pods one surge at a
+  time and never drops below two ready replicas; the new pod must be ready
+  before an old one is retired. A gracefully stopped leader does not release
+  the Lease, so the next holder appears after it expires.
+- If surge capacity is missing the surge pod stays `Pending`, both old
+  replicas keep serving and the rollout stays visibly incomplete
+  (`kubectl rollout status`) until capacity returns. Preferred anti-affinity
+  lets replicas co-locate when only one node fits; that is not node redundancy.
+- Voluntary evictions go one at a time: the PodDisruptionBudget refuses (`429`)
+  a second one until the replacement is ready. Drain nodes sequentially.
+- **`ProtectedReadersUnverified`.** The controller writes protected supporting
+  evidence only while every download replica runs its own image. During the
+  download rollout, or while one Deployment declares another image, runs that
+  close report supporting evidence unavailable with this reason; the package
+  carries no supporting context, technical evidence is unaffected. The next run
+  after the rollout is complete carries it again
+  ([protected-package readers](../charts.md#protected-package-readers)). No
+  action beyond finishing or reverting the rollout.
+- **Downgrades.** Supported rollback is to a previously tested chart and image
+  pair, or scaling to one replica, accepting reduced availability. Never
+  disable election, authentication or retention recovery. Rolling the download
+  service back below the supporting-evidence version while protected packages
+  are retained is unsupported ([supporting evidence](../supporting-evidence.md)).
+  Running the controller and download server from different images is
+  unsupported outside a rollout.
+
+### Failure modes
+
+| Situation | What happens | Check |
+| --- | --- | --- |
+| Leader loses the API server | the leader exits on the lost Lease without forwarding held writes; it is unready and serves no metrics while cut off; the other replica takes over; the former leader returns as a follower. Kyverno keeps enforcing | Lease holder and transitions; `konstapel_observation_ready`; `KonstapelObservationUnavailable` if no replica can lead ([Permission failures](#permission-failures)) |
+| Leader pod or node lost mid-run | before staging the run ends `Failed` with `CaptureLost` and the next run publishes under a new identity; after staging, the successor commits the same run with the staged bytes; after commit but before the receipt it records the original commit and expiry | `konstapel_publication_pending`, `konstapel_publication_failed`; the run's `Published` condition ([Failure walkthrough](#failure-walkthrough)) |
+| S3 unreachable or held | runs stay `Publishing`, never `CaptureLost`, while access is uncertain; downloads of affected packages return `503` and clients retry. Nothing is fabricated | `KonstapelPublicationFailing`, `konstapel_operation_attempts_total{operation="evidence_publication",result="failure"}`, `konstapel_publication_failed` |
+| Registry down | a replica with a verified cache keeps delivering from it; one with an empty cache reports `ContentUnavailable` and keeps applied policies | `KonstapelBindingUnresolved`, `konstapel_binding_condition{condition="Resolved"}` |
+| Bundle trust rotated to a key that did not sign the content | nothing new is delivered (`ContentUnavailable`); the applied policy keeps its UID and digest; rotating back delivers from the cache | same as above; correct the trust configuration |
+| Download authorization revoked | every download replica refuses the operator (`403`) at once, others keep access; no session affinity or leader proxy | download `403` responses |
+| Kyverno API or permission loss | reported in binding conditions, no crash, recovers without restart | `KonstapelEngineUnavailable` |
+| Evidence ages out with no new run | the current view turns stale; it is never shown healthy | `konstapel_binding_current_evidence_expiry_timestamp_seconds`, `KonstapelAssessmentOverdue` |
+| Packages past expiry cannot be deleted | retention blocks deletion | `KonstapelCleanupBlocked`, `konstapel_cleanup_blocked` |
+
+Per-pod staging is not shared: a capture that was never staged in S3 is lost
+with its pod and reported as `CaptureLost`. Retries repeat the whole download
+with fresh authorization; there is no resumable download.
+
+### Alerts and metrics
+
+Use the families in [metrics](metrics.md) and the starter alerts in
+[alert runbooks](alert-runbooks.md): `KonstapelMetricsUnavailable`,
+`KonstapelObservationUnavailable`, `KonstapelBindingUnresolved`,
+`KonstapelEngineUnavailable`, `KonstapelAssessmentOverdue`,
+`KonstapelPublicationFailing`, `KonstapelCleanupBlocked`. During a takeover,
+a condition that persists through the gap fires again only after its full hold,
+and the default `KonstapelObservationUnavailable` hold (5m) is not reached by a
+normal takeover.
+
+### Shared hosts
+
+The three-node `availability` group needs an otherwise idle host. On a shared
+4-CPU, 7 GiB development host it starved (I/O wait above 50%, swap in use): the
+kind API server restarted and the leader lost its Lease before any fault was
+injected. A local failure there is not evidence of a defect, and a passing CI
+run is the gate. Run one live cluster at a time.
 
 ## Lifecycle matrix
 
