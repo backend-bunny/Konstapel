@@ -164,10 +164,42 @@ a 0600 `dev.env` of random credentials until Ctrl-C. Each run removes its own
 container and named volume, identified by label. See
 [supporting evidence](supporting-evidence.md#local-development).
 
-CI uploads test-owned evidence as `acceptance-evidence-<group>`, excluding kubeconfigs,
-compiled test binaries, rendered chart manifests, and node logs. The task tears
-down its cluster and test service on success or failure; teardown errors fail
-the task and remain in its logs.
+Every run records `version-matrix.json` before creating the cluster: the tested
+source commit (and whether it had uncommitted changes), the chart source trees
+or, in release acceptance, the frozen archives' SHA-256, the tool versions on
+`PATH`, the `devbox.lock` checksum and every pin of `scripts/runtime.env`.
+Before teardown, on success, failure, timeout or cancellation alike,
+`scripts/acceptance-evidence.sh diagnostics` writes `diagnostics/`: Kubernetes
+events, the Conditions of nodes, workloads, CRDs, APIServices and the Kyverno,
+cert-manager and Prometheus Operator resources, the full status of Konstapel
+resources (ComplianceBinding, AssessmentRun, EvidenceDestination, ...), Pod
+container states and image IDs, Leases, Helm releases, test-owned containers
+still present, and recent logs of every Pod outside the kind system namespaces.
+It then adds the server and node versions, Helm charts and running image IDs
+to the version matrix. It never reads Secrets, Pod specs or container
+environments; a failed collection step is listed in `diagnostics/collect.log`
+without changing the result. Resources a test already deleted in its own
+cleanup are gone by then; their events are in the test log.
+`acceptance-result.json` records the `outcome`: `passed`, `failed`,
+`timed-out` or `interrupted`. `KONSTAPEL_ACCEPTANCE_TIMEOUT` (for example
+`100m`, set by the `test` workflow) stops a hung run, including every process it
+started, so diagnostics and teardown finish inside the job timeout. Once
+cleanup starts it ignores further INT/TERM signals; only SIGKILL stops it.
+
+CI uploads test-owned evidence as `acceptance-evidence-<group>` (release
+acceptance: `chart-acceptance-evidence`) only through
+`scripts/ci/stage-evidence.py`. It copies the output without kubeconfigs,
+compiled test binaries, the rendered Kyverno manifest, node logs, symlinks or
+special files, and scans every copied file, including archive members, for PEM
+or base64-encoded private keys (Cosign keys too), kubeconfig client keys and
+tokens, bearer/basic authorization, JWTs, cloud and S3 access keys or
+credential assignments, registry auths and htpasswd entries, age and GitHub
+tokens, Kubernetes Secret data and key-material file names. A finding fails the
+job and nothing is uploaded; the step summary names the file, line and rule,
+never the value. Run it locally with
+`devbox run -- python3 scripts/ci/stage-evidence.py OUTPUT FRESH_DIR`.
+The task tears down its cluster and test service on success or failure;
+teardown errors fail the task and remain in its logs.
 After teardown the task checks that the kind cluster is gone and that no
 container a live test labelled `konstapel.acceptance=<cluster name>` (test S3,
 fault proxy and registry services) remains; a leftover fails the run, is
