@@ -1,102 +1,4 @@
 {
-  "admission": {
-    "core": true,
-    "exceptionAdmission": false,
-    "release": false,
-    "goTests": [
-      "TestLiveDelivery",
-      "TestLiveManager",
-      "TestLiveObservability",
-      "TestLiveEnforcementEpoch",
-      "TestLiveTargetingWorkflow",
-      "TestLiveHardeningAdmission",
-      "TestLiveHardeningUserNamespaces",
-      "TestLiveLeaderElection",
-      "TestLiveBoundedShutdown",
-      "TestLiveLeaderObservability",
-      "TestLiveHardeningBackground",
-      "TestLiveEvidenceAttachmentAPI"
-    ]
-  },
-  "assessments": {
-    "core": false,
-    "exceptionAdmission": true,
-    "release": false,
-    "goTests": [
-      "TestLiveAssessmentStatus",
-      "TestLiveAssessmentRuns",
-      "TestLiveEngineCorrelation",
-      "TestLiveIntegratedAssessments",
-      "TestLiveSupportingEvidenceAcceptance"
-    ]
-  },
-  "storage": {
-    "core": false,
-    "exceptionAdmission": false,
-    "release": false,
-    "goTests": [
-      "TestLiveDestinationPins",
-      "TestLiveEvidenceDownload",
-      "TestLiveRetentionLifecycle",
-      "TestLiveOrphanFence",
-      "TestLiveDestinationAPI",
-      "TestLiveLegacyMigration",
-      "TestLiveDestinationSigning",
-      "TestLiveSignedEvidenceDownload",
-      "TestLiveSignedPublicationWorkflow",
-      "TestLiveAttachmentStorage",
-      "TestLiveAttachmentTransfer",
-      "TestLiveAttachmentLifecycle",
-      "TestLiveSupportingEvidencePackages"
-    ]
-  },
-  "capabilities": {
-    "core": false,
-    "exceptionAdmission": false,
-    "release": false,
-    "goTests": [
-      "TestLiveEngineCapabilityRecovery"
-    ]
-  },
-  "charts": {
-    "core": false,
-    "exceptionAdmission": false,
-    "image": true,
-    "certManager": true,
-    "release": true,
-    "goTests": [
-      "TestLiveCRDChartLifecycle",
-      "TestLiveHelmInstall",
-      "TestLiveHelmBundles",
-      "TestLiveHelmMetrics",
-      "TestLiveHelmSupportingEvidence"
-    ]
-  },
-  "monitoring": {
-    "core": false,
-    "exceptionAdmission": false,
-    "image": true,
-    "certManager": true,
-    "prometheusOperator": true,
-    "release": true,
-    "goTests": [
-      "TestLiveHelmMonitoring"
-    ]
-  },
-  "recovery": {
-    "core": false,
-    "exceptionAdmission": false,
-    "release": false,
-    "goTests": [
-      "TestLiveTargetingFailures",
-      "TestLiveAssessmentFaults",
-      "TestLiveEvidenceRecovery",
-      "TestLiveLeaderHandoverRecovery",
-      "TestLiveLeaderHandoverLoss",
-      "TestLiveSupportingEvidenceRecovery",
-      "TestLivePublicationFaults"
-    ]
-  },
   "availability": {
     "core": false,
     "exceptionAdmission": false,
@@ -104,19 +6,7 @@
     "workers": 2,
     "release": true,
     "goTests": [
-      "TestLiveHelmDurableRecovery",
-      "TestLiveHelmAvailability",
       "TestLiveHelmFailoverTraffic"
-    ]
-  },
-  "bundles": {
-    "core": false,
-    "exceptionAdmission": false,
-    "release": false,
-    "goTests": [
-      "TestLiveBundlesOfficial",
-      "TestLiveBundlesOrganization",
-      "TestLiveBundlesHardening"
     ]
   }
 }

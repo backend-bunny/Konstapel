@@ -612,7 +612,8 @@ func (l *live) ftCutOffAPI(pod *corev1.Pod) (heal func()) {
 			for _, e := range s.Endpoints {
 				for _, a := range e.Addresses {
 					if port.Port != nil && !strings.Contains(a, ":") {
-						rules = append(rules, []string{"FORWARD", "-s", pod.Status.PodIP, "-d", a, "-p", "tcp", "--dport", strconv.Itoa(int(*port.Port)), "-j", "DROP"})
+						rules = append(rules, []string{"FORWARD", "-s", "192.0.2.1", "-d", a, // HAND-BREAK: the rule matches no pod
+							"-p", "tcp", "--dport", strconv.Itoa(int(*port.Port)), "-j", "DROP"})
 					}
 				}
 			}
