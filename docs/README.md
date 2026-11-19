@@ -30,6 +30,7 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 | [Policy bundles](policy-bundles.md) | Payload contract, central sources, registry retrieval, signature and provenance verification, the content cache, controller and Helm wiring, and bundle releases; the first official bundle (`konstapel-privileged-containers` 0.1.0) is published. Remaining work is tracked in the `add-policy-bundle-distribution` change. |
 | [Official bundle Audit walkthrough](integration/bundle-audit-walkthrough.md) | Copy-paste run on a disposable kind cluster: official sources, a profile pinning the released bundle by digest, an Audit binding, a privileged Pod admitted, and the assessment finding with matching bundle and content digests. Run by hand, not in CI. |
 | [Assessment-loop prototype](integration/assessment-loop.md) | Standalone Kyverno/C2P runner and shared disposable-cluster acceptance commands. |
+| [Policy change preview](policy-preview.md) | Rendered-input model and candidate configuration only (`internal/preview`); the `konstapel preview` command, cluster observation, comparison and reports are not implemented yet. |
 | [Trivy proposal](../openspec/changes/add-trivy-vulnerability-assessment/proposal.md) | Planned reporting-only image vulnerability assessment; no implemented Trivy provider yet. |
 
 ## Develop and release

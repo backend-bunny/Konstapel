@@ -1,0 +1,2 @@
+# An explicitly empty stream: with --before it proposes removing every
+# identity of the previous set and nothing else.

@@ -1,0 +1,23 @@
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-staging
+spec:
+  profileRef:
+    name: workload-baseline
+  namespaceSelector:
+    matchLabels:
+      environment: staging
+  mode: Audit
+---
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-production
+spec:
+  profileRef:
+    name: workload-baseline
+  namespaceSelector:
+    matchLabels:
+      environment: production
+  mode: Audit

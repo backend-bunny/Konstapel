@@ -1,0 +1,13 @@
+# expect: ambiguous-scalar
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata:
+  name: ambiguous
+spec:
+  bundle:
+    name: konstapel-privileged-containers
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  policies:
+    - name: disallow-privileged-containers
+      parameters:
+        allowHostPath: no

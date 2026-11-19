@@ -8,13 +8,13 @@ dependencies' CRDs, trust systems, or collectors.
 
 ## 1. Manifest inputs and candidate configuration
 
-- [ ] 1.1 Add strict rendered profile/binding input decoding with repeatable files, one stdin stream, named cluster-scoped identities, and bounded input size; verify multi-document YAML/JSON, duplicate keys/identities, unknown fields, unsupported kinds/versions, and invalid selectors in parser tests.
+- [x] 1.1 Add strict rendered profile/binding input decoding with repeatable files, one stdin stream, named cluster-scoped identities, and bounded input size; verify multi-document YAML/JSON, duplicate keys/identities, unknown fields, unsupported kinds/versions, and invalid selectors in parser tests.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.2 Build the candidate from live desired state plus proposed complete specifications and explicit before-minus-after removals; verify partial input preserves unrelated objects, an empty proposed stream removes only declared identities, and an already absent object creates no removal impact.
+- [x] 1.2 Build the candidate from live desired state plus proposed complete specifications and explicit before-minus-after removals; verify partial input preserves unrelated objects, an empty proposed stream removes only declared identities, and an already absent object creates no removal impact.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-- [ ] 1.3 Apply shared defaults/validation and ignore exported server metadata/status as proposed authority; verify default-equivalent and reordered inputs compare equally, injected UID/readiness values are ignored, and deleting a referenced profile produces an attributable error.
+- [x] 1.3 Apply shared defaults/validation and ignore exported server metadata/status as proposed authority; verify default-equivalent and reordered inputs compare equally, injected UID/readiness values are ignored, and deleting a referenced profile produces an attributable error.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 1.4 Document the rendered-input model, supported object scope, explicit removals, and lack of server-side-apply/admission prediction in `docs/policy-preview.md`; verify each example has a matching input fixture.
+- [x] 1.4 Document the rendered-input model, supported object scope, explicit removals, and lack of server-side-apply/admission prediction in `docs/policy-preview.md`; verify each example has a matching input fixture.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 2. Read-only cluster observation
