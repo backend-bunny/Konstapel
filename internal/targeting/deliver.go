@@ -244,6 +244,12 @@ func (d *Delivery) owned(ctx context.Context, bindingUID types.UID) ([]unstructu
 	return out, nil
 }
 
+// OwnedBy reports whether o is an engine policy the binding owns: it needs
+// both the ownership labels and a controller reference to the binding UID, so
+// a copied label alone does not confer ownership. Read-only consumers (the
+// policy-change preview) use the same rule as delivery.
+func OwnedBy(o *unstructured.Unstructured, bindingUID types.UID) bool { return ownedBy(o, bindingUID) }
+
 // ownedBy requires both the ownership labels and a controller reference to
 // the binding UID, so a copied label alone does not confer ownership.
 func ownedBy(o *unstructured.Unstructured, bindingUID types.UID) bool {

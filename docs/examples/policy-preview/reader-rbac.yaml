@@ -1,0 +1,42 @@
+# Read-only access for `konstapel preview` cluster observation
+# (docs/policy-preview.md, "Cluster access"). Bind it to the people or CI
+# identities that run previews; the preview uses their own kubeconfig
+# credentials and never the controller's ServiceAccount.
+#
+# Only get and list. No watch, no write verbs, no Secrets. Discovery
+# (/api, /apis) is allowed to every authenticated identity by the built-in
+# system:discovery role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-policy-preview-reader
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  # Cluster identity (get kube-system) and namespace membership (list).
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list]
+  # Live desired configuration, and acceptance records in every namespace.
+  - apiGroups: [compliance.erenius.io]
+    resources: [complianceprofiles, compliancebindings, complianceexceptions]
+    verbs: [list]
+  # Applied engine policies (listed by the Konstapel management label).
+  - apiGroups: [policies.kyverno.io]
+    resources: [validatingpolicies]
+    verbs: [list]
+---
+# In the Konstapel controller namespace only: acceptance snapshots (list by
+# label) and the bundle-source ConfigMap plus the trust ConfigMaps it names
+# (get). Replace konstapel-system if the controller runs elsewhere.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-policy-preview-reader
+  namespace: konstapel-system
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list]

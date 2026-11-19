@@ -19,13 +19,14 @@ dependencies' CRDs, trust systems, or collectors.
 
 ## 2. Read-only cluster observation
 
-- [ ] 2.1 Add a direct kubeconfig/context snapshot reader for cluster identity, profiles, bindings, namespaces, and owned modern Kyverno policy state; verify shared-profile consumers outside the files, namespace UIDs, policy ownership, and pagination with a recording API test server.
+- [x] 2.1 Add a direct kubeconfig/context snapshot reader for cluster identity, profiles, bindings, namespaces, and owned modern Kyverno policy state; verify shared-profile consumers outside the files, namespace UIDs, policy ownership, and pagination with a recording API test server.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [ ] 2.2 Add provenance and bounded rechecks of relevant configuration, namespace membership, applied-policy, acceptance, and source/trust projections; verify concurrent changes cause recapture or incomplete output and unrelated report timestamps do not force endless retry.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-- [ ] 2.3 Enforce the default 60-second total timeout, at most two recaptures, object/input limits, and cancellation; verify denied/missing required APIs, expired pagination, and exhausted limits never produce a successful empty or truncated snapshot.
+  Open: provenance and rechecks are implemented and verified for configuration, membership, applied policies, the acceptance projections that exist (protected acceptance record, `status.acceptance`, frozen snapshots) and the bundle-source ConfigMap with its trust ConfigMaps. Two projections cannot be observed yet: exception revocation (`spec.revoked` and revocation records, `add-self-service-policy-exceptions` 2.6/3.6), reported as `exception-revocation-unavailable`, and Secret-held trust material, which is never read here and is reported as `secret-not-read` until 4.3 adds caller-authorized named Secret reads. Tick when both are part of the rechecked projections.
+- [x] 2.3 Enforce the default 60-second total timeout, at most two recaptures, object/input limits, and cancellation; verify denied/missing required APIs, expired pagination, and exhausted limits never produce a successful empty or truncated snapshot.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.4 Document the get/list/discovery permission matrix and snapshot limits beside the command examples; verify recorded preview requests contain no Kubernetes mutation or write-shaped authorization/dry-run probe.
+- [x] 2.4 Document the get/list/discovery permission matrix and snapshot limits beside the command examples; verify recorded preview requests contain no Kubernetes mutation or write-shaped authorization/dry-run probe.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 3. Shared resolution and semantic comparison

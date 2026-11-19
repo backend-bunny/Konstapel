@@ -1,11 +1,12 @@
 # Policy change preview
 
-> **Status: input model only.** The `konstapel preview` command, cluster
-> observation, comparison and reporting are not implemented yet. This page
-> documents the part that exists: how rendered manifests are read and validated
-> and how the candidate configuration is formed (`internal/preview`, tasks 1.1 to
-> 1.3 of the `add-policy-change-preview` change). Nothing here reads a cluster,
-> and no command line exposes it. Treat the planned command line in the change's
+> **Status: input model and cluster observation only.** The `konstapel preview`
+> command, comparison and reporting are not implemented yet. This page documents
+> the parts that exist in `internal/preview`: how rendered manifests are read and
+> validated, how the candidate configuration is formed (tasks 1.1 to 1.3 of the
+> `add-policy-change-preview` change), and the read-only cluster observation
+> with its access contract and limits (tasks 2.1 to 2.3). No command line
+> exposes either yet. Treat the planned command line in the change's
 > [design](../openspec/changes/add-policy-change-preview/design.md) as not available.
 
 The preview is meant to show how proposed compliance configuration would change
@@ -264,11 +265,91 @@ that references a profile found neither live nor in the proposal is an error. An
 unrelated, already dangling live reference is a baseline condition for the
 resolver to report, not an input error.
 
+## Cluster observation
+
+The baseline is the selected cluster, read with the caller's own kubeconfig
+credentials: an explicit or standard kubeconfig and a named or current context.
+There is no fallback to an in-cluster ServiceAccount, and the preview never uses
+or impersonates the controller's identity. The caller also names the Konstapel
+controller namespace and, when the controller runs with
+`--bundle-sources-configmap`, the same ConfigMap name.
+
+### Cluster access
+
+The observation sends only `GET` requests: API discovery, `get` and `list`. A
+guard in the client refuses anything else before it is sent, including writes,
+server-side dry-run, `SelfSubjectAccessReview`-style authorization probes,
+watches and any Secret request. Tests run the observation against a recording API
+server and a disposable cluster and check that no other request occurs.
+
+| Resource | API group | Where | Verbs | Read for |
+| --- | --- | --- | --- | --- |
+| `namespaces` | core | cluster | `get` (`kube-system`), `list` | Cluster identity (`kube-system:<uid>`, as the controller records it); namespace instances (name, UID, labels) |
+| `complianceprofiles`, `compliancebindings` | `compliance.erenius.io` | cluster | `list` | Live desired configuration, including every binding of a shared profile |
+| `complianceexceptions` | `compliance.erenius.io` | all namespaces | `list` | Protected acceptance records and snapshot references |
+| `validatingpolicies` | `policies.kyverno.io` | cluster | `list`, label `app.kubernetes.io/managed-by=konstapel` | Applied engine policies, their recorded contribution and readiness |
+| `configmaps` | core | controller namespace | `list` (acceptance snapshots, by label); `get` (the bundle-source ConfigMap and the trust ConfigMaps it names) | Frozen acceptance snapshots; source and trust configuration |
+| discovery | `/api/v1`, `/apis/compliance.erenius.io/v1alpha1`, `/apis/policies.kyverno.io/v1` | | `GET` | Required APIs are served (granted to authenticated users by `system:discovery`) |
+
+`secrets` are not read. A bundle source's `credentialSecret` and any Secret trust
+reference are listed by name as `secret-not-read` limitations; caller-authorized
+bundle access is a later part of the change. A ready-made ClusterRole and Role
+with exactly these permissions is in
+[`docs/examples/policy-preview/reader-rbac.yaml`](examples/policy-preview/reader-rbac.yaml).
+Overlap and shared-profile analysis needs cluster-wide reads, so a namespace
+service account of an application team is usually not enough.
+
+A label without a matching controller reference does not make an engine policy
+Konstapel's: the observation applies the delivery rule (ownership labels and a
+controller reference to the same binding UID). Such a policy is reported as
+unowned. A policy owned by a binding UID that no longer exists is reported as
+orphaned, because it may still enforce. A policy whose recorded contribution
+cannot be read is unknown applied state, never an absent one.
+
+Exception acceptance is observed from what the exception owner provides today:
+the admission-protected acceptance record, the controller's snapshot reference
+in `status.acceptance`, and the frozen snapshot ConfigMaps, each verified
+against its recorded digest. Reasons, actors and claims are not kept.
+Revocation (`spec.revoked` and revocation records) does not exist yet and is
+reported as the `exception-revocation-unavailable` limitation.
+
+### Consistency and limits
+
+Kubernetes has no transaction across these APIs. The observation reads every
+collection completely, following list continuations, records each list's
+`resourceVersion` and every object's UID, `resourceVersion` and generation, and
+then reads everything again as a recheck. It compares only relevant projections:
+specifications, generations, enforcement epochs, namespace UIDs and labels,
+ownership and provenance of engine policies and their derived readiness,
+acceptance records and snapshots, and source and trust data. Status timestamps,
+report times and unrelated annotations are ignored, so constantly changing
+status does not force retries. If a relevant projection changed, or a list
+continuation expired, the whole capture is repeated, at most two recaptures.
+Two consecutive agreeing captures detect drift; they do not prove an atomic
+snapshot or describe the cluster at apply time.
+
+| Limit | Default |
+| --- | --- |
+| Total time, all captures included | 60 seconds |
+| Recaptures after drift or expired pagination | two recaptures (the maximum) |
+| Objects collected per capture | 100,000 |
+| Page size / requests per capture | 500 / 1,000 |
+| Response bytes per capture | 512 MiB |
+| Manifest input (all files) | 16 MiB |
+
+Denied or unauthorized reads, an API that is not served, a missing cluster
+identity, an object that does not match the supported API contract, persistent
+drift, persistent pagination expiry, an exhausted limit, a timeout or a
+cancellation make the observation **incomplete**. An incomplete observation
+carries only provenance and coded diagnostics, never a partial object set, so a
+truncated or empty read can never pass for the cluster. A missing or invalid
+bundle-source ConfigMap is recorded as found, like the controller would find it.
+
 ## Not covered
 
 The preview does not emulate server-side apply, field ownership, admission
 mutation or admission validation beyond the schema rules above, and it cannot
 express deleting and recreating one name in a single step. Applying the
-configuration stays a separate Kubernetes or GitOps action. Observation, bundle
-verification, exceptions, evidence, comparison, reports and exit codes are later
-tasks of the change and are not described here as available.
+configuration stays a separate Kubernetes or GitOps action. Bundle verification,
+exception impact, evidence, comparison, reports and exit codes are later tasks of
+the change and are not described here as available.
