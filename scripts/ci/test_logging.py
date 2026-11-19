@@ -1,12 +1,15 @@
 """Run the real shell wrappers with fake tools; no Docker or cluster required."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
 import selectors
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -42,7 +45,8 @@ class LoggingTests(unittest.TestCase):
         fixture = self.repo / "content/upstream/kyverno/disallow-privileged-containers/.chainsaw-test"
         fixture.mkdir(parents=True)
         self.stub("scripts/build.sh", "echo build")
-        self.stub("scripts/environment.sh", 'echo "environment-$1"; if [[ $1 == delete ]]; then exit "${DELETE_EXIT:-0}"; fi')
+        self.stub("scripts/environment.sh", 'echo "environment-$1"; echo "environment-$1" >> "$PWD/calls.log"; if [[ $1 == delete ]]; then exit "${DELETE_EXIT:-0}"; fi')
+        self.stub("scripts/acceptance-evidence.sh", 'echo "evidence-$1"; echo "evidence-$1" >> "$PWD/calls.log"')
         self.stub("bin/konstapel", 'echo "$1-stdout"; echo "$1-stderr" >&2; if [[ $1 == acceptance ]]; then exit "${RUNNER_EXIT:-0}"; fi')
         self.stub("bin/chainsaw", "echo chainsaw")
         self.stub("scripts/targeting-live.sh", 'echo "targeting-${4:-all}"; echo "require-userns=${KONSTAPEL_LIVE_REQUIRE_USERNS:-false}"')
@@ -73,6 +77,13 @@ class LoggingTests(unittest.TestCase):
             self.assertIn(marker, (self.out / filename).read_text())
         self.assertIn("Running live targeting", (self.out / "progress.log").read_text())
         self.assertTrue(json.loads((self.out / "acceptance-result.json").read_text())["passed"])
+        # The version matrix comes first; diagnostics are collected before teardown, on success too.
+        self.assertIn("evidence-versions", (self.out / "versions.log").read_text())
+        self.assertIn("evidence-diagnostics", (self.out / "diagnostics.log").read_text())
+        self.assertEqual(self.calls(), ["evidence-versions", "environment-create", "evidence-diagnostics", "environment-delete"])
+
+    def calls(self):
+        return (self.repo / "calls.log").read_text().split()
 
     def test_teardown_verification_fails_on_leftovers(self):
         self.setup_acceptance()
@@ -107,7 +118,8 @@ class LoggingTests(unittest.TestCase):
         self.assertIn("acceptance-stderr", (self.out / "runner.log").read_text())
         self.assertNotIn("Acceptance passed", result.stdout)
         self.assertEqual(json.loads((self.out / "acceptance-result.json").read_text()),
-                         {"group": "all", "passed": False, "exitCode": 23})
+                         {"group": "all", "passed": False, "exitCode": 23, "outcome": "failed"})
+        self.assertEqual(self.calls(), ["evidence-versions", "environment-create", "evidence-diagnostics", "environment-delete"])
 
     def test_groups_run_only_their_assigned_stages(self):
         self.setup_acceptance()
@@ -129,8 +141,152 @@ class LoggingTests(unittest.TestCase):
                 self.assertEqual("image-build" in result.stdout, image)
                 self.assertEqual("tagged ghcr.io/backend-bunny/konstapel@sha256:abc" in result.stdout, image)
                 self.assertEqual(json.loads((out / "acceptance-result.json").read_text()),
-                                 {"group": group, "passed": True, "exitCode": 0})
+                                 {"group": group, "passed": True, "exitCode": 0, "outcome": "passed"})
                 self.assertIn("environment-delete", result.stdout)
+
+    def test_deadline_stops_the_run_then_collects_and_tears_down(self):
+        self.setup_acceptance()
+        # A hung stage: the deadline must stop it and its children.
+        self.stub("scripts/targeting-live.sh", 'echo targeting-started; sleep 300 & echo $! > "$PWD/hung.pid"; wait')
+        result = self.run_script("acceptance.sh", self.out, "capabilities", KONSTAPEL_ACCEPTANCE_TIMEOUT="2s")
+        self.assertEqual(result.returncode, 124, result.stderr)
+        self.assertIn("targeting-started", result.stdout)
+        self.assertIn("exceeded KONSTAPEL_ACCEPTANCE_TIMEOUT=2s", (self.out / "progress.log").read_text())
+        self.assertTrue((self.out / "deadline-exceeded.txt").exists())
+        self.assertEqual(self.calls(), ["evidence-versions", "environment-create", "evidence-diagnostics", "environment-delete"])
+        self.assertIn("teardown verified", (self.out / "teardown.log").read_text())
+        self.assertEqual(json.loads((self.out / "acceptance-result.json").read_text()),
+                         {"group": "capabilities", "passed": False, "exitCode": 124, "outcome": "timed-out"})
+        hung = int((self.repo / "hung.pid").read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(hung, 0)
+
+    def test_deadline_is_validated(self):
+        self.setup_acceptance()
+        result = self.run_script("acceptance.sh", self.out, "capabilities", KONSTAPEL_ACCEPTANCE_TIMEOUT="soon")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.out.exists())
+
+    def test_cancellation_collects_diagnostics_and_tears_down(self):
+        self.setup_acceptance()
+        self.stub("scripts/targeting-live.sh", 'echo targeting-started; touch "$PWD/started"; sleep 300')
+        # A second cancellation signal during cleanup must not stop teardown.
+        self.stub("scripts/acceptance-evidence.sh", 'echo "evidence-$1" >> "$PWD/calls.log"; '
+                  'if [[ $1 == diagnostics ]]; then main=$(cat "$PWD/acceptance.pid"); kill -INT "$main"; kill -TERM "$main"; sleep 0.2; fi')
+        shutil.copy(ROOT / "scripts/acceptance.sh", self.repo / "scripts/acceptance.sh")
+        process = subprocess.Popen(["bash", "scripts/acceptance.sh", str(self.out), "capabilities"], cwd=self.repo, env=self.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+        (self.repo / "acceptance.pid").write_text(str(process.pid))
+        try:
+            for _ in range(200):
+                if (self.repo / "started").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue((self.repo / "started").exists())
+            # CI cancellation reaches the whole process group.
+            os.killpg(process.pid, signal.SIGINT)
+            output, _ = process.communicate(timeout=15)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+        self.assertEqual(process.returncode, 130, output)
+        self.assertEqual(self.calls(), ["evidence-versions", "environment-create", "evidence-diagnostics", "environment-delete"])
+        self.assertIn("teardown verified", (self.out / "teardown.log").read_text())
+        self.assertEqual(json.loads((self.out / "acceptance-result.json").read_text()),
+                         {"group": "capabilities", "passed": False, "exitCode": 130, "outcome": "interrupted"})
+
+    def test_evidence_versions_record_pins_tools_and_charts(self):
+        for tool, output in (("go", "go1.27.3"), ("kind", "kind v0.33.0 go1.26.10 linux/amd64"), ("helm", "v4.3.1"),
+                             ("chainsaw", "Version: v0.2.15"), ("docker", "29.9.2")):
+            self.stub("bin/" + tool, f'echo "{output}"')
+        self.stub("bin/kubectl", 'echo \'{"clientVersion":{"gitVersion":"v1.37.2"}}\'')
+        for chart in ("konstapel", "konstapel-crds"):
+            (self.repo / "charts" / chart).mkdir(parents=True)
+            (self.repo / "charts" / chart / "Chart.yaml").write_text(f"name: {chart}\nversion: 0.4.0 # x-release-please-version\n")
+        (self.repo / "devbox.lock").write_text("{}")
+        self.out.mkdir()
+        result = self.run_script("acceptance-evidence.sh", "versions", self.out, "charts")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        matrix = json.loads((self.out / "version-matrix.json").read_text())
+        pins = dict(line.split("=", 1) for line in (ROOT / "scripts/runtime.env").read_text().splitlines()
+                    if line.startswith("KONSTAPEL_"))
+        self.assertEqual(matrix["pins"], pins)
+        self.assertEqual(matrix["tools"]["kubectl"], "v1.37.2")
+        self.assertEqual(matrix["tools"]["chainsaw"], "v0.2.15")
+        self.assertEqual(matrix["tools"]["kind"], "kind v0.33.0 go1.26.10 linux/amd64")
+        self.assertEqual([(c["name"], c["version"]) for c in matrix["charts"]["charts"]], [("konstapel-crds", "0.4.0"), ("konstapel", "0.4.0")])
+        self.assertEqual(matrix["group"], "charts")
+
+        # Release acceptance binds the frozen archives by checksum.
+        archives = self.repo / "frozen"
+        archives.mkdir()
+        (archives / "konstapel-0.4.0.tgz").write_bytes(b"archive")
+        out = self.repo / "release"
+        out.mkdir()
+        result = self.run_script("acceptance-evidence.sh", "versions", out, "charts", KONSTAPEL_LIVE_CHART_ARCHIVES=str(archives),
+                                 KONSTAPEL_ACCEPTANCE_IMAGE="ghcr.io/backend-bunny/konstapel@sha256:" + "a" * 64)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        matrix = json.loads((out / "version-matrix.json").read_text())
+        self.assertEqual(matrix["charts"]["archives"], [{"sha256": hashlib.sha256(b"archive").hexdigest(), "file": "konstapel-0.4.0.tgz"}])
+        self.assertEqual(matrix["controllerImage"], "ghcr.io/backend-bunny/konstapel@sha256:" + "a" * 64)
+
+    def test_evidence_diagnostics_project_status_and_never_fail(self):
+        fixtures = self.repo / "fixtures"
+        fixtures.mkdir()
+        (fixtures / "events").write_text(json.dumps({"items": [{"metadata": {"namespace": "kyverno"}, "type": "Warning", "reason": "BackOff",
+            "message": "restarting", "involvedObject": {"kind": "Pod", "name": "kyverno-a"}, "count": 3, "lastTimestamp": "2026-11-19T05:00:00Z"}]}))
+        (fixtures / "pods").write_text(json.dumps({"items": [{"metadata": {"namespace": "konstapel-system", "name": "controller-a", "uid": "u"},
+            "spec": {"nodeName": "n", "containers": [{"env": [{"name": "SECRET", "value": "spec-only-value"}]}]},
+            "status": {"phase": "Running", "containerStatuses": [{"name": "c", "image": "img", "imageID": "img@sha256:1", "ready": True, "restartCount": 1}]}}]}))
+        (fixtures / "binding").write_text(json.dumps({"items": [{"kind": "ComplianceBinding", "metadata": {"name": "b", "generation": 2},
+            "spec": {"profile": "spec-only-value"}, "status": {"observedGeneration": 2, "conditions": [{"type": "Ready", "status": "False"}]}}]}))
+        (fixtures / "deploy").write_text(json.dumps({"items": [{"kind": "Deployment", "metadata": {"namespace": "kyverno", "name": "k"},
+            "spec": {"template": "spec-only-value"}, "status": {"conditions": [{"type": "Available", "status": "True"}], "replicas": 1}}]}))
+        self.stub("bin/kubectl", 'f=$PWD/fixtures; case "$*" in '
+                  '*"get events"*) cat "$f/events";; *"get pods"*) cat "$f/pods";; '
+                  '*api-resources*) printf "deployments.apps\ncompliancebindings.compliance.erenius.io\nconfigmaps\nsecrets\n";; '
+                  '*"get compliancebindings"*) cat "$f/binding";; *"get deployments.apps"*) cat "$f/deploy";; '
+                  '*"logs"*) echo "log $*";; *"get leases"*) echo \'{"items":[]}\';; '
+                  '*"version -o json"*) echo \'{"serverVersion":{"gitVersion":"v1.37.0","platform":"linux/amd64"}}\';; '
+                  '*"get nodes"*) echo \'{"items":[{"metadata":{"name":"n"},"status":{"nodeInfo":{"kubeletVersion":"v1.37.0"}}}]}\';; '
+                  '*) exit 7;; esac')
+        self.stub("bin/helm", 'echo \'[{"name":"konstapel","namespace":"konstapel-system","chart":"konstapel-0.4.0","app_version":"0.4.0","revision":"1","status":"deployed"}]\'')
+        self.stub("bin/docker", 'echo "$*" >> "$PWD/docker-calls"')
+        self.out.mkdir()
+        (self.out / "kubeconfig").write_text("fixture")
+        (self.out / "version-matrix.json").write_text('{"group":"charts"}')
+        (self.out / "image-ref.txt").write_text("ghcr.io/backend-bunny/konstapel@sha256:" + "b" * 64 + "\n")
+        result = self.run_script("acceptance-evidence.sh", "diagnostics", self.out / "kubeconfig", "kind-x", self.out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        d = self.out / "diagnostics"
+        self.assertEqual(json.loads((d / "events.json").read_text())[0]["reason"], "BackOff")
+        conditions = json.loads((d / "conditions.json").read_text())
+        self.assertEqual({c["kind"] for c in conditions}, {"ComplianceBinding", "Deployment"})
+        self.assertEqual(next(c for c in conditions if c["kind"] == "ComplianceBinding")["status"]["conditions"][0]["type"], "Ready")
+        self.assertEqual(next(c for c in conditions if c["kind"] == "Deployment")["conditions"][0]["type"], "Available")
+        self.assertTrue((d / "logs/konstapel-system.controller-a.log").exists())
+        self.assertTrue((d / "logs/konstapel-system.controller-a.previous.log").exists())
+        matrix = json.loads((self.out / "version-matrix.json").read_text())
+        self.assertEqual(matrix["group"], "charts")
+        self.assertEqual(matrix["cluster"]["kubernetes"]["gitVersion"], "v1.37.0")
+        self.assertEqual(matrix["cluster"]["helmReleases"][0]["chart"], "konstapel-0.4.0")
+        self.assertEqual(matrix["cluster"]["runningImages"], [{"image": "img", "imageID": "img@sha256:1"}])
+        self.assertEqual(matrix["controllerImage"], "ghcr.io/backend-bunny/konstapel@sha256:" + "b" * 64)
+        # Secrets, specs and container environments are never read.
+        everything = "".join(p.read_text() for p in self.out.rglob("*") if p.is_file())
+        self.assertNotIn("spec-only-value", everything)
+        self.assertNotIn("get secrets", everything)
+        self.assertNotIn("inspect", (self.repo / "docker-calls").read_text())
+        self.assertIn("ok: events", (d / "collect.log").read_text())
+
+        # An unreachable cluster leaves a report, not a failure.
+        self.stub("bin/kubectl", "echo unreachable >&2; exit 1")
+        out = self.repo / "unreachable"
+        out.mkdir()
+        (out / "kubeconfig").write_text("fixture")
+        result = self.run_script("acceptance-evidence.sh", "diagnostics", out / "kubeconfig", "kind-x", out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failed: events", (out / "diagnostics/collect.log").read_text())
 
     def test_userns_preparation_failure_fails_and_cleans_up(self):
         self.setup_acceptance()

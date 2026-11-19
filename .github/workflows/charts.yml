@@ -121,7 +121,7 @@ jobs:
             echo '### Release acceptance of the frozen charts'
             for result in "$out"/groups/*/acceptance-result.json; do
               [ -e "$result" ] || continue
-              jq -r '"- group `\(.group)`: passed \(.passed) (exit \(.exitCode))"' "$result"
+              jq -r '"- group `\(.group)`: passed \(.passed) (exit \(.exitCode), \(.outcome))"' "$result"
             done
             if [ -f "$out/chart-acceptance.json" ]; then
               jq -r '"Bound to \(.source.commit) (\(.source.tag)), \(.image)", (.groups | to_entries[] | "- `\(.key)`: " + ([.value.tests[] | "\(.name) \(.result)"] | join(", ")))' "$out/chart-acceptance.json"
@@ -129,16 +129,27 @@ jobs:
               echo 'No chart-acceptance.json: a required group did not fully pass, so publication cannot run.'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Staging scans every file and fails closed: a credential finding fails
+      # the job (blocking publication) and nothing is uploaded.
+      - name: Stage sanitized evidence
+        id: stage-evidence
         if: always()
+        run: |
+          report="$RUNNER_TEMP/evidence-scan.txt"
+          if ! devbox run -- python3 scripts/ci/stage-evidence.py "$RUNNER_TEMP/chart-acceptance" "$RUNNER_TEMP/chart-acceptance-upload" --report "$report"; then
+            { echo '### Evidence not uploaded'; echo 'Credential scan findings (file, line, rule):'; echo '```'; cat "$report" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.stage-evidence.outcome == 'success'
         with:
           name: chart-acceptance-evidence
           path: |
-            ${{ runner.temp }}/chart-acceptance
-            !${{ runner.temp }}/chart-acceptance/**/kubeconfig*
-            !${{ runner.temp }}/chart-acceptance/**/*.test
-            !${{ runner.temp }}/chart-acceptance/**/environment/helm-manifest.yaml
-            !${{ runner.temp }}/chart-acceptance/**/kind-logs
+            ${{ runner.temp }}/chart-acceptance-upload
+            !${{ runner.temp }}/chart-acceptance-upload/**/kubeconfig*
+            !${{ runner.temp }}/chart-acceptance-upload/**/*.test
+            !${{ runner.temp }}/chart-acceptance-upload/**/helm-manifest.yaml
+            !${{ runner.temp }}/chart-acceptance-upload/**/kind-logs
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

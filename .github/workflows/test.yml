@@ -76,6 +76,9 @@ jobs:
       - name: Run acceptance
         env:
           ACCEPTANCE_GROUP: ${{ matrix.group }}
+          # Stops a hung run early enough for diagnostics and teardown to
+          # finish within the job timeout.
+          KONSTAPEL_ACCEPTANCE_TIMEOUT: 100m
         run: devbox run -- task acceptance GROUP="$ACCEPTANCE_GROUP" OUTPUT="$RUNNER_TEMP/acceptance"
       - name: Verify acceptance did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum
@@ -85,22 +88,33 @@ jobs:
           out="$RUNNER_TEMP/acceptance"
           {
             echo '## Acceptance'
-            jq -r '"group: \(.group), passed: \(.passed) (exit \(.exitCode))"' "$out/acceptance-result.json" 2>/dev/null || echo 'no result recorded'
+            jq -r '"group: \(.group), passed: \(.passed) (exit \(.exitCode), \(.outcome))"' "$out/acceptance-result.json" 2>/dev/null || echo 'no result recorded'
             echo
             grep -hE '^(--- (PASS|FAIL)|ok|FAIL)' "$out"/targeting/targeting-live.log 2>/dev/null | sed 's/^/    /' || true
           } >> "$GITHUB_STEP_SUMMARY"
       # Test-owned evidence only: no kubeconfig, rendered chart manifest, or
       # node logs. The cluster and S3 test service are torn down by the task.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Staging scans every file and fails closed: a credential finding fails
+      # the job and nothing is uploaded.
+      - name: Stage sanitized evidence
+        id: stage-evidence
         if: always()
+        run: |
+          report="$RUNNER_TEMP/evidence-scan.txt"
+          if ! devbox run -- python3 scripts/ci/stage-evidence.py "$RUNNER_TEMP/acceptance" "$RUNNER_TEMP/acceptance-upload" --report "$report"; then
+            { echo '### Evidence not uploaded'; echo 'Credential scan findings (file, line, rule):'; echo '```'; cat "$report" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.stage-evidence.outcome == 'success'
         with:
           name: acceptance-evidence-${{ matrix.group }}
           path: |
-            ${{ runner.temp }}/acceptance
-            !${{ runner.temp }}/acceptance/**/kubeconfig*
-            !${{ runner.temp }}/acceptance/**/*.test
-            !${{ runner.temp }}/acceptance/environment/helm-manifest.yaml
-            !${{ runner.temp }}/acceptance/kind-logs
+            ${{ runner.temp }}/acceptance-upload
+            !${{ runner.temp }}/acceptance-upload/**/kubeconfig*
+            !${{ runner.temp }}/acceptance-upload/**/*.test
+            !${{ runner.temp }}/acceptance-upload/**/helm-manifest.yaml
+            !${{ runner.temp }}/acceptance-upload/**/kind-logs
           retention-days: 14
   acceptance:
     # Stable required check: success requires every matrix group to succeed.

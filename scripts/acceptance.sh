@@ -12,6 +12,10 @@ fi
 includes() {
   [[ $group == all ]] || jq -e --arg group "$group" --arg stage "$1" '.[$group][$stage] == true' scripts/acceptance-groups.json >/dev/null
 }
+# KONSTAPEL_ACCEPTANCE_TIMEOUT (sleep(1) duration, e.g. 100m) bounds the run
+# so diagnostics and teardown still fit inside an outer CI job timeout.
+deadline=${KONSTAPEL_ACCEPTANCE_TIMEOUT:-}
+[[ -z $deadline || $deadline =~ ^[1-9][0-9]*[smh]?$ ]] || { echo 'KONSTAPEL_ACCEPTANCE_TIMEOUT must be a duration such as 100m' >&2; exit 1; }
 out=$(realpath -m "$out")
 if [[ -e $out ]]; then echo 'Acceptance output must be a fresh directory' >&2; exit 1; fi
 mkdir -p "$out"
@@ -24,14 +28,25 @@ fi
 context=kind-$KONSTAPEL_CLUSTER_NAME
 jq -n --arg name "$KONSTAPEL_CLUSTER_NAME" --arg context "$context" '{name:$name,context:$context}' > "$out/target.json"
 created=false
+interrupted=
+watchdog=
 stage() {
   printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$out/progress.log"
 }
 cleanup() {
   code=$?
   trap - EXIT
+  # Diagnostics and teardown run to completion even when CI cancels again
+  # (INT, then TERM); only SIGKILL stops them. Bounded steps use timeout -k.
+  trap '' INT TERM USR1
+  [[ -z $watchdog ]] || kill "$watchdog" 2>/dev/null || true
+  # The stopped stage may fail before the watchdog's signal arrives.
+  if [[ -e $out/deadline-exceeded.txt ]]; then interrupted=timed-out; code=124; fi
   if [[ $created == true ]]; then
     stage 'Collecting cluster diagnostics and tearing down the disposable environment' || true
+    # Events, Conditions, Pod states/logs and running images before teardown.
+    timeout -k 10s 5m scripts/acceptance-evidence.sh diagnostics "$kubeconfig" "$context" "$out" 2>&1 | tee "$out/diagnostics.log" ||
+      echo 'Cluster diagnostics incomplete; see diagnostics.log' | tee -a "$out/progress.log"
     kind export logs --name "$KONSTAPEL_CLUSTER_NAME" "$out/kind-logs" 2>&1 | tee "$out/kind-export.log" || true
     scripts/environment.sh delete "$kubeconfig" "$out/environment" 2>&1 | tee "$out/teardown.log" || { [[ $code != 0 ]] || code=1; }
     # Prove the teardown: the cluster and every container a live test
@@ -54,19 +69,45 @@ cleanup() {
       code=1
     fi
   fi
-  jq -n --arg group "$group" --argjson exitCode "$code" '{group:$group,passed:($exitCode==0),exitCode:$exitCode}' > "$out/acceptance-result.json"
+  if [[ $code == 0 ]]; then outcome=passed; elif [[ -n $interrupted ]]; then outcome=$interrupted; else outcome=failed; fi
+  jq -n --arg group "$group" --argjson exitCode "$code" --arg outcome "$outcome" '{group:$group,passed:($exitCode==0),exitCode:$exitCode,outcome:$outcome}' > "$out/acceptance-result.json"
   if [[ $code == 0 ]]; then
     printf 'Acceptance passed (group: %s); all selected checks and teardown succeeded.\n' "$group" | tee "$out/result.txt"
   else
-    printf 'Acceptance failed (exit %s); diagnostics: %s\n' "$code" "$out" | tee "$out/result.txt"
+    printf 'Acceptance failed (exit %s, %s); diagnostics: %s\n' "$code" "$outcome" "$out" | tee "$out/result.txt"
   fi
   # Kubeconfig is operational input, not exported OSCAL evidence.
   exit "$code"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'interrupted=interrupted; exit 130' INT
+trap 'interrupted=interrupted; exit 143' TERM
+trap 'interrupted=timed-out; exit 124' USR1
 stage "Acceptance group: $group; logs and evidence: $out"
+if [[ -n $deadline ]]; then
+  # On expiry, stop every process this run started (the shell waits for its
+  # foreground stage before handling a signal), then let cleanup collect
+  # diagnostics and tear down.
+  main=$$
+  (
+    trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+    sleep "$deadline" & sleeper=$!
+    wait "$sleeper" || exit 0
+    echo "Acceptance exceeded KONSTAPEL_ACCEPTANCE_TIMEOUT=$deadline; stopping it to collect diagnostics and tear down" |
+      tee "$out/deadline-exceeded.txt" | tee -a "$out/progress.log" >&2
+    self=$BASHPID
+    stopping=$(ps -e -o pid=,ppid= | awk -v root="$main" -v self="$self" '
+      { parent[$1] = $2 } END {
+        do { added = 0; for (p in parent) if (!(p in seen) && p != self && (parent[p] == root || parent[p] in seen)) { seen[p] = 1; added = 1 } } while (added)
+        for (p in seen) print p }')
+    [[ -z $stopping ]] || kill -TERM $stopping 2>/dev/null
+    kill -USR1 "$main"
+  ) &
+  watchdog=$!
+fi
+# The version matrix exists even when the cluster never comes up.
+scripts/acceptance-evidence.sh versions "$out" "$group" 2>&1 | tee "$out/versions.log" ||
+  stage 'Recording the version matrix failed; see versions.log'
 if includes core; then
   stage 'Building acceptance binaries'
   scripts/build.sh 2>&1 | tee "$out/build.log"
