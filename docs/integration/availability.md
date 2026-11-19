@@ -703,8 +703,12 @@ service levels.
   close report supporting evidence unavailable with this reason; the package
   carries no supporting context, technical evidence is unaffected. The next run
   after the rollout is complete carries it again
-  ([protected-package readers](../charts.md#protected-package-readers)). No
-  action beyond finishing or reverting the rollout.
+  ([protected-package readers](../charts.md#protected-package-readers)). The
+  runs that closed during the rollout stay that way permanently: the closed
+  run's report, package and status are never rewritten, so schedule download
+  rollouts away from platform runs whose documents matter
+  ([supporting evidence](../supporting-evidence.md)). Otherwise no action
+  beyond finishing or reverting the rollout.
 - **Downgrades.** Supported rollback is to a previously tested chart and image
   pair, or scaling to one replica, accepting reduced availability. Never
   disable election, authentication or retention recovery. Rolling the download

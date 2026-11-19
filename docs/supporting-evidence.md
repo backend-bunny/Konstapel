@@ -806,7 +806,7 @@ reads a newer document under the run's identity.
 | Integration problem | Reported as |
 | --- | --- |
 | Records can't be read at start or at closure | `integration: unavailable`, reason `RecordsUnavailable` (a blocking coverage limitation, never an empty list) |
-| A platform run names documents but the download replicas aren't verified to enforce document read at closure ([protected-package readers](charts.md#protected-package-readers)) | `integration: unavailable`, reason `ProtectedReadersUnverified`; no context or copy is packaged |
+| A platform run names documents but the download replicas aren't verified to enforce document read at closure ([protected-package readers](charts.md#protected-package-readers)) | `integration: unavailable`, reason `ProtectedReadersUnverified`; no context or copy is packaged. Permanent for that run: it is never rewritten after the readers are verified |
 | A run started by an earlier controller | `integration: disabled` (documents not considered) |
 | No record names the binding | `integration: available` with no entries; the package is unchanged |
 
@@ -935,9 +935,26 @@ The controller writes a protected package only while every download replica
 runs its own image ([protected-package readers](charts.md#protected-package-readers)).
 While that isn't so, during an upgrade's download rollout for example, a
 platform run's supporting evidence is reported unavailable
-(`ProtectedReadersUnverified`) and its package carries none. Don't roll the
-download service back below this version while protected packages are
-retained: an earlier one is not a supported downgrade.
+(`ProtectedReadersUnverified`) and its package carries none.
+
+**The limitation is permanent for a run that closed in that state.** The
+reader check is asked once, at closure, and the answer is frozen with the
+run. A run that closes during a rollout keeps `integration: unavailable`
+(reason `ProtectedReadersUnverified`) with no document copy and no protection
+marker in its package, even after every download replica runs the controller's
+image. Nothing re-evaluates, rewrites or republishes a closed run's report,
+package or status, and a document registered or withdrawn later does not
+change it. Only its supporting context is affected: its outcomes, evidence
+completeness (`EvidenceComplete`) and technical evidence in the coverage
+report are those of a run that closed with verified readers. The next run
+that closes after the rollout carries its supporting evidence normally. To
+have documents for the affected period, time upgrades so that no platform
+run with associated documents closes during the download rollout, or start a
+new run once it is complete. A run you must not lose its supporting context
+for is one to re-run, not one that is repaired in place.
+
+Don't roll the download service back below this version while protected
+packages are retained: an earlier one is not a supported downgrade.
 
 To roll back the feature, stop registering documents and withdraw the
 records whose copies new runs should not carry. Keep this version's
