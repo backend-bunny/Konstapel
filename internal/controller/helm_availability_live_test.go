@@ -70,7 +70,11 @@ func TestLiveHelmAvailability(t *testing.T) {
 
 	// Install both charts with operator TLS. A Lease left by an earlier
 	// installation is removed first, so the chart's controllers create it
-	// under the chart Role.
+	// under the chart Role. That installation's processes must be gone
+	// before: a leader still draining after its uninstall keeps renewing,
+	// recreates a deleted Lease with its own transition count, and holds it
+	// until expiry, so the Lease would not be this installation's.
+	l.awaitNoInstallation(ns)
 	if err := l.c.Delete(l.ctx, &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: LeaderElectionID}}); err != nil && !apierrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
@@ -625,6 +629,7 @@ func liveImage(t *testing.T) (image, repo, digest string) {
 func (l *live) installCharts(ns, repo, digest string, extra ...string) []byte {
 	t := l.t
 	t.Helper()
+	l.awaitNoInstallation(ns)
 	if out, err := l.helm("install", "konstapel-crds", chartArchive(t, "konstapel-crds"), "--namespace", ns, "--create-namespace", "--wait"); err != nil {
 		t.Fatalf("install CRD chart: %v\n%s", err, out)
 	}
@@ -656,11 +661,32 @@ func (l *live) installCharts(ns, repo, digest string, extra ...string) []byte {
 			fmt.Fprintf(&b, "==== runs and bindings\n%s\n", kubectl("get", "assessmentruns,compliancebindings", "-o", "yaml"))
 			_ = os.WriteFile(filepath.Join(l.out, t.Name()+"-pods.log"), []byte(b.String()), 0o644)
 		}
-		_, _ = l.helm("uninstall", "konstapel", "--namespace", ns, "--wait")
+		// Foreground deletion keeps each Deployment until its pods are
+		// gone, so the wait covers the controllers' graceful shutdown
+		// (background deletion returns while a leader still drains).
+		_, _ = l.helm("uninstall", "konstapel", "--namespace", ns, "--wait", "--cascade", "foreground")
 		_, _ = l.helm("uninstall", "konstapel-crds", "--namespace", ns)
 		_ = l.c.Delete(l.ctx, tlsSecret)
 	})
 	return caPEM
+}
+
+// awaitNoInstallation waits until no pod of an earlier runtime-chart
+// installation remains in ns, so a new installation's controllers are the
+// only ones that can write its Lease.
+func (l *live) awaitNoInstallation(ns string) {
+	l.t.Helper()
+	l.eventually("no pod of an earlier installation in "+ns, func() (bool, string) {
+		var pods corev1.PodList
+		if err := l.c.List(l.ctx, &pods, client.InNamespace(ns), client.MatchingLabels{"app.kubernetes.io/name": "konstapel"}); err != nil {
+			return false, err.Error()
+		}
+		var left []string
+		for _, p := range pods.Items {
+			left = append(left, p.Name)
+		}
+		return len(left) == 0, strings.Join(left, " ")
+	})
 }
 
 // downloadPackage downloads a run's package from the download server at addr
