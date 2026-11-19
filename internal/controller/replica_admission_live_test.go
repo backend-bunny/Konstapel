@@ -18,10 +18,17 @@ package controller
 //   - a rejected certificate rotation takes one replica out of readiness
 //     while it stays live and the other keeps serving; a missing external
 //     capability (OCI bundle sources) fails only the affected namespace's
-//     admission (3.1).
+//     admission (3.1);
+//   - a webhook CA rotation (add-helm-oci-distribution 3.5): a leaf from
+//     a CA the API server does not trust yet fails admission closed and
+//     stores nothing; once the webhook configurations trust the old and new
+//     CA, then only the new one, both rotated replicas admit with the
+//     caller's attribution, and a replica left on the retired CA is
+//     refused rather than bypassed.
 // Run through scripts/exception-admission-live.sh (assessments group).
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +39,7 @@ import (
 	"testing"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -533,6 +541,108 @@ func TestLiveReplicaAdmission(t *testing.T) {
 	ready(gone)
 	via(gone)
 	l.record("tls-restored", map[string]any{"replica": gone.name})
+
+	// 7. CA rotation. The replica serves a leaf from a new CA as soon as it
+	// verifies on its own; the API server trusts only the webhook
+	// configurations' caBundle, so admission through that replica fails
+	// closed until trust propagates. Nothing is stored meanwhile.
+	newCA := newIssuer(t)
+	servedSerialAt := func(addr string) int64 {
+		conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // inspects the served certificate only
+		if err != nil {
+			return 0
+		}
+		defer conn.Close()
+		return conn.ConnectionState().PeerCertificates[0].SerialNumber.Int64()
+	}
+	rotate := func(r *replica, issuer testIssuer, serial int64) {
+		t.Helper()
+		writeLeaf(t, r.certs, issuer, serial, now.Add(-time.Hour), now.Add(time.Hour), host)
+		l.eventually(fmt.Sprintf("replica %s serves leaf %d", r.name, serial), func() (bool, string) {
+			got := servedSerialAt(r.webhook)
+			return got == serial, fmt.Sprint(got)
+		})
+		ready(r)
+	}
+	// refused asserts that admission routed to r fails closed and stores
+	// nothing. Rerouting closes the API server's pooled connections, so its
+	// next call handshakes with r's current leaf.
+	refused := func(r *replica, name string) {
+		t.Helper()
+		sw.route(r.webhook)
+		var err error
+		l.eventually("admission through "+r.name+" refused on trust", func() (bool, string) {
+			if err = alice.Create(l.ctx, newEx(team, name, nil)); err == nil {
+				t.Fatalf("%s admitted through %s without a trusted webhook", name, r.name)
+			}
+			return err != nil && strings.Contains(err.Error(), "failed calling webhook") && strings.Contains(err.Error(), "x509"), fmt.Sprint(err)
+		})
+		if stored(name) {
+			t.Fatalf("%s stored although no trusted webhook admitted it: %v", name, err)
+		}
+	}
+	setCABundle := func(bundle []byte) {
+		t.Helper()
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			m := &admissionregistrationv1.MutatingWebhookConfiguration{}
+			if err := l.c.Get(l.ctx, client.ObjectKey{Name: "konstapel-exception-acceptance"}, m); err != nil {
+				return err
+			}
+			for i := range m.Webhooks {
+				m.Webhooks[i].ClientConfig.CABundle = bundle
+			}
+			return l.c.Update(l.ctx, m)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			v := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+			if err := l.c.Get(l.ctx, client.ObjectKey{Name: "konstapel-exception-acceptance"}, v); err != nil {
+				return err
+			}
+			for i := range v.Webhooks {
+				v.Webhooks[i].ClientConfig.CABundle = bundle
+			}
+			return l.c.Update(l.ctx, v)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := gone, survivor
+	rotate(first, newCA, 40)
+	refused(first, "ra-untrusted")
+	l.record("ca-rotation-untrusted", map[string]any{"replica": first.name, "admission": "failed closed", "stored": false})
+
+	// Trust propagates as old and new CA: both replicas admit.
+	setCABundle(append(append([]byte{}, ca.pem...), newCA.pem...))
+	via(first)
+	via(second)
+	rotate(second, newCA, 41)
+	via(second)
+	// Then the retired CA leaves the bundle: both rotated replicas admit,
+	// with the caller's attribution.
+	setCABundle(newCA.pem)
+	for _, r := range []*replica{first, second} {
+		via(r)
+		mark := marks()
+		rotated := newEx(team, "ra-rotated-"+r.name, nil)
+		if err := alice.Create(l.ctx, rotated); err != nil {
+			t.Fatalf("create after the CA rotation via %s: %v", r.name, err)
+		}
+		if a := acceptance(t, rotated); a.Actor.Username != "alice" || a.Revision != 1 {
+			t.Fatalf("acceptance after the CA rotation via %s = %+v", r.name, a)
+		}
+		served(r, mark)
+	}
+	l.record("ca-rotation-trusted", map[string]any{"bundle": "old+new, then new", "replicas": []string{first.name, second.name}, "actor": "alice"})
+
+	// A replica still presenting the retired CA's (otherwise valid) leaf
+	// is ready, yet refused by the API server: no bypass.
+	rotate(first, ca, 42)
+	refused(first, "ra-retired")
+	rotate(first, newCA, 43)
+	via(first)
+	l.record("ca-rotation-retired", map[string]any{"replica": first.name, "admission": "failed closed", "restored": true})
 
 	evidence, _ := json.Marshal(map[string]int{"leaderConnections": sw.count(survivor.webhook), "replacementConnections": sw.count(gone.webhook)})
 	l.record("connections", map[string]any{"counts": string(evidence)})

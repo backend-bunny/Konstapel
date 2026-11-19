@@ -267,3 +267,53 @@ func TestRuntimeChartControllerLeaseAccess(t *testing.T) {
 		})
 	}
 }
+
+// Until the exception owner's native grant path and its capability gate
+// land, the runtime chart cannot activate an exception grant
+// (add-helm-oci-distribution 4.3, docs/charts.md "Exception admission"):
+// no rendered role lets any subject touch native Kyverno PolicyExceptions,
+// no admission webhook is registered, and the controller serves none. In
+// every supported configuration, so a missing exception prerequisite cannot
+// be bypassed through chart values.
+func TestRuntimeChartCannotActivateNativeExceptions(t *testing.T) {
+	for name, set := range map[string][]string{
+		"defaults":     nil,
+		"bundles on":   {"bundles.sourcesConfigMap=" + sourcesCM, "bundles.referencedConfigMaps={registry-ca}", "bundles.referencedSecrets={registry-cred,org-key}"},
+		"metrics on":   {"metrics.enabled=true", "metrics.readers[0].namespace=monitoring", "metrics.readers[0].name=prometheus-k8s"},
+		"operator TLS": {"tls.mode=secret", "tls.secret.name=konstapel-tls"},
+		"one replica":  {"replicaCount=1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)
+			if err != nil {
+				t.Fatal(out)
+			}
+			for _, d := range docs {
+				switch d["kind"] {
+				case "MutatingWebhookConfiguration", "ValidatingWebhookConfiguration":
+					t.Errorf("%s %v registered before exception prerequisites", d["kind"], metadata(d)["name"])
+				case "Role", "ClusterRole":
+					rules, _ := d["rules"].([]any)
+					for _, r := range rules {
+						r := r.(map[string]any)
+						groups, _ := r["apiGroups"].([]any)
+						resources, _ := r["resources"].([]any)
+						if slices.Contains(groups, any("policies.kyverno.io")) && slices.ContainsFunc(resources, func(x any) bool {
+							return strings.HasPrefix(x.(string), "policyexceptions")
+						}) {
+							t.Errorf("%s %v grants native PolicyExceptions: %v", d["kind"], metadata(d)["name"], r)
+						}
+					}
+				case "Deployment":
+					for _, c := range at(d, "spec", "template", "spec", "containers").([]any) {
+						for _, a := range at(c, "args").([]any) {
+							if strings.HasPrefix(a.(string), "--webhook-") {
+								t.Errorf("Deployment %v serves admission webhooks: %s", metadata(d)["name"], a)
+							}
+						}
+					}
+				}
+			}
+		})
+	}
+}

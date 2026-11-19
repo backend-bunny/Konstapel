@@ -27,6 +27,7 @@ attestation and GitHub provenance on each OCI subject.
 | The runtime chart refuses another namespace, a missing digest, and unsafe timing or PDB values at render time | `internal/charttest`, `scripts/charts/check.sh` fixtures |
 | Two hardened replicas (non-root, read-only root, no capabilities) become ready, and one holds the Lease | `TestLiveHelmInstall`, `TestLiveHelmAvailability` (`availability` group) |
 | Both TLS modes work: cert-manager (chart CA or platform issuer) and an operator Secret | `TestLiveHelmInstall` steps 4–8 |
+| Leaf and CA rotation reach every replica without a restart; invalid or expired TLS is not ready but never opens an unauthenticated download or bypasses fail-closed admission | `TestLiveHelmInstall` (download), `TestLiveReplicaAdmission` (webhook against the API server), `TestCertificatesReloadRotation`, `TestWebhookCARotation` |
 | The documented examples render and install | `TestDocumentedExamples`; `TestLiveHelmInstall` uses `operator-tls.yaml` and `platform-issuer.yaml`, and `TestLiveHelmAvailability` uses `development.yaml` |
 
 ### Supported versions
@@ -62,7 +63,9 @@ attestation and GitHub provenance on each OCI subject.
 | A capture lost before durable staging is reported as `CaptureLost`, never published, and an S3 outage alone never causes it: while S3 is held or unreachable, before and after the leader pod is removed, the run stays `Publishing` | `TestLiveHelmAvailability`, `TestLiveHelmDurableRecovery` (installed image), `TestLiveLeaderHandoverLoss` |
 | The first scheduled run of a binding is neither duplicated nor orphaned when its status write loses to another writer, even with a lagging run cache or a replan more than one interval later (a defect the deployed recovery test found and this release fixes) | `TestLostFirstScheduleWriteAdoptsTheCreatedRun`, `TestLostFirstScheduleWriteAdoptedAfterAnInterval`, `TestLostFirstScheduleWriteAdoptedDespiteRunCacheLag`, `TestFirstScheduleAdoptsOnlyOwnUnfinishedScheduledRuns` |
 | A delayed former leader can't withdraw the current policy revision | `TestDelayedFormerLeaderResolvesAgain` and delivery tests |
-| Kyverno API or permission loss is reported, not crashed on, and recovers without a restart | `TestLiveEngineCapabilityRecovery` (`capabilities` group) |
+| Kyverno API or permission loss is reported, not crashed on, and recovers without a restart; the controller stays ready and keeps serving webhook TLS throughout | `TestLiveEngineCapabilityRecovery` (`capabilities` group) |
+| Unavailable policy reports never establish compliance, whatever the reason, and leave delivery and the applied policies alone | `TestUnavailableReportsCannotEstablishCompliance`, `TestAssessmentCapabilityGate`, `TestDeliveryCapabilityReasons` |
+| No chart configuration can activate a native exception grant before the exception prerequisites exist | `TestRuntimeChartCannotActivateNativeExceptions` |
 
 ### Upgrade and uninstall
 

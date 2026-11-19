@@ -205,3 +205,67 @@ func TestWebhookTLSValidatedAtStartup(t *testing.T) {
 		}
 	}
 }
+
+// A webhook CA rotation is a leaf from another CA (add-helm-oci-distribution
+// 3.5). The process cannot see the webhook configuration's caBundle, so the
+// new leaf is served once it verifies on its own and readiness holds; the
+// API server's trust decides: a client still trusting only the old CA is
+// refused (admission then fails closed under failurePolicy Fail), one
+// trusting the old and new CAs during propagation, or only the new one
+// afterwards, is served.
+func TestWebhookCARotation(t *testing.T) {
+	oldCA, newCA := newIssuer(t), newIssuer(t)
+	dir := t.TempDir()
+	now := time.Now()
+	writeLeaf(t, dir, oldCA, 2, now.Add(-time.Hour), now.Add(time.Hour))
+	certs, err := webhookTLS(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	srv := webhook.NewServer(webhook.Options{Host: "127.0.0.1", Port: port, TLSOpts: webhookTLSOptions(certs)})
+	ready := webhookReady(certs, srv.StartedChecker())
+	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Start(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	for deadline := time.Now().Add(10 * time.Second); ready(req) != nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("not ready: %v", ready(req))
+		}
+	}
+	trusting := func(cas ...testIssuer) error {
+		pool := x509.NewCertPool()
+		for _, ca := range cas {
+			pool.AddCert(ca.cert)
+		}
+		conn, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), &tls.Config{RootCAs: pool, ServerName: "konstapel-webhook.konstapel-system.svc"})
+		if err == nil {
+			_ = conn.Close()
+		}
+		return err
+	}
+	if err := trusting(oldCA); err != nil {
+		t.Fatalf("old trust before rotation: %v", err)
+	}
+	writeLeaf(t, dir, newCA, 3, now.Add(-time.Hour), now.Add(time.Hour))
+	if err := certs.Reload(); err != nil {
+		t.Fatalf("leaf from a new CA rejected: %v", err)
+	}
+	if err := ready(req); err != nil {
+		t.Fatalf("not ready after a CA rotation: %v", err)
+	}
+	if trusting(oldCA) == nil {
+		t.Fatal("a client trusting only the retired CA accepted the rotated leaf")
+	}
+	if err := trusting(oldCA, newCA); err != nil {
+		t.Fatalf("propagation bundle (old and new CA): %v", err)
+	}
+	if err := trusting(newCA); err != nil {
+		t.Fatalf("new trust after rotation: %v", err)
+	}
+}
