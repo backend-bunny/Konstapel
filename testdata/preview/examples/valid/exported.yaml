@@ -1,0 +1,16 @@
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: baseline-production
+  uid: 5b7e8f3a-0000-4000-8000-000000000000
+  generation: 4
+spec:
+  profileRef:
+    name: workload-baseline
+  namespaceSelector:
+    matchLabels:
+      environment: production
+  mode: Deny
+  enforcementEpoch: 3
+status:
+  observedGeneration: 4

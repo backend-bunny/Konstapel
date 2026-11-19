@@ -1,0 +1,10 @@
+# expect: unknown-field
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: typo
+spec:
+  profileRef: {name: workload-baseline}
+  namespaceSelector: {}
+  mode: Audit
+  enforcment: Deny
