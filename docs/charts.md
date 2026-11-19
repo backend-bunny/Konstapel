@@ -50,14 +50,14 @@ release can't substitute a fixture or a guess for it.
 | Role catalog | `config/rbac/{compliance-admin,compliance-viewer,assessment-operator,assessment-requester,exception-editor,evidence-download,evidence-attachments,controller-assessments}.yaml` | the feature owners | resolved |
 | Admission policies | `config/admission/*.yaml` (Mutating/ValidatingAdmissionPolicies; MutatingAdmissionPolicy needs Kubernetes ≥ 1.36, hence `kubeVersion: >=1.36.0-0`) | continuous-assessments, s3-evidence-publishing, supporting-evidence-attachments | resolved |
 | Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`; with `metrics.enabled`, `:8443` plus `--metrics-cert-dir` and `--metrics-server-name`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
-| Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` fails while the manager shuts down; engine health is reported in Conditions, not readiness. | targeting, add-controller-high-availability | resolved; further replica serving readiness belongs to high availability (pending) |
+| Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` requires this replica's informer sync and, when webhooks are served, a verified unexpired webhook certificate on a started server; it fails while the manager shuts down. Leadership and engine health are not readiness inputs: they are reported in Conditions. | targeting, add-controller-high-availability | resolved |
 | Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
 | Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`, and the attachment limits `--attachment-max-bytes`, `--attachment-timeout`, `--attachment-max-concurrent` and `--attachment-retention` (chart values `download.attachments`); HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing, supporting-evidence-attachments | resolved |
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
 | Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; replica serving readiness and leader/serving separation do not yet | add-controller-high-availability | resolved for the Lease, shutdown budgets, Deployment and PDB; replica serving readiness is pending |
-| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server; webhook TLS waits for exception admission |
+| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server and metrics; the runtime reloads webhook TLS (leaf and CA rotation tested), and the chart renders it with exception admission |
 | OCI policy bundles | `konstapel controller` `--bundle-sources-configmap` (off when empty), `--bundle-cache-dir`, `--bundle-cache-capacity`, `--bundle-refresh-interval` and `POD_NAMESPACE`; the operator-created sources ConfigMap and the Secrets/ConfigMaps it references, read by name in the controller namespace ([Controller wiring](policy-bundles.md#controller-wiring), [RBAC and informers](policy-bundles.md#rbac-and-informers)) | add-policy-bundle-distribution | resolved; values `bundles.*`, off by default |
 | Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
 
@@ -229,7 +229,28 @@ these steps:
 4. The API is removed and restored while the controller runs, and the policy
    is re-delivered.
 
-None of these restarts the controller.
+None of these restarts the controller. The controller serves its probes and
+the admission webhook like a chart pod, and through every step `/readyz`
+(informer sync and the webhook's verified certificate) passes and the webhook
+answers TLS: Kyverno is not a serving prerequisite, so its absence never
+removes the replica from its Service.
+
+Missing reports never establish compliance.
+`TestUnavailableReportsCannotEstablishCompliance` puts a passing,
+attributable PolicyReport in place and makes the assessment capability
+unavailable for each reason (`APINotServed`, `ResourceMissing`,
+`UnsupportedResource`, `AccessDenied`, `DependencyUnavailable`). Current
+evidence counts no pass, an active run keeps collecting and closes
+`Incomplete`, and delivery still reconciles without touching the applied
+policy. With reports readable again the same report counts.
+
+The exceptions capability gates nothing yet because there is nothing to gate:
+the native grant path of add-self-service-policy-exceptions isn't merged.
+`TestRuntimeChartCannotActivateNativeExceptions` checks that no supported
+chart configuration grants any subject access to native `PolicyException`
+objects, registers an admission webhook, or makes the controller serve one.
+When that path lands, its activation consumes the exceptions capability
+result.
 
 ## Runtime chart
 
@@ -1144,7 +1165,7 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download certificate reload, documented examples and installed-image acceptance done; exception webhook serving pending) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download, metrics and webhook certificate reload, serving readiness, documented examples and installed-image acceptance done; rendering the exception webhook and its CA injection waits for exception admission) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest (packaging, frozen-input acceptance, write-once publisher, signing/verification tooling, release workflow, release notes and recovery done; the keyless signing identity and release-please integration are exercised by the first release) | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks (done), Go black-box acceptance of the installed charts, the required CI gate (the `charts` group within the required `acceptance` check) and release gating (done) | groups 2–5 |
@@ -1152,3 +1173,12 @@ Fixtures stay outside `charts/` so they are never packaged.
 Exception admission and its webhook stay out of the chart until
 add-self-service-policy-exceptions merges its handlers and passes its gates.
 The chart then enables them behind tested capability detection.
+The runtime side is ready for that: every replica serves the webhook,
+re-reads its certificate, and leaves its Service while the mounted
+certificate is invalid or expired. `TestLiveReplicaAdmission` rotates the
+webhook CA against the real API server. A leaf from a CA that the webhook
+configurations don't trust yet fails admission closed and stores nothing.
+Trusting the old and new CA, then only the new one, admits through both
+rotated replicas with the caller's attribution. A replica left on the
+retired CA is refused, never bypassed. The chart's CA injection must
+therefore reach the `caBundle` before a leaf from a new CA is served.

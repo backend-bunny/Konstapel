@@ -14,14 +14,23 @@ package controller
 //     policy keeps enforcing; restoring them recovers;
 //   - a Kyverno rollout keeps the existing policy and readiness recovers;
 //   - the API removed while Konstapel runs is reported, and once restored
-//     the policy is delivered again without a restart.
+//     the policy is delivered again without a restart;
+//   - throughout, the replica stays in its Service: /readyz (informers
+//     and the admission webhook's verified TLS) passes and the webhook
+//     answers TLS, because Kyverno is not a serving prerequisite (3.5).
 // Run through scripts/targeting-live.sh.
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -81,8 +90,37 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 		_ = l.c.Delete(l.ctx, p)
 		l.eventually("capability test policies removed", func() (bool, string) { got := l.policiesFor(b.Name); return len(got) == 0, toJSON(got) })
 	})
-	stop := l.startManagerAs(controllerUser)
-	defer func() { stop() }()
+	// The replica serves probes and the admission webhook like a chart pod.
+	probes, webhookPort, certs, ca := freeAddr(t), freePort(t), t.TempDir(), newIssuer(t)
+	writeLeaf(t, certs, ca, 2, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	mgr := l.candidateWith(controllerUser, "cr-controller", func(o *Options) {
+		o.LeaderElection = false
+		o.ProbeAddr = probes
+		o.WebhookCertDir, o.WebhookPort = certs, webhookPort
+	})
+	defer mgr.stop()
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.cert)
+	// serving: the replica is ready for its Service and its webhook answers
+	// TLS with the verified certificate, whatever the engine's state.
+	serving := func() (bool, string) {
+		code, body := probeStatus(probes, "/readyz")
+		if code != http.StatusOK || !strings.Contains(body, "informers") || !strings.Contains(body, "webhook") {
+			return false, fmt.Sprintf("readyz %d: %s", code, body)
+		}
+		conn, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(webhookPort)), &tls.Config{RootCAs: roots, ServerName: "konstapel-webhook.konstapel-system.svc"})
+		if err != nil {
+			return false, "webhook TLS: " + err.Error()
+		}
+		_ = conn.Close()
+		return true, ""
+	}
+	requireServing := func(state string) {
+		t.Helper()
+		if ok, msg := serving(); !ok {
+			t.Fatalf("replica left its Service with %s: %s", state, msg)
+		}
+	}
 	engineReason := func() (string, string) {
 		c := meta.FindStatusCondition(l.binding(b.Name).Status.Conditions, v1alpha1.ConditionEngineReady)
 		if c == nil {
@@ -95,7 +133,9 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 		return r == ReasonEngineResourceMissing || r == ReasonEngineAPINotServed, r + ": " + m
 	})
 	missing, _ := engineReason()
-	l.record("engine-missing", map[string]any{"reason": missing})
+	l.eventually("replica serving without the engine API", serving)
+	requireServing("the engine API missing")
+	l.record("engine-missing", map[string]any{"reason": missing, "readyz": "ok", "webhookTLS": "ok"})
 
 	// 2. The API returns; Kyverno is restarted to serve it. Konstapel
 	// recovers without a restart, delivers, and enforces.
@@ -150,7 +190,8 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 	if ok, msg := l.denied("cr-prod"); !ok {
 		t.Fatalf("enforcement lost with the controller's permissions: %s", msg)
 	}
-	l.record("permissions-lost", map[string]any{"engineReady": ReasonEngineAccessDenied, "enforcement": "retained"})
+	requireServing("engine permissions lost")
+	l.record("permissions-lost", map[string]any{"engineReady": ReasonEngineAccessDenied, "enforcement": "retained", "readyz": "ok"})
 
 	// 4. Permissions return: recovery without a restart.
 	_ = l.c.Get(l.ctx, client.ObjectKey{Name: "konstapel-controller"}, role)
@@ -163,6 +204,7 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 
 	// 5. A Kyverno rollout keeps the existing policy; readiness recovers.
 	l.scaleKyverno("kyverno-admission-controller", 0)
+	requireServing("Kyverno's admission controller scaled to zero")
 	l.scaleKyverno("kyverno-admission-controller", 1)
 	if got := l.policiesFor(b.Name); !slices.Equal(got, applied) {
 		t.Fatalf("engine rollout changed applied policies: %v", got)
@@ -184,6 +226,7 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 		r, m := engineReason()
 		return r == ReasonEngineResourceMissing || r == ReasonEngineAPINotServed, r + ": " + m
 	})
+	requireServing("the engine API removed while running")
 	restore()
 	for _, d := range []string{"kyverno-admission-controller", "kyverno-background-controller", "kyverno-reports-controller"} {
 		l.scaleKyverno(d, 0)
@@ -191,5 +234,6 @@ func TestLiveEngineCapabilityRecovery(t *testing.T) {
 	}
 	l.waitReady(b.Name, 1)
 	l.eventually("re-delivered policy enforces", func() (bool, string) { return l.denied("cr-prod") })
-	l.record("engine-removed-and-restored", map[string]any{"policies": l.policiesFor(b.Name)})
+	requireServing("the engine API restored")
+	l.record("engine-removed-and-restored", map[string]any{"policies": l.policiesFor(b.Name), "readyz": "ok"})
 }
