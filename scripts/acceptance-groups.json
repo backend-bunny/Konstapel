@@ -15,7 +15,8 @@
       "TestLiveBoundedShutdown",
       "TestLiveLeaderObservability",
       "TestLiveHardeningBackground",
-      "TestLiveEvidenceAttachmentAPI"
+      "TestLiveEvidenceAttachmentAPI",
+      "TestLivePolicyPreviewObservation"
     ]
   },
   "assessments": {
