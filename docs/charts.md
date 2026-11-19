@@ -128,7 +128,7 @@ helm upgrade konstapel-crds oci://ghcr.io/backend-bunny/charts/konstapel-crds \
   deliberate operator decision, not something to retry with
   `--take-ownership`.
 
-`TestLiveCRDChartLifecycle` (admission acceptance group) checks this with the
+`TestLiveCRDChartLifecycle` (`charts` acceptance group) checks this with the
 pinned Helm in kind. It installs the chart, adopting the CRDs with the
 documented client-side steps when earlier tests applied them directly, and creates an EvidenceDestination with spec,
 status and a finalizer. Through each of these steps, every CRD UID and the
@@ -251,6 +251,47 @@ chart configuration grants any subject access to native `PolicyException`
 objects, registers an admission webhook, or makes the controller serve one.
 When that path lands, its activation consumes the exceptions capability
 result.
+
+**Installing before Kyverno.** `TestLiveHelmLateKyverno` (`charts` group)
+checks the same behavior on the installed charts and the packaged image, with
+no in-process controller. It uninstalls the disposable cluster's Kyverno
+release, so neither `policies.kyverno.io` nor `wgpolicyk8s.io` is served, and
+then installs both charts as documented:
+1. Every controller and download replica becomes ready without Kyverno.
+2. A Deny binding reports `EngineAPINotServed` (or `EngineResourceMissing`).
+   Its current evidence lists `no engine policies or reports can be read`,
+   counts nothing attributable and is not `Complete`. The download server
+   still refuses an unauthenticated request with 401.
+3. Kyverno is installed with its original chart and values. The binding
+   becomes `EngineReady=True`, its policy enforces and the limitation clears.
+   Neither chart is upgraded or reinstalled (both stay at revision 1), and no
+   pod is replaced or restarted.
+
+While Kyverno is absent, the same test also checks the installed release's
+API contract for every CRD in the CRD chart. It fails if the chart ships a
+CRD that the contract doesn't cover. Each check is a real API request,
+authenticated as a user bound to one of the runtime chart's roles, or as the
+chart's ServiceAccounts:
+- **Defaults and admission fields.** A minimal object gets its schema
+  defaults: profile exception eligibility `Forbidden`; binding assessment
+  `24h`/`5m`/`2h`/`2160h`; destination `Retire`, `path` addressing and the
+  credential keys. The runtime chart's admission policies set a binding's
+  `enforcementEpoch`, a request's `requester` and an attachment's
+  `registeredBy` from the caller. A supplied epoch is overwritten, and an
+  enforcement change advances it.
+- **Invalid specs.** Invalid specs are rejected with their documented
+  reasons, and so are the invalid examples under
+  `testdata/targeting/examples/invalid`. The valid examples (including
+  `docs/examples/evidence-signing` and `docs/examples/supporting-evidence`)
+  are accepted.
+- **Status and protected fields.** Status sent on create or through the main
+  resource isn't stored, and immutable fields refuse changes.
+- **RBAC.** Only `konstapel-controller` may write any `/status`. Each role
+  reads only its documented kinds' status, and a user with no Konstapel role
+  reads none. The controller can't create profiles, bindings or destinations,
+  and neither a viewer nor an attachment registrar can create a profile. Only the controller may create
+  Namespace-scope runs, which `konstapel-assessment-run-scope` enforces
+  through the chart's ConfigMap.
 
 ## Runtime chart
 
@@ -950,6 +991,10 @@ its work:
 
 Reinstalling the runtime chart resumes all of the above from the retained
 objects.
+`TestLiveHelmInstall` checks this: after `helm uninstall konstapel`, the
+binding's delivered policies are unchanged and Kyverno still denies, and the
+reinstalled runtime becomes ready on the same policy revisions and serves the
+earlier run's package.
 
 ## Values contract
 

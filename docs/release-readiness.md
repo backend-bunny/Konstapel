@@ -11,7 +11,7 @@ tested, and what it does not do. Each row names the test that backs it;
 | Artifact | Reference | Contents |
 | --- | --- | --- |
 | Controller image | `ghcr.io/backend-bunny/konstapel@sha256:…` (digest in the release notes) | `konstapel controller`, `konstapel download-server`, the C2P provider and vendored content; signed, with SPDX SBOMs, source/notice attestations and build provenance ([Images](images.md)) |
-| CRD chart | `oci://ghcr.io/backend-bunny/charts/konstapel-crds@sha256:…` | the six `compliance.erenius.io/v1alpha1` CRDs, kept on uninstall |
+| CRD chart | `oci://ghcr.io/backend-bunny/charts/konstapel-crds@sha256:…` | the seven `compliance.erenius.io/v1alpha1` CRDs, kept on uninstall |
 | Runtime chart | `oci://ghcr.io/backend-bunny/charts/konstapel@sha256:…` | controller and download server (two replicas each), RBAC, admission policies, TLS (cert-manager or operator Secret); defaults to the released image digest |
 
 Both charts carry version `0.1.0` and are signed, with a chart-inputs
@@ -24,6 +24,7 @@ attestation and GitHub provenance on each OCI subject.
 | Claim | Evidence |
 | --- | --- |
 | The CRD chart installs every shipped CRD, and the runtime chart installs on Kubernetes ≥ 1.36 into `konstapel-system` | `TestLiveHelmInstall`, `TestLiveCRDChartLifecycle` (`charts` group); release: `charts:acceptance` on the frozen archives |
+| Every shipped CRD's defaults, validation (including the documented examples), status subresource, immutable fields and status RBAC hold through the installed release's roles and admission policies | `TestLiveHelmLateKyverno` (`charts` group) |
 | The runtime chart refuses another namespace, a missing digest, and unsafe timing or PDB values at render time | `internal/charttest`, `scripts/charts/check.sh` fixtures |
 | Two hardened replicas (non-root, read-only root, no capabilities) become ready, and one holds the Lease | `TestLiveHelmInstall`, `TestLiveHelmAvailability` (`availability` group) |
 | Both TLS modes work: cert-manager (chart CA or platform issuer) and an operator Secret | `TestLiveHelmInstall` steps 4–8 |
@@ -63,6 +64,7 @@ attestation and GitHub provenance on each OCI subject.
 | A capture lost before durable staging is reported as `CaptureLost`, never published, and an S3 outage alone never causes it: while S3 is held or unreachable, before and after the leader pod is removed, the run stays `Publishing` | `TestLiveHelmAvailability`, `TestLiveHelmDurableRecovery` (installed image), `TestLiveLeaderHandoverLoss` |
 | The first scheduled run of a binding is neither duplicated nor orphaned when its status write loses to another writer, even with a lagging run cache or a replan more than one interval later (a defect the deployed recovery test found and this release fixes) | `TestLostFirstScheduleWriteAdoptsTheCreatedRun`, `TestLostFirstScheduleWriteAdoptedAfterAnInterval`, `TestLostFirstScheduleWriteAdoptedDespiteRunCacheLag`, `TestFirstScheduleAdoptsOnlyOwnUnfinishedScheduledRuns` |
 | A delayed former leader can't withdraw the current policy revision | `TestDelayedFormerLeaderResolvesAgain` and delivery tests |
+| Installed before Kyverno, both charts become ready, report the missing engine and establish no evidence; Kyverno installed later is used without a restart, upgrade or reinstall | `TestLiveHelmLateKyverno` (`charts` group) |
 | Kyverno API or permission loss is reported, not crashed on, and recovers without a restart; the controller stays ready and keeps serving webhook TLS throughout | `TestLiveEngineCapabilityRecovery` (`capabilities` group) |
 | Unavailable policy reports never establish compliance, whatever the reason, and leave delivery and the applied policies alone | `TestUnavailableReportsCannotEstablishCompliance`, `TestAssessmentCapabilityGate`, `TestDeliveryCapabilityReasons` |
 | No chart configuration can activate a native exception grant before the exception prerequisites exist | `TestRuntimeChartCannotActivateNativeExceptions` |
@@ -74,7 +76,7 @@ attestation and GitHub provenance on each OCI subject.
 | CRD chart upgrades (same-schema and additive) keep objects, UIDs and finalizers; uninstall keeps the CRDs and their objects; a same-identity reinstall takes them back; a different release is refused | `TestLiveCRDChartLifecycle` |
 | Runtime upgrades roll without dropping below two ready controllers, and a blocked surge keeps serving | `TestLiveHelmAvailability` |
 | Uninstalling the runtime chart leaves an operator-supplied TLS Secret | `TestLiveHelmInstall` |
-| Uninstalling the runtime chart stops delivery, assessment, downloads and retention cleanup, but leaves delivered policies and published packages in place | [Helm charts](charts.md) |
+| Uninstalling the runtime chart stops delivery, assessment, downloads and retention cleanup, but leaves delivered policies and published packages in place | [Helm charts](charts.md); `TestLiveHelmInstall` checks that the delivered policies stay and enforce, and that a reinstall resumes on the same revisions and serves the earlier package |
 
 ### Artifact verification
 

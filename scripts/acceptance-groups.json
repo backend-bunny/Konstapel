@@ -67,6 +67,7 @@
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall",
+      "TestLiveHelmLateKyverno",
       "TestLiveHelmBundles",
       "TestLiveHelmMetrics",
       "TestLiveHelmSupportingEvidence"

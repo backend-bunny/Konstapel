@@ -338,12 +338,27 @@ func TestLiveHelmInstall(t *testing.T) {
 	l.followerDownloads(ns, b, run, operator.Name, crb, rotatedRoots, ed, secret)
 
 	// 5. Uninstalling keeps the operator's Secret: the chart never owned it.
+	// It also keeps the binding and its delivered policies, which Kyverno
+	// keeps enforcing with no controller installed (docs/charts.md,
+	// "Uninstalling the runtime chart").
+	delivered := l.policiesFor(b.Name)
+	targets := l.binding(b.Name).Status.TargetCount
+	if targets == nil {
+		t.Fatalf("binding %s has no target count before the runtime uninstall", b.Name)
+	}
 	if out, err := l.helm("uninstall", "konstapel", "--namespace", ns, "--wait"); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
 	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(tlsSecret), &corev1.Secret{}); err != nil {
 		t.Fatalf("operator TLS Secret removed by uninstall: %v", err)
 	}
+	if got := l.policiesFor(b.Name); len(delivered) == 0 || !slices.Equal(got, delivered) {
+		t.Fatalf("runtime uninstall changed the delivered policies: %v, before %v", got, delivered)
+	}
+	if ok, msg := l.denied("hi-prod"); !ok {
+		t.Fatalf("Kyverno stopped enforcing after the runtime uninstall: %s", msg)
+	}
+	l.record("runtime-uninstalled", map[string]any{"policiesKept": delivered, "enforcing": true, "operatorSecretKept": true})
 
 	// 6. Default TLS mode: cert-manager (installed separately) issues the
 	// download certificate from the chart's CA for the Service's names.
@@ -354,6 +369,12 @@ func TestLiveHelmInstall(t *testing.T) {
 	if out, err := l.helm(append([]string{"install", "konstapel", chartArchive(t, "konstapel"), "--namespace", ns, "--wait", "--timeout", "5m"},
 		imageValues(repo, digest)...)...); err != nil {
 		t.Fatalf("install in cert-manager mode: %v\n%s\n%s", err, out, l.podDiagnostics(ns))
+	}
+	// The reinstalled runtime resumes from the retained objects: the
+	// binding is ready again on the same delivered revisions.
+	l.waitReady(b.Name, *targets)
+	if got := l.policiesFor(b.Name); !slices.Equal(got, delivered) {
+		t.Fatalf("reinstall rewrote the delivered policies: %v, before %v", got, delivered)
 	}
 	issued := &corev1.Secret{}
 	l.eventually("download certificate issued", func() (bool, string) {
