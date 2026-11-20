@@ -228,6 +228,8 @@ type capture struct {
 	cluster     string
 	profiles    []v1alpha1.ComplianceProfile
 	bindings    []v1alpha1.ComplianceBinding
+	// specs are the stored specs of profiles and bindings, as returned.
+	specs       map[Identity]map[string]any
 	namespaces  []ObservedNamespace
 	applied     []AppliedPolicy
 	unowned     []ObjectRef
@@ -238,7 +240,7 @@ type capture struct {
 }
 
 func (r *reader) capture(ctx context.Context, opts ObserveOptions) (*capture, *Diagnostic) {
-	c := &capture{r: r, b: &budget{max: r.lim.MaxResponseBytes}, projections: map[string]string{}}
+	c := &capture{r: r, b: &budget{max: r.lim.MaxResponseBytes}, projections: map[string]string{}, specs: map[Identity]map[string]any{}}
 	ctx = withBudget(ctx, c.b)
 	steps := []func(context.Context, ObserveOptions) *Diagnostic{
 		c.readCluster, c.readNamespaces, c.readProfiles, c.readBindings, c.readEnginePolicies,
@@ -429,6 +431,7 @@ func (c *capture) readProfiles(ctx context.Context, _ ObserveOptions) *Diagnosti
 			Terminating bool   `json:"terminating"`
 			Config      string `json:"config"`
 		}{p.Generation, p.DeletionTimestamp != nil, Fingerprint(&p, nil)})
+		c.storeSpec(KindProfile, &items[i])
 		c.profiles = append(c.profiles, p)
 	}
 	return nil
@@ -452,9 +455,18 @@ func (c *capture) readBindings(ctx context.Context, _ ObserveOptions) *Diagnosti
 			Terminating bool   `json:"terminating"`
 			Config      string `json:"config"`
 		}{b.Generation, b.Spec.EnforcementEpoch, b.DeletionTimestamp != nil, Fingerprint(nil, &b)})
+		c.storeSpec(KindBinding, &items[i])
 		c.bindings = append(c.bindings, b)
 	}
 	return nil
+}
+
+// storeSpec keeps the spec exactly as stored, so a proposal can be compared
+// with what the API server holds rather than with normalized configuration.
+func (c *capture) storeSpec(kind string, u *unstructured.Unstructured) {
+	if spec, ok := u.Object["spec"].(map[string]any); ok {
+		c.specs[Identity{Group: v1alpha1.GroupVersion.Group, Kind: kind, Name: u.GetName()}] = runtime.DeepCopyJSON(spec)
+	}
 }
 
 func (c *capture) readEnginePolicies(ctx context.Context, _ ObserveOptions) *Diagnostic {
@@ -680,7 +692,7 @@ func (c *capture) readSources(ctx context.Context, opts ObserveOptions) *Diagnos
 func (c *capture) fill(s *Snapshot, opts ObserveOptions) {
 	s.Cluster = c.cluster
 	s.Objects = slices.SortedFunc(slices.Values(c.refs), compareRef)
-	s.Live = Live{Profiles: c.profiles, Bindings: c.bindings}
+	s.Live = Live{Profiles: c.profiles, Bindings: c.bindings, StoredSpecs: c.specs}
 	slices.SortFunc(s.Live.Profiles, func(a, b v1alpha1.ComplianceProfile) int { return strings.Compare(a.Name, b.Name) })
 	slices.SortFunc(s.Live.Bindings, func(a, b v1alpha1.ComplianceBinding) int { return strings.Compare(a.Name, b.Name) })
 	s.Namespaces = c.namespaces

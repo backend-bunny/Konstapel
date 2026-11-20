@@ -1,0 +1,414 @@
+{
+  "complete": true,
+  "cluster": "kube-system:ks-uid",
+  "contracts": {
+    "targeting": 1
+  },
+  "impactCount": 2,
+  "objects": [
+    {
+      "identity": "ComplianceBinding/deny-prod",
+      "disposition": "replaced",
+      "observed": {
+        "uid": "b-deny",
+        "generation": 5,
+        "enforcementEpoch": 4
+      },
+      "pendingIdentity": true,
+      "configurationChanged": true,
+      "storedSpec": "different",
+      "liveConfigurationFingerprint": "sha256:01ad48ee71225cd0ebd368e6ba22e3c122178d8eb28f22c9dc53c163346f867a",
+      "candidateConfigurationFingerprint": "sha256:2b9a146373030d4f4d0821272ac849b368cdf59e635bd9bafa0c5c3419c66267",
+      "source": "set.yaml",
+      "document": 1,
+      "line": 1
+    }
+  ],
+  "contributions": [
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "privileged"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:e3a996eb2ae5d8b58d04925320811dbccd83a07c31e11996d44578a052535ade",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "staging"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "namespacesAdded": [
+        {
+          "name": "staging",
+          "uid": "staging-uid"
+        }
+      ],
+      "namespacesRemoved": [
+        {
+          "name": "prod",
+          "uid": "prod-uid"
+        }
+      ],
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/deny-prod",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "selector-changed",
+          "area": "scope",
+          "before": "env=production",
+          "after": "env=staging",
+          "reason": "the namespace selector changes"
+        },
+        {
+          "category": "namespace-added",
+          "area": "scope",
+          "after": "staging (staging-uid)",
+          "reason": "these observed namespace instances become subject to this contribution"
+        },
+        {
+          "category": "namespace-removed",
+          "area": "scope",
+          "before": "prod (prod-uid)",
+          "reason": "these observed namespace instances leave this contribution; other contributions may still apply there"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "run-as-non-root"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:2e13528de5fa765423be1b90f11a52cc873dbb27ce4e914a4372a50265179f0d",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "staging"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "namespacesAdded": [
+        {
+          "name": "staging",
+          "uid": "staging-uid"
+        }
+      ],
+      "namespacesRemoved": [
+        {
+          "name": "prod",
+          "uid": "prod-uid"
+        }
+      ],
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/deny-prod",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "selector-changed",
+          "area": "scope",
+          "before": "env=production",
+          "after": "env=staging",
+          "reason": "the namespace selector changes"
+        },
+        {
+          "category": "namespace-added",
+          "area": "scope",
+          "after": "staging (staging-uid)",
+          "reason": "these observed namespace instances become subject to this contribution"
+        },
+        {
+          "category": "namespace-removed",
+          "area": "scope",
+          "before": "prod (prod-uid)",
+          "reason": "these observed namespace instances leave this contribution; other contributions may still apply there"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    }
+  ],
+  "namespaces": [
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "privileged",
+      "removed": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny"
+        }
+      ],
+      "remaining": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "unchanged"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "run-as-non-root",
+      "removed": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny"
+        }
+      ],
+      "remaining": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "unchanged"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "privileged",
+      "added": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "remaining": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "unchanged"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "run-as-non-root",
+      "added": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "remaining": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "unchanged"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    }
+  ],
+  "appliedState": {
+    "policies": [],
+    "pending": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "policy": "privileged"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "policy": "run-as-non-root"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "policy": "privileged"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "policy": "run-as-non-root"
+        },
+        "applied": false
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "code": "no-workload-evaluation",
+      "message": "configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted"
+    },
+    {
+      "code": "rendered-input-assumptions",
+      "message": "each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time"
+    }
+  ]
+}

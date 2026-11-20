@@ -1,0 +1,737 @@
+{
+  "complete": true,
+  "cluster": "kube-system:ks-uid",
+  "contracts": {
+    "targeting": 1
+  },
+  "impactCount": 6,
+  "objects": [
+    {
+      "identity": "ComplianceProfile/shared",
+      "disposition": "replaced",
+      "observed": {
+        "uid": "p-shared",
+        "generation": 3
+      },
+      "pendingIdentity": true,
+      "configurationChanged": true,
+      "storedSpec": "different",
+      "liveConfigurationFingerprint": "sha256:4d792c5b470feb0d551c264012f7ab0472085da6915060b0434180815f67a007",
+      "candidateConfigurationFingerprint": "sha256:cfe4497aeb1a0d77f0030e45371cd1ff62bfb44d1da1597bb062c4f45607bc3b",
+      "source": "set.yaml",
+      "document": 1,
+      "line": 1
+    }
+  ],
+  "contributions": [
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "policy": "privileged"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:e25569d92b9912edc1b6cbb338e5e8e488f8b9a0ef37d9a4f24156a731ba723a",
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "policy": "run-as-non-root"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:9c3816088e71e277a14d7a1449fdf3574ad231ca84e4b2932b0de030422af7b5",
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-none",
+        "bindingUID": "b-none",
+        "policy": "privileged"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "nowhere"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:ae8c413f7371c443cf92d68e653b08244048f70c0477691ab05ccfa01f88b4ee",
+        "targets": [],
+        "targetCount": 0
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "nowhere"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [],
+        "targetCount": 0
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-none",
+        "bindingUID": "b-none",
+        "policy": "run-as-non-root"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "nowhere"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:a49ca0997c1a348ff268c546ac9d72d7f2a18e1c71faea71971209c3c1ff61f9",
+        "targets": [],
+        "targetCount": 0
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "nowhere"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [],
+        "targetCount": 0
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "privileged"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:e3a996eb2ae5d8b58d04925320811dbccd83a07c31e11996d44578a052535ade",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "run-as-non-root"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:2e13528de5fa765423be1b90f11a52cc873dbb27ce4e914a4372a50265179f0d",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceProfile/shared",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "bundle-pin-changed",
+          "area": "policy",
+          "before": "hardening@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "after": "hardening@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "the pinned content changes; this is a change even if the rendered rules look identical"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    }
+  ],
+  "namespaces": [
+    {
+      "namespace": {
+        "name": "dev",
+        "uid": "dev-uid"
+      },
+      "policy": "privileged",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "dev",
+        "uid": "dev-uid"
+      },
+      "policy": "run-as-non-root",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "privileged",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        },
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "run-as-non-root",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        },
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Deny",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "privileged",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "run-as-non-root",
+      "replaced": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    }
+  ],
+  "appliedState": {
+    "policies": [],
+    "pending": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "policy": "privileged"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "policy": "run-as-non-root"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-none",
+          "bindingUID": "b-none",
+          "policy": "privileged"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-none",
+          "bindingUID": "b-none",
+          "policy": "run-as-non-root"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "policy": "privileged"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "policy": "run-as-non-root"
+        },
+        "applied": false
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "code": "no-workload-evaluation",
+      "message": "configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted"
+    },
+    {
+      "code": "rendered-input-assumptions",
+      "message": "each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time"
+    }
+  ]
+}
