@@ -235,7 +235,7 @@ func TestComplianceExceptionDocsExample(t *testing.T) {
 	}
 	// Both patches test the UID, resourceVersion and revision they were
 	// written for before they change anything.
-	for _, f := range []string{"revoke.json", "renew.json"} {
+	for _, f := range []string{"revoke.json", "renew.json", "renew-revoked.json"} {
 		raw, err := os.ReadFile("../../docs/examples/policy-exceptions/" + f)
 		if err != nil {
 			t.Fatal(err)
