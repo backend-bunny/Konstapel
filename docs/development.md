@@ -72,6 +72,11 @@ skipped; CI requires it. Initial tool/module installation
 and the checksum-verified chart download need network access. The pinned Devbox
 Kyverno CLI replaces the previous manual release-archive download.
 
+To preview a compliance configuration change against a cluster, build the
+binary (`task build`) and run `bin/konstapel preview` directly; there is no
+Task wrapper. See the [local and CI examples](policy-preview.md#local-and-ci-use),
+which `task test` verifies against a recording API server.
+
 Task delegates orchestration to `scripts/`; scripts remain usable directly inside
 the environment. The Taskfile exposes recurring workflows; helper scripts do not
 each need a task. Follow the [tooling guidelines](../AGENTS.md#taskfile-scope) when

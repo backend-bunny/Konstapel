@@ -82,6 +82,10 @@ in-progress capabilities, and historical validation records.
   team requests, results, and scoped evidence downloads.
 - [S3 evidence](docs/integration/s3-evidence.md): destinations, credentials,
   publication, retention, retirement, and orphaning.
+- [Policy change preview](docs/policy-preview.md): `konstapel preview` shows
+  how rendered profiles and bindings would change namespace scope and
+  enforcement before GitOps applies them, read-only, with
+  [local and CI examples](docs/policy-preview.md#local-and-ci-use).
 
 ## Assessment-loop prototype
 

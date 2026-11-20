@@ -473,10 +473,7 @@ contexts:
 func TestEvidenceStartsNoProviderOrDelivery(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir) // bin/c2p-konstapel-kyverno-manifest.json does not exist here
-	saved := os.Args
-	t.Cleanup(func() { os.Args = saved })
-	os.Args = []string{"konstapel", "evidence", "status", "dc-north", "--kubeconfig", filepath.Join(dir, "absent")}
-	err := run()
+	err := run([]string{"evidence", "status", "dc-north", "--kubeconfig", filepath.Join(dir, "absent")})
 	if err == nil || !strings.Contains(err.Error(), "kubeconfig") || strings.Contains(err.Error(), "manifest") || strings.Contains(err.Error(), "provider") {
 		t.Fatalf("evidence dispatch: %v", err)
 	}

@@ -1,0 +1,890 @@
+{
+  "kind": "PolicyChangePreview",
+  "schemaVersion": 1,
+  "complete": true,
+  "impactCount": 4,
+  "summary": {
+    "compared": true,
+    "objects": 2,
+    "reportingOnlyObjects": 0,
+    "contributionRows": 4,
+    "contributionImpacts": 4,
+    "namespaceRows": 8,
+    "namespaceImpacts": 0,
+    "equivalentReplacements": 0,
+    "categories": {
+      "contribution-removed": 2,
+      "namespace-added": 2,
+      "namespace-removed": 2,
+      "revision-replaced": 2,
+      "selector-changed": 2
+    }
+  },
+  "observation": {
+    "complete": true,
+    "cluster": "kube-system:ks-0001",
+    "context": "staging",
+    "server": "apiserver.test",
+    "controllerNamespace": "konstapel-system",
+    "start": "2026-11-20T09:30:00Z",
+    "end": "2026-11-20T09:30:00Z",
+    "captures": 2,
+    "collections": [
+      {
+        "resource": "/v1/namespaces",
+        "name": "kube-system",
+        "resourceVersion": "1",
+        "pages": 1,
+        "objects": 1
+      },
+      {
+        "resource": "/v1/namespaces",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 4
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/complianceprofiles",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 1
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/compliancebindings",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 2
+      },
+      {
+        "resource": "policies.kyverno.io/v1/validatingpolicies",
+        "labelSelector": "app.kubernetes.io/managed-by=konstapel",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 0
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/complianceexceptions",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 0
+      },
+      {
+        "resource": "/v1/configmaps",
+        "namespace": "konstapel-system",
+        "labelSelector": "app.kubernetes.io/component=acceptance-snapshot,app.kubernetes.io/managed-by=konstapel",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 0
+      }
+    ],
+    "objects": [
+      {
+        "resource": "/v1/namespaces",
+        "name": "konstapel-system",
+        "uid": "ns-konstapel",
+        "resourceVersion": "2"
+      },
+      {
+        "resource": "/v1/namespaces",
+        "name": "kube-system",
+        "uid": "ks-0001",
+        "resourceVersion": "1"
+      },
+      {
+        "resource": "/v1/namespaces",
+        "name": "prod",
+        "uid": "ns-prod",
+        "resourceVersion": "3"
+      },
+      {
+        "resource": "/v1/namespaces",
+        "name": "staging",
+        "uid": "ns-staging",
+        "resourceVersion": "4"
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/compliancebindings",
+        "name": "audit-all",
+        "uid": "b-audit-all",
+        "resourceVersion": "12",
+        "generation": 1
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/compliancebindings",
+        "name": "deny-prod",
+        "uid": "b-deny-prod",
+        "resourceVersion": "13",
+        "generation": 1
+      },
+      {
+        "resource": "compliance.erenius.io/v1alpha1/complianceprofiles",
+        "name": "baseline",
+        "uid": "p-baseline",
+        "resourceVersion": "11",
+        "generation": 1
+      }
+    ],
+    "namespaces": [
+      {
+        "name": "konstapel-system",
+        "uid": "ns-konstapel",
+        "resourceVersion": "2",
+        "labels": {}
+      },
+      {
+        "name": "kube-system",
+        "uid": "ks-0001",
+        "resourceVersion": "1",
+        "labels": {}
+      },
+      {
+        "name": "prod",
+        "uid": "ns-prod",
+        "resourceVersion": "3",
+        "labels": {
+          "env": "production"
+        }
+      },
+      {
+        "name": "staging",
+        "uid": "ns-staging",
+        "resourceVersion": "4",
+        "labels": {
+          "env": "staging"
+        }
+      }
+    ],
+    "contracts": {
+      "acceptanceSnapshot": 1,
+      "targeting": 1
+    }
+  },
+  "inputs": {
+    "streams": [
+      {
+        "role": "proposed",
+        "path": "../../testdata/preview/cli/proposed.yaml",
+        "read": true,
+        "digest": "sha256:6c4dd662dbde3f3535a5b1b489629d4a11e0f1b2d878cc1a5b852d1f6592b986",
+        "bytes": 204
+      },
+      {
+        "role": "before",
+        "path": "../../testdata/preview/cli/previous.yaml",
+        "read": true,
+        "digest": "sha256:6d2814f5c4fc7d243cd37b5eafc61d5fca1a3eb43abbf1cc5a24b0f126d8b1e1",
+        "bytes": 383
+      }
+    ],
+    "objects": [
+      {
+        "role": "proposed",
+        "identity": "ComplianceBinding/deny-prod",
+        "source": "../../testdata/preview/cli/proposed.yaml",
+        "document": 1,
+        "line": 1,
+        "configurationFingerprint": "sha256:5eb878731beb783e482465910d74371ebf72f64428626b197f07d990cb2703c4"
+      },
+      {
+        "role": "before",
+        "identity": "ComplianceBinding/audit-all",
+        "source": "../../testdata/preview/cli/previous.yaml",
+        "document": 2,
+        "line": 13,
+        "configurationFingerprint": "sha256:98b75009ff1ba823d318b4830261929bda5cfed5d6582c9c8801f80f7e59f192"
+      },
+      {
+        "role": "before",
+        "identity": "ComplianceBinding/deny-prod",
+        "source": "../../testdata/preview/cli/previous.yaml",
+        "document": 1,
+        "line": 1,
+        "configurationFingerprint": "sha256:e6d1f7496f9cc53a7f40269d7364cae866a874b916c361d870d0f1234bc53e81"
+      }
+    ]
+  },
+  "content": [
+    {
+      "name": "konstapel-vendored",
+      "digest": "sha256:<vendored-digest>",
+      "digestKind": "vendored-checksum-manifest",
+      "resolved": true
+    }
+  ],
+  "changes": {
+    "objects": [
+      {
+        "identity": "ComplianceBinding/audit-all",
+        "disposition": "removed",
+        "observed": {
+          "uid": "b-audit-all",
+          "generation": 1,
+          "enforcementEpoch": 1
+        },
+        "configurationChanged": true,
+        "liveConfigurationFingerprint": "sha256:98b75009ff1ba823d318b4830261929bda5cfed5d6582c9c8801f80f7e59f192",
+        "source": "../../testdata/preview/cli/previous.yaml",
+        "document": 2,
+        "line": 13
+      },
+      {
+        "identity": "ComplianceBinding/deny-prod",
+        "disposition": "replaced",
+        "observed": {
+          "uid": "b-deny-prod",
+          "generation": 1,
+          "enforcementEpoch": 1
+        },
+        "pendingIdentity": true,
+        "configurationChanged": true,
+        "storedSpec": "different",
+        "liveConfigurationFingerprint": "sha256:e6d1f7496f9cc53a7f40269d7364cae866a874b916c361d870d0f1234bc53e81",
+        "candidateConfigurationFingerprint": "sha256:5eb878731beb783e482465910d74371ebf72f64428626b197f07d990cb2703c4",
+        "source": "../../testdata/preview/cli/proposed.yaml",
+        "document": 1,
+        "line": 1
+      }
+    ],
+    "absentRemovals": [],
+    "contributions": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "change": "removed",
+        "before": {
+          "profile": "baseline",
+          "profileUID": "p-baseline",
+          "profileGeneration": 1,
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Audit",
+          "namespaceSelector": {},
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "desiredRevision": "sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d",
+          "targets": [
+            {
+              "name": "konstapel-system",
+              "uid": "ns-konstapel"
+            },
+            {
+              "name": "kube-system",
+              "uid": "ks-0001"
+            },
+            {
+              "name": "prod",
+              "uid": "ns-prod"
+            },
+            {
+              "name": "staging",
+              "uid": "ns-staging"
+            }
+          ],
+          "targetCount": 4
+        },
+        "namespacesRemoved": [
+          {
+            "name": "konstapel-system",
+            "uid": "ns-konstapel"
+          },
+          {
+            "name": "kube-system",
+            "uid": "ks-0001"
+          },
+          {
+            "name": "prod",
+            "uid": "ns-prod"
+          },
+          {
+            "name": "staging",
+            "uid": "ns-staging"
+          }
+        ],
+        "responsible": [
+          {
+            "identity": "ComplianceBinding/audit-all",
+            "disposition": "removed",
+            "source": "../../testdata/preview/cli/previous.yaml",
+            "document": 2,
+            "line": 13
+          }
+        ],
+        "impacts": [
+          {
+            "category": "contribution-removed",
+            "area": "policy",
+            "before": "Audit",
+            "reason": "the proposal removes this contribution; this requests withdrawal of its engine policy, which the controller or garbage collection removes after application, not immediately"
+          }
+        ]
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "change": "removed",
+        "before": {
+          "profile": "baseline",
+          "profileUID": "p-baseline",
+          "profileGeneration": 1,
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Audit",
+          "namespaceSelector": {},
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "desiredRevision": "sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2",
+          "targets": [
+            {
+              "name": "konstapel-system",
+              "uid": "ns-konstapel"
+            },
+            {
+              "name": "kube-system",
+              "uid": "ks-0001"
+            },
+            {
+              "name": "prod",
+              "uid": "ns-prod"
+            },
+            {
+              "name": "staging",
+              "uid": "ns-staging"
+            }
+          ],
+          "targetCount": 4
+        },
+        "namespacesRemoved": [
+          {
+            "name": "konstapel-system",
+            "uid": "ns-konstapel"
+          },
+          {
+            "name": "kube-system",
+            "uid": "ks-0001"
+          },
+          {
+            "name": "prod",
+            "uid": "ns-prod"
+          },
+          {
+            "name": "staging",
+            "uid": "ns-staging"
+          }
+        ],
+        "responsible": [
+          {
+            "identity": "ComplianceBinding/audit-all",
+            "disposition": "removed",
+            "source": "../../testdata/preview/cli/previous.yaml",
+            "document": 2,
+            "line": 13
+          }
+        ],
+        "impacts": [
+          {
+            "category": "contribution-removed",
+            "area": "policy",
+            "before": "Audit",
+            "reason": "the proposal removes this contribution; this requests withdrawal of its engine policy, which the controller or garbage collection removes after application, not immediately"
+          }
+        ]
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "change": "changed",
+        "revisionEffect": "replacement-required",
+        "before": {
+          "profile": "baseline",
+          "profileUID": "p-baseline",
+          "profileGeneration": 1,
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Deny",
+          "namespaceSelector": {
+            "matchLabels": {
+              "env": "production"
+            }
+          },
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "desiredRevision": "sha256:05626e4c251a58a25b51cab8a17fb4ba2e00f9837cd5d57e9e5993b85925f1bc",
+          "targets": [
+            {
+              "name": "prod",
+              "uid": "ns-prod"
+            }
+          ],
+          "targetCount": 1
+        },
+        "after": {
+          "profile": "baseline",
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Deny",
+          "namespaceSelector": {
+            "matchLabels": {
+              "env": "staging"
+            }
+          },
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "targets": [
+            {
+              "name": "staging",
+              "uid": "ns-staging"
+            }
+          ],
+          "targetCount": 1
+        },
+        "namespacesAdded": [
+          {
+            "name": "staging",
+            "uid": "ns-staging"
+          }
+        ],
+        "namespacesRemoved": [
+          {
+            "name": "prod",
+            "uid": "ns-prod"
+          }
+        ],
+        "responsible": [
+          {
+            "identity": "ComplianceBinding/deny-prod",
+            "disposition": "replaced",
+            "source": "../../testdata/preview/cli/proposed.yaml",
+            "document": 1,
+            "line": 1
+          }
+        ],
+        "impacts": [
+          {
+            "category": "selector-changed",
+            "area": "scope",
+            "before": "env=production",
+            "after": "env=staging",
+            "reason": "the namespace selector changes"
+          },
+          {
+            "category": "namespace-added",
+            "area": "scope",
+            "after": "staging (ns-staging)",
+            "reason": "these observed namespace instances become subject to this contribution"
+          },
+          {
+            "category": "namespace-removed",
+            "area": "scope",
+            "before": "prod (ns-prod)",
+            "reason": "these observed namespace instances leave this contribution; other contributions may still apply there"
+          },
+          {
+            "category": "revision-replaced",
+            "area": "enforcement",
+            "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+          }
+        ]
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "change": "changed",
+        "revisionEffect": "replacement-required",
+        "before": {
+          "profile": "baseline",
+          "profileUID": "p-baseline",
+          "profileGeneration": 1,
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Deny",
+          "namespaceSelector": {
+            "matchLabels": {
+              "env": "production"
+            }
+          },
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "desiredRevision": "sha256:408965c4eb917c025ba9c737a0532403d396a0ccc7d517234a21379d8f2b94e8",
+          "targets": [
+            {
+              "name": "prod",
+              "uid": "ns-prod"
+            }
+          ],
+          "targetCount": 1
+        },
+        "after": {
+          "profile": "baseline",
+          "bundleName": "konstapel-vendored",
+          "bundleDigest": "sha256:<vendored-digest>",
+          "bundleDigestKind": "vendored-checksum-manifest",
+          "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+          "mode": "Deny",
+          "namespaceSelector": {
+            "matchLabels": {
+              "env": "staging"
+            }
+          },
+          "exceptions": {
+            "eligibility": "Forbidden"
+          },
+          "targets": [
+            {
+              "name": "staging",
+              "uid": "ns-staging"
+            }
+          ],
+          "targetCount": 1
+        },
+        "namespacesAdded": [
+          {
+            "name": "staging",
+            "uid": "ns-staging"
+          }
+        ],
+        "namespacesRemoved": [
+          {
+            "name": "prod",
+            "uid": "ns-prod"
+          }
+        ],
+        "responsible": [
+          {
+            "identity": "ComplianceBinding/deny-prod",
+            "disposition": "replaced",
+            "source": "../../testdata/preview/cli/proposed.yaml",
+            "document": 1,
+            "line": 1
+          }
+        ],
+        "impacts": [
+          {
+            "category": "selector-changed",
+            "area": "scope",
+            "before": "env=production",
+            "after": "env=staging",
+            "reason": "the namespace selector changes"
+          },
+          {
+            "category": "namespace-added",
+            "area": "scope",
+            "after": "staging (ns-staging)",
+            "reason": "these observed namespace instances become subject to this contribution"
+          },
+          {
+            "category": "namespace-removed",
+            "area": "scope",
+            "before": "prod (ns-prod)",
+            "reason": "these observed namespace instances leave this contribution; other contributions may still apply there"
+          },
+          {
+            "category": "revision-replaced",
+            "area": "enforcement",
+            "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+          }
+        ]
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": {
+          "name": "konstapel-system",
+          "uid": "ns-konstapel"
+        },
+        "policy": "disallow-privilege-escalation",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "konstapel-system",
+          "uid": "ns-konstapel"
+        },
+        "policy": "disallow-privileged-containers",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "kube-system",
+          "uid": "ks-0001"
+        },
+        "policy": "disallow-privilege-escalation",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "kube-system",
+          "uid": "ks-0001"
+        },
+        "policy": "disallow-privileged-containers",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "policy": "disallow-privilege-escalation",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          },
+          {
+            "binding": "deny-prod",
+            "bindingUID": "b-deny-prod",
+            "mode": "Deny"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "policy": "disallow-privileged-containers",
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          },
+          {
+            "binding": "deny-prod",
+            "bindingUID": "b-deny-prod",
+            "mode": "Deny"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "policy": "disallow-privilege-escalation",
+        "added": [
+          {
+            "binding": "deny-prod",
+            "bindingUID": "b-deny-prod",
+            "mode": "Deny",
+            "revisionEffect": "replacement-required"
+          }
+        ],
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "after": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      },
+      {
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "policy": "disallow-privileged-containers",
+        "added": [
+          {
+            "binding": "deny-prod",
+            "bindingUID": "b-deny-prod",
+            "mode": "Deny",
+            "revisionEffect": "replacement-required"
+          }
+        ],
+        "removed": [
+          {
+            "binding": "audit-all",
+            "bindingUID": "b-audit-all",
+            "mode": "Audit"
+          }
+        ],
+        "before": {
+          "effective": "Forbidden"
+        },
+        "after": {
+          "effective": "Forbidden"
+        },
+        "impacts": []
+      }
+    ]
+  },
+  "appliedState": {
+    "policies": [],
+    "pending": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "applied": false
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "applied": false
+      }
+    ]
+  },
+  "exceptions": {
+    "analysis": "not-available",
+    "reason": "the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed",
+    "observed": 0,
+    "potentiallyAffected": [],
+    "consequences": []
+  },
+  "evidence": {
+    "analysis": "not-available",
+    "reason": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated",
+    "entries": []
+  },
+  "limitations": [
+    {
+      "code": "bundle-sources-not-selected",
+      "stage": "observation",
+      "message": "no bundle-source ConfigMap was selected; only vendored content can be resolved, as for a controller without --bundle-sources-configmap"
+    },
+    {
+      "code": "no-atomic-snapshot",
+      "stage": "observation",
+      "message": "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"
+    },
+    {
+      "code": "exception-revocation-unavailable",
+      "stage": "observation",
+      "resource": "compliance.erenius.io/v1alpha1/complianceexceptions",
+      "message": "exception revocation (spec.revoked and revocation records) is not available in this version; acceptance is observed from the protected acceptance record, its status reference and the frozen snapshots only"
+    },
+    {
+      "code": "no-workload-evaluation",
+      "stage": "comparison",
+      "message": "configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted"
+    },
+    {
+      "code": "rendered-input-assumptions",
+      "stage": "comparison",
+      "message": "each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time"
+    },
+    {
+      "code": "exception-analysis-unavailable",
+      "stage": "exceptions",
+      "message": "the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed"
+    },
+    {
+      "code": "evidence-unavailable",
+      "stage": "evidence",
+      "message": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated"
+    }
+  ],
+  "errors": []
+}

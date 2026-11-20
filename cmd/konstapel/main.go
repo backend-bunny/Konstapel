@@ -4,8 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
@@ -15,26 +18,57 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	ctx := context.Background()
+	if len(os.Args) > 1 && os.Args[1] == "preview" {
+		// A closed stdout must be a write error (exit 1), not a SIGPIPE
+		// death; an interrupt ends the preview with an incomplete report.
+		signal.Ignore(syscall.SIGPIPE)
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
+	code := dispatch(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	if code != 0 {
+		os.Exit(code)
 	}
 }
-func run() error {
-	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: konstapel controller|download-server|evidence|generate|deliver|convert|acceptance|validate [flags]")
+
+// dispatch selects the command. preview is dispatched first with its own
+// exit statuses (0, 1 and 2) and none of the startup below; every other
+// command keeps its behavior: an error is printed and exits 1.
+func dispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "preview" {
+		return runPreview(ctx, args[1:], stdin, stdout, stderr)
 	}
-	command := os.Args[1]
+	if err := run(args); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// Startup hooks of the other commands, replaced in tests to show that the
+// preview never reaches them.
+var (
+	startController = runController
+	startProvider   = assessment.StartProvider
+)
+
+func run(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: konstapel controller|download-server|evidence|preview|generate|deliver|convert|acceptance|validate [flags]")
+	}
+	command := args[0]
 	if command == "controller" {
-		return runController(os.Args[2:])
+		return startController(args[1:])
 	}
 	if command == "download-server" {
-		return runDownload(os.Args[2:])
+		return runDownload(args[1:])
 	}
 	// Supporting-evidence documents: Kubernetes API and download service
 	// only; the C2P provider below is never started for them.
 	if command == "evidence" {
-		return runEvidence(os.Args[2:], os.Stdout, os.Stderr)
+		return runEvidence(args[1:], os.Stdout, os.Stderr)
 	}
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	root := fs.String("root", ".", "repository root")
@@ -47,7 +81,7 @@ func run() error {
 	kube := fs.String("kubeconfig", "", "explicit kubeconfig path")
 	target := fs.String("context", "", "explicit Kubernetes context")
 	timeout := fs.Duration("timeout", 180*time.Second, "bounded wait per phase")
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	var err error
@@ -67,7 +101,7 @@ func run() error {
 		return err
 	}
 	cfg := map[string]string{"root": *root, "output": *out, "action": *action, "namespace": *ns, "owner": *owner, "capture": *capture}
-	p, err := assessment.StartProvider(*manifest, cfg)
+	p, err := startProvider(*manifest, cfg)
 	if err != nil {
 		return err
 	}
