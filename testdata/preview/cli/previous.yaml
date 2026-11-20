@@ -1,0 +1,21 @@
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny-prod
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector:
+    matchLabels:
+      env: production
+  mode: Deny
+---
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: audit-all
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector: {}
+  mode: Audit

@@ -1,6 +1,8 @@
 package preview
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,9 +29,42 @@ type Inputs struct {
 // sets can never silently consume the same stream. It reads nothing but the
 // named files and stdin, and reports every problem in input order.
 func Load(in Inputs, stdin io.Reader, lim Limits) (proposed, before *Set, err error) {
+	proposed, before, _, err = LoadStreams(in, stdin, lim)
+	return proposed, before, err
+}
+
+// Role is the part an input stream plays in a preview.
+type Role string
+
+const (
+	RoleProposed Role = "proposed"
+	RoleBefore   Role = "before"
+)
+
+// Stream is the provenance of one input stream: its role, its path ("-" for
+// standard input) and, when it was read completely, the sha256 of its bytes.
+// The digest identifies the bytes as read, not normalized configuration.
+type Stream struct {
+	Role   Role   `json:"role"`
+	Path   string `json:"path"`
+	Read   bool   `json:"read"`
+	Digest string `json:"digest,omitempty"`
+	Bytes  int64  `json:"bytes"`
+}
+
+// LoadStreams is Load that also returns the provenance of every named stream
+// in argument order, the proposed streams first, including when the input is
+// invalid. A stream that could not be read completely has Read false.
+func LoadStreams(in Inputs, stdin io.Reader, lim Limits) (proposed, before *Set, streams []Stream, err error) {
 	lim = lim.withDefaults()
+	for _, p := range in.Proposed {
+		streams = append(streams, Stream{Role: RoleProposed, Path: p})
+	}
+	for _, p := range in.Before {
+		streams = append(streams, Stream{Role: RoleBefore, Path: p})
+	}
 	if len(in.Proposed) == 0 {
-		return nil, nil, InputErrors{{Code: CodeNoProposedInput, Message: "at least one proposed input (-f/--file) is required; use an empty file to propose removing the previous set"}}
+		return nil, nil, streams, InputErrors{{Code: CodeNoProposedInput, Message: "at least one proposed input (-f/--file) is required; use an empty file to propose removing the previous set"}}
 	}
 	stdinUses := 0
 	for _, p := range slices.Concat(in.Proposed, in.Before) {
@@ -38,14 +73,17 @@ func Load(in Inputs, stdin io.Reader, lim Limits) (proposed, before *Set, err er
 		}
 	}
 	if stdinUses > 1 {
-		return nil, nil, InputErrors{{Code: CodeStdinTwice, Source: StdinPath, Message: "standard input can supply only one input stream"}}
+		return nil, nil, streams, InputErrors{{Code: CodeStdinTwice, Source: StdinPath, Message: "standard input can supply only one input stream"}}
 	}
 	remaining := lim.MaxInputBytes
 	var errs InputErrors
+	next := 0
 	load := func(paths []string) *Set {
 		var objs []*Object
 		firstAt := map[Identity]*Object{}
 		for _, path := range paths {
+			st := &streams[next]
+			next++
 			data, rerr := readStream(path, stdin, &remaining, lim.MaxInputBytes)
 			if rerr != nil {
 				errs = append(errs, *rerr)
@@ -54,6 +92,8 @@ func Load(in Inputs, stdin io.Reader, lim Limits) (proposed, before *Set, err er
 				}
 				continue
 			}
+			sum := sha256.Sum256(data)
+			st.Read, st.Digest, st.Bytes = true, "sha256:"+hex.EncodeToString(sum[:]), int64(len(data))
 			parsed, perrs := Parse(path, data, lim)
 			errs = append(errs, perrs...)
 			for _, o := range parsed {
@@ -70,12 +110,13 @@ func Load(in Inputs, stdin io.Reader, lim Limits) (proposed, before *Set, err er
 	}
 	proposed = load(in.Proposed)
 	if !hasCode(errs, CodeInputTooLarge) {
+		next = len(in.Proposed)
 		before = load(in.Before)
 	}
 	if len(errs) > 0 {
-		return nil, nil, errs
+		return nil, nil, streams, errs
 	}
-	return proposed, before, nil
+	return proposed, before, streams, nil
 }
 
 func hasCode(errs InputErrors, c Code) bool {

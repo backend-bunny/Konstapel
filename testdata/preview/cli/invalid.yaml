@@ -1,0 +1,10 @@
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny-prod
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector: {}
+  mode: Deny
+  enforcment: Deny

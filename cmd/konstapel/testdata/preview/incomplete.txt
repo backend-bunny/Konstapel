@@ -1,0 +1,87 @@
+Konstapel policy change preview (PolicyChangePreview v1)
+Result: INCOMPLETE (1 error); 2 policy impacts determined so far; no statement about the absence of impacts
+  2 contribution rows with impacts, 0 namespace rows with impacts; 1 object, 0 reporting-only objects
+  impact categories: namespace-added 2, namespace-removed 2, revision-replaced 2, selector-changed 2
+  impact counts are configuration rows, not workloads, failures or controls
+
+Observation
+  complete observation of cluster kube-system:ks-0001 (context staging, server apiserver.test)
+  controller namespace konstapel-system, bundle sources not selected (vendored bundle only)
+  window 2026-11-20T09:30:00Z to 2026-11-20T09:30:00Z, 2 captures, 8 objects, 4 namespaces
+  contracts: acceptanceSnapshot v1, targeting v1
+
+Inputs
+  proposed ../../testdata/preview/cli/proposed.yaml sha256:6c4dd662dbde3f3535a5b1b489629d4a11e0f1b2d878cc1a5b852d1f6592b986 (204 bytes)
+    ComplianceBinding/deny-prod #1:1, configuration sha256:5eb878731beb783e482465910d74371ebf72f64428626b197f07d990cb2703c4
+
+Bundle content
+  konstapel-vendored@sha256:<vendored-digest> [vendored-checksum-manifest]: verified
+
+Changes
+  Objects
+    ComplianceBinding/deny-prod: replaced; configuration changed, stored spec different, server identity pending application, observed uid b-deny-prod generation 1
+  Contributions
+    binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation: changed, revision replacement-required
+      observed: profile baseline, bundle konstapel-vendored@sha256:<vendored-digest> [vendored-checksum-manifest], mode Deny, selector env=production, 1 target namespace
+      proposed: profile baseline, bundle konstapel-vendored@sha256:<vendored-digest> [vendored-checksum-manifest], mode Deny, selector env=staging, 1 target namespace
+      namespaces added: staging (ns-staging)
+      namespaces removed: prod (ns-prod)
+      responsible: ComplianceBinding/deny-prod (replaced) at ../../testdata/preview/cli/proposed.yaml#1:1
+      selector-changed [scope] env=production -> env=staging: the namespace selector changes
+      namespace-added [scope] (none) -> staging (ns-staging): these observed namespace instances become subject to this contribution
+      namespace-removed [scope] prod (ns-prod) -> (none): these observed namespace instances leave this contribution; other contributions may still apply there
+      revision-replaced [enforcement]: the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers: changed, revision replacement-required
+      observed: profile baseline, bundle konstapel-vendored@sha256:<vendored-digest> [vendored-checksum-manifest], mode Deny, selector env=production, 1 target namespace
+      proposed: profile baseline, bundle konstapel-vendored@sha256:<vendored-digest> [vendored-checksum-manifest], mode Deny, selector env=staging, 1 target namespace
+      namespaces added: staging (ns-staging)
+      namespaces removed: prod (ns-prod)
+      responsible: ComplianceBinding/deny-prod (replaced) at ../../testdata/preview/cli/proposed.yaml#1:1
+      selector-changed [scope] env=production -> env=staging: the namespace selector changes
+      namespace-added [scope] (none) -> staging (ns-staging): these observed namespace instances become subject to this contribution
+      namespace-removed [scope] prod (ns-prod) -> (none): these observed namespace instances leave this contribution; other contributions may still apply there
+      revision-replaced [enforcement]: the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it
+  Namespaces
+    prod (ns-prod) policy disallow-privilege-escalation
+      removed: deny-prod Deny
+      remaining: audit-all Audit, unchanged
+      exception eligibility: Forbidden -> Forbidden
+    prod (ns-prod) policy disallow-privileged-containers
+      removed: deny-prod Deny
+      remaining: audit-all Audit, unchanged
+      exception eligibility: Forbidden -> Forbidden
+    staging (ns-staging) policy disallow-privilege-escalation
+      added: deny-prod Deny, replacement-required
+      remaining: audit-all Audit, unchanged
+      exception eligibility: Forbidden -> Forbidden
+    staging (ns-staging) policy disallow-privileged-containers
+      added: deny-prod Deny, replacement-required
+      remaining: audit-all Audit, unchanged
+      exception eligibility: Forbidden -> Forbidden
+
+Observed applied state (informational)
+  no Konstapel-owned engine policy observed
+  pending delivery: binding audit-all (uid b-audit-all) policy disallow-privilege-escalation: no engine policy yet
+  pending delivery: binding audit-all (uid b-audit-all) policy disallow-privileged-containers: no engine policy yet
+  pending delivery: binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation: no engine policy yet
+  pending delivery: binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers: no engine policy yet
+
+Exceptions
+  analysis not-available: the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed
+  1 ComplianceException observed
+    prod/legacy-app policy disallow-privileged-containers (accepted false, revision 1): consequence unknown; changed bindings deny-prod, 1 namespace row
+
+Evidence (context, never an impact)
+  analysis not-available: the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+
+Limitations (informational)
+  [bundle-sources-not-selected] observation no bundle-source ConfigMap was selected; only vendored content can be resolved, as for a controller without --bundle-sources-configmap
+  [no-atomic-snapshot] observation Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time
+  [exception-revocation-unavailable] observation compliance.erenius.io/v1alpha1/complianceexceptions: exception revocation (spec.revoked and revocation records) is not available in this version; acceptance is observed from the protected acceptance record, its status reference and the frozen snapshots only
+  [no-workload-evaluation] comparison configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted
+  [rendered-input-assumptions] comparison each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time
+  [exception-analysis-unavailable] exceptions the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed
+  [evidence-unavailable] evidence the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+
+Errors
+  [exception-impact-undetermined] exceptions compliance.erenius.io/v1alpha1/complianceexceptions prod/legacy-app: the proposal changes contributions of policy disallow-privileged-containers in this exception's namespace, and the acceptance comparison is not available, so whether the exception needs renewal, becomes forbidden or loses scope is unknown

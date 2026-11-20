@@ -70,14 +70,18 @@ dependencies' CRDs, trust systems, or collectors.
 
 ## 6. CLI output and CI contract
 
-- [ ] 6.1 Add independent `preview` dispatch and flags with no prototype/provider/controller startup; verify help, malformed flags, kubeconfig/context selection, unknown format, and preservation of existing command error behavior through command tests.
+- [x] 6.1 Add independent `preview` dispatch and flags with no prototype/provider/controller startup; verify help, malformed flags, kubeconfig/context selection, unknown format, and preservation of existing command error behavior through command tests.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.2 Define JSON report v1 and render text from the same model with stable ordering, observations, typed digests, completeness, impacts, applied state, exceptions, evidence, and coded diagnostics; verify complete/incomplete golden reports and JSON stdout purity.
+  `cmd/konstapel/preview.go` over `preview.Run`; `TestPreviewFlags`, `TestPreviewKubeconfigSelection`, `TestPreviewStartsNothingElse` (startup hooks, source and dependency checks) and `TestExistingCommandsKeepTheirBehavior`. Flag defaults are design decision 7.
+- [x] 6.2 Define JSON report v1 and render text from the same model with stable ordering, observations, typed digests, completeness, impacts, applied state, exceptions, evidence, and coded diagnostics; verify complete/incomplete golden reports and JSON stdout purity.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.3 Implement informational exit `0`, opt-in impact exit `2`, and failure/incomplete/output-error exit `1`; verify the full flag/outcome matrix, evidence-only and reporting-only changes, failure precedence after partial impacts, and broken-output handling at the process boundary.
+  `internal/preview/report.go` and `render.go`; goldens in `cmd/konstapel/testdata/preview`. The `exceptions` and `evidence` parts define their v1 shape with `analysis: not-available` and stay empty until 5.1 and 5.3 supply their content; an observed exception in a changed namespace and policy makes the report incomplete (`exception-impact-undetermined`).
+- [x] 6.3 Implement informational exit `0`, opt-in impact exit `2`, and failure/incomplete/output-error exit `1`; verify the full flag/outcome matrix, evidence-only and reporting-only changes, failure precedence after partial impacts, and broken-output handling at the process boundary.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 6.4 Add local and CI examples to `docs/policy-preview.md` and link them from the README/development guide when implemented; verify commands and saved JSON using the pinned Devbox environment without adding per-helper Taskfile wrappers.
+  `TestPreviewExitMatrix` (every scenario with and without `--fail-on-impact`), `TestPreviewOutputErrors` and `TestPreviewProcessBoundary` (the real `main`: closed stdout, `/dev/full`, statuses 0 and 2).
+- [x] 6.4 Add local and CI examples to `docs/policy-preview.md` and link them from the README/development guide when implemented; verify commands and saved JSON using the pinned Devbox environment without adding per-helper Taskfile wrappers.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+  `TestDocumentedPreviewCommands` runs every documented command, the text excerpt, the jq expressions on the saved JSON and the field and flag tables under `task test`; no Taskfile change.
 
 ## 7. Integrated acceptance
 

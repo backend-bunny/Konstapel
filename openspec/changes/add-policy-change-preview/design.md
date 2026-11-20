@@ -238,6 +238,31 @@ into its existing generic error exit `1`. Existing commands retain their current
 exit behavior. Avoid adding one Taskfile wrapper per command; use existing check
 workflows and direct Devbox commands in documentation.
 
+### 7. Command-line defaults (settled with group 6)
+
+- `--controller-namespace` defaults to `konstapel-system`, the namespace the
+  charts install into. The bundle-source ConfigMap has no default name and is
+  never discovered from the controller Deployment, which would widen the
+  reader permissions. When `--bundle-sources-configmap` is not given at all and
+  an observed or proposed profile pins a non-vendored bundle, the report is
+  incomplete (`bundle-sources-required`); an explicitly empty value states a
+  controller without sources.
+- `--controller-version` defaults to the CLI's own build version. A non-SemVer
+  development build with sources selected is a flag error, not a report in
+  which every OCI bundle is incompatible.
+- Rows that are semantically equivalent but replace enforcement revisions
+  (`semanticallyEquivalent` with `replacement-required`) are impacts and count
+  for `--fail-on-impact`: they replace real engine policies and invalidate
+  revision-bound acceptances. The report counts them separately
+  (`summary.equivalentReplacements`) and the text labels them.
+- The report goes to stdout or `--output`; any write failure exits `1`.
+  SIGPIPE is ignored for the preview so a closed stdout is a write error.
+- Until the exception integration exists, an observed ComplianceException in a
+  namespace and policy with a changed row makes the report incomplete
+  (`exception-impact-undetermined`); exceptions elsewhere cannot be affected by
+  the proposal. Evidence is always `not-available`, an informational
+  limitation.
+
 ## Risks / Trade-offs
 
 - Cross-resource races and later GitOps changes → bounded recapture, explicit

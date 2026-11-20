@@ -1,21 +1,245 @@
 # Policy change preview
 
-> **Status: input model, cluster observation, comparison core and verified
-> bundle resolution only.** The `konstapel preview` command, its JSON report
-> and exit codes are not implemented yet. This page documents the parts that
-> exist in `internal/preview`: how rendered manifests are read and validated,
-> how the candidate configuration is formed (tasks 1.1 to 1.3 of the
-> `add-policy-change-preview` change), the read-only cluster observation with
-> its access contract and limits (tasks 2.1 to 2.3), the semantic comparison
-> with its impact categories (tasks 3.1 to 3.4), and verified bundle content
-> under the caller's access (tasks 4.1 to 4.3). No command line exposes any of
-> them yet. Treat the planned command line in the change's
-> [design](../openspec/changes/add-policy-change-preview/design.md) as not available.
+> **Status: the `konstapel preview` command, its JSON report v1 and its exit
+> statuses are implemented, without exception-acceptance consequences and
+> evidence context.** Those two parts depend on the exception and assessment
+> owners (`add-policy-change-preview` group 5). Until then the report states
+> them as `not-available`, and a preview whose proposal changes the namespace
+> and policy of an observed ComplianceException is **incomplete** (exit
+> status 1) rather than claiming that no acceptance is affected. See
+> [Command line](#command-line), [Report](#report-json-v1),
+> [Exit status](#exit-status) and [Local and CI use](#local-and-ci-use). The
+> rest of this page describes the parts underneath: how rendered manifests are
+> read and validated, how the candidate configuration is formed, the read-only
+> cluster observation with its access contract and limits, the semantic
+> comparison with its impact categories, and verified bundle content under the
+> caller's access.
 
 The preview is meant to show how proposed compliance configuration would change
 namespace coverage, enforcement and accepted risks before GitOps applies it. It
 describes configuration effects. It does not evaluate workloads, predict
 admission, or promise that existing workloads pass a new policy.
+
+## Command line
+
+```text
+konstapel preview -f FILE [-f FILE ...] [--before FILE ...] [flags]
+```
+
+`preview` is dispatched before every other `konstapel` command and shares none
+of their startup: it starts no controller manager, C2P provider, policy
+delivery, metrics server or leader election, and it never writes to the
+cluster (see [Cluster access](#cluster-access)). `konstapel preview -h` prints
+the flags.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-f`, `--file` | required, repeatable | Proposed rendered manifests; `-` reads standard input (at most one stream across all flags) |
+| `--before` | none, repeatable | The previous rendered set: identities in it and absent from the proposed files are removed |
+| `--kubeconfig` | `$KUBECONFIG`, then `~/.kube/config` | The caller's kubeconfig. There is no in-cluster fallback |
+| `--context` | the current context | The kubeconfig context, recorded in the report |
+| `--controller-namespace` | `konstapel-system` | The controller's namespace (its `POD_NAMESPACE`), as the charts install it |
+| `--bundle-sources-configmap` | not given | The controller's `--bundle-sources-configmap`; give it explicitly, empty (`--bundle-sources-configmap=`) for a controller without bundle sources (see [Bundle-source selection](#bundle-source-selection)) |
+| `--controller-version` | this binary's release | Controller release (SemVer) for OCI bundle compatibility checks |
+| `--content-root` | `/usr/share/konstapel/content` | The vendored content tree, as in the image; use `content` in a checkout |
+| `--bundle-cache-dir` | a temporary directory | Verified OCI bundle cache kept between previews (one preview at a time); needs `--bundle-sources-configmap` |
+| `--format` | `text` | `text` or `json` |
+| `-o`, `--output` | `-` (standard output) | Write the report to a file instead |
+| `--fail-on-impact` | off | Exit 2 when a complete preview has policy impacts |
+| `--timeout` | `60s` | Total time for the preview, observation recaptures included |
+
+Invalid flags print a message on standard error and exit 1 without
+contacting the cluster. Once the flags are valid, every later problem
+(invalid manifests, kubeconfig, observation, content, comparison) is a coded
+error of an incomplete report, written in the requested format. Standard
+output carries only the report; progress and diagnostics go to standard
+error.
+
+## Report (JSON v1)
+
+`--format json` writes one JSON document, `kind: PolicyChangePreview` with
+`schemaVersion: 1`, independent of the consumed contract versions, which are
+recorded in `observation.contracts`. The text format renders the same model:
+a report decoded from saved JSON renders to the same text. The report contains
+capture times only, no rendering time and no random identifiers, and every list
+has a stable order, so the same captured inputs give the same bytes.
+
+<!-- report-fields -->
+| Field | Meaning |
+| --- | --- |
+| `kind`, `schemaVersion` | The report contract |
+| `complete` | `true` only when the observation, content resolution and comparison finished without any error. Only a complete report supports a statement that no impact exists |
+| `impactCount` | Contribution and namespace rows with at least one impact (see [Impact categories](#impact-categories)); in an incomplete report, only what was determined. Not a number of workloads, failures or controls |
+| `summary` | Row counts, `reportingOnlyObjects`, `equivalentReplacements` and impacts per category |
+| `observation` | Cluster identity, context, API server host, controller namespace, selected sources and assumed controller release, capture window, captures and drift, collections with their resourceVersions, every object's UID, resourceVersion and generation, namespace instances, observed source configuration. `null` when nothing was observed |
+| `inputs` | Every input stream with its role and the sha256 of its bytes, and every validated object with its location and configuration fingerprint |
+| `content` | Every pinned bundle read, with `digestKind` (see [Digest meanings](#digest-meanings)) |
+| `changes` | `objects`, `absentRemovals`, `contributions` and `namespaces` of the [comparison](#what-is-compared). `null` when no comparison ran: undetermined, never empty |
+| `appliedState` | [Observed applied state](#observed-applied-state), informational. `null` when no comparison ran |
+| `exceptions`, `evidence` | [Exceptions and evidence](#exceptions-and-evidence) |
+| `limitations` | Coded informational bounds, each with its `stage` |
+| `errors` | Coded problems that make the report incomplete, each with its `stage` (`input`, `kubeconfig`, `observation`, `content`, `comparison`, `exceptions`) and location |
+
+A CI job can therefore tell policy impacts (`impactCount`, `changes`),
+informational bounds (`limitations`) and fatal problems (`complete: false`,
+`errors`) apart without reading prose. Fields may be added within version 1;
+a change of meaning or a removal needs a new `schemaVersion`.
+
+Rows whose configuration is semantically equivalent but whose enforcement
+revision is still replaced (`semanticallyEquivalent: true` with
+`revisionEffect: replacement-required`, for example reordered selector
+expressions or profile policies) count as impacts: the engine policies are
+really replaced and any acceptance bound to their revisions no longer matches.
+`summary.equivalentReplacements` counts them, and the text marks each one.
+
+### Exceptions and evidence
+
+The acceptance comparison of the exception owner and the evidence attribution
+of the assessment owner are not integrated yet, so both parts report
+`analysis: not-available` with a reason, and their `consequences` and
+`entries` are always empty. That emptiness never means "nothing affected":
+
+- `exceptions.observed` is the number of ComplianceExceptions in the complete
+  observation. Each one in a namespace and policy that a changed contribution
+  or namespace row touches is listed under `potentiallyAffected` with the
+  responsible contribution keys, and adds the error
+  `exception-impact-undetermined`: the report is incomplete, because whether it
+  needs renewal, becomes forbidden or loses scope is not known. An exception
+  elsewhere cannot be affected by the proposal, because acceptance depends only
+  on the contributions of its own namespace and policy. Every compared report
+  also carries the `exception-analysis-unavailable` limitation.
+- Evidence is context, never an impact. Every compared report carries the
+  `evidence-unavailable` limitation, which alone does not make it incomplete
+  or change the exit status.
+
+## Exit status
+
+| Outcome | Default | `--fail-on-impact` |
+| --- | --- | --- |
+| Complete, no policy impacts (reporting-only edits and evidence limitations included) | 0 | 0 |
+| Complete, policy impacts | 0 | 2 |
+| Invalid flags or inputs, failed or incomplete preview, or a report that cannot be written | 1 | 1 |
+
+Failure takes precedence: an incomplete preview exits 1 even when it found
+impacts and `--fail-on-impact` is set. A report that cannot be written (a
+closed pipe, a full disk, an unwritable `--output`) exits 1 as well. The
+exit status of every other `konstapel` command is unchanged.
+
+## Local and CI use
+
+The examples below run against a cluster with the namespaces `prod`
+(`env: production`) and `staging` (`env: staging`), one profile `baseline`
+with two vendored policies, and two bindings that use it: `audit-all`
+(Audit, every namespace) and `deny-prod` (Deny, `env: production`). They
+use a binary built from a checkout (`devbox run -- task build`), hence
+`--content-root content`; the image's binary needs no `--content-root`.
+The reader permissions are in
+[`reader-rbac.yaml`](examples/policy-preview/reader-rbac.yaml).
+
+<!-- preview-files: proposed.yaml=testdata/preview/cli/proposed.yaml previous.yaml=testdata/preview/cli/previous.yaml -->
+
+The proposal moves `deny-prod` to staging:
+
+<!-- fixture: testdata/preview/cli/proposed.yaml -->
+```yaml
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny-prod
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector:
+    matchLabels:
+      env: staging
+  mode: Deny
+```
+
+### Local preview
+
+A local preview is informational and exits 0 when it is complete:
+
+<!-- preview-run: exit=0 -->
+```sh
+bin/konstapel preview -f proposed.yaml --context staging --content-root content
+```
+
+An excerpt of the text report:
+
+<!-- preview-output -->
+```text
+Result: complete, 2 policy impacts
+...
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers: changed, revision replacement-required
+...
+      selector-changed [scope] env=production -> env=staging: the namespace selector changes
+...
+    prod (ns-prod) policy disallow-privileged-containers
+      removed: deny-prod Deny
+      remaining: audit-all Audit, unchanged
+```
+
+The Deny contribution leaves `prod`, but `audit-all` still applies there.
+Nothing says that a workload will be admitted, rejected or evicted.
+
+### CI
+
+In CI, render the previous and the proposed configuration (for example the
+target branch and the pull request) into two files, and let the preview
+declare the removals between them. Here the previous set also had
+`audit-all`, which the proposal no longer contains:
+
+<!-- fixture: testdata/preview/cli/previous.yaml -->
+```yaml
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny-prod
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector:
+    matchLabels:
+      env: production
+  mode: Deny
+---
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: audit-all
+spec:
+  profileRef:
+    name: baseline
+  namespaceSelector: {}
+  mode: Audit
+```
+
+Start informational: save the JSON report as a job artifact and fail the job
+only when the preview is incomplete (exit 1):
+
+<!-- preview-run: exit=0 -->
+```sh
+bin/konstapel preview --before previous.yaml -f proposed.yaml \
+  --context production --content-root content \
+  --format json --output preview.json
+jq -e '.complete' preview.json
+jq '{impactCount, categories: .summary.categories, errors: [.errors[].code]}' preview.json
+```
+
+Once the team reviews every impact, gate on it. Exit 2 means a complete
+preview with impacts, exit 1 an invalid, failed or incomplete one:
+
+<!-- preview-run: exit=2 -->
+```sh
+bin/konstapel preview --before previous.yaml -f proposed.yaml \
+  --context production --content-root content \
+  --format json --output preview.json --fail-on-impact
+```
+
+These commands, the excerpt and the saved report are verified by
+`TestDocumentedPreviewCommands` in `cmd/konstapel` against a recording API
+server with exactly this cluster. In that test the context names reach it
+through `KUBECONFIG`.
 
 ## Rendered-input model
 
@@ -279,8 +503,9 @@ The baseline is the selected cluster, read with the caller's own kubeconfig
 credentials: an explicit or standard kubeconfig and a named or current context.
 There is no fallback to an in-cluster ServiceAccount, and the preview never uses
 or impersonates the controller's identity. The caller also names the Konstapel
-controller namespace and, when the controller runs with
-`--bundle-sources-configmap`, the same ConfigMap name.
+controller namespace (`--controller-namespace`, default `konstapel-system`) and,
+when the controller runs with `--bundle-sources-configmap`, the same ConfigMap
+name (see [Command line](#command-line)).
 
 ### Cluster access
 
@@ -455,8 +680,8 @@ Formatting, key order, written-out defaults, descriptive metadata and exported
 server fields create no contribution or namespace row. A reporting-only binding edit
 (`spec.assessment`) is listed under `objects` with `reportingOnly` and is not an
 impact unless it also rotates revisions, as described below. Exception
-acceptance consequences and evidence are later parts of the change and are not
-part of these categories yet.
+acceptance consequences and evidence are not part of these categories (see
+[Exceptions and evidence](#exceptions-and-evidence)).
 
 ### Revision effects and identities
 
@@ -650,7 +875,19 @@ the controller's ServiceAccount are never used.
 
 Bundle compatibility is checked against a controller release that the caller
 supplies (the `controller-version-assumed` limitation): the running
-controller's release is not observed.
+controller's release is not observed. `--controller-version` defaults to the
+release of the `konstapel` binary itself, so a preview run with the
+controller's own release needs no flag. A development build (`dev`) is not
+SemVer: with a bundle-source ConfigMap named, the command then refuses to
+start until `--controller-version` names the controller's release.
+
+The preview cannot see the controller's flags, and reading its Deployment
+would widen the reader permissions, so it does not guess. When
+`--bundle-sources-configmap` is not given at all and an observed or proposed
+profile pins any bundle other than the vendored one, the report is incomplete
+with `bundle-sources-required`. Pass the controller's ConfigMap name, or an
+explicitly empty value (`--bundle-sources-configmap=`) for a controller that
+runs without bundle sources.
 
 ### Required caller access
 
@@ -681,8 +918,8 @@ image serves it.
 
 ### Cache and trust
 
-`ContentOptions.CacheDir` keeps verified content between previews; empty uses a
-temporary directory removed afterwards. The cache is owned by one process at a
+`--bundle-cache-dir` (`ContentOptions.CacheDir`) keeps verified content between
+previews; without it a temporary directory is used and removed afterwards. The cache is owned by one process at a
 time. Cached content is reused only after it is verified again under the
 trust observed now, with its retained proofs, so a warm cache serves through a
 registry outage, while content cached under a key that the publisher rule no
@@ -714,7 +951,8 @@ A denied referenced Secret adds `content-access-denied` to any of these.
    [`reader-rbac.yaml`](examples/policy-preview/reader-rbac.yaml) to the
    identity that runs previews, and the
    `konstapel-policy-preview-bundle-secrets` Role with your Secret names.
-3. Preview with the controller namespace and the sources ConfigMap name. The
+3. Preview with `--controller-namespace` and `--bundle-sources-configmap` set
+   to the controller's namespace and sources ConfigMap name. The
    bundles of that source are read with the referenced credential, verified
    under its publisher rule and reported with `digestKind: oci-manifest`.
 
@@ -730,5 +968,6 @@ The preview does not emulate server-side apply, field ownership, admission
 mutation or admission validation beyond the schema rules above, and it cannot
 express deleting and recreating one name in a single step. Applying the
 configuration stays a separate Kubernetes or GitOps action. Exception
-acceptance impact, evidence, reports and exit codes are later tasks of the
-change and are not described here as available.
+acceptance consequences and attributed evidence are not analyzed yet; the
+report says so instead of describing them (see
+[Exceptions and evidence](#exceptions-and-evidence)).
