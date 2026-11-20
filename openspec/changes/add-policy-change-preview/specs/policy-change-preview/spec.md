@@ -119,9 +119,17 @@ MUST NOT imply a framework-specific compliance score.
 
 #### Scenario: No semantic change
 
-- **WHEN** the proposed specifications differ only in YAML ordering or ordinary
-  descriptive metadata
+- **WHEN** the proposed specifications differ only in map key ordering,
+  written-out defaults, or ordinary descriptive metadata
 - **THEN** the completed preview has no policy impacts
+
+#### Scenario: List order changes the stored specification
+
+- **WHEN** the proposal only reorders selector expressions, selector values, or
+  profile policies
+- **THEN** the affected contributions are reported as replaced enforcement
+  revisions marked semantically equivalent, because the stored specification
+  and the controller's revision change
 
 #### Scenario: New bundle digest or zero current targets
 

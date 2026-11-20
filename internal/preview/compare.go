@@ -124,6 +124,9 @@ type ContributionSide struct {
 	ProfileGeneration int64     `json:"profileGeneration,omitempty"`
 	BundleName        string    `json:"bundleName"`
 	BundleDigest      string    `json:"bundleDigest"`
+	// BundleDigestKind says whether BundleDigest is a vendored
+	// checksum-manifest digest or an OCI manifest digest.
+	BundleDigestKind DigestKind `json:"bundleDigestKind"`
 	// ConfigurationDigest is targeting.ConfigurationDigest of the policy's
 	// parameters and exception settings: a function of the configuration,
 	// not a server-assigned value.
@@ -254,8 +257,10 @@ type Comparison struct {
 	Contracts map[string]int `json:"contracts"`
 	// ImpactCount counts contribution and namespace rows with at least one
 	// impact. It is not a count of workloads, failures or controls.
-	ImpactCount    int                  `json:"impactCount"`
-	Objects        []ObjectChange       `json:"objects"`
+	ImpactCount int            `json:"impactCount"`
+	Objects     []ObjectChange `json:"objects"`
+	// Content is every pinned bundle read, with its typed digest.
+	Content        []ContentRecord      `json:"content"`
 	AbsentRemovals []string             `json:"absentRemovals,omitempty"`
 	Contributions  []ContributionChange `json:"contributions"`
 	Namespaces     []NamespaceChange    `json:"namespaces"`
@@ -301,6 +306,14 @@ func Compare(ctx context.Context, in CompareInput) (*Comparison, error) {
 		c.AbsentRemovals = append(c.AbsentRemovals, id.String())
 	}
 	c.Contributions = a.contributionChanges()
+	for _, r := range c.Contributions {
+		for _, side := range []*ContributionSide{r.Before, r.After} {
+			if side != nil {
+				side.BundleDigestKind = contentKind(in.Content, side.BundleName)
+			}
+		}
+	}
+	c.Content = a.content
 	c.Namespaces = a.namespaceChanges()
 	c.Applied = a.appliedState()
 	for _, r := range c.Contributions {
@@ -335,6 +348,7 @@ type side struct {
 }
 
 type adapter struct {
+	content     []ContentRecord
 	snap        *Snapshot
 	cand        *Candidate
 	entries     map[Identity]*Entry
@@ -485,9 +499,19 @@ func (a *adapter) resolve(ctx context.Context, src targeting.ContentSource) erro
 		return cmp.Or(cmp.Compare(x.Name, y.Name), cmp.Compare(x.Digest, y.Digest))
 	}) {
 		got, err := src.Content(ctx, ref)
+		rec := ContentRecord{Name: ref.Name, Digest: ref.Digest, DigestKind: contentKind(src, ref.Name), ErrorClass: targeting.ContentErrorClassOf(err), Error: boundedError(err)}
+		if bc, ok := src.(*BundleContent); ok {
+			rec.Repository = bc.Repository(ref.Name)
+		}
+		var denied *ContentAccessError
 		switch {
 		case ctx.Err() != nil:
 			return fmt.Errorf("resolving content: %w", ctx.Err())
+		case errors.As(err, &denied):
+			// The caller's access, not the cluster, is why this content is
+			// unavailable: never a complete comparison, whoever pins it.
+			a.errors = append(a.errors, Diagnostic{Code: CompareContentAccessDenied, Name: ref.Name + "@" + ref.Digest, Message: denied.Error()})
+			unavailable[ref] = err
 		case errors.Is(err, targeting.ErrContentUnavailable):
 			unavailable[ref] = err
 		case err != nil:
@@ -498,10 +522,15 @@ func (a *adapter) resolve(ctx context.Context, src targeting.ContentSource) erro
 			a.errors = append(a.errors, Diagnostic{Code: CompareContentMismatch, Name: ref.Name + "@" + ref.Digest, Message: "the content source returned content for another reference"})
 			unavailable[ref] = errors.New("content mismatch")
 		default:
+			rec.Resolved = true
 			contents[ref] = got
 			a.base.in.Bundles = append(a.base.in.Bundles, got.Bundle)
 			a.next.in.Bundles = append(a.next.in.Bundles, got.Bundle)
 		}
+		a.content = append(a.content, rec)
+	}
+	if bc, ok := src.(*BundleContent); ok {
+		a.limitations = append(a.limitations, bc.Limitations()...)
 	}
 	for _, s := range []*side{&a.base, &a.next} {
 		s.res = targeting.Resolve(s.in)
@@ -591,6 +620,16 @@ func (a *adapter) diagnoseResolution(unavailable map[v1alpha1.BundleReference]er
 		baseErrs, nextErrs := a.base.errorsOf(n), a.next.errorsOf(n)
 		if !a.affected(n) {
 			for _, e := range baseErrs {
+				if e.Reason == targeting.ReasonContentUnavailable && a.environmentDependent(e, unavailable) {
+					// The preview reads content itself, from where it runs
+					// and with its own vendored tree. A failure that depends
+					// on that is not a known baseline condition: whether the
+					// controller resolves it is not observed, so this
+					// binding's overlap with the proposal is unknown.
+					a.errors = append(a.errors, Diagnostic{Code: CompareContentUnavailable, Resource: resourceString(gvrBindings), Name: n,
+						Message: "the preview could not read the content this live binding pins, for a reason that depends on where the preview runs, so its contributions and their overlap with the proposal cannot be determined; whether the controller resolves it is not observed: " + detail(e, &a.base)})
+					continue
+				}
 				a.limitations = append(a.limitations, Diagnostic{Code: LimitBaselineUnresolved, Resource: resourceString(gvrBindings), Name: n,
 					Message: "the live configuration does not resolve and the proposal does not change it; previously applied policies may remain enforcing: " + detail(e, &a.base)})
 			}
@@ -605,6 +644,25 @@ func (a *adapter) diagnoseResolution(unavailable map[v1alpha1.BundleReference]er
 				Message: "the proposed configuration does not resolve; the controller would keep the previously applied policies for it: " + detail(e, &a.next)})
 		}
 	}
+}
+
+// environmentDependent reports whether a content failure behind a baseline
+// resolution error depends on where the preview runs rather than on the
+// observed configuration and the content: a retrieval, proof, cache or
+// vendored-tree failure, or one without a class. A verdict the controller
+// reaches the same way under the observed sources and trust (no source,
+// untrusted, incompatible, a digest mismatch, malformed content) is not.
+func (a *adapter) environmentDependent(e targeting.ResolutionError, unavailable map[v1alpha1.BundleReference]error) bool {
+	p := a.base.profiles[e.Profile]
+	if p == nil {
+		return true
+	}
+	switch targeting.ContentErrorClassOf(unavailable[p.Spec.Bundle]) {
+	case targeting.ContentErrorConfig, targeting.ContentErrorUntrusted, targeting.ContentErrorIncompatible,
+		targeting.ContentErrorDigestMismatch, targeting.ContentErrorMalformed:
+		return false
+	}
+	return true
 }
 
 func (a *adapter) objectChanges() []ObjectChange {

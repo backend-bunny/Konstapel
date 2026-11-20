@@ -2,7 +2,10 @@ package preview
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -47,16 +50,19 @@ type reader struct {
 	lim  ObserveLimits
 	dyn  dynamic.Interface
 	disc rest.Interface
+	// secretKey keys the in-memory projections of Secret values, so not
+	// even a digest of a credential could be compared outside this process.
+	secretKey []byte
 }
 
-func newReader(cfg *rest.Config, lim ObserveLimits) (*reader, error) {
+func newReader(cfg *rest.Config, lim ObserveLimits, namespace string) (*reader, error) {
 	cfg = rest.CopyConfig(cfg)
 	cfg.UserAgent = UserAgent
 	if cfg.QPS == 0 {
 		cfg.QPS, cfg.Burst = 50, 100
 	}
 	// Outermost, so a refused request reaches no other transport.
-	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper { return readOnlyTransport{next: rt} })
+	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper { return readOnlyTransport{next: rt, namespace: namespace} })
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -65,7 +71,11 @@ func newReader(cfg *rest.Config, lim ObserveLimits) (*reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &reader{lim: lim, dyn: dyn, disc: dc.RESTClient()}, nil
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	return &reader{lim: lim, dyn: dyn, disc: dc.RESTClient(), secretKey: key}, nil
 }
 
 // refusedError is a request the read-only transport never sent.
@@ -76,12 +86,18 @@ func (e *refusedError) Error() string {
 }
 
 // readOnlyTransport is the enforcement point of the access contract: only GET
-// requests leave the process; Secrets, watches and dry-run are refused before
-// sending. It also meters response bytes against the capture budget.
-type readOnlyTransport struct{ next http.RoundTripper }
+// requests leave the process; watches, dry-run and every Secret request
+// except a granted named get are refused before sending. It also meters
+// response bytes against the capture budget.
+type readOnlyTransport struct {
+	next http.RoundTripper
+	// namespace is the controller namespace, the only one in which a
+	// Secret may be read.
+	namespace string
+}
 
 func (t readOnlyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if why := refuse(req); why != "" {
+	if why := t.refuse(req); why != "" {
 		return nil, &refusedError{method: req.Method, path: req.URL.Path, why: why}
 	}
 	resp, err := t.next.RoundTrip(req)
@@ -93,7 +109,7 @@ func (t readOnlyTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, err
 }
 
-func refuse(req *http.Request) string {
+func (t readOnlyTransport) refuse(req *http.Request) string {
 	if req.Method != http.MethodGet {
 		return "the preview sends only GET requests"
 	}
@@ -101,13 +117,21 @@ func refuse(req *http.Request) string {
 	if q.Has("dryRun") {
 		return "server-side dry-run is a write-shaped request"
 	}
-	if w := q.Get("watch"); w != "" && w != "false" && w != "0" {
+	if w := q.Get("watch"); (w != "" && w != "false" && w != "0") || isWatchPath(req.URL.Path) {
 		return "the preview does not watch"
 	}
 	if isSecretPath(req.URL.Path) {
-		return "the preview does not read Secrets"
+		return refuseSecret(req, t.namespace)
 	}
 	return ""
+}
+
+// isWatchPath matches the legacy watch endpoints, /api/v1/watch/... and
+// /apis/<group>/<version>/watch/....
+func isWatchPath(p string) bool {
+	segs := strings.Split(strings.Trim(p, "/"), "/")
+	return (len(segs) >= 3 && segs[0] == "api" && segs[2] == "watch") ||
+		(len(segs) >= 4 && segs[0] == "apis" && segs[3] == "watch")
 }
 
 // isSecretPath matches core Secret requests, /api/v1/secrets and
@@ -118,6 +142,46 @@ func isSecretPath(p string) bool {
 		return false
 	}
 	return segs[2] == "secrets" || (segs[2] == "namespaces" && len(segs) >= 5 && segs[4] == "secrets")
+}
+
+// secretGrant names the Secrets one capture may read: exactly those its
+// observed bundle-source configuration references, in the controller
+// namespace. Only readSources creates one.
+type secretGrant struct {
+	namespace string
+	names     map[string]bool
+}
+
+type secretGrantKey struct{}
+
+func withSecretGrant(ctx context.Context, namespace string, names []string) context.Context {
+	g := &secretGrant{namespace: namespace, names: map[string]bool{}}
+	for _, n := range names {
+		g.names[n] = true
+	}
+	return context.WithValue(ctx, secretGrantKey{}, g)
+}
+
+// refuseSecret allows a Secret request only as a plain get of one granted
+// name in the controller namespace: never a list (in a namespace or across
+// all), a watch, a subresource, a query, another namespace or a Secret the
+// observed configuration does not reference.
+func refuseSecret(req *http.Request, namespace string) string {
+	segs := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	switch {
+	case len(segs) != 6 || segs[1] != "v1" || segs[2] != "namespaces" || segs[4] != "secrets" ||
+		req.URL.Path != "/api/v1/namespaces/"+segs[3]+"/secrets/"+segs[5]:
+		return "the preview reads Secrets only as a get of one named Secret: no list, watch or subresource"
+	case namespace == "" || segs[3] != namespace:
+		return "the preview reads Secrets only in the controller namespace"
+	case req.URL.RawQuery != "":
+		return "a Secret read carries no query parameters"
+	}
+	g, _ := req.Context().Value(secretGrantKey{}).(*secretGrant)
+	if g == nil || g.namespace != segs[3] || !g.names[segs[5]] {
+		return "the Secret is not referenced by the observed bundle-source configuration"
+	}
+	return ""
 }
 
 type budget struct {
@@ -195,7 +259,7 @@ func classify(ctx context.Context, b *budget, err error, resource, ns, name stri
 		d.Code, d.Message = ObserveByteLimit, fmt.Sprintf("the capture exceeded %d response bytes", b.max)
 	case errors.As(err, &refused):
 		d.Code = ObserveRefusedRequest
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case errors.Is(ctx.Err(), context.DeadlineExceeded) || rateLimitedPastDeadline(ctx, err):
 		d.Code, d.Message = ObserveTimeout, "the observation timed out"
 	case errors.Is(ctx.Err(), context.Canceled):
 		d.Code, d.Message = ObserveCanceled, "the observation was canceled"
@@ -213,6 +277,14 @@ func classify(ctx context.Context, b *budget, err error, resource, ns, name stri
 		d.Code = ObserveRequestFailed
 	}
 	return d
+}
+
+// rateLimitedPastDeadline matches client-go's client-side rate limiter
+// refusing to wait beyond the context deadline: the deadline has not passed
+// yet, but the request can no longer be sent within it.
+func rateLimitedPastDeadline(ctx context.Context, err error) bool {
+	_, ok := ctx.Deadline()
+	return ok && strings.Contains(err.Error(), "would exceed context deadline")
 }
 
 // capture is one complete pass over every relevant projection.
@@ -236,6 +308,7 @@ type capture struct {
 	exceptions  []ObservedException
 	snapshots   []ObservedAcceptanceSnapshot
 	sources     *ObservedSources
+	inputs      *sourceInputs
 	limitations []Diagnostic
 }
 
@@ -604,88 +677,217 @@ func (c *capture) readSources(ctx context.Context, opts ObserveOptions) *Diagnos
 	}
 	o := &ObservedSources{ConfigMap: ObjectRef{Resource: resourceString(gvrConfigMaps), Namespace: opts.Namespace, Name: opts.SourcesConfigMap}}
 	c.sources = o
+	in := &sourceInputs{namespace: opts.Namespace, configMap: opts.SourcesConfigMap, objects: map[string]*sourceObject{}}
+	c.inputs = in
 	key := resourceString(gvrConfigMaps) + " " + opts.Namespace + "/" + opts.SourcesConfigMap
 	if !found {
-		o.Missing = true
+		o.Missing, in.missing = true, true
 		c.projections[key] = "missing"
 		c.limitations = append(c.limitations, Diagnostic{Code: LimitSourcesUnusable, Resource: o.ConfigMap.Resource, Namespace: opts.Namespace, Name: opts.SourcesConfigMap,
 			Message: "the selected bundle-source ConfigMap does not exist; OCI-pinned profiles cannot resolve"})
 		return nil
 	}
 	data, _, _ := unstructured.NestedStringMap(u.Object, "data")
+	binary, _, _ := unstructured.NestedMap(u.Object, "binaryData")
+	in.data, in.binaryData = data, len(binary) > 0
 	o.Digest = digestOf(data)
-	o.ConfigMap = c.observe(gvrConfigMaps, u, o.Digest)
+	o.ConfigMap = c.observe(gvrConfigMaps, u, []any{o.Digest, slices.Sorted(maps.Keys(binary))})
 	sources, err := bundle.ParseConfigMapData(data)
+	if err == nil && in.binaryData {
+		// The controller's source watcher refuses binaryData the same way.
+		err = fmt.Errorf("binaryData is not allowed; the document is data[%q]", bundle.SourcesConfigKey)
+	}
 	if err != nil {
 		o.ParseError = err.Error()
 		c.limitations = append(c.limitations, Diagnostic{Code: LimitSourcesUnusable, Resource: o.ConfigMap.Resource, Namespace: opts.Namespace, Name: opts.SourcesConfigMap,
 			Message: "the selected bundle-source configuration is invalid; OCI-pinned profiles cannot resolve"})
 		return nil
 	}
-	type trustRef struct{ name, key string }
-	var trust []trustRef
-	secrets := map[string]bool{}
-	note := func(r *bundle.ObjectRef, defaultKey string) {
+	in.parsed = &sources
+	// Every referenced value, with the default kinds and keys the source
+	// watcher, the verifier and the credential provider apply.
+	keys := map[string]map[string]bool{} // "Kind/name" -> referenced keys
+	for _, s := range sources.Sources {
+		o.Sources = append(o.Sources, ObservedSource{Name: s.Name, Repository: s.Repository, Publisher: s.Publisher.Type})
+		for _, r := range sourceRefs(s) {
+			id := r.kind + "/" + r.name
+			if keys[id] == nil {
+				keys[id] = map[string]bool{}
+			}
+			keys[id][r.key] = true
+		}
+	}
+	var secrets []string
+	for _, id := range slices.Sorted(maps.Keys(keys)) {
+		kind, name, _ := strings.Cut(id, "/")
+		ks := slices.Sorted(maps.Keys(keys[id]))
+		if kind == bundle.KindSecret {
+			secrets = append(secrets, name)
+			continue
+		}
+		obj, found, d := c.get(ctx, gvrConfigMaps, opts.Namespace, name)
+		if d != nil {
+			return d
+		}
+		so := &sourceObject{access: SecretMissing}
+		in.objects[id] = so
+		if found {
+			so.access, so.data = SecretRead, configMapValues(obj, ks)
+		}
+		for _, k := range ks {
+			to := ObservedTrustObject{ObjectRef: ObjectRef{Resource: resourceString(gvrConfigMaps), Namespace: opts.Namespace, Name: name}, Key: k}
+			tkey := key + "#trust/" + name + "#" + k
+			if !found {
+				to.Missing = true
+				c.projections[tkey] = "missing"
+			} else {
+				to.ObjectRef = ObjectRef{Resource: to.Resource, Namespace: opts.Namespace, Name: name, UID: obj.GetUID(), ResourceVersion: obj.GetResourceVersion()}
+				if v, ok := so.data[k]; !ok {
+					to.Missing = true
+				} else {
+					to.Digest = digestOf(string(v))
+				}
+				c.projections[tkey] = digestOf([]any{obj.GetUID(), to.Missing, to.Digest})
+			}
+			o.TrustConfigMaps = append(o.TrustConfigMaps, to)
+		}
+	}
+	// Referenced Secrets: one get per name, under a grant that the transport
+	// checks, with the caller's identity. A denial is recorded, not
+	// incomplete: only content that needs the Secret cannot be resolved.
+	sctx := withSecretGrant(ctx, opts.Namespace, secrets)
+	for _, name := range secrets {
+		ks := slices.Sorted(maps.Keys(keys[bundle.KindSecret+"/"+name]))
+		sec, d := c.getSecret(sctx, opts.Namespace, name, ks)
+		if d != nil {
+			return d
+		}
+		in.objects[bundle.KindSecret+"/"+name] = sec.obj
+		o.Secrets = append(o.Secrets, sec.observed)
+		if sec.observed.Access == SecretDenied {
+			o.UnreadSecrets = append(o.UnreadSecrets, name)
+			c.limitations = append(c.limitations, Diagnostic{Code: LimitSecretNotRead, Resource: resourceString(gvrSecrets), Namespace: opts.Namespace, Name: name,
+				Message: "a bundle source references this Secret and the caller may not read it; content from that source cannot be resolved by this preview, which never uses the controller's access"})
+		}
+	}
+	return nil
+}
+
+// sourceRef is one referenced object value.
+type sourceRef struct{ kind, name, key string }
+
+// sourceRefs lists the values a source references with default kinds and
+// keys filled in, exactly as the source watcher enumerates them.
+func sourceRefs(s bundle.BundleSource) []sourceRef {
+	var out []sourceRef
+	add := func(r *bundle.ObjectRef, kind, key string) {
 		if r == nil {
 			return
 		}
-		k := r.Key
-		if k == "" {
-			k = defaultKey
+		if r.Kind != "" {
+			kind = r.Kind
 		}
-		if r.Kind == bundle.KindSecret {
-			secrets[r.Name] = true
-			return
+		if r.Key != "" {
+			key = r.Key
 		}
-		trust = append(trust, trustRef{r.Name, k})
+		out = append(out, sourceRef{kind: kind, name: r.Name, key: key})
 	}
-	for _, s := range sources.Sources {
-		o.Sources = append(o.Sources, ObservedSource{Name: s.Name, Repository: s.Repository, Publisher: s.Publisher.Type})
-		if s.CredentialSecret != nil {
-			secrets[s.CredentialSecret.Name] = true
-		}
-		note(s.CA, bundle.DefaultCAKey)
-		note(s.Publisher.TrustRoot, bundle.DefaultTrustRootKey)
-		note(s.Publisher.PublicKey, bundle.DefaultPublicKey)
-	}
-	slices.SortFunc(trust, func(a, b trustRef) int { return strings.Compare(a.name+"\x00"+a.key, b.name+"\x00"+b.key) })
-	trust = slices.Compact(trust)
-	read := map[string]*unstructured.Unstructured{}
-	for _, t := range trust {
-		obj, seen := read[t.name]
-		if !seen {
-			got, found, d := c.get(ctx, gvrConfigMaps, opts.Namespace, t.name)
-			if d != nil {
-				return d
+	add(s.CredentialSecret, bundle.KindSecret, bundle.DefaultCredentialKey)
+	add(s.CA, "", bundle.DefaultCAKey)
+	add(s.Publisher.PublicKey, "", bundle.DefaultPublicKey)
+	add(s.Publisher.TrustRoot, "", bundle.DefaultTrustRootKey)
+	return out
+}
+
+// configMapValues returns the referenced keys of a ConfigMap, from data or
+// binaryData, as the credential provider and the verifier read them.
+func configMapValues(u *unstructured.Unstructured, keys []string) map[string][]byte {
+	out := map[string][]byte{}
+	data, _, _ := unstructured.NestedStringMap(u.Object, "data")
+	binary, _, _ := unstructured.NestedStringMap(u.Object, "binaryData")
+	for _, k := range keys {
+		if v, ok := binary[k]; ok {
+			if b, err := base64.StdEncoding.DecodeString(v); err == nil {
+				out[k] = b
 			}
-			if found {
-				obj = got
-			}
-			read[t.name] = obj
 		}
-		to := ObservedTrustObject{ObjectRef: ObjectRef{Resource: resourceString(gvrConfigMaps), Namespace: opts.Namespace, Name: t.name}, Key: t.key}
-		tkey := key + "#trust/" + t.name + "#" + t.key
-		if obj == nil {
-			to.Missing = true
-			c.projections[tkey] = "missing"
-		} else {
-			to.ObjectRef = ObjectRef{Resource: to.Resource, Namespace: opts.Namespace, Name: t.name, UID: obj.GetUID(), ResourceVersion: obj.GetResourceVersion()}
-			v, ok, _ := unstructured.NestedString(obj.Object, "data", t.key)
-			if !ok {
-				to.Missing = true
-			} else {
-				to.Digest = digestOf(v)
-			}
-			c.projections[tkey] = digestOf([]any{obj.GetUID(), to.Missing, to.Digest})
+		if v, ok := data[k]; ok {
+			out[k] = []byte(v)
 		}
-		o.TrustConfigMaps = append(o.TrustConfigMaps, to)
 	}
-	for _, s := range slices.Sorted(maps.Keys(secrets)) {
-		o.UnreadSecrets = append(o.UnreadSecrets, s)
-		c.limitations = append(c.limitations, Diagnostic{Code: LimitSecretNotRead, Resource: "/v1/secrets", Namespace: opts.Namespace, Name: s,
-			Message: "a bundle source references this Secret; the observation never reads Secrets"})
+	return out
+}
+
+type observedSecret struct {
+	observed ObservedSecret
+	obj      *sourceObject
+}
+
+// getSecret reads one referenced Secret by name. Only the referenced keys
+// are kept, in memory; the projection is a keyed digest, and no message
+// carries anything the API server returned.
+func (c *capture) getSecret(ctx context.Context, ns, name string, keys []string) (observedSecret, *Diagnostic) {
+	res := resourceString(gvrSecrets)
+	out := observedSecret{observed: ObservedSecret{ObjectRef: ObjectRef{Resource: res, Namespace: ns, Name: name}, Keys: keys}, obj: &sourceObject{}}
+	pkey := res + " " + ns + "/" + name
+	col := Collection{Resource: res, Namespace: ns, Name: name}
+	defer func() { c.collections = append(c.collections, col) }()
+	if d := c.request(); d != nil {
+		d.Resource, d.Namespace, d.Name = res, ns, name
+		return out, d
 	}
-	return nil
+	u, err := c.r.dyn.Resource(gvrSecrets).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	col.Pages++
+	if err != nil {
+		d := classify(ctx, c.b, err, res, ns, name, false)
+		switch d.Code {
+		case ObserveNotFound:
+			out.observed.Access, out.obj.access = SecretMissing, SecretMissing
+		case ObserveAccessDenied, ObserveUnauthorized:
+			out.observed.Access, out.obj.access = SecretDenied, SecretDenied
+		case ObserveByteLimit, ObserveTimeout, ObserveCanceled, ObserveRefusedRequest:
+			return out, d
+		default:
+			d.Message = "the referenced Secret could not be read"
+			return out, d
+		}
+		c.projections[pkey] = string(out.observed.Access)
+		return out, nil
+	}
+	if d := c.count(1); d != nil {
+		d.Resource, d.Namespace, d.Name = res, ns, name
+		return out, d
+	}
+	col.ResourceVersion, col.Objects = u.GetResourceVersion(), 1
+	typ, _, _ := unstructured.NestedString(u.Object, "type")
+	data, _, _ := unstructured.NestedStringMap(u.Object, "data")
+	values := map[string][]byte{}
+	for _, k := range keys {
+		v, ok := data[k]
+		if !ok {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return out, &Diagnostic{Code: ObserveInvalidObject, Resource: res, Namespace: ns, Name: name, Message: "the referenced Secret's data is not valid base64"}
+		}
+		values[k] = b
+	}
+	out.observed.ObjectRef = ObjectRef{Resource: res, Namespace: ns, Name: name, UID: u.GetUID(), ResourceVersion: u.GetResourceVersion()}
+	out.observed.Access = SecretRead
+	*out.obj = sourceObject{access: SecretRead, typ: typ, data: values}
+	c.refs = append(c.refs, out.observed.ObjectRef)
+	// Changes of the referenced values (and of the type the credential
+	// provider checks) are drift; nothing else about the Secret is.
+	mac := hmac.New(sha256.New, c.r.secretKey)
+	fmt.Fprintf(mac, "%s\x00%d:%s\x00", u.GetUID(), len(typ), typ)
+	for _, k := range keys {
+		v, ok := values[k]
+		fmt.Fprintf(mac, "%s\x00%t\x00%d:", k, ok, len(v))
+		mac.Write(v)
+	}
+	c.projections[pkey] = "hmac:" + hex.EncodeToString(mac.Sum(nil))
+	return out, nil
 }
 
 // fill copies a stable capture into the snapshot in deterministic order.
@@ -707,6 +909,7 @@ func (c *capture) fill(s *Snapshot, opts ObserveOptions) {
 	s.AcceptanceSnapshots = c.snapshots
 	slices.SortFunc(s.AcceptanceSnapshots, func(a, b ObservedAcceptanceSnapshot) int { return compareRef(a.ObjectRef, b.ObjectRef) })
 	s.Sources = c.sources
+	s.inputs = c.inputs
 	lims := append(slices.Clone(c.limitations),
 		Diagnostic{Code: LimitNoAtomicSnapshot, Message: "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"},
 		Diagnostic{Code: LimitRevocationUnavailable, Resource: resourceString(gvrExceptions),

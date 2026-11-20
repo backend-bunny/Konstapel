@@ -17,10 +17,13 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
-// This file is the read-only cluster observation (tasks 2.1 to 2.3). It reads
-// the selected cluster with the caller's own credentials, using only GET
-// requests: discovery, get and list. It never writes, never watches, never
-// sends server-side dry-run or authorization probes, and never reads Secrets.
+// This file is the read-only cluster observation (tasks 2.1 to 2.3, with the
+// named Secret reads of 4.3). It reads the selected cluster with the caller's
+// own credentials, using only GET requests: discovery, get and list. It never
+// writes, never watches and never sends server-side dry-run or authorization
+// probes. The only Secrets it requests are those the observed bundle-source
+// configuration references, each by name in the controller namespace; it never
+// lists Secrets, and their values never reach a report.
 
 // ObserveLimits bounds one observation. Hitting any limit, a timeout or a
 // cancellation makes the snapshot incomplete; nothing is silently truncated.
@@ -124,8 +127,8 @@ const (
 	// LimitSourcesNotSelected: no bundle-source ConfigMap was named, so only
 	// vendored content can be resolved.
 	LimitSourcesNotSelected ObserveCode = "bundle-sources-not-selected"
-	// LimitSecretNotRead: a source references a Secret; the observation never
-	// reads Secrets. Caller-authorized bundle access is a later stage.
+	// LimitSecretNotRead: a source references a Secret that the caller may
+	// not read. Content from that source cannot be resolved by this preview.
 	LimitSecretNotRead ObserveCode = "secret-not-read"
 	// LimitSourcesUnusable: the named source configuration is missing or
 	// invalid, as the controller would also find it.
@@ -282,7 +285,8 @@ type ObservedAcceptanceSnapshot struct {
 }
 
 // ObservedSources is the controller's central bundle-source configuration, as
-// read from its ConfigMap. Referenced Secrets are named, never read.
+// read from its ConfigMap. Referenced Secrets are read by name with the
+// caller's identity; only their identity and access outcome are reported.
 type ObservedSources struct {
 	ConfigMap ObjectRef `json:"configMap"`
 	// Missing is true when the named ConfigMap does not exist.
@@ -295,8 +299,34 @@ type ObservedSources struct {
 	// TrustConfigMaps are the referenced CA, trust-root and public-key
 	// ConfigMaps, sorted by name and key.
 	TrustConfigMaps []ObservedTrustObject `json:"trustConfigMaps,omitempty"`
-	// UnreadSecrets names referenced Secrets (credentials or trust material).
+	// Secrets are the referenced Secrets (credentials or trust material),
+	// sorted by name: identity and access only, never their data.
+	Secrets []ObservedSecret `json:"secrets,omitempty"`
+	// UnreadSecrets names the referenced Secrets the caller may not read.
 	UnreadSecrets []string `json:"unreadSecrets,omitempty"`
+}
+
+// SecretAccess is the outcome of reading one referenced Secret.
+type SecretAccess string
+
+const (
+	// SecretRead: the caller read the Secret by name.
+	SecretRead SecretAccess = "read"
+	// SecretMissing: the Secret does not exist, as the controller would also
+	// find.
+	SecretMissing SecretAccess = "missing"
+	// SecretDenied: the caller may not read the Secret (forbidden or
+	// unauthorized). The preview never substitutes another identity.
+	SecretDenied SecretAccess = "denied"
+)
+
+// ObservedSecret is one referenced Secret: its identity, the keys the
+// sources reference and whether the caller could read it. Its data is
+// held only in memory for the bundle content adapter and never reported.
+type ObservedSecret struct {
+	ObjectRef
+	Keys   []string     `json:"keys"`
+	Access SecretAccess `json:"access"`
 }
 
 // ObservedSource is the non-secret part of one source mapping.
@@ -358,6 +388,10 @@ type Snapshot struct {
 	Exceptions          []ObservedException          `json:"exceptions,omitempty"`
 	AcceptanceSnapshots []ObservedAcceptanceSnapshot `json:"acceptanceSnapshots,omitempty"`
 	Sources             *ObservedSources             `json:"sources,omitempty"`
+	// inputs is the observed source configuration and the referenced
+	// objects' values, for the bundle content adapter (content.go). It holds
+	// Secret data: it is never serialized and formats as redacted.
+	inputs *sourceInputs
 	// Contracts records the consumed contract versions.
 	Contracts   map[string]int `json:"contracts"`
 	Limitations []Diagnostic   `json:"limitations,omitempty"`
@@ -377,6 +411,7 @@ func (s *Snapshot) TargetingNamespaces() []targeting.Namespace {
 var (
 	gvrNamespaces   = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
 	gvrConfigMaps   = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+	gvrSecrets      = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
 	gvrProfiles     = v1alpha1.GroupVersion.WithResource("complianceprofiles")
 	gvrBindings     = v1alpha1.GroupVersion.WithResource("compliancebindings")
 	gvrExceptions   = v1alpha1.GroupVersion.WithResource("complianceexceptions")
@@ -406,7 +441,7 @@ func Observe(ctx context.Context, opts ObserveOptions) (*Snapshot, error) {
 	if now == nil {
 		now = time.Now
 	}
-	r, err := newReader(opts.Config, lim)
+	r, err := newReader(opts.Config, lim, opts.Namespace)
 	if err != nil {
 		return nil, err
 	}

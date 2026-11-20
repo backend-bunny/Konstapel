@@ -27,6 +27,14 @@
       "line": 1
     }
   ],
+  "content": [
+    {
+      "name": "hardening",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digestKind": "unknown",
+      "resolved": true
+    }
+  ],
   "contributions": [
     {
       "key": {
@@ -40,6 +48,7 @@
         "profile": "fresh",
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
         "mode": "Deny",
         "namespaceSelector": {},

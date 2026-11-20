@@ -38,6 +38,14 @@
       "line": 1
     }
   ],
+  "content": [
+    {
+      "name": "hardening",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digestKind": "unknown",
+      "resolved": true
+    }
+  ],
   "contributions": [
     {
       "key": {
@@ -53,6 +61,7 @@
         "profileGeneration": 3,
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
         "mode": "Audit",
         "namespaceSelector": {},
@@ -122,6 +131,7 @@
         "profileGeneration": 3,
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
         "parameters": {
           "runAsUser": 1000
@@ -195,6 +205,7 @@
         "profileGeneration": 3,
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
         "mode": "Deny",
         "namespaceSelector": {
@@ -218,6 +229,7 @@
         "profile": "shared",
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
         "mode": "Audit",
         "namespaceSelector": {
@@ -275,6 +287,7 @@
         "profileGeneration": 3,
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
         "parameters": {
           "runAsUser": 1000
@@ -301,6 +314,7 @@
         "profile": "shared",
         "bundleName": "hardening",
         "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundleDigestKind": "unknown",
         "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
         "parameters": {
           "runAsUser": 1000
