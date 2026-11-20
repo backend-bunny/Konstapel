@@ -118,7 +118,8 @@
     "goTests": [
       "TestLiveBundlesOfficial",
       "TestLiveBundlesOrganization",
-      "TestLiveBundlesHardening"
+      "TestLiveBundlesHardening",
+      "TestLivePolicyPreviewPrivateBundle"
     ]
   }
 }

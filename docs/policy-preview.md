@@ -1,13 +1,14 @@
 # Policy change preview
 
-> **Status: input model, cluster observation and comparison core only.** The
-> `konstapel preview` command, its JSON report and exit codes are not
-> implemented yet. This page documents the parts that exist in
-> `internal/preview`: how rendered manifests are read and validated, how the
-> candidate configuration is formed (tasks 1.1 to 1.3 of the
+> **Status: input model, cluster observation, comparison core and verified
+> bundle resolution only.** The `konstapel preview` command, its JSON report
+> and exit codes are not implemented yet. This page documents the parts that
+> exist in `internal/preview`: how rendered manifests are read and validated,
+> how the candidate configuration is formed (tasks 1.1 to 1.3 of the
 > `add-policy-change-preview` change), the read-only cluster observation with
-> its access contract and limits (tasks 2.1 to 2.3), and the semantic comparison
-> with its impact categories (tasks 3.1 to 3.4). No command line exposes any of
+> its access contract and limits (tasks 2.1 to 2.3), the semantic comparison
+> with its impact categories (tasks 3.1 to 3.4), and verified bundle content
+> under the caller's access (tasks 4.1 to 4.3). No command line exposes any of
 > them yet. Treat the planned command line in the change's
 > [design](../openspec/changes/add-policy-change-preview/design.md) as not available.
 
@@ -285,9 +286,14 @@ controller namespace and, when the controller runs with
 
 The observation sends only `GET` requests: API discovery, `get` and `list`. A
 guard in the client refuses anything else before it is sent, including writes,
-server-side dry-run, `SelfSubjectAccessReview`-style authorization probes,
-watches and any Secret request. Tests run the observation against a recording API
-server and a disposable cluster and check that no other request occurs.
+server-side dry-run, `SelfSubjectAccessReview`-style authorization probes and
+watches (the `watch` parameter and the legacy `/watch/` paths). The only Secret
+request it lets through is a plain `get` of one named Secret in the controller
+namespace that the observed bundle-source configuration references; a Secret
+list (in a namespace or across all), a watch, a subresource, a query, another
+namespace and every unreferenced name are refused. Tests run the observation
+against a recording API server and a disposable cluster and check that no
+other request occurs.
 
 | Resource | API group | Where | Verbs | Read for |
 | --- | --- | --- | --- | --- |
@@ -296,12 +302,20 @@ server and a disposable cluster and check that no other request occurs.
 | `complianceexceptions` | `compliance.erenius.io` | all namespaces | `list` | Protected acceptance records and snapshot references |
 | `validatingpolicies` | `policies.kyverno.io` | cluster | `list`, label `app.kubernetes.io/managed-by=konstapel` | Applied engine policies, their recorded contribution and readiness |
 | `configmaps` | core | controller namespace | `list` (acceptance snapshots, by label); `get` (the bundle-source ConfigMap and the trust ConfigMaps it names) | Frozen acceptance snapshots; source and trust configuration |
+| `secrets` | core | controller namespace | `get`, only the names the bundle-source ConfigMap references (optional) | Registry credentials and Secret-held trust material of private bundle sources |
 | discovery | `/api/v1`, `/apis/compliance.erenius.io/v1alpha1`, `/apis/policies.kyverno.io/v1` | | `GET` | Required APIs are served (granted to authenticated users by `system:discovery`) |
 
-`secrets` are not read. A bundle source's `credentialSecret` and any Secret trust
-reference are listed by name as `secret-not-read` limitations; caller-authorized
-bundle access is a later part of the change. A ready-made ClusterRole and Role
-with exactly these permissions is in
+A bundle source's `credentialSecret` and its Secret-held trust references
+(`ca`, `publicKey` or `trustRoot` of kind `Secret`) are read by name with the
+caller's own identity, never listed. Their identity and access outcome
+(`read`, `missing` or `denied`) are reported; their values are held in memory
+for [bundle content](#bundle-content) only and never appear in a report,
+diagnostic, error or log. A Secret the caller may not read is the
+`secret-not-read` limitation, and any content that needs it makes the
+comparison incomplete (`content-access-denied`). A ready-made ClusterRole and
+Role with exactly these permissions, plus the optional Role
+`konstapel-policy-preview-bundle-secrets` with `get` on the named Secrets of a
+private source, is in
 [`docs/examples/policy-preview/reader-rbac.yaml`](examples/policy-preview/reader-rbac.yaml).
 Overlap and shared-profile analysis needs cluster-wide reads, so a namespace
 service account of an application team is usually not enough.
@@ -328,7 +342,9 @@ collection completely, following list continuations, records each list's
 then reads everything again as a recheck. It compares only relevant projections:
 specifications, generations, enforcement epochs, namespace UIDs and labels,
 ownership and provenance of engine policies and their derived readiness,
-acceptance records and snapshots, and source and trust data. Status timestamps,
+acceptance records and snapshots, and source and trust data, including the
+referenced values of Secrets (compared as a digest keyed per run, so not even
+a digest of a credential leaves the process). Status timestamps,
 report times and unrelated annotations are ignored, so constantly changing
 status does not force retries. If a relevant projection changed, or a list
 continuation expired, the whole capture is repeated, at most two recaptures.
@@ -379,18 +395,26 @@ cannot determine an affected contribution:
 | `unresolved-candidate` | A binding that the proposal affects does not resolve in the candidate (missing or untrusted content, unknown policy, unsupported policy scope, unrenderable configuration). The controller would keep the previously applied policies for it. |
 | `unresolved-baseline` | The live configuration of an affected binding does not resolve, so its current contributions cannot be determined. Previously applied policies may remain enforcing. |
 | `content-failed`, `content-mismatch` | The content source failed for another reason than unavailable content, or returned content for another reference. |
+| `content-access-denied` | The caller may not read a Secret that the bundle's source references. Raised for every pinned bundle of that source, whether or not the proposal touches the bindings that pin it. |
+| `content-unavailable` | A live binding that the proposal does not touch pins content the preview could not read for a reason that depends on where it runs (retrieval, missing proofs, the cache, or this installation's vendored tree). Whether the controller resolves it is not observed, so its overlap is unknown. |
 
 Unresolved contributions in the candidate are never reported as withdrawn, and
 an unresolved overlap keeps exception eligibility `Forbidden` rather than
 permitting exceptions. A live binding that does not resolve but that the
 proposal does not touch is the `baseline-unresolved` limitation of a complete
-comparison. Every comparison also carries the `rendered-input-assumptions` and
+comparison when the reason is the observed configuration itself: a missing
+profile, an unknown policy, an unsupported scope, or content that the
+observed sources and trust refuse (no configured source, untrusted,
+incompatible, a digest mismatch, malformed). The controller reaches the same
+verdict. A content failure that depends on the preview's own environment is
+`content-unavailable` instead. Every comparison also carries the `rendered-input-assumptions` and
 `no-workload-evaluation` limitations.
 
 ### What is compared
 
 | Part | One entry per | Contents |
 | --- | --- | --- |
+| `content` | Pinned bundle read | Name, digest and `digestKind` (see [Digest meanings](#digest-meanings)), the configured repository, whether it resolved under current trust, and the bounded error class and text |
 | `objects` | Proposed, removed or restated profile or binding | Disposition, observed identity, `pendingIdentity`, `configurationChanged`, `storedSpec`, `reportingOnly`, configuration fingerprints, input location |
 | `contributions` | Binding and logical policy whose contribution differs | Stable key, `added`/`removed`/`changed`, `revisionEffect`, observed `before` and proposed `after` sides, namespace instances added and removed, responsible inputs, impacts |
 | `namespaces` | Observed namespace instance and logical policy whose applicable contributions or effective eligibility differ | Contributions added, removed, replaced and **remaining**, effective eligibility before and after |
@@ -587,11 +611,124 @@ preview does not claim that nothing changes: the engine policies are replaced
 and any acceptance bound to the current revisions no longer matches them.
 Keeping the live order in the rendered manifest avoids the replacement.
 
+## Bundle content
+
+The comparison reads bundle content through the controller's own content
+source, assembled without a manager, a provider subprocess or any watcher
+(`OpenContent` in `internal/preview`):
+
+- The **vendored bundle** (the controller's `konstapel-vendored` name) is served
+  by `targeting.LocalContent` from this installation's content tree. Every read
+  checks every file against `SHA256SUMS`; a changed or missing file fails, and
+  nothing is served from a corrupted tree.
+- **Every other name** goes through the bundle owner's stack
+  (`internal/bundle/stack`), routed exactly as the controller routes it: the
+  central source mapping, the exact-digest resolver, the current-trust
+  verifier (signature and provenance under the source's publisher rule), the
+  content cache and the Secret-backed registry credential and CA provider.
+  There is no unsigned, unverified or substituted fallback. See
+  [Policy bundles](policy-bundles.md) for the trust model.
+
+### Bundle-source selection
+
+Name the controller namespace and, when the controller runs with
+`--bundle-sources-configmap`, the same ConfigMap. The preview uses that
+configuration as observed; proposed manifests can never replace sources,
+publisher rules, trust material or credentials. Without a selected ConfigMap
+only the vendored bundle resolves, like a controller without bundle sources,
+and an OCI pin is unavailable with error class `Config`. A missing or invalid
+ConfigMap makes every OCI bundle unavailable, as it would for the controller.
+
+The bundle stack is not given a Kubernetes client. It is served the values
+that the observation read and rechecked: the source document, the trust
+ConfigMaps and the referenced Secrets. So it sends no request of its own, and
+what it verifies against is the observed state, drift-checked like the rest of
+the snapshot. Registry requests go from where the preview runs to the
+configured repository, with the configured CA and the credential from the
+referenced Secret. Local Docker credentials, node or kubelet credentials and
+the controller's ServiceAccount are never used.
+
+Bundle compatibility is checked against a controller release that the caller
+supplies (the `controller-version-assumed` limitation): the running
+controller's release is not observed.
+
+### Required caller access
+
+| Source | Access the caller needs |
+| --- | --- |
+| Vendored bundle only | The [observation permissions](#cluster-access) |
+| Public OCI source (no `credentialSecret`, ConfigMap trust) | The observation permissions; network access to the registry |
+| Private OCI source | Also `get` on each referenced Secret by name (`konstapel-policy-preview-bundle-secrets` in the reader RBAC example), and network access to the registry |
+
+A referenced Secret the caller may not read is never replaced by the
+controller's access, an anonymous request or an earlier value. Its bundles are
+`content-access-denied` and the comparison is incomplete. The report names the
+Secret and never carries its value, the API server's message or a registry
+response.
+
+### Digest meanings
+
+| `digestKind` | The pinned digest identifies |
+| --- | --- |
+| `vendored-checksum-manifest` | The sha256 of the vendored tree's `SHA256SUMS`, which lists every vendored file's checksum. It is not an OCI digest and changes with any vendored file of the release. |
+| `oci-manifest` | The OCI image manifest of a bundle in the configured repository. Its config, layer and proofs are verified against it. |
+| `unknown` | Only for a content source that does not say how it interprets names (test doubles); a digest is never labelled as the other kind. |
+
+The vendored digest the preview serves is that of its own installation. A
+profile pinned to the vendored digest of another release is unavailable to
+it, and the comparison is incomplete rather than assuming the controller's
+image serves it.
+
+### Cache and trust
+
+`ContentOptions.CacheDir` keeps verified content between previews; empty uses a
+temporary directory removed afterwards. The cache is owned by one process at a
+time. Cached content is reused only after it is verified again under the
+trust observed now, with its retained proofs, so a warm cache serves through a
+registry outage, while content cached under a key that the publisher rule no
+longer trusts is refused.
+
+### Trust and content errors
+
+Each `content` record carries the bundle owner's error class. An affected
+binding whose content fails is `unresolved-candidate` or `unresolved-baseline`
+and makes the comparison incomplete.
+
+| Class | Meaning | Untouched live binding |
+| --- | --- | --- |
+| `Untrusted` | No proof satisfies the publisher rule now: unsigned, another signer, tampered proofs or provenance, or trust that changed since the content was cached | `baseline-unresolved` limitation |
+| `Config` | No usable source for the name (none selected, missing or invalid configuration, or publisher trust material that cannot be read) | `baseline-unresolved` limitation |
+| `Incompatible`, `DigestMismatch`, `Malformed` | The content does not fit the given controller release, is not exactly the pin, or is not readable policy content | `baseline-unresolved` limitation |
+| `ContentUnavailable`, `ProofUnavailable` | The content or its proofs could not be retrieved (not in the repository, registry down or refusing the credential, bytes that do not match the pinned digest) | `content-unavailable` error |
+| `Capacity`, `Stale`, `Unresolved`, none | A cache, concurrency or vendored-tree failure | `content-unavailable` error |
+
+A denied referenced Secret adds `content-access-denied` to any of these.
+
+### Private-source workflow
+
+1. Create the controller's private source as in
+   [Private registry setup](policy-bundles.md#private-registry-setup): the
+   sources ConfigMap, the registry credential Secret, the CA ConfigMap and the
+   publisher key Secret in the controller namespace.
+2. Bind the reader ClusterRole and Role of
+   [`reader-rbac.yaml`](examples/policy-preview/reader-rbac.yaml) to the
+   identity that runs previews, and the
+   `konstapel-policy-preview-bundle-secrets` Role with your Secret names.
+3. Preview with the controller namespace and the sources ConfigMap name. The
+   bundles of that source are read with the referenced credential, verified
+   under its publisher rule and reported with `digestKind: oci-manifest`.
+
+`TestLivePolicyPreviewPrivateBundle` (the `bundles` acceptance group) runs
+this workflow on a disposable cluster against the bundle owner's
+organization-key fixture in a disposable TLS and htpasswd registry, with
+exactly the documented names: complete with the Secret Role, and
+`content-access-denied` without it.
+
 ## Not covered
 
 The preview does not emulate server-side apply, field ownership, admission
 mutation or admission validation beyond the schema rules above, and it cannot
 express deleting and recreating one name in a single step. Applying the
-configuration stays a separate Kubernetes or GitOps action. Bundle verification
-beyond the content seam, exception acceptance impact, evidence, reports and exit
-codes are later tasks of the change and are not described here as available.
+configuration stays a separate Kubernetes or GitOps action. Exception
+acceptance impact, evidence, reports and exit codes are later tasks of the
+change and are not described here as available.

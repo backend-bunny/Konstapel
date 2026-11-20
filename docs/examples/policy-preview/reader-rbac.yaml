@@ -3,7 +3,7 @@
 # identities that run previews; the preview uses their own kubeconfig
 # credentials and never the controller's ServiceAccount.
 #
-# Only get and list. No watch, no write verbs, no Secrets. Discovery
+# Only get and list. No watch, no write verbs, and no Secret list. Discovery
 # (/api, /apis) is allowed to every authenticated identity by the built-in
 # system:discovery role.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -40,3 +40,22 @@ rules:
   - apiGroups: [""]
     resources: [configmaps]
     verbs: [get, list]
+---
+# Optional, for private bundle sources only: get on exactly the Secrets the
+# bundle-source ConfigMap references (registry credentials and Secret-held
+# trust material), by name. Replace the names with your references (these are
+# the ones of docs/examples/charts/oci-bundles.yaml). Without this Role a
+# preview of a profile pinned to such a source is incomplete; the preview
+# never uses the controller's access instead. Never grant list or watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konstapel-policy-preview-bundle-secrets
+  namespace: konstapel-system
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [acme-registry, acme-bundle-signing-key]
+    verbs: [get]

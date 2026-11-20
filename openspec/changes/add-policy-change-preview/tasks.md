@@ -30,6 +30,7 @@ dependencies' CRDs, trust systems, or collectors.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 - [ ] 2.5 Add exception revocation and Secret-held trust material to the rechecked projections: revocation (`spec.revoked` and revocation records) once `add-self-service-policy-exceptions` 2.6/3.6 reach main, reported as `exception-revocation-unavailable` until then, and Secret-held trust material through the caller-authorized named Secret reads of 4.3, reported as `secret-not-read` until then; verify a concurrent revocation or Secret change causes recapture or incomplete output, and that no Secret is listed or its data reported.
   <!-- agent: tier=deep risk=medium reason="Snapshot consistency across exception revocation and caller-authorized Secret trust inputs owned by other changes" -->
+  Secret half done with 4.3: referenced Secrets are read by name with the caller's identity in every capture and rechecked as a keyed digest of their referenced values (change → recapture, persistent change → `unstable`; denied → `secret-not-read`; nothing listed or reported). Revocation half open until the exception owner's 2.6/3.6 reach main.
 
 ## 3. Shared resolution and semantic comparison
 
@@ -46,14 +47,15 @@ dependencies' CRDs, trust systems, or collectors.
 
 ## 4. Verified bundle resolution
 
-- [ ] 4.1 Adapt local vendored `ContentSource` for preview without provider or manager startup; verify checksum corruption fails and reports distinguish vendored checksum-manifest digests from OCI manifest digests.
+- [x] 4.1 Adapt local vendored `ContentSource` for preview without provider or manager startup; verify checksum corruption fails and reports distinguish vendored checksum-manifest digests from OCI manifest digests.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 4.2 After `add-policy-bundle-distribution` supplies its implementation, consume the source mapping, exact-digest resolver, current-trust verifier, and cache contract; verify signed public/private bundles, changed trust, cache reuse, digest mismatch, unavailable pins, and forbidden unsigned fallback.
+- [x] 4.2 After `add-policy-bundle-distribution` supplies its implementation, consume the source mapping, exact-digest resolver, current-trust verifier, and cache contract; verify signed public/private bundles, changed trust, cache reuse, digest mismatch, unavailable pins, and forbidden unsigned fallback.
   <!-- agent: tier=deep risk=high reason="Caller authorization, bundle trust, and accepted-risk boundaries" -->
-- [ ] 4.3 Wire caller-authorized registry credentials and narrowly referenced Secret reads through the shared source adapter; verify denied credentials produce incomplete output, no controller impersonation or secret listing occurs, and reports/diagnostics redact credential material.
+- [x] 4.3 Wire caller-authorized registry credentials and narrowly referenced Secret reads through the shared source adapter; verify denied credentials produce incomplete output, no controller impersonation or secret listing occurs, and reports/diagnostics redact credential material.
   <!-- agent: tier=deep risk=high reason="Caller authorization, bundle trust, and accepted-risk boundaries" -->
-- [ ] 4.4 Document bundle-source selection, required caller access, digest meanings, and trust errors; verify the documented private-source workflow against the distribution owner's integration fixture.
+- [x] 4.4 Document bundle-source selection, required caller access, digest meanings, and trust errors; verify the documented private-source workflow against the distribution owner's integration fixture.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+  Verified by `internal/preview/content_test.go` (real stack, organization-key fixture, in-process TLS registry) and `TestLivePolicyPreviewPrivateBundle` (bundles group: disposable cluster, pinned registry, documented names and reader RBAC).
 
 ## 5. Exception and evidence integration
 

@@ -2,8 +2,10 @@ package preview
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -182,6 +184,56 @@ func assertReadOnly(t *testing.T, reqs []recorded) {
 	for _, r := range reqs {
 		if r.Method != http.MethodGet || strings.Contains(r.Query, "dryRun") || strings.Contains(r.Query, "watch=") || isSecretPath(r.Path) {
 			t.Fatalf("non-read request sent: %+v", r)
+		}
+	}
+}
+
+// assertSecretReads asserts read-only requests in which every Secret request
+// is a plain GET of one of the named Secrets in the controller namespace, and
+// each named Secret was read.
+func assertSecretReads(t *testing.T, reqs []recorded, names ...string) {
+	t.Helper()
+	read := map[string]bool{}
+	var other []recorded
+	for _, r := range reqs {
+		if !isSecretPath(r.Path) {
+			other = append(other, r)
+			continue
+		}
+		name, ok := strings.CutPrefix(r.Path, pathSecrets(ctrlNS)+"/")
+		if r.Method != http.MethodGet || r.Query != "" || !ok || !slices.Contains(names, name) {
+			t.Fatalf("Secret request outside the referenced names: %+v", r)
+		}
+		read[name] = true
+	}
+	assertReadOnly(t, other)
+	for _, n := range names {
+		if !read[n] {
+			t.Fatalf("referenced Secret %s was not read: %+v", n, reqs)
+		}
+	}
+}
+
+// assertNoSecretValues asserts that no Secret value appears in a
+// snapshot's JSON or in any of its formatted forms.
+func assertNoSecretValues(t *testing.T, s *Snapshot, values ...string) {
+	t.Helper()
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forms := []string{string(raw), fmt.Sprintf("%v", s), fmt.Sprintf("%+v", s), fmt.Sprintf("%#v", s), fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%v", s.inputs), fmt.Sprintf("%+v", s.inputs), fmt.Sprintf("%#v", s.inputs)}
+	for _, v := range values {
+		// Verbatim, base64, and as fmt renders a []byte with %v and %#v.
+		decimal := strings.Trim(fmt.Sprint([]byte(v)), "[]")
+		hexBytes := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%#v", []byte(v)), "[]byte{"), "}")
+		for _, enc := range []string{v, base64.StdEncoding.EncodeToString([]byte(v)), decimal, hexBytes} {
+			for _, f := range forms {
+				if strings.Contains(f, enc) {
+					t.Fatalf("a Secret value reached the snapshot's output: %s", f)
+				}
+			}
 		}
 	}
 }
@@ -647,8 +699,10 @@ func TestObserveTimeoutAndCancellation(t *testing.T) {
 	})
 }
 
-// Source and trust projections: the named ConfigMap and the trust
-// ConfigMaps it references are read; Secrets are named, never requested.
+// Source and trust projections: the named ConfigMap, the trust ConfigMaps it
+// references and, by name and with the caller's identity, the Secrets it
+// references (4.3, 2.5). Nothing else is requested, and no Secret value
+// reaches the snapshot's serialized or formatted forms.
 func TestObserveSourcesAndTrust(t *testing.T) {
 	sourcesDoc := `version: 1
 sources:
@@ -665,13 +719,20 @@ sources:
         sourceRepository: https://example.com/org/bundle
         builder: https://example.com/builder
 `
+	const pullValue, rootValue = "PULL-SECRET-VALUE-MUST-NOT-LEAK", "ROOT-SECRET-VALUE-MUST-NOT-LEAK"
 	setup := func(t *testing.T) *fakeAPI {
 		f := baseline(t)
 		f.put(pathConfigMaps(ctrlNS), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "konstapel-bundle-sources"}, Data: map[string]string{"sources.yaml": sourcesDoc}})
 		f.put(pathConfigMaps(ctrlNS), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "registry-ca"}, Data: map[string]string{"ca.crt": "CA-1"}})
+		f.put(pathSecrets(ctrlNS), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "registry-pull"}, Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte(pullValue)}})
+		f.put(pathSecrets(ctrlNS), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sigstore-root"},
+			Data: map[string][]byte{"trusted_root.json": []byte(rootValue), "unreferenced": []byte("x")}})
+		f.put(pathSecrets(ctrlNS), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "unrelated"}, Data: map[string][]byte{"k": []byte("v")}})
 		return f
 	}
 	withSources := func(o *ObserveOptions) { o.SourcesConfigMap = "konstapel-bundle-sources" }
+	referenced := []string{"registry-pull", "sigstore-root"}
 
 	f := setup(t)
 	s, err := observe(t, f, withSources)
@@ -679,20 +740,118 @@ sources:
 	src := s.Sources
 	if src == nil || src.Missing || src.ParseError != "" || len(src.Sources) != 1 || src.Sources[0].Repository != "registry.example.com/org/bundle" ||
 		len(src.TrustConfigMaps) != 1 || src.TrustConfigMaps[0].Name != "registry-ca" || src.TrustConfigMaps[0].Digest == "" ||
-		!slices.Equal(src.UnreadSecrets, []string{"registry-pull", "sigstore-root"}) {
+		len(src.UnreadSecrets) != 0 || len(src.Secrets) != 2 {
 		t.Fatalf("sources: %+v", src)
 	}
-	var secretLimits int
-	for _, l := range s.Limitations {
-		if l.Code == LimitSecretNotRead {
-			secretLimits++
+	for i, want := range []struct{ name, key string }{{"registry-pull", corev1.DockerConfigJsonKey}, {"sigstore-root", "trusted_root.json"}} {
+		got := src.Secrets[i]
+		if got.Name != want.name || got.Access != SecretRead || got.UID != types.UID("uid-"+want.name) || got.ResourceVersion == "" || !slices.Equal(got.Keys, []string{want.key}) {
+			t.Fatalf("secret %d: %+v", i, got)
 		}
 	}
-	if secretLimits != 2 {
+	if slices.ContainsFunc(s.Limitations, func(d Diagnostic) bool { return d.Code == LimitSecretNotRead }) {
 		t.Fatalf("limitations: %+v", s.Limitations)
 	}
-	assertReadOnly(t, f.recorded())
+	assertSecretReads(t, f.recorded(), referenced...)
+	assertNoSecretValues(t, s, pullValue, rootValue)
+	// The values are held for the content adapter, referenced keys only.
+	if o := s.inputs.objects["Secret/sigstore-root"]; o == nil || string(o.data["trusted_root.json"]) != rootValue || len(o.data) != 1 {
+		t.Fatal("the referenced Secret value is not held for the content adapter")
+	}
 
+	t.Run("secret change is drift", func(t *testing.T) {
+		f := setup(t)
+		f.onCapture = func(n int) {
+			if n == 2 {
+				f.mutate(pathSecrets(ctrlNS), "sigstore-root", func(m map[string]any) {
+					m["data"].(map[string]any)["trusted_root.json"] = base64.StdEncoding.EncodeToString([]byte("ROTATED"))
+				})
+			}
+		}
+		s, err := observe(t, f, withSources)
+		mustComplete(t, s, err)
+		if s.Captures != 3 || len(s.Drift) != 1 || !slices.Equal(s.Drift[0].Changed, []string{"/v1/secrets " + ctrlNS + "/sigstore-root"}) {
+			t.Fatalf("drift: %+v", s.Drift)
+		}
+		if string(s.inputs.objects["Secret/sigstore-root"].data["trusted_root.json"]) != "ROTATED" {
+			t.Fatal("the recaptured value is not the one held")
+		}
+		assertNoSecretValues(t, s, "ROTATED")
+	})
+	t.Run("secret changing on every capture is incomplete", func(t *testing.T) {
+		f := setup(t)
+		f.onCapture = func(n int) {
+			f.mutate(pathSecrets(ctrlNS), "registry-pull", func(m map[string]any) {
+				m["type"] = []string{string(corev1.SecretTypeDockerConfigJson), string(corev1.SecretTypeOpaque)}[n%2]
+			})
+		}
+		s, err := observe(t, f, withSources)
+		mustIncomplete(t, s, err, ObserveUnstable)
+		if s.inputs != nil {
+			t.Fatal("an incomplete snapshot holds Secret values")
+		}
+	})
+	t.Run("unreferenced secret data and metadata are not drift", func(t *testing.T) {
+		f := setup(t)
+		f.onCapture = func(n int) {
+			if n == 2 {
+				f.mutate(pathSecrets(ctrlNS), "sigstore-root", func(m map[string]any) {
+					m["data"].(map[string]any)["unreferenced"] = base64.StdEncoding.EncodeToString([]byte("y"))
+					m["metadata"].(map[string]any)["labels"] = map[string]any{"rotated": "yes"}
+				})
+			}
+		}
+		s, err := observe(t, f, withSources)
+		mustComplete(t, s, err)
+		if s.Captures != 2 || len(s.Drift) != 0 {
+			t.Fatalf("drift: %+v", s.Drift)
+		}
+	})
+	t.Run("denied secret is recorded, not read and not incomplete", func(t *testing.T) {
+		f := setup(t)
+		f.hook = func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path == pathSecrets(ctrlNS)+"/registry-pull" {
+				writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden, `secrets "registry-pull" is forbidden: User "reader" cannot get resource "secrets"`)
+				return true
+			}
+			return false
+		}
+		s, err := observe(t, f, withSources)
+		mustComplete(t, s, err)
+		if !slices.Equal(s.Sources.UnreadSecrets, []string{"registry-pull"}) || s.Sources.Secrets[0].Access != SecretDenied || s.Sources.Secrets[0].UID != "" ||
+			s.Sources.Secrets[1].Access != SecretRead {
+			t.Fatalf("sources: %+v", s.Sources)
+		}
+		i := slices.IndexFunc(s.Limitations, func(d Diagnostic) bool { return d.Code == LimitSecretNotRead })
+		if i < 0 || s.Limitations[i].Name != "registry-pull" || strings.Contains(s.Limitations[i].Message, "forbidden: User") {
+			t.Fatalf("limitations: %+v", s.Limitations)
+		}
+		assertSecretReads(t, f.recorded(), referenced...)
+	})
+	t.Run("missing secret", func(t *testing.T) {
+		f := setup(t)
+		f.remove(pathSecrets(ctrlNS), "sigstore-root")
+		s, err := observe(t, f, withSources)
+		mustComplete(t, s, err)
+		if s.Sources.Secrets[1].Access != SecretMissing || len(s.Sources.UnreadSecrets) != 0 {
+			t.Fatalf("sources: %+v", s.Sources)
+		}
+	})
+	t.Run("a failed secret read is incomplete without echoing the response", func(t *testing.T) {
+		f := setup(t)
+		f.hook = func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path == pathSecrets(ctrlNS)+"/sigstore-root" {
+				writeStatus(w, http.StatusInternalServerError, metav1.StatusReasonInternalError, "ECHOED-"+rootValue)
+				return true
+			}
+			return false
+		}
+		s, err := observe(t, f, withSources)
+		mustIncomplete(t, s, err, ObserveRequestFailed)
+		if strings.Contains(err.Error(), rootValue) || strings.Contains(s.Errors[0].Message, "ECHOED") {
+			t.Fatalf("error echoes the response: %v", err)
+		}
+	})
 	t.Run("trust change is drift", func(t *testing.T) {
 		f := setup(t)
 		f.onCapture = func(n int) {
@@ -751,7 +910,7 @@ func TestReadOnlyTransportRefusesBeforeSending(t *testing.T) {
 		sent = append(sent, r.Method+" "+r.URL.String())
 		return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
 	})
-	tr := readOnlyTransport{next: inner}
+	tr := readOnlyTransport{next: inner, namespace: "konstapel-system"}
 	for _, c := range []struct{ method, url string }{
 		{http.MethodPost, "https://api/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"},
 		{http.MethodPut, "https://api/apis/compliance.erenius.io/v1alpha1/compliancebindings/b"},
@@ -778,6 +937,72 @@ func TestReadOnlyTransportRefusesBeforeSending(t *testing.T) {
 		if _, err := tr.RoundTrip(req); err != nil {
 			t.Fatalf("%s refused: %v", u, err)
 		}
+	}
+	if len(sent) != 3 {
+		t.Fatalf("sent %v", sent)
+	}
+}
+
+// 4.3: a Secret request leaves the process only as a plain GET of one Secret
+// that the capture's grant names (the observed sources reference it) in the
+// controller namespace. Unreferenced names, lists, watches, writes,
+// subresources, queries and other namespaces are refused before sending.
+func TestReadOnlyTransportAllowsOnlyReferencedSecretGets(t *testing.T) {
+	var sent []string
+	inner := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		sent = append(sent, r.Method+" "+r.URL.String())
+		return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+	})
+	tr := readOnlyTransport{next: inner, namespace: ctrlNS}
+	granted := withSecretGrant(context.Background(), ctrlNS, []string{"registry-pull", "signing-key"})
+	const base = "https://api/api/v1/namespaces/" + ctrlNS + "/secrets"
+	for _, c := range []struct {
+		ctx         context.Context
+		method, url string
+	}{
+		{context.Background(), http.MethodGet, base + "/registry-pull"}, // no grant
+		{granted, http.MethodGet, base + "/unreferenced"},
+		{granted, http.MethodGet, base},
+		{granted, http.MethodGet, base + "?labelSelector=a%3Db"},
+		{granted, http.MethodGet, "https://api/api/v1/secrets"},
+		{granted, http.MethodGet, "https://api/api/v1/secrets/registry-pull"},
+		{granted, http.MethodGet, base + "?watch=true"},
+		{granted, http.MethodGet, base + "/registry-pull?watch=1"},
+		{granted, http.MethodGet, "https://api/api/v1/watch/namespaces/" + ctrlNS + "/secrets/registry-pull"},
+		{granted, http.MethodGet, "https://api/api/v1/watch/secrets"},
+		{granted, http.MethodGet, base + "/registry-pull?resourceVersion=0"},
+		{granted, http.MethodGet, base + "/registry-pull/"},
+		{granted, http.MethodGet, base + "/registry-pull/status"},
+		{granted, http.MethodGet, "https://api/api/v1/namespaces/default/secrets/registry-pull"},
+		{withSecretGrant(context.Background(), "default", []string{"registry-pull"}), http.MethodGet, "https://api/api/v1/namespaces/default/secrets/registry-pull"},
+		{granted, http.MethodPut, base + "/registry-pull"},
+		{granted, http.MethodPatch, base + "/registry-pull"},
+		{granted, http.MethodDelete, base + "/registry-pull"},
+		{granted, http.MethodPost, base},
+		{granted, http.MethodGet, base + "/registry-pull?dryRun=All"},
+	} {
+		req, _ := http.NewRequestWithContext(c.ctx, c.method, c.url, nil)
+		var refused *refusedError
+		if _, err := tr.RoundTrip(req); !errors.As(err, &refused) {
+			t.Fatalf("%s %s was not refused: %v", c.method, c.url, err)
+		}
+	}
+	if len(sent) != 0 {
+		t.Fatalf("refused requests were sent: %v", sent)
+	}
+	for _, name := range []string{"registry-pull", "signing-key"} {
+		req, _ := http.NewRequestWithContext(granted, http.MethodGet, base+"/"+name, nil)
+		if _, err := tr.RoundTrip(req); err != nil {
+			t.Fatalf("referenced Secret %s refused: %v", name, err)
+		}
+	}
+	// Without a controller namespace no Secret can be read at all.
+	req, _ := http.NewRequestWithContext(granted, http.MethodGet, base+"/registry-pull", nil)
+	if _, err := (readOnlyTransport{next: inner}).RoundTrip(req); err == nil {
+		t.Fatal("a Secret was read without a controller namespace")
+	}
+	if len(sent) != 2 {
+		t.Fatalf("sent %v", sent)
 	}
 }
 
@@ -815,62 +1040,81 @@ func requestAccess(t *testing.T, r recorded) (access, bool) {
 	return a, true
 }
 
-func loadReaderRBAC(t *testing.T) (*rbacv1.ClusterRole, *rbacv1.Role) {
+func loadReaderRBAC(t *testing.T) (*rbacv1.ClusterRole, *rbacv1.Role, *rbacv1.Role) {
 	t.Helper()
 	raw, err := os.ReadFile("../../docs/examples/policy-preview/reader-rbac.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	docs := strings.Split(string(raw), "\n---\n")
-	if len(docs) != 2 {
-		t.Fatalf("want a ClusterRole and a Role, got %d documents", len(docs))
+	if len(docs) != 3 {
+		t.Fatalf("want a ClusterRole and two Roles, got %d documents", len(docs))
 	}
-	cr, r := &rbacv1.ClusterRole{}, &rbacv1.Role{}
+	cr, r, sr := &rbacv1.ClusterRole{}, &rbacv1.Role{}, &rbacv1.Role{}
 	if err := yaml.UnmarshalStrict([]byte(docs[0]), cr); err != nil || cr.Kind != "ClusterRole" {
 		t.Fatalf("cluster role: %v %s", err, cr.Kind)
 	}
-	if err := yaml.UnmarshalStrict([]byte(docs[1]), r); err != nil || r.Kind != "Role" || r.Namespace != ctrlNS {
-		t.Fatalf("role: %v %s %s", err, r.Kind, r.Namespace)
+	for _, role := range []struct {
+		doc string
+		r   *rbacv1.Role
+	}{{docs[1], r}, {docs[2], sr}} {
+		if err := yaml.UnmarshalStrict([]byte(role.doc), role.r); err != nil || role.r.Kind != "Role" || role.r.Namespace != ctrlNS {
+			t.Fatalf("role: %v %s %s", err, role.r.Kind, role.r.Namespace)
+		}
 	}
-	return cr, r
+	return cr, r, sr
 }
 
-func allows(rules []rbacv1.PolicyRule, a access) bool {
+func allows(rules []rbacv1.PolicyRule, a access, name string) bool {
 	for _, rule := range rules {
-		if slices.Contains(rule.APIGroups, a.group) && slices.Contains(rule.Resources, a.resource) && slices.Contains(rule.Verbs, a.verb) {
+		if slices.Contains(rule.APIGroups, a.group) && slices.Contains(rule.Resources, a.resource) && slices.Contains(rule.Verbs, a.verb) &&
+			(len(rule.ResourceNames) == 0 || slices.Contains(rule.ResourceNames, name)) {
 			return true
 		}
 	}
 	return false
 }
 
-// 2.4: the documented permission matrix is exactly what the observation
-// uses: get and list only, no Secrets, and every recorded request is allowed.
+// 2.4 and 4.3: the documented permission matrix is exactly what the
+// observation uses: get and list only, Secrets only as a get of the named
+// references, and every recorded request is allowed.
 func TestDocumentedReaderRBACMatchesRecordedRequests(t *testing.T) {
-	cr, role := loadReaderRBAC(t)
-	for _, rule := range append(slices.Clone(cr.Rules), role.Rules...) {
+	cr, role, secrets := loadReaderRBAC(t)
+	for _, rule := range append(append(slices.Clone(cr.Rules), role.Rules...), secrets.Rules...) {
 		for _, v := range rule.Verbs {
 			if v != "get" && v != "list" {
 				t.Fatalf("reader role grants %q: %+v", v, rule)
 			}
 		}
-		if slices.Contains(rule.Resources, "secrets") || slices.Contains(rule.Resources, "*") || slices.Contains(rule.APIGroups, "*") || len(rule.ResourceNames) > 0 {
+		if slices.Contains(rule.Resources, "*") || slices.Contains(rule.APIGroups, "*") {
+			t.Fatalf("reader role is broader than documented: %+v", rule)
+		}
+	}
+	for _, rule := range append(slices.Clone(cr.Rules), role.Rules...) {
+		if slices.Contains(rule.Resources, "secrets") || len(rule.ResourceNames) > 0 {
 			t.Fatalf("reader role is broader than documented: %+v", rule)
 		}
 	}
 	if !slices.Equal(role.Rules[0].Resources, []string{"configmaps"}) || len(role.Rules) != 1 {
 		t.Fatalf("namespace role: %+v", role.Rules)
 	}
+	if len(secrets.Rules) != 1 || !slices.Equal(secrets.Rules[0].Resources, []string{"secrets"}) || !slices.Equal(secrets.Rules[0].Verbs, []string{"get"}) ||
+		!slices.Equal(secrets.Rules[0].ResourceNames, []string{"acme-registry", "acme-bundle-signing-key"}) {
+		t.Fatalf("secret role must be get on named Secrets only: %+v", secrets.Rules)
+	}
 
-	// Run the widest observation (sources and trust) and check each request.
+	// Run the widest observation (sources, trust ConfigMaps and the
+	// documented private-source Secrets) and check each request.
 	f := baseline(t)
-	f.put(pathConfigMaps(ctrlNS), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "konstapel-bundle-sources"}, Data: map[string]string{"sources.yaml": "version: 1\nsources:\n  - name: org\n    repository: registry.example.com/org\n    ca: {kind: ConfigMap, name: registry-ca}\n    publisher: {type: keyless, issuer: https://i.example.com, identity: https://e.example.com/ci, provenance: {sourceRepository: https://e.example.com/r, builder: https://e.example.com/b}}\n"}})
+	f.put(pathConfigMaps(ctrlNS), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "konstapel-bundle-sources"}, Data: map[string]string{"sources.yaml": "version: 1\nsources:\n  - name: org\n    repository: registry.example.com/org\n    credentialSecret: {name: acme-registry}\n    ca: {kind: ConfigMap, name: registry-ca}\n    publisher: {type: public-key, publicKey: {kind: Secret, name: acme-bundle-signing-key, key: cosign.pub}, keyFingerprint: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, provenance: {sourceRepository: https://e.example.com/r, builder: https://e.example.com/b}}\n"}})
 	f.put(pathConfigMaps(ctrlNS), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "registry-ca"}, Data: map[string]string{"ca.crt": "x"}})
+	f.put(pathSecrets(ctrlNS), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "acme-registry"}, Type: corev1.SecretTypeDockerConfigJson, Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte("{}")}})
+	f.put(pathSecrets(ctrlNS), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "acme-bundle-signing-key"}, Data: map[string][]byte{"cosign.pub": []byte("k")}})
 	s, err := observe(t, f, func(o *ObserveOptions) { o.SourcesConfigMap = "konstapel-bundle-sources" })
 	mustComplete(t, s, err)
+	assertSecretReads(t, f.recorded(), "acme-registry", "acme-bundle-signing-key")
 	used := map[access]bool{}
 	for _, r := range f.recorded() {
-		assertReadOnly(t, []recorded{r})
 		a, ok := requestAccess(t, r)
 		if !ok {
 			continue
@@ -881,13 +1125,14 @@ func TestDocumentedReaderRBACMatchesRecordedRequests(t *testing.T) {
 			if a.namespace != ctrlNS {
 				t.Fatalf("namespaced read outside the controller namespace: %+v", r)
 			}
-			rules = role.Rules
+			rules = append(slices.Clone(role.Rules), secrets.Rules...)
 		}
-		if !allows(rules, a) {
+		segs := strings.Split(strings.Trim(r.Path, "/"), "/")
+		if !allows(rules, a, segs[len(segs)-1]) {
 			t.Fatalf("documented RBAC does not allow %+v (request %+v)", a, r)
 		}
 	}
-	// And nothing in the role is unused.
+	// And nothing in the roles is unused.
 	for _, rule := range cr.Rules {
 		for _, res := range rule.Resources {
 			for _, v := range rule.Verbs {
@@ -902,13 +1147,17 @@ func TestDocumentedReaderRBACMatchesRecordedRequests(t *testing.T) {
 			t.Errorf("Role grants unused %s configmaps", v)
 		}
 	}
+	if !used[access{"get", "", "secrets", ctrlNS}] {
+		t.Error("the Secret Role is unused")
+	}
 
 	// The guide documents the same matrix and links the example.
 	doc, err := os.ReadFile("../../docs/policy-preview.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"docs/examples/policy-preview/reader-rbac.yaml", "complianceexceptions", "validatingpolicies", "60 seconds", "100,000", "two recaptures"} {
+	for _, want := range []string{"docs/examples/policy-preview/reader-rbac.yaml", "complianceexceptions", "validatingpolicies", "60 seconds", "100,000", "two recaptures",
+		"konstapel-policy-preview-bundle-secrets", "content-access-denied"} {
 		if !strings.Contains(string(doc), want) {
 			t.Errorf("docs/policy-preview.md does not mention %q", want)
 		}

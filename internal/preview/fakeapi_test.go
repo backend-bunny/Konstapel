@@ -59,12 +59,16 @@ const (
 
 func pathConfigMaps(ns string) string { return "/api/v1/namespaces/" + ns + "/configmaps" }
 
+func pathSecrets(ns string) string { return "/api/v1/namespaces/" + ns + "/secrets" }
+
 func typeFor(listPath string) (string, string) {
 	switch {
 	case listPath == pathNamespaces:
 		return "v1", "Namespace"
 	case strings.HasSuffix(listPath, "/configmaps"):
 		return "v1", "ConfigMap"
+	case strings.HasSuffix(listPath, "/secrets"):
+		return "v1", "Secret"
 	case listPath == pathProfiles:
 		return "compliance.erenius.io/v1alpha1", "ComplianceProfile"
 	case listPath == pathBindings:
