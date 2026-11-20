@@ -12,14 +12,21 @@ import (
 type Live struct {
 	Profiles []v1alpha1.ComplianceProfile
 	Bindings []v1alpha1.ComplianceBinding
+	// StoredSpecs is each object's spec as the API server returned it, by
+	// identity. Without it, whether a restating proposal would be stored
+	// unchanged is unknown, and the comparison assumes it would not be.
+	StoredSpecs map[Identity]map[string]any
 }
 
 // Disposition says what the candidate does to one identity.
 type Disposition string
 
 const (
-	// Unchanged objects survive as observed (including proposed objects whose
-	// normalized configuration equals the live one: a no-op).
+	// Unchanged objects survive as observed, including proposed objects whose
+	// normalized configuration equals the live one. Such a proposal is a
+	// configuration no-op, but not necessarily a server no-op: Entry.StoredSpec
+	// says whether the API server would store a different spec, which advances
+	// the generation and can rotate enforcement revisions.
 	Unchanged Disposition = "unchanged"
 	// Created objects exist only in the proposal.
 	Created Disposition = "created"
@@ -42,8 +49,13 @@ type Entry struct {
 	Proposed *Object
 	Before   *Object
 	// LiveFingerprint and CandidateFingerprint are set when the side exists.
+	// Equal fingerprints mean equal normalized configuration only; they are
+	// not enforcement revisions.
 	LiveFingerprint      string
 	CandidateFingerprint string
+	// StoredSpec compares the proposal with the live stored spec for live
+	// objects that a proposal restates (Unchanged or Replaced).
+	StoredSpec StoredSpecChange
 }
 
 // Candidate is the proposed configuration: live desired state, plus proposed
@@ -121,6 +133,9 @@ func BuildCandidate(live Live, proposed, before *Set) (*Candidate, error) {
 	if proposed != nil {
 		for _, o := range proposed.Objects {
 			e := entries[o.Identity]
+			if e != nil {
+				e.StoredSpec = compareStored(o.Identity.Kind, live.StoredSpecs[o.Identity], o.Spec)
+			}
 			switch {
 			case e == nil:
 				entries[o.Identity] = &Entry{Identity: o.Identity, Disposition: Created, Proposed: o, CandidateFingerprint: o.Fingerprint}

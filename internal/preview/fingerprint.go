@@ -15,7 +15,11 @@ import (
 // (exactly one non-nil). Two specs that differ only in defaults being written
 // out, list order of set-like lists, key order, equivalent duration spellings,
 // metadata, status, or the admission-maintained enforcementEpoch have the same
-// fingerprint. It is not an enforcement revision and not an acceptance token.
+// fingerprint. It is a semantic-equivalence aid only: it is not an
+// enforcement revision and not an acceptance token. The API server and the
+// controller's EnforcementRevision see list order and spellings as written,
+// so equal fingerprints do not mean that revisions stay the same
+// (StoredSpecChange, RevisionEffect).
 func Fingerprint(p *v1alpha1.ComplianceProfile, b *v1alpha1.ComplianceBinding) string {
 	var v any
 	switch {
@@ -71,39 +75,48 @@ type canonRequirement struct {
 	Values   []string `json:"values"`
 }
 
+// canonicalSelector is the order-independent form of a selector: expression
+// order and value order and duplicates do not matter to which namespaces it
+// selects. A nil selector stays distinguishable from {}. It is a semantic
+// comparison aid only: the API server, the enforcement epoch and
+// EnforcementRevision all see the selector as written.
+func canonicalSelector(s *v1alpha1.NamespaceSelector) any {
+	if s == nil {
+		return nil
+	}
+	labels := map[string]string{}
+	for k, v := range s.MatchLabels {
+		labels[k] = string(v)
+	}
+	exprs := make([]canonRequirement, 0, len(s.MatchExpressions))
+	for _, r := range s.MatchExpressions {
+		vals := slices.Clone(r.Values)
+		if vals == nil {
+			vals = []string{}
+		}
+		slices.Sort(vals)
+		vals = slices.Compact(vals)
+		exprs = append(exprs, canonRequirement{r.Key, string(r.Operator), vals})
+	}
+	sort.SliceStable(exprs, func(i, j int) bool {
+		if exprs[i].Key != exprs[j].Key {
+			return exprs[i].Key < exprs[j].Key
+		}
+		if exprs[i].Operator != exprs[j].Operator {
+			return exprs[i].Operator < exprs[j].Operator
+		}
+		return slices.Compare(exprs[i].Values, exprs[j].Values) < 0
+	})
+	return struct {
+		MatchLabels      map[string]string  `json:"matchLabels"`
+		MatchExpressions []canonRequirement `json:"matchExpressions"`
+	}{labels, exprs}
+}
+
 func canonicalBinding(b *v1alpha1.ComplianceBinding) any {
 	c := b.DeepCopy()
 	DefaultBinding(c)
-	var sel any // nil selector stays distinguishable from {}
-	if s := c.Spec.NamespaceSelector; s != nil {
-		labels := map[string]string{}
-		for k, v := range s.MatchLabels {
-			labels[k] = string(v)
-		}
-		exprs := make([]canonRequirement, 0, len(s.MatchExpressions))
-		for _, r := range s.MatchExpressions {
-			vals := slices.Clone(r.Values)
-			if vals == nil {
-				vals = []string{}
-			}
-			slices.Sort(vals)
-			vals = slices.Compact(vals)
-			exprs = append(exprs, canonRequirement{r.Key, string(r.Operator), vals})
-		}
-		sort.SliceStable(exprs, func(i, j int) bool {
-			if exprs[i].Key != exprs[j].Key {
-				return exprs[i].Key < exprs[j].Key
-			}
-			if exprs[i].Operator != exprs[j].Operator {
-				return exprs[i].Operator < exprs[j].Operator
-			}
-			return slices.Compare(exprs[i].Values, exprs[j].Values) < 0
-		})
-		sel = struct {
-			MatchLabels      map[string]string  `json:"matchLabels"`
-			MatchExpressions []canonRequirement `json:"matchExpressions"`
-		}{labels, exprs}
-	}
+	sel := canonicalSelector(c.Spec.NamespaceSelector)
 	dur := func(d v1alpha1.Duration) string {
 		if v, err := time.ParseDuration(string(d)); err == nil {
 			return v.String()

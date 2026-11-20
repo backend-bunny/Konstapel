@@ -1,0 +1,668 @@
+{
+  "complete": true,
+  "cluster": "kube-system:ks-uid",
+  "contracts": {
+    "targeting": 1
+  },
+  "impactCount": 4,
+  "objects": [
+    {
+      "identity": "ComplianceBinding/audit-all",
+      "disposition": "removed",
+      "observed": {
+        "uid": "b-audit",
+        "generation": 2,
+        "enforcementEpoch": 2
+      },
+      "configurationChanged": true,
+      "liveConfigurationFingerprint": "sha256:509b6eec1c2b2f519be9c815ea1cc4f808ab58bedb852ebb56c88ab25886390c",
+      "source": "set.yaml",
+      "document": 1,
+      "line": 1
+    },
+    {
+      "identity": "ComplianceBinding/deny-prod",
+      "disposition": "replaced",
+      "observed": {
+        "uid": "b-deny",
+        "generation": 5,
+        "enforcementEpoch": 4
+      },
+      "pendingIdentity": true,
+      "configurationChanged": true,
+      "storedSpec": "different",
+      "liveConfigurationFingerprint": "sha256:01ad48ee71225cd0ebd368e6ba22e3c122178d8eb28f22c9dc53c163346f867a",
+      "candidateConfigurationFingerprint": "sha256:ffa9f6ba8eacd031df08b8f97310335b4ab44120f3f36c8c73f7e717cd480c71",
+      "source": "set.yaml",
+      "document": 1,
+      "line": 1
+    }
+  ],
+  "contributions": [
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "policy": "privileged"
+      },
+      "change": "removed",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:e25569d92b9912edc1b6cbb338e5e8e488f8b9a0ef37d9a4f24156a731ba723a",
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "namespacesRemoved": [
+        {
+          "name": "dev",
+          "uid": "dev-uid"
+        },
+        {
+          "name": "prod",
+          "uid": "prod-uid"
+        },
+        {
+          "name": "staging",
+          "uid": "staging-uid"
+        }
+      ],
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/audit-all",
+          "disposition": "removed",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "contribution-removed",
+          "area": "policy",
+          "before": "Audit",
+          "reason": "the proposal removes this contribution; this requests withdrawal of its engine policy, which the controller or garbage collection removes after application, not immediately"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "policy": "run-as-non-root"
+      },
+      "change": "removed",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Audit",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:9c3816088e71e277a14d7a1449fdf3574ad231ca84e4b2932b0de030422af7b5",
+        "targets": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ],
+        "targetCount": 3
+      },
+      "namespacesRemoved": [
+        {
+          "name": "dev",
+          "uid": "dev-uid"
+        },
+        {
+          "name": "prod",
+          "uid": "prod-uid"
+        },
+        {
+          "name": "staging",
+          "uid": "staging-uid"
+        }
+      ],
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/audit-all",
+          "disposition": "removed",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "contribution-removed",
+          "area": "policy",
+          "before": "Audit",
+          "reason": "the proposal removes this contribution; this requests withdrawal of its engine policy, which the controller or garbage collection removes after application, not immediately"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "privileged"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:e3a996eb2ae5d8b58d04925320811dbccd83a07c31e11996d44578a052535ade",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Audit",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/deny-prod",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "mode-changed",
+          "area": "enforcement",
+          "before": "Deny",
+          "after": "Audit",
+          "reason": "the enforcement mode changes; Audit does not override an overlapping Deny contribution"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    },
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "policy": "run-as-non-root"
+      },
+      "change": "changed",
+      "revisionEffect": "replacement-required",
+      "before": {
+        "profile": "shared",
+        "profileUID": "p-shared",
+        "profileGeneration": 3,
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Deny",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "desiredRevision": "sha256:2e13528de5fa765423be1b90f11a52cc873dbb27ce4e914a4372a50265179f0d",
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "after": {
+        "profile": "shared",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:fe1ad795b3f4ed2e211f00284391d95d5485ecfd510ef0bf47e3d6a5ce77480c",
+        "parameters": {
+          "runAsUser": 1000
+        },
+        "mode": "Audit",
+        "namespaceSelector": {
+          "matchLabels": {
+            "env": "production"
+          }
+        },
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/deny-prod",
+          "disposition": "replaced",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "mode-changed",
+          "area": "enforcement",
+          "before": "Deny",
+          "after": "Audit",
+          "reason": "the enforcement mode changes; Audit does not override an overlapping Deny contribution"
+        },
+        {
+          "category": "revision-replaced",
+          "area": "enforcement",
+          "reason": "the controller computes a new enforcement revision: the engine policy is replaced under a new name and anything bound to the current revision, such as an accepted exception, no longer matches it"
+        }
+      ]
+    }
+  ],
+  "namespaces": [
+    {
+      "namespace": {
+        "name": "dev",
+        "uid": "dev-uid"
+      },
+      "policy": "privileged",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "dev",
+        "uid": "dev-uid"
+      },
+      "policy": "run-as-non-root",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "privileged",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "replaced": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "run-as-non-root",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "replaced": [
+        {
+          "binding": "deny-prod",
+          "bindingUID": "b-deny",
+          "mode": "Audit",
+          "revisionEffect": "replacement-required"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "privileged",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    },
+    {
+      "namespace": {
+        "name": "staging",
+        "uid": "staging-uid"
+      },
+      "policy": "run-as-non-root",
+      "removed": [
+        {
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "mode": "Audit"
+        }
+      ],
+      "before": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    }
+  ],
+  "appliedState": {
+    "policies": [
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-privileged-7be051b1bda806a4",
+          "uid": "uid-konstapel-privileged-7be051b1bda806a4",
+          "resourceVersion": ""
+        },
+        "binding": "deleted",
+        "bindingUID": "b-deleted",
+        "logicalPolicy": "privileged",
+        "revision": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "mode": "Deny",
+        "ready": true,
+        "condition": "orphaned",
+        "proposed": "not-attributable",
+        "scope": [
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-privileged-da3e688252c2de1c",
+          "uid": "uid-konstapel-privileged-da3e688252c2de1c",
+          "resourceVersion": ""
+        },
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "logicalPolicy": "privileged",
+        "revision": "sha256:e3a996eb2ae5d8b58d04925320811dbccd83a07c31e11996d44578a052535ade",
+        "mode": "Deny",
+        "ready": true,
+        "condition": "current",
+        "proposed": "replacement-pending",
+        "scope": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-privileged-daa16faadca5b322",
+          "uid": "uid-konstapel-privileged-daa16faadca5b322",
+          "resourceVersion": ""
+        },
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "logicalPolicy": "privileged",
+        "revision": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "mode": "Deny",
+        "ready": true,
+        "condition": "superseded",
+        "proposed": "replacement-pending",
+        "scope": [
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-privileged-fcde3f3f72c0483e",
+          "uid": "uid-konstapel-privileged-fcde3f3f72c0483e",
+          "resourceVersion": ""
+        },
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "logicalPolicy": "privileged",
+        "revision": "sha256:e25569d92b9912edc1b6cbb338e5e8e488f8b9a0ef37d9a4f24156a731ba723a",
+        "mode": "Audit",
+        "ready": false,
+        "condition": "current",
+        "proposed": "withdrawal-requested",
+        "scope": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-run-as-non-root-968a32fc6a2284ed",
+          "uid": "uid-konstapel-run-as-non-root-968a32fc6a2284ed",
+          "resourceVersion": ""
+        },
+        "binding": "deny-prod",
+        "bindingUID": "b-deny",
+        "logicalPolicy": "run-as-non-root",
+        "revision": "sha256:2e13528de5fa765423be1b90f11a52cc873dbb27ce4e914a4372a50265179f0d",
+        "mode": "Deny",
+        "ready": true,
+        "condition": "current",
+        "proposed": "replacement-pending",
+        "scope": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-run-as-non-root-a364817bf6a67e48",
+          "uid": "uid-konstapel-run-as-non-root-a364817bf6a67e48",
+          "resourceVersion": ""
+        },
+        "binding": "audit-all",
+        "bindingUID": "b-audit",
+        "logicalPolicy": "run-as-non-root",
+        "revision": "sha256:9c3816088e71e277a14d7a1449fdf3574ad231ca84e4b2932b0de030422af7b5",
+        "mode": "Audit",
+        "ready": true,
+        "condition": "current",
+        "proposed": "withdrawal-requested",
+        "scope": [
+          {
+            "name": "dev",
+            "uid": "dev-uid"
+          },
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          },
+          {
+            "name": "staging",
+            "uid": "staging-uid"
+          }
+        ]
+      },
+      {
+        "policy": {
+          "resource": "policies.kyverno.io/v1/validatingpolicies",
+          "name": "konstapel-unreadable",
+          "uid": "",
+          "resourceVersion": ""
+        },
+        "bindingUID": "b-audit",
+        "ready": false,
+        "condition": "unknown",
+        "proposed": "not-attributable",
+        "scope": []
+      }
+    ],
+    "pending": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-uid",
+          "binding": "audit-all",
+          "bindingUID": "b-audit",
+          "policy": "privileged"
+        },
+        "applied": true
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "code": "no-workload-evaluation",
+      "message": "configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted"
+    },
+    {
+      "code": "rendered-input-assumptions",
+      "message": "each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time"
+    }
+  ]
+}

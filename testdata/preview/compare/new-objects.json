@@ -1,0 +1,122 @@
+{
+  "complete": true,
+  "cluster": "kube-system:ks-uid",
+  "contracts": {
+    "targeting": 1
+  },
+  "impactCount": 1,
+  "objects": [
+    {
+      "identity": "ComplianceBinding/fresh-b",
+      "disposition": "created",
+      "pendingIdentity": true,
+      "configurationChanged": true,
+      "candidateConfigurationFingerprint": "sha256:cd642ade9216d184aea3484725799048356159ab4b27f47ed38d530121d01524",
+      "source": "set.yaml",
+      "document": 2,
+      "line": 10
+    },
+    {
+      "identity": "ComplianceProfile/fresh",
+      "disposition": "created",
+      "pendingIdentity": true,
+      "configurationChanged": true,
+      "candidateConfigurationFingerprint": "sha256:c7eb9bf6bddd9f0a02de64170ec1269660303f159aa9ab9e468d885663a078fe",
+      "source": "set.yaml",
+      "document": 1,
+      "line": 1
+    }
+  ],
+  "contributions": [
+    {
+      "key": {
+        "cluster": "kube-system:ks-uid",
+        "binding": "fresh-b",
+        "policy": "run-as-non-root"
+      },
+      "change": "added",
+      "revisionEffect": "new",
+      "after": {
+        "profile": "fresh",
+        "bundleName": "hardening",
+        "bundleDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "configurationDigest": "sha256:bc5b5a5615116d7f2c71a9877158bf8ab2bc0a4108d759cf86fc5771b1283022",
+        "mode": "Deny",
+        "namespaceSelector": {},
+        "exceptions": {
+          "eligibility": "Forbidden"
+        },
+        "targets": [
+          {
+            "name": "prod",
+            "uid": "prod-uid"
+          }
+        ],
+        "targetCount": 1
+      },
+      "namespacesAdded": [
+        {
+          "name": "prod",
+          "uid": "prod-uid"
+        }
+      ],
+      "responsible": [
+        {
+          "identity": "ComplianceBinding/fresh-b",
+          "disposition": "created",
+          "source": "set.yaml",
+          "document": 2,
+          "line": 10
+        },
+        {
+          "identity": "ComplianceProfile/fresh",
+          "disposition": "created",
+          "source": "set.yaml",
+          "document": 1,
+          "line": 1
+        }
+      ],
+      "impacts": [
+        {
+          "category": "contribution-added",
+          "area": "policy",
+          "after": "Deny",
+          "reason": "the proposal adds this contribution; it selects 1 observed namespaces now, and its revision is assigned after application"
+        }
+      ]
+    }
+  ],
+  "namespaces": [
+    {
+      "namespace": {
+        "name": "prod",
+        "uid": "prod-uid"
+      },
+      "policy": "run-as-non-root",
+      "added": [
+        {
+          "binding": "fresh-b",
+          "mode": "Deny",
+          "revisionEffect": "new"
+        }
+      ],
+      "after": {
+        "effective": "Forbidden"
+      },
+      "impacts": []
+    }
+  ],
+  "appliedState": {
+    "policies": []
+  },
+  "limitations": [
+    {
+      "code": "no-workload-evaluation",
+      "message": "configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted"
+    },
+    {
+      "code": "rendered-input-assumptions",
+      "message": "each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time"
+    }
+  ]
+}

@@ -385,6 +385,27 @@ func TestObserveDetectsEachRelevantProjection(t *testing.T) {
 			f.mutate(pathExceptions, "allow-debug", func(m map[string]any) { m["spec"].(map[string]any)["acceptanceRevision"] = int64(2) })
 		},
 		"snapshot written": func(f *fakeAPI) { f.putException(f.t, "allow-other", "dev", "dev-uid", "uid-ex-2") },
+		"acceptance record": func(f *fakeAPI) {
+			f.mutate(pathExceptions, "allow-debug", func(m map[string]any) {
+				ann := m["metadata"].(map[string]any)["annotations"].(map[string]any)
+				ann[exception.AcceptanceAnnotation] = strings.Replace(ann[exception.AcceptanceAnnotation].(string), "team-a", "team-b", 1)
+			})
+		},
+		"snapshot reference": func(f *fakeAPI) {
+			f.mutate(pathExceptions, "allow-debug", func(m map[string]any) {
+				m["status"].(map[string]any)["acceptance"].(map[string]any)["digest"] = digestB
+			})
+		},
+		"snapshot content": func(f *fakeAPI) {
+			f.mu.Lock()
+			name := f.colls[pathExceptions]["allow-debug"]["status"].(map[string]any)["acceptance"].(map[string]any)["snapshot"].(string)
+			f.mu.Unlock()
+			f.mutate(pathConfigMaps(ctrlNS), name, func(m map[string]any) {
+				for k := range m["data"].(map[string]any) {
+					m["data"].(map[string]any)[k] = "tampered"
+				}
+			})
+		},
 		"cluster identity": func(f *fakeAPI) {
 			f.mutate(pathNamespaces, "kube-system", func(m map[string]any) { m["metadata"].(map[string]any)["uid"] = "other-cluster" })
 		},
@@ -682,6 +703,21 @@ sources:
 		s, err := observe(t, f, withSources)
 		mustComplete(t, s, err)
 		if s.Captures != 3 || len(s.Drift) != 1 || !strings.Contains(s.Drift[0].Changed[0], "#trust/registry-ca") {
+			t.Fatalf("drift: %+v", s.Drift)
+		}
+	})
+	t.Run("source change is drift", func(t *testing.T) {
+		f := setup(t)
+		f.onCapture = func(n int) {
+			if n == 2 {
+				f.mutate(pathConfigMaps(ctrlNS), "konstapel-bundle-sources", func(m map[string]any) {
+					m["data"] = map[string]any{"sources.yaml": strings.Replace(sourcesDoc, "org/bundle\n", "org/other\n", 1)}
+				})
+			}
+		}
+		s, err := observe(t, f, withSources)
+		mustComplete(t, s, err)
+		if s.Captures != 3 || len(s.Drift) != 1 || !slices.ContainsFunc(s.Drift[0].Changed, func(c string) bool { return strings.Contains(c, "konstapel-bundle-sources") }) {
 			t.Fatalf("drift: %+v", s.Drift)
 		}
 	})

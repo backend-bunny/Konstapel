@@ -21,25 +21,27 @@ dependencies' CRDs, trust systems, or collectors.
 
 - [x] 2.1 Add a direct kubeconfig/context snapshot reader for cluster identity, profiles, bindings, namespaces, and owned modern Kyverno policy state; verify shared-profile consumers outside the files, namespace UIDs, policy ownership, and pagination with a recording API test server.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
-- [ ] 2.2 Add provenance and bounded rechecks of relevant configuration, namespace membership, applied-policy, acceptance, and source/trust projections; verify concurrent changes cause recapture or incomplete output and unrelated report timestamps do not force endless retry.
+- [x] 2.2 Add provenance and bounded rechecks of relevant configuration, namespace membership, applied-policy, acceptance (protected acceptance record, `status.acceptance` snapshot reference, frozen snapshot ConfigMaps), and bundle-source/trust ConfigMap projections; verify a concurrent change to each causes recapture or incomplete output and unrelated report timestamps do not force endless retry.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-  Open: provenance and rechecks are implemented and verified for configuration, membership, applied policies, the acceptance projections that exist (protected acceptance record, `status.acceptance`, frozen snapshots) and the bundle-source ConfigMap with its trust ConfigMaps. Two projections cannot be observed yet: exception revocation (`spec.revoked` and revocation records, `add-self-service-policy-exceptions` 2.6/3.6), reported as `exception-revocation-unavailable`, and Secret-held trust material, which is never read here and is reported as `secret-not-read` until 4.3 adds caller-authorized named Secret reads. Tick when both are part of the rechecked projections.
+  Narrowed to what is observable today. The separate acceptance-record, snapshot-reference, snapshot-content and source-ConfigMap drift cases were added with group 3; the unobservable projections are 2.5.
 - [x] 2.3 Enforce the default 60-second total timeout, at most two recaptures, object/input limits, and cancellation; verify denied/missing required APIs, expired pagination, and exhausted limits never produce a successful empty or truncated snapshot.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
 - [x] 2.4 Document the get/list/discovery permission matrix and snapshot limits beside the command examples; verify recorded preview requests contain no Kubernetes mutation or write-shaped authorization/dry-run probe.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
+- [ ] 2.5 Add exception revocation and Secret-held trust material to the rechecked projections: revocation (`spec.revoked` and revocation records) once `add-self-service-policy-exceptions` 2.6/3.6 reach main, reported as `exception-revocation-unavailable` until then, and Secret-held trust material through the caller-authorized named Secret reads of 4.3, reported as `secret-not-read` until then; verify a concurrent revocation or Secret change causes recapture or incomplete output, and that no Secret is listed or its data reported.
+  <!-- agent: tier=deep risk=medium reason="Snapshot consistency across exception revocation and caller-authorized Secret trust inputs owned by other changes" -->
 
 ## 3. Shared resolution and semantic comparison
 
-- [ ] 3.1 Add the baseline/candidate adapter around the versioned targeting resolver and verified content seam; verify shared profiles, cumulative Audit/Deny contributions, Forbidden precedence, shortest lifetime, unsupported policy scope, and unresolved overlap using targeting fixtures.
+- [x] 3.1 Add the baseline/candidate adapter around the versioned targeting resolver and verified content seam; verify shared profiles, cumulative Audit/Deny contributions, Forbidden precedence, shortest lifetime, unsupported policy scope, and unresolved overlap using targeting fixtures.
   <!-- agent: tier=deep risk=high reason="Caller authorization, bundle trust, and accepted-risk boundaries" -->
-- [ ] 3.2 Implement stable contribution/configuration comparisons and framework-neutral impact categories; verify added/removed namespaces, selectors, parameters, bundle pins, enforcement settings, zero-target changes, and metadata/order-only no-ops with report fixtures.
+- [x] 3.2 Implement stable contribution/configuration comparisons and framework-neutral impact categories; verify added/removed namespaces, selectors, parameters, bundle pins, enforcement settings, zero-target changes, and metadata/order-only no-ops with report fixtures.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-- [ ] 3.3 Separate observed identity from provisional resolver inputs and candidate fingerprints; verify new resources and rollback flag revision replacement without leaking provisional UIDs, generations, hashes, or engine names as real future values.
+- [x] 3.3 Separate observed identity from provisional resolver inputs and candidate fingerprints; verify new resources and rollback flag revision replacement without leaking provisional UIDs, generations, hashes, or engine names as real future values.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-- [ ] 3.4 Correlate observed applied policies with desired contributions and stale scopes; verify retained old policies, pending replacement/temporary overlap, binding removal, and unresolved profile removal are distinguished from immediate withdrawal or new impacts.
+- [x] 3.4 Correlate observed applied policies with desired contributions and stale scopes; verify retained old policies, pending replacement/temporary overlap, binding removal, and unresolved profile removal are distinguished from immediate withdrawal or new impacts.
   <!-- agent: tier=deep risk=medium reason="Consistent snapshots and cross-owner impact semantics" -->
-- [ ] 3.5 Document impact categories and observed-versus-proposed interpretation; verify worked examples show remaining overlap and avoid workload-pass, eviction, or framework-coverage claims.
+- [x] 3.5 Document impact categories and observed-versus-proposed interpretation; verify worked examples show remaining overlap and avoid workload-pass, eviction, or framework-coverage claims.
   <!-- agent: tier=standard risk=low reason="Document or check an established contract" -->
 
 ## 4. Verified bundle resolution

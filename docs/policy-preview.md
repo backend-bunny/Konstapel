@@ -1,12 +1,14 @@
 # Policy change preview
 
-> **Status: input model and cluster observation only.** The `konstapel preview`
-> command, comparison and reporting are not implemented yet. This page documents
-> the parts that exist in `internal/preview`: how rendered manifests are read and
-> validated, how the candidate configuration is formed (tasks 1.1 to 1.3 of the
-> `add-policy-change-preview` change), and the read-only cluster observation
-> with its access contract and limits (tasks 2.1 to 2.3). No command line
-> exposes either yet. Treat the planned command line in the change's
+> **Status: input model, cluster observation and comparison core only.** The
+> `konstapel preview` command, its JSON report and exit codes are not
+> implemented yet. This page documents the parts that exist in
+> `internal/preview`: how rendered manifests are read and validated, how the
+> candidate configuration is formed (tasks 1.1 to 1.3 of the
+> `add-policy-change-preview` change), the read-only cluster observation with
+> its access contract and limits (tasks 2.1 to 2.3), and the semantic comparison
+> with its impact categories (tasks 3.1 to 3.4). No command line exposes any of
+> them yet. Treat the planned command line in the change's
 > [design](../openspec/changes/add-policy-change-preview/design.md) as not available.
 
 The preview is meant to show how proposed compliance configuration would change
@@ -178,8 +180,10 @@ admission-maintained `spec.enforcementEpoch` are discarded and recorded as
 ignored. Defaults are applied before comparison, so an input that writes out a
 default, reorders policies or selector expressions, reorders parameter keys, or
 spells `24h` as `1440m` has the same fingerprint as one that does not. The
-fingerprint identifies normalized configuration only. It is not an enforcement
-revision and not an acceptance token.
+fingerprint identifies normalized configuration only. It is a semantic
+equivalence aid, not an enforcement revision and not an acceptance token: some
+of these equivalent edits still replace enforcement revisions (see
+[Revision effects](#revision-effects-and-identities)).
 
 <!-- fixture: testdata/preview/examples/valid/exported.yaml -->
 ```yaml
@@ -208,8 +212,11 @@ caller; this layer never reads a cluster), the proposed objects, and the
 declared removals:
 
 1. Each proposed object replaces the live object of the same group, kind and name
-   as its complete specification. A proposal that equals the live configuration
-   is a no-op and keeps the observed object.
+   as its complete specification. A proposal whose normalized configuration
+   equals the live one keeps the observed object as a configuration no-op. It is
+   a server no-op only if the API server would also store the same
+   specification; otherwise enforcement revisions can still rotate (see
+   [Revision effects](#revision-effects-and-identities)).
 2. Identities in the previous set but not in the proposed set are removed. If the
    live cluster no longer has such an object, the removal is recorded as already
    absent and creates no impact.
@@ -345,11 +352,246 @@ carries only provenance and coded diagnostics, never a partial object set, so a
 truncated or empty read can never pass for the cluster. A missing or invalid
 bundle-source ConfigMap is recorded as found, like the controller would find it.
 
+## Semantic comparison
+
+The comparison takes a complete observation, the validated input sets and a
+verified content source. It refuses an incomplete observation, a missing
+content source and an invalid candidate outright. Otherwise it resolves two
+configurations with the controller's own `targeting.Resolve`:
+
+- the **baseline**: the observed live profiles, bindings and namespace
+  instances; and
+- the **candidate**: the [candidate configuration](#candidate-configuration)
+  against the same namespace instances.
+
+Both sides read content through the same `targeting.ContentSource` seam that the
+controller uses, by exact bundle name and digest, and never substitute other
+content. Terminating bindings and namespaces are left out, as the controller
+leaves them out. Every binding of a changed profile is resolved, including
+bindings that do not appear in any input, so overlap and shared-profile
+consumers stay visible.
+
+The comparison is **incomplete** (`complete: false`, coded `errors`) when it
+cannot determine an affected contribution:
+
+| Code | Meaning |
+| --- | --- |
+| `unresolved-candidate` | A binding that the proposal affects does not resolve in the candidate (missing or untrusted content, unknown policy, unsupported policy scope, unrenderable configuration). The controller would keep the previously applied policies for it. |
+| `unresolved-baseline` | The live configuration of an affected binding does not resolve, so its current contributions cannot be determined. Previously applied policies may remain enforcing. |
+| `content-failed`, `content-mismatch` | The content source failed for another reason than unavailable content, or returned content for another reference. |
+
+Unresolved contributions in the candidate are never reported as withdrawn, and
+an unresolved overlap keeps exception eligibility `Forbidden` rather than
+permitting exceptions. A live binding that does not resolve but that the
+proposal does not touch is the `baseline-unresolved` limitation of a complete
+comparison. Every comparison also carries the `rendered-input-assumptions` and
+`no-workload-evaluation` limitations.
+
+### What is compared
+
+| Part | One entry per | Contents |
+| --- | --- | --- |
+| `objects` | Proposed, removed or restated profile or binding | Disposition, observed identity, `pendingIdentity`, `configurationChanged`, `storedSpec`, `reportingOnly`, configuration fingerprints, input location |
+| `contributions` | Binding and logical policy whose contribution differs | Stable key, `added`/`removed`/`changed`, `revisionEffect`, observed `before` and proposed `after` sides, namespace instances added and removed, responsible inputs, impacts |
+| `namespaces` | Observed namespace instance and logical policy whose applicable contributions or effective eligibility differ | Contributions added, removed, replaced and **remaining**, effective eligibility before and after |
+| `appliedState` | Observed Konstapel-owned engine policy | How it relates to the live and the proposed configuration (see [Applied state](#observed-applied-state)) |
+
+The key of a contribution is the cluster, the binding name, the observed binding
+UID when the binding exists, and the logical policy. A contribution row exists
+even when its binding selects no namespace. A namespace is identified by name
+and UID, so a recreated namespace is another subject. Selectors are compared as
+the namespaces they can select: reordered expressions or values are not a
+selector change. Parameter key order is not a parameter change.
+
+### Impact categories
+
+Every impact has a category, an area, the before and after values where they are
+short enough to state, and a reason. Categories describe what changes and in
+which direction. They do not score compliance, refer to any framework, or treat a
+tightening as good or a relaxation as bad.
+
+| Category | Area | Raised when |
+| --- | --- | --- |
+| `contribution-added` | policy | A binding gains a contribution: a new binding, a profile that gains a policy, or a profile reference that now provides it. The row lists the observed namespaces it selects now. |
+| `contribution-removed` | policy | A contribution disappears. This requests withdrawal of its engine policy after application; it is not an immediate withdrawal. |
+| `profile-changed` | policy | The binding takes the same logical policy from another profile. |
+| `bundle-pin-changed` | policy | The pinned bundle name or digest changes, even if the rendered rules look identical. |
+| `parameters-changed` | policy | The policy's parameters change. |
+| `selector-changed` | scope | The binding's namespace selector selects differently. It counts with zero matching namespaces. |
+| `namespace-added` | scope | Observed namespace instances become subject to the contribution. |
+| `namespace-removed` | scope | Observed namespace instances leave the contribution. Other contributions may still apply there; see `remaining`. |
+| `mode-changed` | enforcement | `Audit` becomes `Deny` or the reverse. Audit never overrides an overlapping Deny contribution. |
+| `revision-replaced` | enforcement | The controller would compute a new enforcement revision (see [Revision effects](#revision-effects-and-identities)). |
+| `exception-rule-changed` | exception | The profile's exception settings for the policy change. |
+| `eligibility-changed` | exception | The effective self-service eligibility of a namespace and policy changes across all its contributions: `Forbidden` takes precedence, even from an Audit binding, and the shortest lifetime applies. |
+
+`impactCount` counts contribution rows and namespace rows with at least one
+impact. It is not a number of workloads, failures, violations or controls.
+Formatting, key order, written-out defaults, descriptive metadata and exported
+server fields create no contribution or namespace row. A reporting-only binding edit
+(`spec.assessment`) is listed under `objects` with `reportingOnly` and is not an
+impact unless it also rotates revisions, as described below. Exception
+acceptance consequences and evidence are later parts of the change and are not
+part of these categories yet.
+
+### Revision effects and identities
+
+Observed and proposed values are kept apart. The `before` side of a contribution
+carries observed values: profile UID and generation and the desired revision the
+controller computes from the live configuration. The `after` side carries
+configuration only. Objects that the candidate creates or changes report
+`pendingIdentity: true`, because the API server assigns their UID, generation
+and enforcement epoch on application.
+
+To decide whether a revision changes, the candidate is resolved with private
+provisional values: the next generation for an object whose stored
+specification would change, the enforcement epoch that the
+`konstapel-binding-enforcement-epoch` admission policy would assign, and a
+placeholder UID for a created object. Revisions come from the controller's own
+`EnforcementRevision`, unchanged. Only their equality with the observed
+revision is used. Provisional UIDs, generations, revisions and engine policy
+names never appear in a comparison. Each contribution reports a
+`revisionEffect` instead:
+
+| `revisionEffect` | Meaning |
+| --- | --- |
+| `unchanged` | The controller would compute the observed revision. Its engine policy and anything bound to it stay. |
+| `replacement-required` | The controller would compute a new revision. The engine policy is replaced under a new name, and anything bound to the current revision, such as an accepted exception, no longer matches it. |
+| `new` | The contribution does not exist in the live configuration. Its revision is assigned after application. |
+
+Equal configuration fingerprints do not mean unchanged revisions. The
+fingerprint is only an aid for recognizing semantically equal configuration.
+The revision follows what the API server stores and what the controller
+hashes:
+
+- **Stored differently, configuration equal.** Reordered selector expressions or
+  values, reordered profile policies, and respelled durations (`60m` for `1h`)
+  are stored as written. The generation advances. For a profile, this rotates
+  the revisions of every binding that uses it. For a binding, a reordered
+  selector also advances the enforcement epoch, because the admission policy
+  compares the atomic selector lists in order, and `EnforcementRevision` hashes
+  the selector as written. These rows are `replacement-required` with
+  `semanticallyEquivalent: true`.
+- **Stored identically.** Written-out defaults, map key order and exported
+  metadata or status are stored as the live object already is. The generation
+  does not advance and no contribution or namespace row is created.
+- **Reporting only.** A binding edit outside `profileRef`, `namespaceSelector` and
+  `mode` keeps the enforcement epoch, so its revisions stay `unchanged`.
+- **No observed epoch.** A binding written before the epoch policy existed has no
+  `enforcementEpoch`. The preview cannot see whether the admission policy is
+  installed, so it assumes the generation fallback, where every stored change
+  rotates the binding's revisions. It reports `replacement-required` with the
+  `enforcement-epoch-unavailable` limitation. This can overstate a replacement.
+  It never reports `unchanged` where the controller would replace a policy.
+- **Unknown stored specification.** If the live stored specification was not
+  observed, the preview cannot show that a restatement is stored unchanged. It
+  assumes that it is not.
+- **Rollback.** Restoring earlier values is still a new write. The epoch or
+  generation advances and the revision is new, even if an older engine policy
+  with those values is still applied. That older policy is not revived (see
+  below).
+
+### Observed applied state
+
+Engine policies are read separately from the desired configuration and
+correlated through their controller ownership and recorded contribution. Their
+`scope` is the observed namespaces that their own recorded selector matches now.
+For a policy that is not current, this is a stale scope.
+
+| `condition` | Relation to the live configuration |
+| --- | --- |
+| `current` | At the revision the live configuration desires. |
+| `superseded` | An earlier revision of a logical policy that the binding still desires. Delivery keeps it until the replacement is ready, so both can enforce at the same time. |
+| `held` | The binding or policy does not resolve live. The controller keeps what it last applied. |
+| `not-desired` | The binding resolves but no longer desires this policy. The controller removes it on its next reconcile. |
+| `withdrawing` | The owning binding is being deleted. Garbage collection removes the policy. |
+| `orphaned` | No observed binding has the owner UID. The policy may enforce until garbage collection removes it. |
+| `unknown` | The recorded contribution cannot be read. This is unknown state, never an absent policy. |
+
+| `proposed` | What the candidate asks of the policy |
+| --- | --- |
+| `kept` | The candidate desires exactly this revision. |
+| `replacement-pending` | The candidate desires another revision of the logical policy. This one stays until the replacement is ready, so old and new can overlap temporarily. |
+| `withdrawal-requested` | The candidate no longer desires the policy, or removes the binding. Removal follows application and reconciliation. |
+| `held` | The candidate does not resolve the policy, so the controller would keep it enforcing. |
+| `not-attributable` | Orphaned, withdrawing or unreadable policies are outside what the candidate controls. |
+
+`pending` lists live contributions that have no ready engine policy at their
+revision yet. This is reconciliation lag. It is informational, as is everything
+in `appliedState`. None of it is a new desired impact, and none of it shows
+that enforcement has converged or been withdrawn.
+
+### Worked examples
+
+The live cluster has three namespaces, `prod` (`env: production`), `staging`
+(`env: staging`) and `dev` (`env: development`), and one profile `shared` with
+the policies `run-as-non-root` and `privileged`. Two bindings use it:
+`audit-all` (Audit, selector `{}`) and `deny-prod` (Deny, `env: production`).
+The proposal moves `deny-prod` to staging:
+
+<!-- fixture: testdata/preview/examples/valid/selector-change.yaml -->
+```yaml
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny-prod
+spec:
+  profileRef:
+    name: shared
+  namespaceSelector:
+    matchLabels:
+      env: staging
+  mode: Deny
+```
+
+The comparison is complete with `impactCount` 2: one contribution row for each
+policy of `deny-prod`, each with `selector-changed` (`env=production` to
+`env=staging`), `namespace-added` (`staging` with its UID), `namespace-removed`
+(`prod` with its UID) and `revision-replaced`. The four namespace rows (`prod`
+and `staging` for each policy) show `deny-prod` removed from `prod` and added
+in `staging`. In each, `audit-all` stays in `remaining` with revision effect
+`unchanged`. The Deny contribution leaves `prod`, but Audit still applies
+there. Eligibility stays `Forbidden` everywhere, so the namespace rows carry no
+impact of their own. Nothing here says that a workload in `staging` will be
+admitted or rejected, or that any workload is evicted.
+
+In a second cluster, the binding `deny` (Deny) selects `env In (production,
+staging)` and `tier Exists`, in that order, and has an enforcement epoch. A
+proposal that only swaps the two expressions selects exactly the same namespaces:
+
+<!-- fixture: testdata/preview/examples/valid/reordered-selector.yaml -->
+```yaml
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: deny
+spec:
+  profileRef:
+    name: shared
+  namespaceSelector:
+    matchExpressions:
+      - key: tier
+        operator: Exists
+      - key: env
+        operator: In
+        values: [production, staging]
+  mode: Deny
+```
+
+The object is `unchanged` with `configurationChanged: false` and the same
+fingerprint as the live object. Its `storedSpec` is `different`, because the
+API server stores the new order and the admission policy advances the
+enforcement epoch. Each of its contributions is therefore `replacement-required`
+with `semanticallyEquivalent: true` and a single `revision-replaced` impact. The
+preview does not claim that nothing changes: the engine policies are replaced
+and any acceptance bound to the current revisions no longer matches them.
+Keeping the live order in the rendered manifest avoids the replacement.
+
 ## Not covered
 
 The preview does not emulate server-side apply, field ownership, admission
 mutation or admission validation beyond the schema rules above, and it cannot
 express deleting and recreating one name in a single step. Applying the
-configuration stays a separate Kubernetes or GitOps action. Bundle verification,
-exception impact, evidence, comparison, reports and exit codes are later tasks of
-the change and are not described here as available.
+configuration stays a separate Kubernetes or GitOps action. Bundle verification
+beyond the content seam, exception acceptance impact, evidence, reports and exit
+codes are later tasks of the change and are not described here as available.

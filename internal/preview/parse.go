@@ -51,6 +51,11 @@ type Object struct {
 	// name and the defaulted, validated spec.
 	Profile *v1alpha1.ComplianceProfile
 	Binding *v1alpha1.ComplianceBinding
+	// Spec is the spec as written (without the enforcementEpoch), before
+	// defaults. It decides whether the API server would store a different
+	// spec than the live one (StoredSpecChange); it is not proposed authority
+	// beyond what Profile or Binding hold.
+	Spec map[string]any
 	// Ignored lists exported server-owned fields that were present and
 	// discarded, sorted, for provenance.
 	Ignored []string
@@ -379,7 +384,7 @@ func (p *parser) document(doc int, root *yaml.Node) {
 		at(CodeInvalidSpec, line, id, "spec", "spec cannot be encoded: %v", err)
 		return
 	}
-	obj := &Object{Identity: identity, Source: p.source, Document: doc, Line: line, Ignored: ignored}
+	obj := &Object{Identity: identity, Source: p.source, Document: doc, Line: line, Ignored: ignored, Spec: spec}
 	var problems []fieldProblem
 	switch kind {
 	case KindProfile:
