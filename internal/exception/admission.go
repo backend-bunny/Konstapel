@@ -79,8 +79,9 @@ type Resolution struct {
 	Restrictive []string
 }
 
-// Mutator records the acceptance on creation and explicit renewal. It only
-// reads the cluster, so dry-run requests have no side effects.
+// Mutator records the acceptance on creation and explicit renewal, and the
+// revocation when spec.revoked becomes true. It only reads the cluster, so
+// dry-run requests have no side effects.
 type Mutator struct {
 	Reader   client.Reader
 	Resolver Resolver
@@ -103,7 +104,7 @@ func (m *Mutator) Handle(ctx context.Context, req admission.Request) admission.R
 		// Fail closed: an acceptance without its resolved set is not recorded.
 		return admission.Errored(http.StatusInternalServerError, err)
 	case updated == nil:
-		return admission.Allowed("no acceptance in this operation")
+		return admission.Allowed("no acceptance or revocation in this operation")
 	}
 	current, err := json.Marshal(updated)
 	if err != nil {
@@ -114,14 +115,24 @@ func (m *Mutator) Handle(ctx context.Context, req admission.Request) admission.R
 
 type badRequest struct{ error }
 
-// record returns the exception with its acceptance recorded, or nil when the
-// operation is not an acceptance.
+// record returns the exception with its acceptance or revocation recorded,
+// or nil when the operation is neither.
 func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.ComplianceException, error) {
 	ex, old, err := decode(m.Decoder, req)
 	if err != nil {
 		return nil, badRequest{err}
 	}
-	if !isAcceptance(req, ex, old) {
+	now := time.Now
+	if m.Now != nil {
+		now = m.Now
+	}
+	op, d := classify(req, ex, old)
+	switch {
+	case d != nil:
+		return nil, d
+	case op == opRevocation:
+		return revoke(req, ex, old, now())
+	case op != opAcceptance:
 		return nil, nil
 	}
 	ns := &corev1.Namespace{}
@@ -134,10 +145,6 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 		return nil, fmt.Errorf("resolve policy contributions: %w", err)
 	}
 	el := res.Eligibility
-	now := time.Now
-	if m.Now != nil {
-		now = m.Now
-	}
 	a := Acceptance{
 		Revision:    ex.Spec.AcceptanceRevision,
 		AcceptedAt:  metav1.NewTime(now().UTC().Truncate(time.Second)),
@@ -164,17 +171,18 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 	return updated, nil
 }
 
-// Validator rejects acceptance records that do not belong to the operation:
-// on an acceptance it must name the authenticated caller and the requested
-// revision; on any other update it must be unchanged.
+// Validator rejects acceptance and revocation records that do not belong to
+// the operation: on an acceptance or a revocation the record must name the
+// authenticated caller and the requested revision; on any other update both
+// records, and the revocation finalizer, must be unchanged.
 type Validator struct {
 	Decoder admission.Decoder
 	Cluster string
 	Now     func() time.Time
 }
 
-// acceptanceSkew bounds how far a recorded acceptance time may be from the
-// validating webhook's clock in the same request.
+// acceptanceSkew bounds how far a recorded acceptance or revocation time may
+// be from the validating webhook's clock in the same request.
 const acceptanceSkew = 2 * time.Minute
 
 // Handle implements admission.Handler.
@@ -194,8 +202,15 @@ func (v *Validator) Handle(_ context.Context, req admission.Request) admission.R
 }
 
 func check(req admission.Request, ex, old *v1alpha1.ComplianceException, cluster string, now time.Time) error {
+	op, d := classify(req, ex, old)
+	if d != nil {
+		return d
+	}
+	if err := checkRevocation(req, op, ex, old, now); err != nil {
+		return err
+	}
 	got, present := ex.Annotations[AcceptanceAnnotation]
-	if !isAcceptance(req, ex, old) {
+	if op != opAcceptance {
 		was, wasPresent := old.Annotations[AcceptanceAnnotation]
 		if got != was || present != wasPresent {
 			return fmt.Errorf("%s is protected: it changes only with an explicit renewal (spec.acceptanceRevision + 1)", AcceptanceAnnotation)
@@ -232,19 +247,6 @@ func check(req admission.Request, ex, old *v1alpha1.ComplianceException, cluster
 		return d
 	}
 	return nil
-}
-
-// isAcceptance reports whether the operation accepts risk: creation, or an
-// update that changes spec.acceptanceRevision (an explicit renewal; the CRD
-// allows only +1).
-func isAcceptance(req admission.Request, ex, old *v1alpha1.ComplianceException) bool {
-	switch req.Operation {
-	case admissionv1.Create:
-		return true
-	case admissionv1.Update:
-		return old != nil && ex.Spec.AcceptanceRevision != old.Spec.AcceptanceRevision
-	}
-	return false
 }
 
 func actorOf(req admission.Request) Actor {

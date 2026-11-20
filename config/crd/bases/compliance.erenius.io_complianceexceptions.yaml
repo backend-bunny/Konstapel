@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.expiresAt
       name: Expires
       type: string
+    - jsonPath: .spec.revoked
+      name: Revoked
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -65,6 +68,11 @@ spec:
               expiry with it; any other change to the reason or expiry is rejected, so
               metadata edits and reconciliation cannot renew. Admission (identity, time,
               eligibility and lifetime checks) and the controller do the rest.
+
+              Revocation sets revoked from false to true at the same acceptance
+              revision, so reason and expiresAt stay as accepted. A new acceptance
+              (creation or renewal) starts unrevoked, and only a renewal clears revoked:
+              a revoked revision is never reactivated.
             properties:
               acceptanceRevision:
                 description: |-
@@ -98,6 +106,17 @@ spec:
                 x-kubernetes-validations:
                 - message: reason must not be blank
                   rule: self.trim().size() > 0
+              revoked:
+                default: false
+                description: |-
+                  revoked withdraws the current acceptance revision while keeping this
+                  resource and its acceptance history. Set it true without changing
+                  acceptanceRevision, reason or expiresAt; admission records who revoked
+                  and when. It is desired state: true does not mean the engine has
+                  withdrawn anything. Once true, only a renewal (acceptanceRevision + 1)
+                  sets it false again. Omitted means false, so resources stored before
+                  this field existed are neither revoked nor renewed by it.
+                type: boolean
               workloadSelector:
                 description: |-
                   workloadSelector selects the evaluated objects, in this namespace only,
@@ -172,6 +191,18 @@ spec:
               optionalOldSelf: true
               rule: '!oldSelf.hasValue() || self.acceptanceRevision != oldSelf.value().acceptanceRevision
                 || (self.reason == oldSelf.value().reason && self.expiresAt == oldSelf.value().expiresAt)'
+            - message: 'InvalidRevocationTransition: a new acceptance (creation or
+                renewal) starts with revoked false; revoke an existing acceptance
+                revision in a separate update'
+              optionalOldSelf: true
+              rule: '!self.revoked || (oldSelf.hasValue() && self.acceptanceRevision
+                == oldSelf.value().acceptanceRevision)'
+            - message: 'RenewalRequired: a revoked acceptance revision cannot be reactivated;
+                renew with acceptanceRevision + 1, or create a new ComplianceException'
+              optionalOldSelf: true
+              rule: '!oldSelf.hasValue() || !oldSelf.value().revoked || self.revoked
+                || self.acceptanceRevision == oldSelf.value().acceptanceRevision +
+                1'
           status:
             description: ComplianceExceptionStatus is written only by the Konstapel
               controller.
