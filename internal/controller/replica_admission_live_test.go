@@ -15,6 +15,10 @@ package controller
 //   - while the leader is gone and before the survivor is elected, the
 //     survivor keeps serving with the same checks; failover renews,
 //     broadens or rewrites no acceptance and no snapshot (3.2);
+//   - revocation (add-self-service-policy-exceptions 2.6) is recorded by
+//     whichever replica serves it, including without a leader, with the
+//     caller's identity; failover and a repeated revocation through another
+//     replica leave the record, the finalizer and spec.revoked as stored;
 //   - a rejected certificate rotation takes one replica out of readiness
 //     while it stays live and the other keeps serving; a missing external
 //     capability (OCI bundle sources) fails only the affected namespace's
@@ -34,6 +38,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -197,6 +202,9 @@ func TestLiveReplicaAdmission(t *testing.T) {
 		})
 	}
 	sw := newTCPSwitch(t, fmt.Sprintf(":%d", replicaSwitchPort))
+	// Revoked exceptions keep a finalizer no identity may remove while the
+	// webhooks serve; this runs after they are removed.
+	t.Cleanup(func() { l.releaseRevocations("ra-team", "ra-oci") })
 	l.installExceptionWebhooksAt(host, replicaSwitchPort, ca.pem)
 
 	// Central configuration: SelfService in ra-team; ra-oci is also
@@ -402,22 +410,50 @@ func TestLiveReplicaAdmission(t *testing.T) {
 	denied("rewritten acceptance via the follower", l.patchException(bob, tampered), exception.AcceptanceAnnotation+" is protected")
 	l.waitSnapshot(one, 2)
 
+	// 4a. Revocation through the follower: the caller's identity is recorded
+	// with the finalizer, without the leader. ra-gap-revoked is revoked later,
+	// while no replica leads.
+	mark = marks()
+	revokedOne, gapRevoked := newEx(team, "ra-revoked", nil), newEx(team, "ra-gap-revoked", nil)
+	for _, e := range []*v1alpha1.ComplianceException{revokedOne, gapRevoked} {
+		if err := alice.Create(l.ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.mergePatch(bob, team, revokedOne.Name, `{"spec":{"revoked":true}}`); err != nil {
+		t.Fatalf("revoke through the follower: %v", err)
+	}
+	revokedOne = l.exception(team, revokedOne.Name)
+	if r := revocation(t, revokedOne); r.Actor.Username != "bob" || r.Revision != 1 || r.ExceptionUID != revokedOne.UID ||
+		!slices.Contains(revokedOne.Finalizers, exception.RevocationFinalizer) {
+		t.Fatalf("revocation through the follower = %+v %v", r, revokedOne.Finalizers)
+	}
+	denied("reactivation via the follower", l.mergePatch(alice, team, revokedOne.Name, `{"spec":{"revoked":false}}`), exception.ReasonRenewalRequired)
+	served(follower, mark)
+	l.record("follower-revokes", map[string]any{"replica": follower.name, "actor": "bob"})
+
 	// Everything accepted so far, as the API server stores it.
 	type kept struct {
 		annotation, expiresAt string
 		revision              int64
 		snapshot              string
 		snapshotRV            string
+		revocation            string // the stored lifecycle: spec.revoked, record and finalizers
+	}
+	revocationState := func(ex *v1alpha1.ComplianceException) string {
+		return toJSON(map[string]any{"revoked": ex.Spec.Revoked, "record": ex.Annotations[exception.RevocationAnnotation], "finalizers": ex.Finalizers})
 	}
 	before := map[string]kept{}
+	keep := func(ex *v1alpha1.ComplianceException) {
+		cm := l.waitSnapshot(ex, ex.Spec.AcceptanceRevision)
+		before[ex.Name] = kept{ex.Annotations[exception.AcceptanceAnnotation], ex.Spec.ExpiresAt.UTC().Format(time.RFC3339), ex.Spec.AcceptanceRevision, cm.Name, cm.ResourceVersion, revocationState(ex)}
+	}
 	var exceptions v1alpha1.ComplianceExceptionList
 	if err := l.c.List(l.ctx, &exceptions, client.InNamespace(team)); err != nil {
 		t.Fatal(err)
 	}
 	for i := range exceptions.Items {
-		ex := &exceptions.Items[i]
-		cm := l.waitSnapshot(ex, ex.Spec.AcceptanceRevision)
-		before[ex.Name] = kept{ex.Annotations[exception.AcceptanceAnnotation], ex.Spec.ExpiresAt.UTC().Format(time.RFC3339), ex.Spec.AcceptanceRevision, cm.Name, cm.ResourceVersion}
+		keep(&exceptions.Items[i])
 	}
 	l.record("before-failover", map[string]any{"exceptions": len(before)})
 
@@ -448,6 +484,15 @@ func TestLiveReplicaAdmission(t *testing.T) {
 	if a := acceptance(t, gap); a.Actor.Username != "alice" || a.Revision != 1 {
 		t.Fatalf("acceptance without a leader = %+v", a)
 	}
+	// Revocation needs no leader either (the reconciler is not running).
+	if err := l.mergePatch(alice, team, gapRevoked.Name, `{"spec":{"revoked":true}}`); err != nil {
+		t.Fatalf("revocation without a leader: %v", err)
+	}
+	gapRevoked = l.exception(team, gapRevoked.Name)
+	if r := revocation(t, gapRevoked); r.Actor.Username != "alice" || r.Revision != 1 {
+		t.Fatalf("revocation without a leader = %+v", r)
+	}
+	keep(gapRevoked)
 	setEligibility(v1alpha1.ExceptionsForbidden)
 	denied("restriction without a leader", alice.Create(l.ctx, newEx(team, "ra-gap-blocked", nil)), exception.ReasonForbidden)
 	setEligibility(v1alpha1.ExceptionsSelfService)
@@ -518,7 +563,16 @@ func TestLiveReplicaAdmission(t *testing.T) {
 			t.Errorf("%s: acceptance status %+v after failover", name, cur.Status.Acceptance)
 		case cm == nil || cm.ResourceVersion != k.snapshotRV:
 			t.Errorf("%s: snapshot %s changed or vanished across failover", name, k.snapshot)
+		case revocationState(cur) != k.revocation:
+			t.Errorf("%s: revocation state changed across failover: %s, was %s", name, revocationState(cur), k.revocation)
 		}
+	}
+	// Repeating a revocation through the replacement keeps the first record.
+	if err := l.mergePatch(alice, team, revokedOne.Name, `{"spec":{"revoked":true},"metadata":{"labels":{"repeated":"replacement"}}}`); err != nil {
+		t.Fatalf("repeat revocation through the replacement: %v", err)
+	}
+	if got := l.exception(team, revokedOne.Name); revocationState(got) != before[revokedOne.Name].revocation {
+		t.Errorf("a repeated revocation through the replacement rewrote %s: %s", revokedOne.Name, revocationState(got))
 	}
 	l.record("failover", map[string]any{"leader": survivor.name, "replacement": gone.name, "unchanged": len(before)})
 

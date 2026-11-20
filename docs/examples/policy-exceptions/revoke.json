@@ -1,0 +1,6 @@
+[
+  {"op": "test", "path": "/metadata/uid", "value": "4b8f0d6e-2c1a-4e7b-9f3d-5a6c7b8d9e01"},
+  {"op": "test", "path": "/metadata/resourceVersion", "value": "48213"},
+  {"op": "test", "path": "/spec/acceptanceRevision", "value": 1},
+  {"op": "add", "path": "/spec/revoked", "value": true}
+]

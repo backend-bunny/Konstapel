@@ -13,9 +13,16 @@ import (
 // expiry with it; any other change to the reason or expiry is rejected, so
 // metadata edits and reconciliation cannot renew. Admission (identity, time,
 // eligibility and lifetime checks) and the controller do the rest.
+//
+// Revocation sets revoked from false to true at the same acceptance
+// revision, so reason and expiresAt stay as accepted. A new acceptance
+// (creation or renewal) starts unrevoked, and only a renewal clears revoked:
+// a revoked revision is never reactivated.
 // +kubebuilder:validation:XValidation:rule="oldSelf.hasValue() || self.acceptanceRevision == 1",optionalOldSelf=true,message="a new exception starts at acceptanceRevision 1"
 // +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() || self.acceptanceRevision == oldSelf.value().acceptanceRevision || self.acceptanceRevision == oldSelf.value().acceptanceRevision + 1",optionalOldSelf=true,message="a renewal increments acceptanceRevision by exactly one"
 // +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() || self.acceptanceRevision != oldSelf.value().acceptanceRevision || (self.reason == oldSelf.value().reason && self.expiresAt == oldSelf.value().expiresAt)",optionalOldSelf=true,message="reason and expiresAt change only with an explicit renewal (acceptanceRevision + 1)"
+// +kubebuilder:validation:XValidation:rule="!self.revoked || (oldSelf.hasValue() && self.acceptanceRevision == oldSelf.value().acceptanceRevision)",optionalOldSelf=true,message="InvalidRevocationTransition: a new acceptance (creation or renewal) starts with revoked false; revoke an existing acceptance revision in a separate update"
+// +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() || !oldSelf.value().revoked || self.revoked || self.acceptanceRevision == oldSelf.value().acceptanceRevision + 1",optionalOldSelf=true,message="RenewalRequired: a revoked acceptance revision cannot be reactivated; renew with acceptanceRevision + 1, or create a new ComplianceException"
 type ComplianceExceptionSpec struct {
 	// policy is the logical policy identity within the bundle, as used by
 	// ComplianceProfile spec.policies[].name. Immutable.
@@ -51,6 +58,17 @@ type ComplianceExceptionSpec struct {
 	// +required
 	// +kubebuilder:validation:Minimum=1
 	AcceptanceRevision int64 `json:"acceptanceRevision"`
+
+	// revoked withdraws the current acceptance revision while keeping this
+	// resource and its acceptance history. Set it true without changing
+	// acceptanceRevision, reason or expiresAt; admission records who revoked
+	// and when. It is desired state: true does not mean the engine has
+	// withdrawn anything. Once true, only a renewal (acceptanceRevision + 1)
+	// sets it false again. Omitted means false, so resources stored before
+	// this field existed are neither revoked nor renewed by it.
+	// +optional
+	// +kubebuilder:default=false
+	Revoked bool `json:"revoked,omitempty"`
 }
 
 // ComplianceExceptionStatus is written only by the Konstapel controller.
@@ -105,6 +123,7 @@ const (
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policy`
 // +kubebuilder:printcolumn:name="Revision",type=integer,JSONPath=`.spec.acceptanceRevision`
 // +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.spec.expiresAt`
+// +kubebuilder:printcolumn:name="Revoked",type=boolean,JSONPath=`.spec.revoked`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type ComplianceException struct {
 	metav1.TypeMeta   `json:",inline"`

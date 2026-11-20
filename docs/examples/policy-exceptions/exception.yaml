@@ -1,0 +1,25 @@
+# A namespace team's self-service acceptance of one policy
+# (docs/integration/policy-exceptions.md). It waives the whole logical policy
+# for the objects its selector matches, in this namespace only. The selector
+# matches each evaluated object's own labels: label the Pod template and the
+# Deployment when both are evaluated. Create it as revision 1; omitting
+# spec.revoked means false.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceException
+metadata:
+  name: priv-debug
+  namespace: team-a
+  annotations:
+    # An unverified claim, kept apart from the authenticated actor that
+    # admission records.
+    compliance.erenius.io/claimed-by: carol, ticket SEC-7
+spec:
+  policy: disallow-privileged-containers
+  workloadSelector:
+    matchLabels:
+      app: debug
+  reason: Incident 42 needs a privileged debug sidecar until the fix ships
+  # In the future and within the shortest applicable maxLifetime, measured
+  # from the request.
+  expiresAt: "2026-12-01T00:00:00Z"
+  acceptanceRevision: 1

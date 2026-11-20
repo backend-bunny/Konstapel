@@ -19,23 +19,27 @@ namespace. The CRD itself enforces these rules
 | `spec.reason` | Required. Blank or whitespace-only values are rejected. |
 | `spec.expiresAt` | Required RFC 3339 time. |
 | `spec.acceptanceRevision` | `1` at creation. A renewal increments it by exactly one. |
+| `spec.revoked` | Optional, default `false`. `true` revokes the current acceptance revision ([Revocation](#revocation)). A new acceptance starts with `false`, and only a renewal sets it back to `false`. |
 
 `reason` and `expiresAt` can change only together with a renewal (the
 revision +1). Metadata edits do not renew, and a revision never skips or goes
-back. A selector has no namespace field, so scope cannot reach another
-namespace. Widening the scope means creating a new resource.
+back. Revocation changes neither field. A selector has no namespace field, so
+scope cannot reach another namespace. Widening the scope means creating a new
+resource. Resources stored before `spec.revoked` existed read as `false`, so
+the field neither revokes nor renews them.
 
-Admission (below) records authenticated attribution and enforces
-eligibility and lifetime limits. Status is controller-only (see Access control), and
-revocation arrives with the withdrawal lifecycle (group 4). Until then the
-resource has no effect: Konstapel grants nothing for it.
+Admission (below) records authenticated attribution for acceptances and
+revocations, and enforces eligibility and lifetime limits. Status is
+controller-only (see Access control). The resource has no effect on workloads
+yet: native exception enablement is blocked (see the engine gates below), so
+Konstapel grants nothing for it.
 
 ## Access control
 
 | Identity | Access |
 | --- | --- |
 | Application team: ClusterRole `konstapel-exception-editor` (`config/rbac/exception-editor.yaml`), bound with a **RoleBinding in the team's namespace** | get, list, watch, create, update, patch and delete on `complianceexceptions` in that namespace; read-only status. Nothing else. |
-| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. |
+| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It cannot write an exception's spec or metadata, so it cannot revoke, renew or reactivate one. |
 | Platform administrators: `konstapel-compliance-admin` | Central profiles and bindings. Does not write exceptions on a team's behalf. |
 
 The editor role is not aggregated into the built-in `admin`/`edit` roles:
@@ -43,8 +47,8 @@ namespace edit rights alone do not grant authority to accept risk. It grants
 nothing outside `complianceexceptions`. In particular it gives no access to
 profiles, bindings, the protected `konstapel-system` namespace where
 acceptance snapshots are stored, or native Kyverno
-`PolicyException`s. The protected acceptance record is enforced by admission,
-not RBAC (see below).
+`PolicyException`s. The protected acceptance and revocation records are
+enforced by admission, not RBAC (see below).
 
 `api/v1alpha1/exception_rbac_test.go` checks every shipped role. The live
 admission test confirms these as denied for a team member:
@@ -129,8 +133,11 @@ CA, and requests are made as impersonated users (alice, bob, an Argo CD
 service account). It checks forged attribution, dry run, GitOps claims,
 renewal, an over-limit expiry, a `Forbidden` overlap on creation and renewal,
 a metadata edit after the binding is deleted, a tampered record, and a renewal
-once no binding applies. `task acceptance` runs it. Run it
-against a cluster created by `scripts/environment.sh`:
+once no binding applies. `TestLiveExceptionRevocation` covers
+[revocation](#revocation) and the [documented workflows](#working-with-an-exception),
+and `TestLiveReplicaAdmission` covers revocation through either replica and
+across failover. The assessments group of `task acceptance` runs all three.
+Run them against a cluster created by `scripts/environment.sh`:
 
 ```sh
 devbox run -- scripts/exception-admission-live.sh konstapel-assessment-<name> /tmp/konstapel-exc-adm
@@ -139,6 +146,191 @@ devbox run -- scripts/exception-admission-live.sh konstapel-assessment-<name> /t
 The script runs the compiled test in a container on the kind network, so the
 API server can reach the webhook even when a host firewall blocks
 container-to-host traffic.
+
+## Revocation
+
+A team revokes an acceptance by setting `spec.revoked: true` at the current
+`acceptanceRevision`, with `reason` and `expiresAt` unchanged. The resource
+stays, with its acceptance record and snapshots, and no approval or native
+Kyverno write is involved. The CRD rules and both webhooks allow only these
+transitions:
+
+| Operation | Request | Result |
+| --- | --- | --- |
+| Create | revision 1, `revoked` omitted or `false` | An acceptance (above). |
+| Create | `revoked: true` | Rejected: `InvalidRevocationTransition`. |
+| Revoke | same revision, `false` to `true` | Admitted. Admission adds the revocation record and finalizer; eligibility and expiry are not checked. |
+| Repeat revoke | same revision, `true` to `true` | Admitted. The first record is kept. |
+| Reactivate | same revision, `true` to `false`, including an update that omits `revoked` | Rejected: `RenewalRequired`. |
+| Renew | revision + 1, `revoked` stays `false` | An acceptance (above). |
+| Renew a revoked revision | revision + 1, `true` to `false` | Rejected for now: `RevocationHistoryPending` (see [below](#what-revocation-does-not-do-yet)). |
+| Renew and revoke together | revision + 1 with `revoked: true` | Rejected: `InvalidRevocationTransition`. |
+
+Admission messages start with the reason, as acceptance denials do. Metadata
+edits and controller reconciliation cannot change `revoked`.
+
+### Revocation record
+
+On the `false` to `true` update, the mutating webhook writes the protected
+annotation `compliance.erenius.io/revocation`. Any value the caller supplied
+is overwritten. The annotation holds:
+
+| Field | Source |
+| --- | --- |
+| `exceptionUID` | the UID of the stored resource |
+| `revision` | the revoked `spec.acceptanceRevision` |
+| `requestedAt` | the webhook's clock at the request, in UTC seconds. It records when revocation was requested, not when an engine stopped granting. |
+| `actor` | the request's authenticated `userInfo`: username, UID, groups |
+| `claim` | the `compliance.erenius.io/claimed-by` value in the revoking request, unverified |
+
+In the same write it adds the finalizer
+`compliance.erenius.io/revocation-history`. The record sits next to the
+acceptance record and changes nothing in it: the accepting actor, reason,
+expiry and snapshot stay as accepted.
+
+The validating webhook checks that the record belongs to the request: the
+authenticated caller, the stored UID, the current revision, the claim, a time
+within two minutes of its clock, and the finalizer. On every other create or
+update, the record and the finalizer must be exactly as stored:
+
+- a creation carries neither;
+- no edit adds, rewrites or removes either, whoever sends it;
+- a repeated revocation keeps the first actor and time;
+- a GitOps re-apply that drops the annotation is rejected, like one that drops
+  the acceptance record.
+
+Revocation reads nothing from the cluster. It resolves no eligibility and
+does not need a future `expiresAt`, so an expired acceptance, a policy that
+is now `Forbidden` and one whose configuration cannot be resolved can all be
+revoked. It still needs the webhooks: while admission is unavailable the
+update fails (`failurePolicy: Fail`) and nothing is recorded. A dry run
+returns the record and finalizer it would store, and stores nothing.
+
+A GitOps service account that revokes is the recorded actor. A commit author
+or ticket belongs in `claimed-by`, which is kept as an unverified claim.
+
+### What revocation does not do yet
+
+- **It withdraws nothing.** No native grant exists while engine enablement
+  is blocked. Withdrawing native grants, and status that separates the
+  requested withdrawal from observed engine state, are group 4 (tasks 4.1,
+  4.3, 4.4). `spec.revoked: true` is accepted intent. It is not evidence
+  that any engine has stopped granting, and once grants exist, a revocation
+  recorded while the controller is stopped stays unconfirmed until
+  reconciliation resumes.
+- **The record exists only on the resource.** Independent revocation records
+  in the protected namespace are task 3.6. Until then:
+  - No identity can remove the finalizer while the webhooks serve; the
+    controller cannot write exceptions at all. Deleting a revoked exception
+    is accepted, but it stays `Terminating`, record intact, until task 3.6
+    persists the record and releases it. So does the namespace that
+    contains it.
+  - Renewing a revoked revision is rejected with `RevocationHistoryPending`,
+    because the renewal would replace the only copy of its revocation.
+    Create a new `ComplianceException` instead: it has a new UID and is
+    validated as a new acceptance.
+- An operator who removes the webhooks and then the finalizer by hand
+  erases the only copy of that revocation.
+
+## Working with an exception
+
+The examples are in
+[`docs/examples/policy-exceptions`](../examples/policy-exceptions).
+`TestComplianceExceptionDocsExample` validates them against the CRD, and
+`TestLiveExceptionRevocation` applies them to a real API server, substituting
+only the namespace, a current `expiresAt` and the values that were read.
+
+### Scope
+
+An exception waives one whole logical policy (`spec.policy`) for the objects
+its `workloadSelector` matches, in its own namespace. There are no
+per-container, per-image or per-value waivers. The selector matches each
+evaluated object's own labels, and Konstapel does not follow owner
+references. A Deployment and the Pods it creates are distinct objects, so when
+both are evaluated, label the Deployment and its Pod template. A selector also
+covers matching workloads created later, but only in the same namespace
+instance.
+
+### Create
+
+```sh
+kubectl apply -f docs/examples/policy-exceptions/exception.yaml
+```
+
+[`exception.yaml`](../examples/policy-exceptions/exception.yaml) is revision
+1 and omits `revoked`. Set `expiresAt` within the shortest applicable
+`maxLifetime` from the time of the request. Admission records the
+authenticated caller as the accepting actor; `claimed-by` stays an
+unverified claim.
+
+### Revoke
+
+Read the exception and review it, then send a JSON patch that tests the UID,
+`resourceVersion` and `acceptanceRevision` you reviewed before it sets
+`revoked` ([`revoke.json`](../examples/policy-exceptions/revoke.json)):
+
+```sh
+kubectl -n team-a get complianceexception priv-debug \
+  -o jsonpath='{.metadata.uid} {.metadata.resourceVersion} {.spec.acceptanceRevision} {.spec.revoked}{"\n"}'
+# 4b8f0d6e-2c1a-4e7b-9f3d-5a6c7b8d9e01 48213 1 false
+kubectl -n team-a patch complianceexception priv-debug --type=json -p '[
+  {"op": "test", "path": "/metadata/uid", "value": "4b8f0d6e-2c1a-4e7b-9f3d-5a6c7b8d9e01"},
+  {"op": "test", "path": "/metadata/resourceVersion", "value": "48213"},
+  {"op": "test", "path": "/spec/acceptanceRevision", "value": 1},
+  {"op": "add", "path": "/spec/revoked", "value": true}
+]'
+```
+
+If anything changed after you read it, such as a renewal, an edit or a
+controller status write, a `test` fails. The API server then rejects the
+patch as invalid (HTTP 422, `the server rejected our request due to an error
+in our request`) and changes nothing. Re-read, check
+that you still mean to revoke that revision, and retry with the new values.
+Do not refresh the values automatically.
+
+Admission sees only the resulting object, so it cannot tell whether a request
+carried these tests. A plain `kubectl patch -p '{"spec":{"revoked":true}}'`
+revokes whichever revision is current when it arrives. Repeating the patch
+with current values is safe: the first record stays.
+
+With GitOps, commit `revoked: true` and leave `acceptanceRevision`, `reason`
+and `expiresAt` unchanged. The GitOps service account is the recorded actor.
+Keep `revoked: true` in the source afterwards: applying `false`, or a manifest
+without the field over one that set it, is rejected.
+
+### Renew
+
+[`renew.json`](../examples/policy-exceptions/renew.json) tests the same three
+values plus `spec.revoked: false`, then sets `acceptanceRevision` to the read
+value plus one and replaces `reason` and `expiresAt`. The `revoked` test makes
+the renewal fail rather than renew over a revocation you have not seen.
+Admission re-checks eligibility and lifetime from the time of the renewal and
+records the renewing actor; the controller writes a new snapshot and keeps
+the earlier ones. A revoked revision cannot be renewed yet (above).
+
+### Delete
+
+Deletion removes the resource, and revocation keeps it. `kubectl delete`
+sends no preconditions, so it deletes whatever resource has that name when
+the request arrives. API clients can send `DeleteOptions.preconditions` with
+the `uid` and `resourceVersion` they reviewed; the API server rejects stale
+values with `409 Conflict`. An unrevoked exception is removed at once. A
+revoked one stays `Terminating` (above). Neither deletes or stops a workload.
+Withdrawing native grants on deletion is part of the lifecycle work in groups
+3 and 4.
+
+### Rejected requests
+
+`TestLiveExceptionRevocation` confirms each of these:
+
+| Request | Result |
+| --- | --- |
+| An editor bound in another namespace revokes the exception | `Forbidden` (RBAC) |
+| An identity without the editor role revokes it | `Forbidden` (RBAC) |
+| A team member revokes an exception in another namespace | `Forbidden` (RBAC) |
+| The controller service account sets `revoked` or removes the finalizer | `Forbidden` (RBAC: it writes status only) |
+| Anyone rewrites or removes the revocation record or the finalizer | `ProtectedField` |
+| A stale `test`, or a delete with stale preconditions | `422` or `409`; nothing changes |
 
 ## Acceptance snapshots
 
