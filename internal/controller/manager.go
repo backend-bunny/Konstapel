@@ -373,8 +373,18 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if opts.WebhookCertDir != "" {
 		// Admission runs on every replica; the server needs no leader. It
 		// reads through the API reader so acceptance sees current configuration.
-		m, v := exception.NewHandlers(mgr.GetScheme(), mgr.GetAPIReader(), opts.Content, br.Cluster)
+		history := opts.SnapshotNamespace
+		if history == "" {
+			history = DefaultSnapshotNamespace
+		}
+		identity := &exception.Identity{Lookup: exception.SelfSubjectReview(mgr.GetClient())}
+		m, v := exception.NewHandlers(mgr.GetScheme(), mgr.GetAPIReader(), opts.Content, br.Cluster, history, identity)
 		exception.Register(mgr.GetWebhookServer(), m, v)
+		// Learn the controller identity on every replica at startup, so the
+		// webhook restricts it without a lookup on the revocation path.
+		if err := mgr.Add(identityWarmup{identity: identity, retry: opts.EnginePoll}); err != nil {
+			return nil, err
+		}
 	}
 	return mgr, nil
 }

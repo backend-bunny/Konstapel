@@ -2,13 +2,14 @@
 
 package controller
 
-// Live exception revocation (add-self-service-policy-exceptions tasks 2.6 and
-// 2.5): the in-process manager serves the ComplianceException webhooks from
-// config/webhook/exceptions.yaml to a real API server, requests are made as
-// impersonated application identities, and the documented example and
-// version-aware patches (docs/examples/policy-exceptions) are applied as
-// written. Run through scripts/exception-admission-live.sh (assessments
-// group).
+// Live exception revocation (add-self-service-policy-exceptions tasks 2.6
+// and 2.5, with the revocation history of task 3.6): the in-process manager
+// serves the ComplianceException webhooks from config/webhook/exceptions.yaml
+// to a real API server, requests are made as impersonated application
+// identities, and the documented example and version-aware patches
+// (docs/examples/policy-exceptions) are applied as written. Faults, restarts
+// and the controller identity are TestLiveRevocationHistory's. Run through
+// scripts/exception-admission-live.sh (assessments group).
 
 import (
 	"context"
@@ -177,7 +178,8 @@ func lifecycle(ex *v1alpha1.ComplianceException) string {
 
 // releaseRevocations removes the revocation finalizer from the exceptions a
 // test left in namespaces and deletes them. It runs after the webhooks are
-// removed: while they serve, no identity may remove the finalizer.
+// removed: while they serve, only the controller identity may remove the
+// finalizer, and only once the revocation is recorded independently.
 func (l *live) releaseRevocations(namespaces ...string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -246,12 +248,7 @@ func TestLiveExceptionRevocation(t *testing.T) {
 			RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: editor},
 			Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: group}}}
 	}
-	// The controller's shipped role: it reads exceptions and writes status only.
-	controllerRole := l.shippedClusterRole("../../config/rbac/controller/role.yaml", "konstapel-controller")
-	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exc-revoke-controller"},
-		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: controllerRole},
-		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "konstapel-controller", Namespace: DefaultSnapshotNamespace}}}
-	objs := []client.Object{p, b, roleBinding(ns, "rv-team-a"), roleBinding(nsB, "rv-team-b"), crb}
+	objs := []client.Object{p, b, roleBinding(ns, "rv-team-a"), roleBinding(nsB, "rv-team-b")}
 	for _, o := range objs {
 		if err := l.c.Create(l.ctx, o); err != nil {
 			t.Fatal(err)
@@ -273,7 +270,6 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	argo := l.as(argoUser, "rv-team-a", "system:serviceaccounts", "system:authenticated")
 	erin := l.as("erin", "rv-team-b", "system:authenticated")
 	mallory := l.as("mallory", "system:authenticated")
-	controllerSA := l.as("system:serviceaccount:konstapel-system:konstapel-controller", "system:serviceaccounts", "system:serviceaccounts:konstapel-system", "system:authenticated")
 	expires := func(d time.Duration) metav1.Time { return metav1.NewTime(time.Now().Add(d).Truncate(time.Second)) }
 	newEx := func(namespace, name string) *v1alpha1.ComplianceException {
 		return &v1alpha1.ComplianceException{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -409,6 +405,10 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	if cm := l.snapshotConfigMap(snap1.Name); cm == nil || cm.ResourceVersion != snap1.ResourceVersion {
 		t.Fatal("revocation changed or removed the acceptance snapshot")
 	}
+	// The controller persists the revocation independently (task 3.6) and
+	// only then releases the finalizer; the later steps see that state.
+	record := l.waitHistory(revokedEx)
+	l.record("history", map[string]any{"record": record.Name})
 
 	// 5. Repeating the revocation, as another editor and as a full GitOps
 	// re-apply, keeps the first actor and time.
@@ -437,16 +437,14 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	unchanged("reactivation", revokedEx)
 
 	// 7. Renewal: the documented patch refuses to renew over a revocation it
-	// did not expect; a deliberate renewal of the revoked revision waits for
-	// its independent history (task 3.6); renewing into revoked is invalid.
+	// did not expect; renewing into revoked is invalid.
 	renew := renewOps.withPreconditions(revokedEx).set("/spec/acceptanceRevision", int64(2)).set("/spec/expiresAt", expires(48*time.Hour).UTC().Format(time.RFC3339))
 	if _, err := l.jsonPatch(alice, ns, ex.Name, renew); !patchTestFailed(err) {
 		t.Fatalf("renewal over an unseen revocation: want a failed patch test, got %v", err)
 	}
-	deliberate := fmt.Sprintf(`{"spec":{"acceptanceRevision":2,"revoked":false,"reason":"fresh acceptance","expiresAt":%q}}`, expires(48*time.Hour).UTC().Format(time.RFC3339))
-	denied("renewal of a revoked revision", l.mergePatch(alice, ns, ex.Name, deliberate), exception.ReasonRevocationHistoryPending)
-	denied("renewal into revoked", l.mergePatch(alice, ns, ex.Name, strings.Replace(deliberate, `"revoked":false`, `"revoked":true`, 1)), exception.ReasonInvalidRevocationTransition)
-	unchanged("renewal of a revoked revision", revokedEx)
+	deliberate := fmt.Sprintf(`{"spec":{"acceptanceRevision":2,"revoked":true,"reason":"fresh acceptance","expiresAt":%q}}`, expires(48*time.Hour).UTC().Format(time.RFC3339))
+	denied("renewal into revoked", l.mergePatch(alice, ns, ex.Name, deliberate), exception.ReasonInvalidRevocationTransition)
+	unchanged("renewal into revoked", revokedEx)
 
 	// 8. The record and the finalizer are protected.
 	rewritten := strings.Replace(revokedEx.Annotations[exception.RevocationAnnotation], argoUser, "platform-admin", 1)
@@ -454,11 +452,13 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	denied("rewrite the revocation record", l.mergePatch(alice, ns, ex.Name, string(rewrite)), exception.ReasonProtectedField)
 	remove, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{exception.RevocationAnnotation: nil}}})
 	denied("remove the revocation record", l.mergePatch(alice, ns, ex.Name, string(remove)), exception.ReasonProtectedField)
-	denied("remove the revocation finalizer", l.mergePatch(argo, ns, ex.Name, `{"metadata":{"finalizers":null}}`), exception.ReasonProtectedField)
+	readd, _ := json.Marshal(map[string]any{"metadata": map[string]any{"finalizers": []string{exception.RevocationFinalizer}}})
+	denied("re-add the revocation finalizer", l.mergePatch(argo, ns, ex.Name, string(readd)), exception.ReasonProtectedField)
 	unchanged("protected history", revokedEx)
 
-	// 9. Authorization: another team, an unbound identity and the controller
-	// cannot revoke or release, and nobody reaches another namespace.
+	// 9. Authorization: another team and an unbound identity cannot revoke,
+	// and nobody reaches another namespace. (The controller identity's own
+	// limits are TestLiveRevocationHistory's, where the manager runs as it.)
 	forbidden("revoke as another team", l.mergePatch(erin, ns, ex.Name, `{"spec":{"revoked":true}}`))
 	forbidden("revoke as an unbound identity", l.mergePatch(mallory, ns, ex.Name, `{"spec":{"revoked":true}}`))
 	exB := newEx(nsB, "team-b")
@@ -467,18 +467,38 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	}
 	forbidden("revoke another namespace's exception", l.mergePatch(alice, nsB, exB.Name, `{"spec":{"revoked":true}}`))
 	unchanged("another namespace's exception", exB)
-	l.eventually("controller identity bound", func() (bool, string) {
-		got := &v1alpha1.ComplianceException{}
-		err := controllerSA.Get(l.ctx, client.ObjectKeyFromObject(revokedEx), got)
-		return err == nil, fmt.Sprint(err)
-	})
-	forbidden("release the finalizer as the controller", l.mergePatch(controllerSA, ns, ex.Name, `{"metadata":{"finalizers":null}}`))
-	forbidden("revoke as the controller", l.mergePatch(controllerSA, nsB, exB.Name, `{"spec":{"revoked":true}}`))
 	unchanged("unauthorized writes", revokedEx)
 
-	// 10. Deletion with UID/resourceVersion preconditions: stale ones fail;
-	// current ones are accepted, and the finalizer keeps the revoked resource
-	// with its record, the only copy of the revocation until task 3.6.
+	// 10. The documented renewal of a revoked revision: version-aware, it is
+	// a new acceptance, freshly validated and attributed, and clears the
+	// protected record from the resource; the independent record of
+	// revision 1 and its snapshot stay.
+	renewRevoked := examplePatch(t, "renew-revoked.json").withPreconditions(revokedEx).
+		set("/spec/acceptanceRevision", int64(2)).set("/spec/expiresAt", expires(48*time.Hour).UTC().Format(time.RFC3339))
+	if _, err := l.jsonPatch(alice, ns, ex.Name, renewOps.withPreconditions(revokedEx).set("/spec/acceptanceRevision", int64(2))); !patchTestFailed(err) {
+		t.Fatalf("the unrevoked renewal patch on a revoked revision: want a failed patch test, got %v", err)
+	}
+	renewed, err := l.jsonPatch(alice, ns, ex.Name, renewRevoked)
+	if err != nil {
+		t.Fatalf("renew the revoked revision: %v", err)
+	}
+	switch a := acceptance(t, renewed); {
+	case a.Revision != 2 || a.Actor.Username != "alice" || renewed.Spec.Revoked || renewed.Spec.AcceptanceRevision != 2:
+		t.Fatalf("renewal of the revoked revision = %+v %s", a, lifecycle(renewed))
+	case renewed.Annotations[exception.RevocationAnnotation] != "" || slices.Contains(renewed.Finalizers, exception.RevocationFinalizer):
+		t.Fatalf("the renewal kept revocation state: %s", lifecycle(renewed))
+	}
+	l.waitSnapshot(renewed, 2)
+	if cm := l.snapshotConfigMap(snap1.Name); cm == nil || cm.ResourceVersion != snap1.ResourceVersion {
+		t.Fatal("renewal changed or removed the revision 1 snapshot")
+	}
+	if cm := l.snapshotConfigMap(record.Name); cm == nil || cm.ResourceVersion != record.ResourceVersion {
+		t.Fatal("renewal changed or removed the revision 1 revocation record")
+	}
+	l.record("renew-revoked", map[string]any{"revision": 2, "record": record.Name})
+
+	// 11. Deletion with UID/resourceVersion preconditions: stale ones fail;
+	// current ones remove the resource at once. Its history stays.
 	delStale := alice.Delete(l.ctx, l.exception(ns, ex.Name), client.Preconditions{UID: &current.UID, ResourceVersion: &current.ResourceVersion})
 	if !apierrors.IsConflict(delStale) {
 		t.Fatalf("delete with a stale resourceVersion: want Conflict, got %v", delStale)
@@ -487,20 +507,20 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	if err := alice.Delete(l.ctx, l.exception(ns, ex.Name), client.Preconditions{UID: &otherUID}); !apierrors.IsConflict(err) {
 		t.Fatalf("delete with another UID: want Conflict, got %v", err)
 	}
-	unchanged("a stale delete", revokedEx)
 	fresh := l.settled(ns, ex.Name)
 	if err := alice.Delete(l.ctx, fresh, client.Preconditions{UID: &fresh.UID, ResourceVersion: &fresh.ResourceVersion}); err != nil {
 		t.Fatalf("delete with current preconditions: %v", err)
 	}
-	terminating := l.exception(ns, ex.Name)
-	if terminating.DeletionTimestamp.IsZero() || terminating.Annotations[exception.RevocationAnnotation] != revokedEx.Annotations[exception.RevocationAnnotation] ||
-		!slices.Contains(terminating.Finalizers, exception.RevocationFinalizer) {
-		t.Fatalf("deleted revoked exception: %s deletion %v", lifecycle(terminating), terminating.DeletionTimestamp)
+	l.eventually("deleted exception removed", func() (bool, string) {
+		err := l.c.Get(l.ctx, client.ObjectKeyFromObject(fresh), &v1alpha1.ComplianceException{})
+		return apierrors.IsNotFound(err), fmt.Sprint(err)
+	})
+	if cm := l.snapshotConfigMap(record.Name); cm == nil || cm.ResourceVersion != record.ResourceVersion || len(cm.OwnerReferences) != 0 {
+		t.Fatal("deletion changed or removed the revocation record")
 	}
-	denied("remove the finalizer of a terminating revoked exception", l.mergePatch(alice, ns, ex.Name, `{"metadata":{"finalizers":null}}`), exception.ReasonProtectedField)
-	l.record("delete-revoked", map[string]any{"retained": true, "finalizer": exception.RevocationFinalizer})
+	l.record("delete", map[string]any{"removed": true, "recordRetained": record.Name})
 
-	// 11. A new acceptance starts unrevoked and carries no revocation history.
+	// 12. A new acceptance starts unrevoked and carries no revocation history.
 	createRevoked := newEx(ns, "create-revoked")
 	createRevoked.Spec.Revoked = true
 	denied("create revoked", alice.Create(l.ctx, createRevoked), exception.ReasonInvalidRevocationTransition)
@@ -522,8 +542,9 @@ func TestLiveExceptionRevocation(t *testing.T) {
 		}
 	}
 
-	// 12. Expired, Forbidden and unresolved acceptances are revoked without
-	// fresh eligibility or a future expiry.
+	// 13. Expired, Forbidden and unresolved acceptances are revoked without
+	// fresh eligibility or a future expiry, and their revocations are
+	// recorded like any other.
 	short := newEx(ns, "short")
 	short.Spec.ExpiresAt = expires(6 * time.Second)
 	forbiddenLater, unresolvedLater := newEx(ns, "forbidden-later"), newEx(ns, "unresolved-later")
@@ -541,7 +562,8 @@ func TestLiveExceptionRevocation(t *testing.T) {
 		if r := revocation(t, got); r.Actor.Username != "dave" || r.Revision != 1 || !got.Spec.ExpiresAt.Equal(&e.Spec.ExpiresAt) {
 			t.Fatalf("revocation of %s = %+v %s", what, r, lifecycle(got))
 		}
-		l.record("revoke-"+what, map[string]any{"revocation": revocation(t, got)})
+		rec := l.waitHistory(got)
+		l.record("revoke-"+what, map[string]any{"revocation": revocation(t, got), "record": rec.Name})
 	}
 	for time.Now().Before(short.Spec.ExpiresAt.Add(time.Second)) {
 		time.Sleep(500 * time.Millisecond)
@@ -601,7 +623,7 @@ func TestLiveExceptionRevocation(t *testing.T) {
 	revokeNow("unresolved", unresolvedLater)
 	gone(ub, up)
 
-	// 13. A resource stored before spec.revoked existed reads as unrevoked;
+	// 14. A resource stored before spec.revoked existed reads as unrevoked;
 	// an edit that omits the field neither renews nor revokes it.
 	l.legacyExceptionChecks(alice, dave, newEx(ns, "legacy"))
 }

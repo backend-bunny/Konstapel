@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 // ComplianceException RBAC (add-self-service-policy-exceptions task 2.4),
@@ -84,16 +86,59 @@ func TestExceptionEditorRoleIsNamespaceScopedSelfService(t *testing.T) {
 
 // Only the namespace editor role (bound per namespace) and the controller
 // may write exceptions; central roles and viewers may not accept risk on a
-// team's behalf.
+// team's behalf. The controller may update and patch an exception only to
+// release the revocation finalizer once the revocation is recorded
+// independently (task 3.6), which admission enforces; it never creates or
+// deletes one.
 func TestOnlyNamespaceEditorsWriteExceptions(t *testing.T) {
+	controller := false
 	for _, r := range loadRoles(t) {
 		if r.name == exceptionEditorRole {
 			continue
 		}
+		allowed := map[string]bool{}
+		if r.kind == "ClusterRole" && r.name == "konstapel-controller" {
+			allowed = map[string]bool{"update": true, "patch": true}
+			controller = grants(r.rules, "update", "complianceexceptions") && grants(r.rules, "patch", "complianceexceptions")
+		}
 		for _, verb := range exceptionWriteVerbs {
-			if grants(r.rules, verb, "complianceexceptions") {
+			if !allowed[verb] && grants(r.rules, verb, "complianceexceptions") {
 				t.Errorf("%s %s (%s) must not %s complianceexceptions", r.kind, r.name, r.file, verb)
 			}
 		}
 	}
+	if !controller {
+		t.Error("ClusterRole konstapel-controller must be able to update and patch complianceexceptions to release the revocation finalizer")
+	}
+}
+
+// The controller persists revocation records next to acceptance snapshots
+// in its own namespace, and learns its identity for admission.
+func TestControllerCanPersistRevocationHistory(t *testing.T) {
+	var cluster, namespaced bool
+	for _, r := range loadRoles(t) {
+		switch {
+		case r.kind == "ClusterRole" && r.name == "konstapel-controller":
+			cluster = grantsIn(r.rules, "authentication.k8s.io", "create", "selfsubjectreviews")
+		case r.kind == "Role" && r.name == "konstapel-controller":
+			namespaced = grantsIn(r.rules, "", "create", "configmaps") && grantsIn(r.rules, "", "get", "configmaps")
+			for _, verb := range []string{"update", "patch", "delete", "deletecollection"} {
+				if grantsIn(r.rules, "", verb, "configmaps") {
+					t.Errorf("the controller may %s configmaps: snapshots and revocation records are immutable history", verb)
+				}
+			}
+		}
+	}
+	if !cluster || !namespaced {
+		t.Errorf("controller selfsubjectreviews create %v; konstapel-system configmaps get/create only %v", cluster, namespaced)
+	}
+}
+
+func grantsIn(rules []rbacv1.PolicyRule, group, verb, resource string) bool {
+	for _, r := range rules {
+		if matches(r.APIGroups, group) && matches(r.Resources, resource) && matches(r.Verbs, verb) {
+			return true
+		}
+	}
+	return false
 }

@@ -178,8 +178,8 @@ func TestRevocationTransitions(t *testing.T) {
 		{"create revoked", admissionv1.Create, createRevoked, nil, ReasonInvalidRevocationTransition},
 		{"renew and revoke together", admissionv1.Update, renewAndRevoke, stored, ReasonInvalidRevocationTransition},
 		{"same-revision reactivation", admissionv1.Update, cleared, revoked, ReasonRenewalRequired},
-		// Until the revocation is persisted independently (task 3.6), this
-		// resource holds its only copy.
+		// The revocation is not yet persisted independently (task 3.6) and
+		// its finalizer is held, so this resource holds its only copy.
 		{"renew a revoked revision", admissionv1.Update, renewRevoked, revoked, ReasonRevocationHistoryPending},
 		{"renew a revoked revision into revoked", admissionv1.Update, renewRevokedAgain, revoked, ReasonInvalidRevocationTransition},
 	}
