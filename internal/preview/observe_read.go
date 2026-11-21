@@ -307,6 +307,7 @@ type capture struct {
 	unowned     []ObjectRef
 	exceptions  []ObservedException
 	snapshots   []ObservedAcceptanceSnapshot
+	evidence    []ObservedEvidence
 	sources     *ObservedSources
 	inputs      *sourceInputs
 	limitations []Diagnostic
@@ -530,8 +531,39 @@ func (c *capture) readBindings(ctx context.Context, _ ObserveOptions) *Diagnosti
 		}{b.Generation, b.Spec.EnforcementEpoch, b.DeletionTimestamp != nil, Fingerprint(nil, &b)})
 		c.storeSpec(KindBinding, &items[i])
 		c.bindings = append(c.bindings, b)
+		c.evidence = append(c.evidence, observedEvidence(&items[i], &b))
 	}
 	return nil
+}
+
+// observedEvidence reads the binding's recorded evidence state from the
+// same object: the targeting controller's observedGeneration and the
+// assessment owner's status.assessment.current. A current-evidence record
+// that does not match the supported contract is kept as invalid, never
+// dropped: evidence is informational, so it never fails the observation.
+func observedEvidence(u *unstructured.Unstructured, b *v1alpha1.ComplianceBinding) ObservedEvidence {
+	ev := ObservedEvidence{Binding: b.Name, UID: b.UID, Generation: b.Generation}
+	if g, found, err := unstructured.NestedInt64(u.Object, "status", "observedGeneration"); err == nil && found {
+		ev.ObservedGeneration = g
+	}
+	raw, found, err := unstructured.NestedFieldNoCopy(u.Object, "status", "assessment", "current")
+	switch {
+	case err != nil:
+		ev.Invalid = err.Error()
+	case found:
+		m, ok := raw.(map[string]any)
+		if !ok {
+			ev.Invalid = "not an object"
+			break
+		}
+		var cur v1alpha1.CurrentEvidence
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructuredWithValidation(runtime.DeepCopyJSON(m), &cur, true); err != nil {
+			ev.Invalid = err.Error()
+			break
+		}
+		ev.Current = &cur
+	}
+	return ev
 }
 
 // storeSpec keeps the spec exactly as stored, so a proposal can be compared
@@ -909,6 +941,8 @@ func (c *capture) fill(s *Snapshot, opts ObserveOptions) {
 	s.AcceptanceSnapshots = c.snapshots
 	slices.SortFunc(s.AcceptanceSnapshots, func(a, b ObservedAcceptanceSnapshot) int { return compareRef(a.ObjectRef, b.ObjectRef) })
 	s.Sources = c.sources
+	s.Evidence = c.evidence
+	slices.SortFunc(s.Evidence, func(a, b ObservedEvidence) int { return strings.Compare(a.Binding, b.Binding) })
 	s.inputs = c.inputs
 	lims := append(slices.Clone(c.limitations),
 		Diagnostic{Code: LimitNoAtomicSnapshot, Message: "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"},

@@ -146,6 +146,42 @@ func (f *fakeCluster) addException() {
   spec: {policy: disallow-privileged-containers, workloadSelector: {matchLabels: {app: legacy}}, reason: "migration", expiresAt: "2027-01-01T00:00:00Z", acceptanceRevision: 1}}`))
 }
 
+// Owner-recorded current evidence (status.assessment.current) for
+// setEvidence, relative to fixedNow, the observation clock.
+const (
+	// evidenceCurrent: Complete, expires after the observation.
+	evidenceCurrent = `{evidence: {completeness: Complete, expected: 4, attributable: 4, missing: 0, rejected: 0, unresolved: 0},
+  outcomes: {pass: 3, fail: 1, error: 0, skip: 0, acceptedRisk: 0, notApplicable: 0, unknown: 0},
+  evaluatedAt: "2026-11-20T09:00:00Z", oldestEvaluation: "2026-11-20T08:40:00Z", nextExpiry: "2026-11-20T10:40:00Z"}`
+	// evidenceExpired: was Complete, its next expiry passed before the observation.
+	evidenceExpired = `{evidence: {completeness: Complete, expected: 4, attributable: 4, missing: 0, rejected: 0, unresolved: 0},
+  outcomes: {pass: 4, fail: 0, error: 0, skip: 0, acceptedRisk: 0, notApplicable: 0, unknown: 0},
+  evaluatedAt: "2026-11-20T05:00:00Z", oldestEvaluation: "2026-11-20T04:00:00Z", nextExpiry: "2026-11-20T06:00:00Z",
+  limitations: ["policy reports unavailable"]}`
+	// evidenceInconsistent: counts that do not add up.
+	evidenceInconsistent = `{evidence: {completeness: Complete, expected: 4, attributable: 3, missing: 0, rejected: 0, unresolved: 0},
+  outcomes: {pass: 3, fail: 0, error: 0, skip: 0, acceptedRisk: 0, notApplicable: 0, unknown: 0},
+  evaluatedAt: "2026-11-20T09:00:00Z", nextExpiry: "2026-11-20T10:40:00Z"}`
+)
+
+// setEvidence records a binding's status as its controllers would: the
+// targeting controller's observedGeneration and, unless current is empty,
+// the assessment owner's status.assessment.current.
+func (f *fakeCluster) setEvidence(binding string, observedGeneration int64, current string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, b := range f.lists[pathBindings] {
+		if b["metadata"].(map[string]any)["name"] != binding {
+			continue
+		}
+		st := map[string]any{"observedGeneration": observedGeneration}
+		if current != "" {
+			st["assessment"] = map[string]any{"current": obj(f.t, current)}
+		}
+		b["status"] = st
+	}
+}
+
 func (f *fakeCluster) recorded() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -347,10 +383,108 @@ func TestPreviewExitMatrix(t *testing.T) {
 		{name: "complete without impacts", setup: func(*testing.T, *fakeCluster) []string { return []string{"-f", fixture("unchanged.yaml")} },
 			plain: 0, gated: 0, complete: true,
 			check: func(t *testing.T, r *preview.Report) {
-				// Evidence and exception analysis are unavailable: an
-				// informational limitation, never a failure on its own.
-				if !slices.Contains(codes(r.Limitations), "evidence-unavailable") || r.Evidence.Analysis != preview.AnalysisNotAvailable || len(r.Evidence.Entries) != 0 {
-					t.Errorf("evidence limitation missing: %+v %+v", r.Limitations, r.Evidence)
+				// No evidence is recorded: an informational limitation,
+				// never a failure on its own.
+				if !slices.Contains(codes(r.Limitations), "evidence-missing") || r.Evidence.Analysis != preview.AnalysisAvailable ||
+					len(r.Evidence.Bindings) != 1 || r.Evidence.Bindings[0].State != preview.EvidenceMissing || len(r.Evidence.Entries) != 2 {
+					t.Errorf("evidence: %v %+v", codes(r.Limitations), r.Evidence)
+				}
+				for _, e := range r.Evidence.Entries {
+					if e.Proposed != preview.ProposalUnchanged || e.State != preview.EvidenceMissing || e.ObservedRevision == "" {
+						t.Errorf("entry %+v", e)
+					}
+				}
+			}},
+		{name: "evidence-only: current evidence of a reporting-only edit", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.setEvidence("deny-prod", 1, evidenceCurrent)
+			return []string{"-f", fixture("reporting-only.yaml")}
+		}, plain: 0, gated: 0, complete: true,
+			check: func(t *testing.T, r *preview.Report) {
+				b := r.Evidence.Bindings
+				if len(b) != 1 || b[0].State != preview.EvidenceCurrent || b[0].Current == nil || b[0].Current.Outcomes.Fail != 1 {
+					t.Fatalf("bindings %+v", b)
+				}
+				for _, e := range r.Evidence.Entries {
+					// The reporting-only edit keeps the revision, so the
+					// evidence still describes the proposal.
+					if e.Proposed != preview.ProposalUnchanged || e.State != preview.EvidenceCurrent || e.EvaluatedAt == nil ||
+						!e.EvaluatedAt.Equal(time.Date(2026, 11, 20, 8, 40, 0, 0, time.UTC)) {
+						t.Errorf("entry %+v", e)
+					}
+				}
+				if slices.ContainsFunc(r.Limitations, func(d preview.ReportDiagnostic) bool {
+					return d.Stage == preview.StageEvidence && d.Code != "evidence-per-binding"
+				}) {
+					t.Errorf("limitations %v", codes(r.Limitations))
+				}
+			}},
+		{name: "evidence-only: stale evidence", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.setEvidence("deny-prod", 1, evidenceExpired)
+			return []string{"-f", fixture("unchanged.yaml")}
+		}, plain: 0, gated: 0, complete: true,
+			check: func(t *testing.T, r *preview.Report) {
+				if b := r.Evidence.Bindings; len(b) != 1 || b[0].State != preview.EvidenceStale || b[0].Current.OwnerLimitations != 1 ||
+					!slices.Contains(codes(r.Limitations), "evidence-stale") {
+					t.Errorf("evidence %+v %v", b, codes(r.Limitations))
+				}
+				for _, e := range r.Evidence.Entries {
+					if e.State != preview.EvidenceStale || e.EvaluatedAt != nil {
+						t.Errorf("entry %+v", e)
+					}
+				}
+			}},
+		{name: "evidence-only: unattributable evidence", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.setEvidence("deny-prod", 1, evidenceInconsistent)
+			return []string{"-f", fixture("unchanged.yaml")}
+		}, plain: 0, gated: 0, complete: true,
+			check: func(t *testing.T, r *preview.Report) {
+				if b := r.Evidence.Bindings; len(b) != 1 || b[0].State != preview.EvidenceUnattributable || !slices.Contains(codes(r.Limitations), "evidence-unattributable") {
+					t.Errorf("evidence %+v %v", b, codes(r.Limitations))
+				}
+			}},
+		{name: "evidence-only: controller behind the binding", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.setEvidence("deny-prod", 0, evidenceCurrent)
+			return []string{"-f", fixture("unchanged.yaml")}
+		}, plain: 0, gated: 0, complete: true,
+			check: func(t *testing.T, r *preview.Report) {
+				if b := r.Evidence.Bindings; len(b) != 1 || b[0].State != preview.EvidenceUnattributable {
+					t.Errorf("evidence %+v", b)
+				}
+			}},
+		{name: "current evidence is never attached to a new revision", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.setEvidence("deny-prod", 1, evidenceCurrent)
+			return []string{"-f", fixture("proposed.yaml")}
+		}, plain: 0, gated: 2, complete: true, impacts: true,
+			check: func(t *testing.T, r *preview.Report) {
+				got := map[string]preview.EvidenceProposal{}
+				for _, e := range r.Evidence.Entries {
+					got[e.Key.Policy+"/"+e.Namespace.Name] = e.Proposed
+					switch e.Namespace.Name {
+					case "prod": // observed revision, leaving the proposal
+						if e.State != preview.EvidenceCurrent || e.ObservedRevision == "" || e.Proposed != preview.ProposalWithdrawn {
+							t.Errorf("prod %+v", e)
+						}
+					case "staging": // proposed only: nothing describes it
+						if e.State != preview.EvidenceNotObserved || e.ObservedRevision != "" || e.EvaluatedAt != nil || e.Proposed != preview.ProposalNotEvaluated {
+							t.Errorf("staging %+v", e)
+						}
+					default:
+						t.Errorf("unexpected entry %+v", e)
+					}
+				}
+				if len(got) != 4 || !slices.Contains(codes(r.Limitations), "evidence-not-evaluated") {
+					t.Errorf("entries %v limitations %v", got, codes(r.Limitations))
+				}
+			}},
+		{name: "failure after impacts: undetermined exception despite current evidence", setup: func(_ *testing.T, f *fakeCluster) []string {
+			f.addException()
+			f.setEvidence("deny-prod", 1, evidenceCurrent)
+			return []string{"-f", fixture("proposed.yaml")}
+		}, plain: 1, gated: 1, impacts: true, errors: []string{"exception-impact-undetermined"},
+			check: func(t *testing.T, r *preview.Report) {
+				// Evidence adds no error; the exception input decides.
+				if len(r.Errors) != 1 || r.Evidence.Bindings[0].State != preview.EvidenceCurrent {
+					t.Errorf("errors %v evidence %+v", codes(r.Errors), r.Evidence.Bindings)
 				}
 			}},
 		{name: "reporting-only change", setup: func(*testing.T, *fakeCluster) []string { return []string{"-f", fixture("reporting-only.yaml")} },
@@ -596,7 +730,10 @@ func TestPreviewGoldenReports(t *testing.T) {
 		setup func(f *fakeCluster)
 		args  []string
 	}{
-		{name: "complete", args: []string{"--before", fixture("previous.yaml"), "-f", fixture("proposed.yaml")}},
+		{name: "complete", setup: func(f *fakeCluster) {
+			f.setEvidence("deny-prod", 1, evidenceCurrent)
+			f.setEvidence("audit-all", 1, evidenceExpired)
+		}, args: []string{"--before", fixture("previous.yaml"), "-f", fixture("proposed.yaml")}},
 		{name: "incomplete", setup: func(f *fakeCluster) { f.addException() }, args: []string{"-f", fixture("proposed.yaml")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

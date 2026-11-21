@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -177,11 +178,27 @@ spec:
 
 // serverApply applies a proposal the way the API server and the
 // konstapel-binding-enforcement-epoch policy would: generation +1 when the
-// stored spec changes, epoch +1 when the enforcement fields differ as
-// written. Resolving the result with the real resolver gives the revisions
-// the controller would compute after application.
+// stored spec changes, and the epoch the policy assigns, decided by the
+// policy's own enforcementChanged expression (not the preview's mirror):
+// carried forward, or +1 when the enforcement fields differ as written, from
+// the old generation for a binding without an epoch. Resolving the result
+// with the real resolver gives the revisions the controller would compute
+// after application.
 func serverApply(t *testing.T, w *world, doc string) map[[2]string]string {
 	t.Helper()
+	out := map[[2]string]string{}
+	for _, br := range serverApplied(t, w, doc).Bindings {
+		for _, c := range br.Contributions {
+			out[[2]string{br.Binding.Name, c.Policy}] = c.Revision
+		}
+	}
+	return out
+}
+
+// serverApplied is the controller's resolution after serverApply.
+func serverApplied(t *testing.T, w *world, doc string) targeting.Result {
+	t.Helper()
+	prg := enforcementChangedProgram(t)
 	o := mustSet(t, doc).Objects[0]
 	live := *w.snap
 	live.Live.Profiles = slices.Clone(w.snap.Live.Profiles)
@@ -202,26 +219,24 @@ func serverApply(t *testing.T, w *world, doc string) map[[2]string]string {
 		for i, b := range live.Live.Bindings {
 			if b.Name == o.Identity.Name {
 				nb := *o.Binding.DeepCopy()
-				nb.UID, nb.Generation, nb.Spec.EnforcementEpoch = b.UID, b.Generation, b.Spec.EnforcementEpoch
+				nb.UID, nb.Generation = b.UID, b.Generation
 				if compareStored(KindBinding, stored, o.Spec) != StoredSpecEqual {
 					nb.Generation++
 				}
-				if enforcementFieldsChanged(stored, o.Spec) {
+				base := b.Spec.EnforcementEpoch
+				if base == 0 {
+					base = b.Generation
+				}
+				nb.Spec.EnforcementEpoch = base
+				if admissionEnforcementChanged(t, prg, stored, o.Spec) {
 					nb.Spec.EnforcementEpoch++
 				}
 				live.Live.Bindings[i] = nb
 			}
 		}
 	}
-	res := targeting.Resolve(targeting.Input{Cluster: live.Cluster, Bundles: []targeting.Bundle{w.content[v1alpha1.BundleReference{Name: "hardening", Digest: digestA}].Bundle,
+	return targeting.Resolve(targeting.Input{Cluster: live.Cluster, Bundles: []targeting.Bundle{w.content[v1alpha1.BundleReference{Name: "hardening", Digest: digestA}].Bundle,
 		w.content[v1alpha1.BundleReference{Name: "hardening", Digest: digestB}].Bundle}, Profiles: live.Live.Profiles, Bindings: live.Live.Bindings, Namespaces: (&live).TargetingNamespaces()})
-	out := map[[2]string]string{}
-	for _, br := range res.Bindings {
-		for _, c := range br.Contributions {
-			out[[2]string{br.Binding.Name, c.Policy}] = c.Revision
-		}
-	}
-	return out
 }
 
 func provisional(t *testing.T, w *world, doc string) map[[2]string]string {
@@ -387,6 +402,128 @@ func TestRollbackRequiresANewRevision(t *testing.T) {
 		}
 		if p.Proposed == OutcomeKept {
 			t.Fatalf("nothing is kept by a rollback: %+v", p)
+		}
+	}
+}
+
+// --- 5.2: the owner's enforcement-epoch classification ---
+
+// resolveLive is the controller's resolution of the observed configuration.
+func resolveLive(w *world) targeting.Result {
+	return targeting.Resolve(targeting.Input{Cluster: w.snap.Cluster, Bundles: []targeting.Bundle{w.content[v1alpha1.BundleReference{Name: "hardening", Digest: digestA}].Bundle,
+		w.content[v1alpha1.BundleReference{Name: "hardening", Digest: digestB}].Bundle}, Profiles: w.snap.Live.Profiles, Bindings: w.snap.Live.Bindings, Namespaces: w.snap.TargetingNamespaces()})
+}
+
+// contributorRevisions maps "namespace UID/policy" to the revisions of a
+// binding's contributors in an eligibility result: what an acceptance in
+// that namespace and policy freezes for that binding (exception.Snapshot
+// .Eligibility.Contributors).
+func contributorRevisions(res targeting.Result, binding string) map[string]string {
+	out := map[string]string{}
+	for _, e := range res.Eligibility {
+		for _, c := range e.Contributors {
+			if c.Binding.Name == binding {
+				out[string(e.Namespace.UID)+"/"+e.Policy] = c.Revision
+			}
+		}
+	}
+	return out
+}
+
+// An accepted exception is bound to the contribution revisions of its
+// namespace and policy. After application, computed with the owner's
+// admission expression and the controller's EnforcementRevision (not the
+// preview's mirror), a reporting-only edit keeps every accepted revision and
+// the preview reports no impact and no replacement; an enforcement change
+// replaces exactly the accepted revisions of the edited binding and the
+// preview reports them as replacement-required. Bindings the proposal does
+// not touch keep theirs either way.
+func TestEnforcementEpochKeepsAcceptanceOnlyForReportingEdits(t *testing.T) {
+	sel := revisionSelector
+	cases := []struct {
+		name, doc string
+		reporting bool
+	}{
+		{"interval", bindingWith("deny", "shared", "Deny", sel) + "  assessment: {interval: 12h}\n", true},
+		{"every reporting setting", bindingWith("deny", "shared", "Deny", sel) +
+			"  assessment: {interval: 1h, maxEvidenceAge: 30m, collectionTimeout: 10m, retention: 8760h, destinationRef: {name: archive, uid: d-1}}\n", true},
+		{"mode", bindingWith("deny", "shared", "Audit", sel), false},
+		{"selector", bindingWith("deny", "shared", "Deny", "{matchLabels: {env: production}}"), false},
+		{"selector order", bindingWith("deny", "shared", "Deny", "{matchExpressions: [{key: tier, operator: Exists}, {key: env, operator: In, values: [production, staging]}]}"), false},
+		{"profile", bindingWith("deny", "other", "Deny", sel), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := revisionWorld(t).live(profileWith("other", digestA, polRun+"    - {name: privileged, exceptions: {eligibility: SelfService, maxLifetime: 1h}}\n"), "p-other", 1, 0)
+			before, after := resolveLive(w), serverApplied(t, w, tc.doc)
+			accepted, now := contributorRevisions(before, "deny"), contributorRevisions(after, "deny")
+			if len(accepted) == 0 {
+				t.Fatal("no accepted contributions of the edited binding")
+			}
+			for k, rev := range accepted {
+				if kept := now[k] == rev; kept != tc.reporting {
+					t.Errorf("%s: accepted revision kept after application = %v", k, kept)
+				}
+			}
+			for _, other := range []string{"audit", "legacy"} {
+				if !maps.Equal(contributorRevisions(before, other), contributorRevisions(after, other)) {
+					t.Errorf("the untouched binding %s lost its accepted revisions", other)
+				}
+			}
+
+			c := w.compare(mustSet(t, tc.doc), nil)
+			if !c.Complete {
+				t.Fatal(c.Errors)
+			}
+			if len(c.Objects) != 1 || c.Objects[0].ReportingOnly != tc.reporting {
+				t.Fatalf("objects %+v", c.Objects)
+			}
+			if tc.reporting {
+				if c.ImpactCount != 0 || len(c.Contributions) != 0 || len(c.Namespaces) != 0 {
+					t.Fatalf("a reporting-only edit has impacts: %d %+v", c.ImpactCount, c.Contributions)
+				}
+				return
+			}
+			if c.ImpactCount == 0 {
+				t.Fatal("an enforcement change has no impact")
+			}
+			for _, r := range c.Contributions {
+				if r.Key.Binding == "deny" && r.Before != nil && r.RevisionEffect != RevisionReplacement {
+					t.Errorf("%s: %s, want %s", r.Key.Policy, r.RevisionEffect, RevisionReplacement)
+				}
+				if r.Key.Binding != "deny" {
+					t.Errorf("an untouched binding has a row: %+v", r.Key)
+				}
+			}
+		})
+	}
+}
+
+// A rollback restores the values an acceptance was made under, but the
+// owner's epoch advances, so the accepted revision is not revived: after
+// application the revision differs from both the accepted and the live one.
+func TestRollbackDoesNotReviveAnAcceptedRevision(t *testing.T) {
+	audit := bindingWith("b", "shared", "Audit", "{}")
+	at := func(doc string, gen, epoch int64) *world {
+		return newWorld(t).ns("prod", "prod-uid", map[string]string{"env": "production"}).
+			live(profileWith("shared", digestA, polRun+"    - {name: privileged, exceptions: {eligibility: SelfService, maxLifetime: 1h}}\n"), "p-shared", 1, 0).
+			live(doc, "b-uid", gen, epoch)
+	}
+	accepted := contributorRevisions(resolveLive(at(audit, 1, 1)), "b")
+	w := at(bindingWith("b", "shared", "Deny", "{}"), 2, 2)
+	live, after := contributorRevisions(resolveLive(w), "b"), contributorRevisions(serverApplied(t, w, audit), "b")
+	for k, rev := range accepted {
+		if after[k] == rev || after[k] == live[k] || after[k] == "" {
+			t.Fatalf("%s: accepted %s, live %s, after rollback %s", k, rev, live[k], after[k])
+		}
+	}
+	c := w.compare(mustSet(t, audit), nil)
+	if len(c.Contributions) == 0 {
+		t.Fatal("no rows")
+	}
+	for _, r := range c.Contributions {
+		if r.RevisionEffect != RevisionReplacement || c.Objects[0].ReportingOnly {
+			t.Fatalf("%+v", r)
 		}
 	}
 }

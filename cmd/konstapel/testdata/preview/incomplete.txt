@@ -72,7 +72,13 @@ Exceptions
     prod/legacy-app policy disallow-privileged-containers (accepted false, revision 1): consequence unknown; changed bindings deny-prod, 1 namespace row
 
 Evidence (context, never an impact)
-  analysis not-available: the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+  analysis available: the assessment owner's current evidence (status.assessment.current) of each observed binding the proposal involves, judged at the end of the observation, for the subjects targeting.ExpectedEvidence derives from the observed configuration; evidence is context, never an impact, and a proposed revision is never shown as evaluated
+  binding deny-prod (uid b-deny-prod, generation 1, observed generation 0): missing, 2 expected subjects: no current evidence is recorded: continuous assessment is not installed or has not evaluated this binding yet
+  subjects (state of the observed revision; proposed)
+    binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation namespace prod (ns-prod): missing, observed revision sha256:05626e4c251a58a25b51cab8a17fb4ba2e00f9837cd5d57e9e5993b85925f1bc; proposed withdrawn
+    binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation namespace staging (ns-staging): not-observed, no observed revision; proposed not-evaluated
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers namespace prod (ns-prod): missing, observed revision sha256:408965c4eb917c025ba9c737a0532403d396a0ccc7d517234a21379d8f2b94e8; proposed withdrawn
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers namespace staging (ns-staging): not-observed, no observed revision; proposed not-evaluated
 
 Limitations (informational)
   [bundle-sources-not-selected] observation no bundle-source ConfigMap was selected; only vendored content can be resolved, as for a controller without --bundle-sources-configmap
@@ -81,7 +87,9 @@ Limitations (informational)
   [no-workload-evaluation] comparison configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted
   [rendered-input-assumptions] comparison each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time
   [exception-analysis-unavailable] exceptions the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed
-  [evidence-unavailable] evidence the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+  [evidence-not-evaluated] evidence 2 proposed subjects have a new or replaced revision: nothing has evaluated it, and evidence of the observed revision stays historical context for that revision only
+  [evidence-per-binding] evidence the assessment owner records current evidence per binding, without the revisions or namespaces it evaluated: each subject carries its binding's state, and an evaluation still pending after a recent change is not visible
+  [evidence-missing] evidence compliance.erenius.io/v1alpha1/compliancebindings deny-prod: no current evidence is recorded: continuous assessment is not installed or has not evaluated this binding yet
 
 Errors
   [exception-impact-undetermined] exceptions compliance.erenius.io/v1alpha1/complianceexceptions prod/legacy-app: the proposal changes contributions of policy disallow-privileged-containers in this exception's namespace, and the acceptance comparison is not available, so whether the exception needs renewal, becomes forbidden or loses scope is unknown

@@ -267,6 +267,9 @@ type Comparison struct {
 	Applied        AppliedState         `json:"appliedState"`
 	Limitations    []Diagnostic         `json:"limitations,omitempty"`
 	Errors         []Diagnostic         `json:"errors,omitempty"`
+	// subjects are the expected-evidence subjects of the observed bindings
+	// the proposal involves, for the report's evidence part (evidence.go).
+	subjects map[string]*bindingSubjects
 }
 
 // CompareInput is a complete observation, the validated input sets and the
@@ -326,6 +329,11 @@ func Compare(ctx context.Context, in CompareInput) (*Comparison, error) {
 			c.ImpactCount++
 		}
 	}
+	live := map[string]bool{}
+	for _, b := range a.base.in.Bindings {
+		live[b.Name] = true
+	}
+	c.subjects = a.expectedEvidence(evidenceBindings(c, live))
 	c.Errors = sortDiagnostics(a.errors)
 	c.Complete = len(c.Errors) == 0
 	c.Limitations = sortDiagnostics(append(slices.Clone(snap.Limitations), append(a.limitations,
@@ -348,7 +356,9 @@ type side struct {
 }
 
 type adapter struct {
-	content     []ContentRecord
+	content []ContentRecord
+	// resolved is the verified content of every pin that resolved.
+	resolved    map[v1alpha1.BundleReference]*targeting.Content
 	snap        *Snapshot
 	cand        *Candidate
 	entries     map[Identity]*Entry
@@ -532,6 +542,7 @@ func (a *adapter) resolve(ctx context.Context, src targeting.ContentSource) erro
 	if bc, ok := src.(*BundleContent); ok {
 		a.limitations = append(a.limitations, bc.Limitations()...)
 	}
+	a.resolved = contents
 	for _, s := range []*side{&a.base, &a.next} {
 		s.res = targeting.Resolve(s.in)
 		s.profiles = map[string]*v1alpha1.ComplianceProfile{}

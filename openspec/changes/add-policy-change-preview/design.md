@@ -260,8 +260,36 @@ workflows and direct Devbox commands in documentation.
 - Until the exception integration exists, an observed ComplianceException in a
   namespace and policy with a changed row makes the report incomplete
   (`exception-impact-undetermined`); exceptions elsewhere cannot be affected by
-  the proposal. Evidence is always `not-available`, an informational
-  limitation.
+  the proposal.
+
+### 8. Enforcement-epoch classification and evidence read model (settled with group 5)
+
+- The assessment owner ships the reporting-only versus enforcement
+  classification only as CEL: the `enforcementChanged` variable of the
+  `konstapel-binding-enforcement-epoch` admission policy, enforced
+  independently by the ComplianceBinding transition rule. Its Go consumers
+  (`targeting.BindingEpoch`, `EnforcementRevision`) read the resulting epoch,
+  not the classification. The preview therefore keeps its Go equivalent
+  (`enforcementFieldsChanged`) to predict the epoch of a hypothetical update,
+  and the tests pin it to both owner statements: the policy's compiled
+  expression and the CRD rule (the predicted epoch is accepted and the other
+  rejected). The after-application side of the revision tests is computed
+  with the policy's own expression, not the equivalent. Revisions still come
+  only from `EnforcementRevision`; no preview-only revision algorithm exists.
+- Evidence consumes `targeting.ExpectedEvidence` of the observed
+  configuration for subjects and the owner's current-evidence read model,
+  `status.assessment.current` of each binding, for attribution and freshness.
+  The preview does not re-run the collector's attribution: it would need
+  engine reports, workloads and the controller's continuity boundaries, which
+  widens the reader permissions and still could not reproduce the boundaries.
+  The owner's status is per binding and does not record the evaluated
+  revisions, so each subject carries its binding's state; the targeting
+  controller's `observedGeneration` behind the binding's generation makes the
+  evidence unattributable. A proposed revision that differs from the observed
+  one is `not-evaluated`. The status is read with the bindings, outside the
+  rechecked projections. Revision-attributed historical runs
+  (`AssessmentRun.status.enforcementRevisions`) are not read: they are
+  protected and would need an additional reader permission.
 
 ## Risks / Trade-offs
 

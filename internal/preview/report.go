@@ -64,9 +64,6 @@ const (
 	// LimitExceptionAnalysisUnavailable: acceptance consequences (renewal,
 	// newly forbidden, lifetime, removed scope) are not analyzed yet.
 	LimitExceptionAnalysisUnavailable ObserveCode = "exception-analysis-unavailable"
-	// LimitEvidenceUnavailable: attributed assessment evidence is not read
-	// yet; no evidence context is reported.
-	LimitEvidenceUnavailable ObserveCode = "evidence-unavailable"
 )
 
 // ReportDiagnostic is one coded error or limitation with its location: an
@@ -176,6 +173,8 @@ const (
 	// preview, so the part is not analyzed. Its entries are always empty;
 	// that emptiness never means "nothing is affected".
 	AnalysisNotAvailable Analysis = "not-available"
+	// AnalysisAvailable: the owning integration produced the part.
+	AnalysisAvailable Analysis = "available"
 )
 
 // ExceptionSubject is one observed ComplianceException that lies in a
@@ -213,23 +212,33 @@ type ExceptionReport struct {
 	Consequences        []ExceptionConsequence `json:"consequences"`
 }
 
-// EvidenceEntry is the shape of one piece of attributed evidence context.
-// No entry is produced until the assessment owner's evidence attribution
-// and freshness contract is integrated.
+// EvidenceEntry is the evidence context of one expected-evidence subject:
+// one contribution in one namespace instance. State describes the evidence
+// of the observed revision (the binding's state, see BindingEvidence);
+// Proposed says whether that evidence also describes the proposal.
 type EvidenceEntry struct {
-	Key              ContributionKey        `json:"key"`
-	Namespace        targeting.NamespaceRef `json:"namespace"`
-	State            string                 `json:"state"`
-	ObservedRevision string                 `json:"observedRevision,omitempty"`
-	EvaluatedAt      *time.Time             `json:"evaluatedAt,omitempty"`
+	Key       ContributionKey        `json:"key"`
+	Namespace targeting.NamespaceRef `json:"namespace"`
+	State     EvidenceState          `json:"state"`
+	// ObservedRevision is the subject's observed enforcement revision;
+	// empty for a subject that exists only in the proposal.
+	ObservedRevision string `json:"observedRevision,omitempty"`
+	// EvaluatedAt is set only for current evidence: the binding's oldest
+	// source evaluation, so every observation of this subject was evaluated
+	// at or after it.
+	EvaluatedAt *time.Time       `json:"evaluatedAt,omitempty"`
+	Proposed    EvidenceProposal `json:"proposed"`
 }
 
 // EvidenceReport is the evidence part of the report. Evidence is context,
-// never a policy impact.
+// never a policy impact, and never makes a report incomplete.
 type EvidenceReport struct {
-	Analysis Analysis        `json:"analysis"`
-	Reason   string          `json:"reason"`
-	Entries  []EvidenceEntry `json:"entries"`
+	Analysis Analysis `json:"analysis"`
+	Reason   string   `json:"reason"`
+	// Bindings is the owner's current evidence of every observed binding the
+	// proposal involves.
+	Bindings []BindingEvidence `json:"bindings"`
+	Entries  []EvidenceEntry   `json:"entries"`
 }
 
 // Report is the preview result, version ReportSchemaVersion. A report is
@@ -258,7 +267,7 @@ type Report struct {
 
 const (
 	exceptionsReason = "the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed"
-	evidenceReason   = "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated"
+	evidenceReason   = "no comparison ran, so no observed subject is known and no evidence is reported"
 )
 
 func newReport() *Report {
@@ -267,7 +276,7 @@ func newReport() *Report {
 		Inputs:      ReportInputs{Streams: []Stream{}, Objects: []InputObject{}},
 		Content:     []ContentRecord{},
 		Exceptions:  ExceptionReport{Analysis: AnalysisNotAvailable, Reason: exceptionsReason, PotentiallyAffected: []ExceptionSubject{}, Consequences: []ExceptionConsequence{}},
-		Evidence:    EvidenceReport{Analysis: AnalysisNotAvailable, Reason: evidenceReason, Entries: []EvidenceEntry{}},
+		Evidence:    EvidenceReport{Analysis: AnalysisNotAvailable, Reason: evidenceReason, Bindings: []BindingEvidence{}, Entries: []EvidenceEntry{}},
 		Limitations: []ReportDiagnostic{}, Errors: []ReportDiagnostic{}}
 }
 
@@ -448,8 +457,7 @@ func (r *Report) fillExceptions(snap *Snapshot, ch *ReportChanges) {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	r.Limitations = append(r.Limitations,
-		ReportDiagnostic{Code: LimitExceptionAnalysisUnavailable, Stage: StageExceptions, Message: exceptionsReason},
-		ReportDiagnostic{Code: LimitEvidenceUnavailable, Stage: StageEvidence, Message: evidenceReason})
+		ReportDiagnostic{Code: LimitExceptionAnalysisUnavailable, Stage: StageExceptions, Message: exceptionsReason})
 }
 
 func rowTouches(row ContributionChange, namespace string) bool {

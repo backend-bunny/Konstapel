@@ -388,6 +388,9 @@ type Snapshot struct {
 	Exceptions          []ObservedException          `json:"exceptions,omitempty"`
 	AcceptanceSnapshots []ObservedAcceptanceSnapshot `json:"acceptanceSnapshots,omitempty"`
 	Sources             *ObservedSources             `json:"sources,omitempty"`
+	// Evidence is every live binding's recorded evidence state
+	// (evidence.go), informational and not rechecked.
+	Evidence []ObservedEvidence `json:"evidence,omitempty"`
 	// inputs is the observed source configuration and the referenced
 	// objects' values, for the bundle content adapter (content.go). It holds
 	// Secret data: it is never serialized and formats as redacted.
