@@ -100,6 +100,7 @@ func Run(ctx context.Context, o RunOptions) *Report {
 	}
 	r.fillComparison(c, snap.Limitations)
 	r.fillExceptions(snap, r.Changes)
+	r.fillEvidence(snap, c)
 	return r.finish()
 }
 

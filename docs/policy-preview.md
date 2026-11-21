@@ -1,12 +1,12 @@
 # Policy change preview
 
 > **Status: the `konstapel preview` command, its JSON report v1 and its exit
-> statuses are implemented, without exception-acceptance consequences and
-> evidence context.** Those two parts depend on the exception and assessment
-> owners (`add-policy-change-preview` group 5). Until then the report states
-> them as `not-available`, and a preview whose proposal changes the namespace
-> and policy of an observed ComplianceException is **incomplete** (exit
-> status 1) rather than claiming that no acceptance is affected. See
+> statuses are implemented, including evidence context, but without
+> exception-acceptance consequences.** Those depend on the exception owner
+> (`add-policy-change-preview` 5.1). Until then the exceptions part states
+> `not-available`, and a preview whose proposal changes the namespace and
+> policy of an observed ComplianceException is **incomplete** (exit status 1)
+> rather than claiming that no acceptance is affected. See
 > [Command line](#command-line), [Report](#report-json-v1),
 > [Exit status](#exit-status) and [Local and CI use](#local-and-ci-use). The
 > rest of this page describes the parts underneath: how rendered manifests are
@@ -76,7 +76,7 @@ has a stable order, so the same captured inputs give the same bytes.
 | `content` | Every pinned bundle read, with `digestKind` (see [Digest meanings](#digest-meanings)) |
 | `changes` | `objects`, `absentRemovals`, `contributions` and `namespaces` of the [comparison](#what-is-compared). `null` when no comparison ran: undetermined, never empty |
 | `appliedState` | [Observed applied state](#observed-applied-state), informational. `null` when no comparison ran |
-| `exceptions`, `evidence` | [Exceptions and evidence](#exceptions-and-evidence) |
+| `exceptions`, `evidence` | [Exceptions and evidence](#exceptions-and-evidence): acceptance consequences, and evidence context of the observed bindings the proposal involves |
 | `limitations` | Coded informational bounds, each with its `stage` |
 | `errors` | Coded problems that make the report incomplete, each with its `stage` (`input`, `kubeconfig`, `observation`, `content`, `comparison`, `exceptions`) and location |
 
@@ -94,10 +94,10 @@ really replaced and any acceptance bound to their revisions no longer matches.
 
 ### Exceptions and evidence
 
-The acceptance comparison of the exception owner and the evidence attribution
-of the assessment owner are not integrated yet, so both parts report
-`analysis: not-available` with a reason, and their `consequences` and
-`entries` are always empty. That emptiness never means "nothing affected":
+The acceptance comparison of the exception owner is not integrated yet, so
+the exceptions part reports `analysis: not-available` with a reason, and its
+`consequences` are always empty. That emptiness never means "nothing
+affected":
 
 - `exceptions.observed` is the number of ComplianceExceptions in the complete
   observation. Each one in a namespace and policy that a changed contribution
@@ -108,15 +108,75 @@ of the assessment owner are not integrated yet, so both parts report
   elsewhere cannot be affected by the proposal, because acceptance depends only
   on the contributions of its own namespace and policy. Every compared report
   also carries the `exception-analysis-unavailable` limitation.
-- Evidence is context, never an impact. Every compared report carries the
-  `evidence-unavailable` limitation, which alone does not make it incomplete
-  or change the exit status.
+
+Evidence is context, never an impact: it never makes a report incomplete,
+never counts in `impactCount`, and never changes the exit status. A compared
+report has `evidence.analysis: available` (without a comparison it stays
+`not-available` and empty). It is built from two contracts of their owners:
+
+- The subjects are `targeting.ExpectedEvidence` of the observed
+  configuration: one per contribution and namespace instance (by UID), with
+  the revision the controller computes from the live configuration. These are
+  the subjects the assessment collector expects evidence for. A policy or
+  binding whose observed configuration does not resolve, or that the
+  controller cannot render, is a stale scope instead.
+- The evidence is the assessment owner's current evidence,
+  `status.assessment.current` of each ComplianceBinding, read with the binding
+  in the final capture (no extra request and no extra permission). The owner
+  writes it after its own attribution rules (results that name the engine
+  policy, its revision and the workload, evaluated after the workload's
+  continuity boundary and within `maxEvidenceAge`) and its freshness rules.
+  The preview does not re-run attribution: it reads no engine report and no
+  workload. Because the owner rewrites this status whenever evidence changes,
+  it is not part of the rechecked projections (see
+  [Consistency and limits](#consistency-and-limits)).
+
+`evidence.bindings` lists every observed binding the proposal involves (it has
+a contribution row, or the proposal restates or removes it) with the owner's
+counts and times as recorded (`evaluatedAt`, `oldestEvaluation`,
+`nextExpiry`, and the number of the owner's limitation messages, which are not
+copied), its `expectedSubjects` and `staleScopes`, and a `state` judged at the
+end of the observation, in this order:
+
+| `state` | Meaning |
+| --- | --- |
+| `missing` | No current evidence is recorded: continuous assessment is not installed or has not evaluated the binding yet |
+| `stale` | The owner's `nextExpiry` passed by the end of the observation |
+| `unattributable` | The record cannot describe the observed revisions: it does not match the supported contract, the targeting controller has not observed the binding's current generation, part of the observed configuration is a stale scope, the counts do not add up, or the owner evaluated no targets while subjects are expected |
+| `no-targets` | The owner evaluated an empty scope and none is expected. Not a pass |
+| `incomplete` | Fresh and consistent, but some expected observations lack attributable evidence; the owner's status does not say which |
+| `current` | Fresh, consistent and `Complete`: every expected observation of the binding is attributable |
+
+`evidence.entries` has one entry per subject of those bindings, plus one per
+subject that only the proposal has (a new contribution or a newly targeted
+namespace):
+
+| Field | Meaning |
+| --- | --- |
+| `key`, `namespace` | Contribution and namespace instance |
+| `state` | The binding's state for the observed revision, or `not-observed` for a subject only the proposal has |
+| `observedRevision` | The observed enforcement revision; absent for `not-observed` |
+| `evaluatedAt` | Only for `current`: the binding's oldest source evaluation, so this subject was evaluated at or after it |
+| `proposed` | `unchanged` (the proposal keeps the revision, so the evidence describes it too), `not-evaluated` (a new or replaced revision: nothing has evaluated it), or `withdrawn` (the subject leaves the proposal) |
+
+Existing results are never attached to a proposed revision: an entry whose
+`proposed` is `not-evaluated` describes evidence of its observed revision
+only, as historical context, and the `evidence-not-evaluated` limitation
+counts those subjects. The owner records current evidence per binding, not
+per revision or namespace, so every subject carries its binding's state, and
+an owner evaluation still pending right after a binding change is not visible
+(`evidence-per-binding`). Each binding in another state than `current` or
+`no-targets` adds the limitation `evidence-missing`, `evidence-stale`,
+`evidence-unattributable` or `evidence-incomplete`. None of them is an error.
+By contrast, an exception input the preview needs but cannot obtain (a denied
+or unserved exception or snapshot read, or an exception whose consequence is
+undetermined, above) makes the report incomplete.
 
 ## Exit status
 
 | Outcome | Default | `--fail-on-impact` |
 | --- | --- | --- |
-| Complete, no policy impacts (reporting-only edits and evidence limitations included) | 0 | 0 |
+| Complete, no policy impacts (reporting-only edits and missing, stale or unattributable evidence included) | 0 | 0 |
 | Complete, policy impacts | 0 | 2 |
 | Invalid flags or inputs, failed or incomplete preview, or a report that cannot be written | 1 | 1 |
 
@@ -523,7 +583,7 @@ other request occurs.
 | Resource | API group | Where | Verbs | Read for |
 | --- | --- | --- | --- | --- |
 | `namespaces` | core | cluster | `get` (`kube-system`), `list` | Cluster identity (`kube-system:<uid>`, as the controller records it); namespace instances (name, UID, labels) |
-| `complianceprofiles`, `compliancebindings` | `compliance.erenius.io` | cluster | `list` | Live desired configuration, including every binding of a shared profile |
+| `complianceprofiles`, `compliancebindings` | `compliance.erenius.io` | cluster | `list` | Live desired configuration, including every binding of a shared profile; the bindings' `status.observedGeneration` and `status.assessment.current` for [evidence](#exceptions-and-evidence) |
 | `complianceexceptions` | `compliance.erenius.io` | all namespaces | `list` | Protected acceptance records and snapshot references |
 | `validatingpolicies` | `policies.kyverno.io` | cluster | `list`, label `app.kubernetes.io/managed-by=konstapel` | Applied engine policies, their recorded contribution and readiness |
 | `configmaps` | core | controller namespace | `list` (acceptance snapshots, by label); `get` (the bundle-source ConfigMap and the trust ConfigMaps it names) | Frozen acceptance snapshots; source and trust configuration |
@@ -571,8 +631,10 @@ acceptance records and snapshots, and source and trust data, including the
 referenced values of Secrets (compared as a digest keyed per run, so not even
 a digest of a credential leaves the process). Status timestamps,
 report times and unrelated annotations are ignored, so constantly changing
-status does not force retries. If a relevant projection changed, or a list
-continuation expired, the whole capture is repeated, at most two recaptures.
+status does not force retries. The bindings' recorded current evidence is
+informational and taken from the final capture without a recheck. If a
+relevant projection changed, or a list continuation expired, the whole capture
+is repeated, at most two recaptures.
 Two consecutive agreeing captures detect drift; they do not prove an atomic
 snapshot or describe the cluster at apply time.
 
@@ -725,7 +787,13 @@ hashes:
   metadata or status are stored as the live object already is. The generation
   does not advance and no contribution or namespace row is created.
 - **Reporting only.** A binding edit outside `profileRef`, `namespaceSelector` and
-  `mode` keeps the enforcement epoch, so its revisions stay `unchanged`.
+  `mode` keeps the enforcement epoch, so its revisions stay `unchanged`, and an
+  exception accepted for them stays bound to them. The classification is the
+  assessment owner's: the `enforcementChanged` expression of the
+  `konstapel-binding-enforcement-epoch` admission policy, which the CRD's
+  transition rule enforces independently. The owner ships it as CEL only, so
+  the preview applies it through a Go equivalent that the tests evaluate
+  against both the policy's own expression and the CRD rule.
 - **No observed epoch.** A binding written before the epoch policy existed has no
   `enforcementEpoch`. The preview cannot see whether the admission policy is
   installed, so it assumes the generation fallback, where every stored change
@@ -968,6 +1036,8 @@ The preview does not emulate server-side apply, field ownership, admission
 mutation or admission validation beyond the schema rules above, and it cannot
 express deleting and recreating one name in a single step. Applying the
 configuration stays a separate Kubernetes or GitOps action. Exception
-acceptance consequences and attributed evidence are not analyzed yet; the
-report says so instead of describing them (see
+acceptance consequences are not analyzed yet; the report says so instead of
+describing them. Evidence is the assessment owner's recorded current evidence
+of the observed configuration; the preview evaluates no workload, reads no
+policy report, retrieves no archived evidence and schedules no assessment (see
 [Exceptions and evidence](#exceptions-and-evidence)).

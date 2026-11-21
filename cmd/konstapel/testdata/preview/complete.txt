@@ -95,7 +95,28 @@ Exceptions
   0 ComplianceExceptions observed
 
 Evidence (context, never an impact)
-  analysis not-available: the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+  analysis available: the assessment owner's current evidence (status.assessment.current) of each observed binding the proposal involves, judged at the end of the observation, for the subjects targeting.ExpectedEvidence derives from the observed configuration; evidence is context, never an impact, and a proposed revision is never shown as evaluated
+  binding audit-all (uid b-audit-all, generation 1, observed generation 1): stale, 8 expected subjects: the owner's current evidence expired at 2026-11-20T06:00:00Z, before the end of the observation; it is not current until the owner evaluates again
+    owner's current evidence of the observed revisions: Complete, 4 expected, 4 attributable, 0 missing, 0 rejected, 0 unresolved, 0 stale scopes
+    outcomes: pass 4, fail 0, error 0, skip 0, accepted risk 0, not applicable 0, unknown 0
+    evaluated 2026-11-20T05:00:00Z, oldest source evaluation 2026-11-20T04:00:00Z, next expiry 2026-11-20T06:00:00Z, 1 owner limitation
+  binding deny-prod (uid b-deny-prod, generation 1, observed generation 1): current, 2 expected subjects: every expected observation of the binding is attributable and fresh
+    owner's current evidence of the observed revisions: Complete, 4 expected, 4 attributable, 0 missing, 0 rejected, 0 unresolved, 0 stale scopes
+    outcomes: pass 3, fail 1, error 0, skip 0, accepted risk 0, not applicable 0, unknown 0
+    evaluated 2026-11-20T09:00:00Z, oldest source evaluation 2026-11-20T08:40:00Z, next expiry 2026-11-20T10:40:00Z, 0 owner limitations
+  subjects (state of the observed revision; proposed)
+    binding audit-all (uid b-audit-all) policy disallow-privilege-escalation namespace konstapel-system (ns-konstapel): stale, observed revision sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privilege-escalation namespace kube-system (ks-0001): stale, observed revision sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privilege-escalation namespace prod (ns-prod): stale, observed revision sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privilege-escalation namespace staging (ns-staging): stale, observed revision sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privileged-containers namespace konstapel-system (ns-konstapel): stale, observed revision sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privileged-containers namespace kube-system (ks-0001): stale, observed revision sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privileged-containers namespace prod (ns-prod): stale, observed revision sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2; proposed withdrawn
+    binding audit-all (uid b-audit-all) policy disallow-privileged-containers namespace staging (ns-staging): stale, observed revision sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2; proposed withdrawn
+    binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation namespace prod (ns-prod): current, observed revision sha256:05626e4c251a58a25b51cab8a17fb4ba2e00f9837cd5d57e9e5993b85925f1bc, evaluated at or after 2026-11-20T08:40:00Z; proposed withdrawn
+    binding deny-prod (uid b-deny-prod) policy disallow-privilege-escalation namespace staging (ns-staging): not-observed, no observed revision; proposed not-evaluated
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers namespace prod (ns-prod): current, observed revision sha256:408965c4eb917c025ba9c737a0532403d396a0ccc7d517234a21379d8f2b94e8, evaluated at or after 2026-11-20T08:40:00Z; proposed withdrawn
+    binding deny-prod (uid b-deny-prod) policy disallow-privileged-containers namespace staging (ns-staging): not-observed, no observed revision; proposed not-evaluated
 
 Limitations (informational)
   [bundle-sources-not-selected] observation no bundle-source ConfigMap was selected; only vendored content can be resolved, as for a controller without --bundle-sources-configmap
@@ -104,7 +125,9 @@ Limitations (informational)
   [no-workload-evaluation] comparison configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted
   [rendered-input-assumptions] comparison each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time
   [exception-analysis-unavailable] exceptions the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed
-  [evidence-unavailable] evidence the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated
+  [evidence-not-evaluated] evidence 2 proposed subjects have a new or replaced revision: nothing has evaluated it, and evidence of the observed revision stays historical context for that revision only
+  [evidence-per-binding] evidence the assessment owner records current evidence per binding, without the revisions or namespaces it evaluated: each subject carries its binding's state, and an evaluation still pending after a recent change is not visible
+  [evidence-stale] evidence compliance.erenius.io/v1alpha1/compliancebindings audit-all: the owner's current evidence expired at 2026-11-20T06:00:00Z, before the end of the observation; it is not current until the owner evaluates again
 
 Errors
   none

@@ -844,9 +844,258 @@
     "consequences": []
   },
   "evidence": {
-    "analysis": "not-available",
-    "reason": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated",
-    "entries": []
+    "analysis": "available",
+    "reason": "the assessment owner's current evidence (status.assessment.current) of each observed binding the proposal involves, judged at the end of the observation, for the subjects targeting.ExpectedEvidence derives from the observed configuration; evidence is context, never an impact, and a proposed revision is never shown as evaluated",
+    "bindings": [
+      {
+        "binding": "audit-all",
+        "uid": "b-audit-all",
+        "generation": 1,
+        "observedGeneration": 1,
+        "state": "stale",
+        "reason": "the owner's current evidence expired at 2026-11-20T06:00:00Z, before the end of the observation; it is not current until the owner evaluates again",
+        "expectedSubjects": 8,
+        "staleScopes": [],
+        "current": {
+          "evidence": {
+            "completeness": "Complete",
+            "expected": 4,
+            "attributable": 4,
+            "missing": 0,
+            "rejected": 0,
+            "unresolved": 0
+          },
+          "outcomes": {
+            "pass": 4,
+            "fail": 0,
+            "error": 0,
+            "skip": 0,
+            "acceptedRisk": 0,
+            "notApplicable": 0,
+            "unknown": 0
+          },
+          "evaluatedAt": "2026-11-20T05:00:00Z",
+          "oldestEvaluation": "2026-11-20T04:00:00Z",
+          "nextExpiry": "2026-11-20T06:00:00Z",
+          "ownerLimitations": 1
+        }
+      },
+      {
+        "binding": "deny-prod",
+        "uid": "b-deny-prod",
+        "generation": 1,
+        "observedGeneration": 1,
+        "state": "current",
+        "reason": "every expected observation of the binding is attributable and fresh",
+        "expectedSubjects": 2,
+        "staleScopes": [],
+        "current": {
+          "evidence": {
+            "completeness": "Complete",
+            "expected": 4,
+            "attributable": 4,
+            "missing": 0,
+            "rejected": 0,
+            "unresolved": 0
+          },
+          "outcomes": {
+            "pass": 3,
+            "fail": 1,
+            "error": 0,
+            "skip": 0,
+            "acceptedRisk": 0,
+            "notApplicable": 0,
+            "unknown": 0
+          },
+          "evaluatedAt": "2026-11-20T09:00:00Z",
+          "oldestEvaluation": "2026-11-20T08:40:00Z",
+          "nextExpiry": "2026-11-20T10:40:00Z",
+          "ownerLimitations": 0
+        }
+      }
+    ],
+    "entries": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "konstapel-system",
+          "uid": "ns-konstapel"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "kube-system",
+          "uid": "ks-0001"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:091bff567f7a4eb6eae7f217e28c2522e195e7bb79425e0670f87e211e7ff20d",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "konstapel-system",
+          "uid": "ns-konstapel"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "kube-system",
+          "uid": "ks-0001"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "audit-all",
+          "bindingUID": "b-audit-all",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "stale",
+        "observedRevision": "sha256:3bc6434ed1c2da2cac5570b9c0a4328c20b3911a4ea8a0e7c832235f96148cd2",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "current",
+        "observedRevision": "sha256:05626e4c251a58a25b51cab8a17fb4ba2e00f9837cd5d57e9e5993b85925f1bc",
+        "evaluatedAt": "2026-11-20T08:40:00Z",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "not-observed",
+        "proposed": "not-evaluated"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "current",
+        "observedRevision": "sha256:408965c4eb917c025ba9c737a0532403d396a0ccc7d517234a21379d8f2b94e8",
+        "evaluatedAt": "2026-11-20T08:40:00Z",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "not-observed",
+        "proposed": "not-evaluated"
+      }
+    ]
   },
   "limitations": [
     {
@@ -881,9 +1130,21 @@
       "message": "the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed"
     },
     {
-      "code": "evidence-unavailable",
+      "code": "evidence-not-evaluated",
       "stage": "evidence",
-      "message": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated"
+      "message": "2 proposed subjects have a new or replaced revision: nothing has evaluated it, and evidence of the observed revision stays historical context for that revision only"
+    },
+    {
+      "code": "evidence-per-binding",
+      "stage": "evidence",
+      "message": "the assessment owner records current evidence per binding, without the revisions or namespaces it evaluated: each subject carries its binding's state, and an evaluation still pending after a recent change is not visible"
+    },
+    {
+      "code": "evidence-stale",
+      "stage": "evidence",
+      "resource": "compliance.erenius.io/v1alpha1/compliancebindings",
+      "name": "audit-all",
+      "message": "the owner's current evidence expired at 2026-11-20T06:00:00Z, before the end of the observation; it is not current until the owner evaluates again"
     }
   ],
   "errors": []

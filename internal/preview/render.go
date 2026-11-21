@@ -374,9 +374,42 @@ func (t textWriter) exceptions(e ExceptionReport) {
 func (t textWriter) evidence(e EvidenceReport) {
 	t.section("Evidence (context, never an impact)")
 	t.line(1, "analysis %s: %s", e.Analysis, e.Reason)
-	for _, en := range e.Entries {
-		t.line(2, "%s namespace %s: %s", keyString(en.Key), en.Namespace.Name, en.State)
+	for _, b := range e.Bindings {
+		t.line(1, "binding %s (uid %s, generation %d, observed generation %d): %s, %s: %s", b.Binding, b.UID, b.Generation, b.ObservedGeneration, b.State,
+			plural(b.ExpectedSubjects, "expected subject", "expected subjects"), b.Reason)
+		for _, s := range b.StaleScopes {
+			t.line(2, "stale scope %s: %s", orNone(s.Policy), s.Reason)
+		}
+		if c := b.Current; c != nil {
+			ev, o := c.Evidence, c.Outcomes
+			t.line(2, "owner's current evidence of the observed revisions: %s, %d expected, %d attributable, %d missing, %d rejected, %d unresolved, %d stale scopes",
+				ev.Completeness, ev.Expected, ev.Attributable, ev.Missing, ev.Rejected, ev.Unresolved, ev.StaleScopes)
+			t.line(2, "outcomes: pass %d, fail %d, error %d, skip %d, accepted risk %d, not applicable %d, unknown %d", o.Pass, o.Fail, o.Error, o.Skip, o.AcceptedRisk, o.NotApplicable, o.Unknown)
+			t.line(2, "evaluated %s, oldest source evaluation %s, next expiry %s, %s", c.EvaluatedAt.Format(time.RFC3339), timeText(c.OldestEvaluation),
+				timeText(c.NextExpiry), plural(c.OwnerLimitations, "owner limitation", "owner limitations"))
+		}
 	}
+	if len(e.Entries) > 0 {
+		t.line(1, "subjects (state of the observed revision; proposed)")
+	}
+	for _, en := range e.Entries {
+		rev := "no observed revision"
+		if en.ObservedRevision != "" {
+			rev = "observed revision " + en.ObservedRevision
+		}
+		at := ""
+		if en.EvaluatedAt != nil {
+			at = ", evaluated at or after " + en.EvaluatedAt.Format(time.RFC3339)
+		}
+		t.line(2, "%s namespace %s (%s): %s, %s%s; proposed %s", keyString(en.Key), en.Namespace.Name, en.Namespace.UID, en.State, rev, at, en.Proposed)
+	}
+}
+
+func timeText(t *time.Time) string {
+	if t == nil {
+		return "(none)"
+	}
+	return t.Format(time.RFC3339)
 }
 
 func (t textWriter) diagnostics(title string, ds []ReportDiagnostic) {

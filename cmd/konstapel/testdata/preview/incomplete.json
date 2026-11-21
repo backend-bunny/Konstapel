@@ -618,9 +618,81 @@
     "consequences": []
   },
   "evidence": {
-    "analysis": "not-available",
-    "reason": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated",
-    "entries": []
+    "analysis": "available",
+    "reason": "the assessment owner's current evidence (status.assessment.current) of each observed binding the proposal involves, judged at the end of the observation, for the subjects targeting.ExpectedEvidence derives from the observed configuration; evidence is context, never an impact, and a proposed revision is never shown as evaluated",
+    "bindings": [
+      {
+        "binding": "deny-prod",
+        "uid": "b-deny-prod",
+        "generation": 1,
+        "observedGeneration": 0,
+        "state": "missing",
+        "reason": "no current evidence is recorded: continuous assessment is not installed or has not evaluated this binding yet",
+        "expectedSubjects": 2,
+        "staleScopes": [],
+        "current": null
+      }
+    ],
+    "entries": [
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "missing",
+        "observedRevision": "sha256:05626e4c251a58a25b51cab8a17fb4ba2e00f9837cd5d57e9e5993b85925f1bc",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privilege-escalation"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "not-observed",
+        "proposed": "not-evaluated"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "prod",
+          "uid": "ns-prod"
+        },
+        "state": "missing",
+        "observedRevision": "sha256:408965c4eb917c025ba9c737a0532403d396a0ccc7d517234a21379d8f2b94e8",
+        "proposed": "withdrawn"
+      },
+      {
+        "key": {
+          "cluster": "kube-system:ks-0001",
+          "binding": "deny-prod",
+          "bindingUID": "b-deny-prod",
+          "policy": "disallow-privileged-containers"
+        },
+        "namespace": {
+          "name": "staging",
+          "uid": "ns-staging"
+        },
+        "state": "not-observed",
+        "proposed": "not-evaluated"
+      }
+    ]
   },
   "limitations": [
     {
@@ -655,9 +727,21 @@
       "message": "the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed"
     },
     {
-      "code": "evidence-unavailable",
+      "code": "evidence-not-evaluated",
       "stage": "evidence",
-      "message": "the assessment owner's evidence attribution and freshness contract (add-continuous-assessments) is not integrated yet: no evidence context is read, and no policy revision is shown as evaluated"
+      "message": "2 proposed subjects have a new or replaced revision: nothing has evaluated it, and evidence of the observed revision stays historical context for that revision only"
+    },
+    {
+      "code": "evidence-per-binding",
+      "stage": "evidence",
+      "message": "the assessment owner records current evidence per binding, without the revisions or namespaces it evaluated: each subject carries its binding's state, and an evaluation still pending after a recent change is not visible"
+    },
+    {
+      "code": "evidence-missing",
+      "stage": "evidence",
+      "resource": "compliance.erenius.io/v1alpha1/compliancebindings",
+      "name": "deny-prod",
+      "message": "no current evidence is recorded: continuous assessment is not installed or has not evaluated this binding yet"
     }
   ],
   "errors": [
