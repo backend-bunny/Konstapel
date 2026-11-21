@@ -39,7 +39,7 @@ Konstapel grants nothing for it.
 | Identity | Access |
 | --- | --- |
 | Application team: ClusterRole `konstapel-exception-editor` (`config/rbac/exception-editor.yaml`), bound with a **RoleBinding in the team's namespace** | get, list, watch, create, update, patch and delete on `complianceexceptions` in that namespace; read-only status. Nothing else. |
-| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It cannot write an exception's spec or metadata, so it cannot revoke, renew or reactivate one. |
+| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It may `update`/`patch` an exception only to release the revocation finalizer once the revocation is recorded independently ([Revocation records](#revocation-records)). Admission rejects any other change it sends, so it cannot accept, renew, revoke or reactivate one. |
 | Platform administrators: `konstapel-compliance-admin` | Central profiles and bindings. Does not write exceptions on a team's behalf. |
 
 The editor role is not aggregated into the built-in `admin`/`edit` roles:
@@ -163,7 +163,7 @@ transitions:
 | Repeat revoke | same revision, `true` to `true` | Admitted. The first record is kept. |
 | Reactivate | same revision, `true` to `false`, including an update that omits `revoked` | Rejected: `RenewalRequired`. |
 | Renew | revision + 1, `revoked` stays `false` | An acceptance (above). |
-| Renew a revoked revision | revision + 1, `true` to `false` | Rejected for now: `RevocationHistoryPending` (see [below](#what-revocation-does-not-do-yet)). |
+| Renew a revoked revision | revision + 1, `true` to `false` | An acceptance (above), once the revocation is recorded independently; until then `RevocationHistoryPending` ([Revocation records](#revocation-records)). The renewal removes the revocation annotation from the resource. |
 | Renew and revoke together | revision + 1 with `revoked: true` | Rejected: `InvalidRevocationTransition`. |
 
 Admission messages start with the reason, as acceptance denials do. Metadata
@@ -186,7 +186,9 @@ is overwritten. The annotation holds:
 In the same write it adds the finalizer
 `compliance.erenius.io/revocation-history`. The record sits next to the
 acceptance record and changes nothing in it: the accepting actor, reason,
-expiry and snapshot stay as accepted.
+expiry and snapshot stay as accepted. The controller then copies the record
+into an independent [revocation record](#revocation-records) and releases the
+finalizer.
 
 The validating webhook checks that the record belongs to the request: the
 authenticated caller, the stored UID, the current revision, the claim, a time
@@ -194,10 +196,15 @@ within two minutes of its clock, and the finalizer. On every other create or
 update, the record and the finalizer must be exactly as stored:
 
 - a creation carries neither;
-- no edit adds, rewrites or removes either, whoever sends it;
+- no edit adds, rewrites or removes either, except as below;
 - a repeated revocation keeps the first actor and time;
 - a GitOps re-apply that drops the annotation is rejected, like one that drops
   the acceptance record.
+
+Two operations may remove them, and only after the independent record is
+durable and matches the annotation: the controller identity releases the
+finalizer, and a renewal of the revoked revision removes the annotation
+(once the finalizer is gone).
 
 Revocation reads nothing from the cluster. It resolves no eligibility and
 does not need a future `expiresAt`, so an expired acceptance, a policy that
@@ -209,6 +216,88 @@ returns the record and finalizer it would store, and stores nothing.
 A GitOps service account that revokes is the recorded actor. A commit author
 or ticket belongs in `claimed-by`, which is kept as an unverified claim.
 
+### Revocation records
+
+The annotation is the only copy of a revocation until the controller
+persists it independently (task 3.6). For every revoked acceptance revision,
+the controller writes an immutable `ConfigMap` in the protected namespace
+(`konstapel-system`), next to the acceptance snapshots. It is named
+`revocation-<exception UID>-<revision>`, so each revoked revision has its own
+record and a recreated exception never reuses one. Its `revocation.json`
+(record `version: 1`) holds:
+
+- the exception name, namespace and UID, and the revoked acceptance revision;
+- the namespace name and UID, the cluster identity and the policy, from that
+  revision's acceptance record;
+- `revocation`: the protected annotation exactly as admission wrote it (the
+  authenticated revoking actor, `requestedAt` and the unverified claim);
+- `acceptance`: the `{revision, snapshot, digest}` of the revoked revision's
+  acceptance snapshot, which is referenced, never rewritten. When no usable
+  acceptance record exists, `acceptanceUnavailable` says why instead.
+
+Everything comes from the stored resource. Nothing is resolved from the
+cluster, so an expired, `Forbidden` or unresolvable acceptance gets the same
+record, and every replica or leader builds the same one. The labels match the
+snapshots' (`app.kubernetes.io/component=revocation-record`,
+`compliance.erenius.io/exception-uid`, `compliance.erenius.io/namespace-uid`,
+`compliance.erenius.io/acceptance-revision`,
+`compliance.erenius.io/policy-hash`), and the
+`compliance.erenius.io/record-digest` annotation is verified on every read.
+Records have no owner reference: deleting the exception or its namespace does
+not remove them. Their retention is documented with task 3.5.
+
+The record says when revocation was **requested**. It is not evidence that an
+engine stopped granting; observed withdrawal is group 4 (below).
+
+#### Order of operations
+
+1. The controller writes the record, or finds an existing one and checks
+   that it holds exactly this revocation. An existing object is never
+   overwritten.
+2. Only then does it release the finalizer, with an optimistic lock. The
+   validating webhook allows the release only from the controller identity,
+   which it learns with a `SelfSubjectReview` at startup, and only after it
+   has read the record back from the API server and found it matching. For
+   a deleted exception, the controller also writes the revoked revision's
+   acceptance snapshot first, so an acceptance that was revoked and deleted
+   before the controller ever ran keeps its snapshot too.
+3. A renewal of the revoked revision is admitted only once the finalizer is
+   gone and the record matches. It is then validated and attributed like any
+   renewal, and it removes the annotation. The record of the earlier revision
+   stays.
+
+The exception's `RevocationRecorded` condition reports the record of the
+current revision. It is absent while the current revision is not revoked.
+
+| Reason | Meaning | Finalizer |
+| --- | --- | --- |
+| `Recorded` (`True`) | The record exists and matches. The message names it and its digest. | Released |
+| `RevocationHistoryPending` | The record could not be written yet, for example because the protected namespace is not writable. Retried every 5 seconds. | Kept |
+| `RevocationRecordConflict` | Another object has the record's name and does not hold this revocation. It is never overwritten. Rechecked every minute; an operator must remove it. | Kept |
+| `RevocationInvalid` | `spec.revoked` is true but the protected record is missing or belongs to another revision. Nothing can be recorded. | Kept |
+
+The finalizer is also kept while the revoked revision's acceptance snapshot
+cannot be written (a transient error, or `SnapshotConflict`): the acceptance
+record on the resource is then its last copy.
+
+While the finalizer is kept, deleting the exception is accepted but the
+resource stays `Terminating`, record intact, and so does a namespace that
+contains it. A renewal of the revoked revision is rejected with
+`RevocationHistoryPending`. Create a new `ComplianceException` if you cannot
+wait: it has a new UID and is validated as a new acceptance.
+
+Recovery needs no manual step. A record whose create response was lost is
+found and verified on the next attempt and not written again. A controller
+that stops after writing the record and before releasing the finalizer is
+replaced by the next leader, which verifies the same record and releases. A
+revocation admitted while no replica leads is recorded by whichever replica
+is elected next. `TestLiveRevocationHistory` exercises each of these against
+a real API server with the controller running as its service account and the
+shipped roles, as does `TestLiveReplicaAdmission` across failover.
+
+An operator who removes the webhooks and then the finalizer by hand, before
+the record exists, erases the only copy of that revocation.
+
 ### What revocation does not do yet
 
 - **It withdraws nothing.** No native grant exists while engine enablement
@@ -217,20 +306,11 @@ or ticket belongs in `claimed-by`, which is kept as an unverified claim.
   4.3, 4.4). `spec.revoked: true` is accepted intent. It is not evidence
   that any engine has stopped granting, and once grants exist, a revocation
   recorded while the controller is stopped stays unconfirmed until
-  reconciliation resumes.
-- **The record exists only on the resource.** Independent revocation records
-  in the protected namespace are task 3.6. Until then:
-  - No identity can remove the finalizer while the webhooks serve; the
-    controller cannot write exceptions at all. Deleting a revoked exception
-    is accepted, but it stays `Terminating`, record intact, until task 3.6
-    persists the record and releases it. So does the namespace that
-    contains it.
-  - Renewing a revoked revision is rejected with `RevocationHistoryPending`,
-    because the renewal would replace the only copy of its revocation.
-    Create a new `ComplianceException` instead: it has a new UID and is
-    validated as a new acceptance.
-- An operator who removes the webhooks and then the finalizer by hand
-  erases the only copy of that revocation.
+  reconciliation resumes. Persisting the revocation record never waits for,
+  or holds up, withdrawal.
+- **Observed withdrawal is not recorded.** The revocation record holds the
+  request. A durable record of when withdrawal was observed comes with
+  group 4.
 
 ## Working with an exception
 
@@ -306,7 +386,18 @@ value plus one and replaces `reason` and `expiresAt`. The `revoked` test makes
 the renewal fail rather than renew over a revocation you have not seen.
 Admission re-checks eligibility and lifetime from the time of the renewal and
 records the renewing actor; the controller writes a new snapshot and keeps
-the earlier ones. A revoked revision cannot be renewed yet (above).
+the earlier ones.
+
+To renew a **revoked** revision, use
+[`renew-revoked.json`](../examples/policy-exceptions/renew-revoked.json). It
+tests `spec.revoked: true` instead, and sets it to `false` with the revision
+increment. Wait until the exception's `RevocationRecorded` condition is `True`
+and the `compliance.erenius.io/revocation-history` finalizer is gone; before
+that, admission rejects the renewal with `RevocationHistoryPending`. The
+renewal is a new acceptance: eligibility and lifetime are checked again, it
+starts unrevoked, and it removes the revocation annotation from the
+resource. The revoked revision stays revoked, and its independent record and
+snapshot stay.
 
 ### Delete
 
@@ -314,23 +405,31 @@ Deletion removes the resource, and revocation keeps it. `kubectl delete`
 sends no preconditions, so it deletes whatever resource has that name when
 the request arrives. API clients can send `DeleteOptions.preconditions` with
 the `uid` and `resourceVersion` they reviewed; the API server rejects stale
-values with `409 Conflict`. An unrevoked exception is removed at once. A
-revoked one stays `Terminating` (above). Neither deletes or stops a workload.
+values with `409 Conflict`. An exception is removed at once, unless it is
+revoked and its revocation is not yet recorded independently: then it stays
+`Terminating` until the controller has written the record (above). Deletion
+removes neither its snapshots nor its revocation records, and it does not
+delete or stop a workload.
 Withdrawing native grants on deletion is part of the lifecycle work in groups
 3 and 4.
 
 ### Rejected requests
 
-`TestLiveExceptionRevocation` confirms each of these:
+`TestLiveExceptionRevocation` confirms each of these, and
+`TestLiveRevocationHistory` the controller-identity and history cases:
 
 | Request | Result |
 | --- | --- |
 | An editor bound in another namespace revokes the exception | `Forbidden` (RBAC) |
 | An identity without the editor role revokes it | `Forbidden` (RBAC) |
 | A team member revokes an exception in another namespace | `Forbidden` (RBAC) |
-| The controller service account sets `revoked` or removes the finalizer | `Forbidden` (RBAC: it writes status only) |
-| Anyone rewrites or removes the revocation record or the finalizer | `ProtectedField` |
+| Anyone rewrites or removes the revocation annotation or re-adds the finalizer | `ProtectedField` |
+| A team member writes in `konstapel-system` (revocation records included) | `Forbidden` (RBAC) |
 | A stale `test`, or a delete with stale preconditions | `422` or `409`; nothing changes |
+| A team member removes the finalizer | `ProtectedField` |
+| The controller identity removes the finalizer before the record is durable and matches | `RevocationHistoryPending` |
+| The controller identity sets `revoked`, renews, or edits labels or annotations | `ProtectedField` |
+| The controller identity updates or deletes a record `ConfigMap` | `Forbidden` (RBAC: `get`/`create` only); an administrator's rewrite fails because it is immutable |
 
 ## Acceptance snapshots
 
@@ -375,8 +474,9 @@ revision>=true`. The `compliance.erenius.io/snapshot-digest` annotation is
 verified on every read.
 
 The controller may only `get` and `create` ConfigMaps in its namespace;
-application roles have no access there. Snapshots have no owner reference,
-because they outlive the exception for retained evidence. Their retention is
+application roles have no access there. Snapshots, like
+[revocation records](#revocation-records), have no owner reference, because
+they outlive the exception for retained evidence. Their retention is
 documented with task 3.5.
 
 ## Lifecycle fixture matrix

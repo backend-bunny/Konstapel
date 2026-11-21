@@ -18,7 +18,9 @@ package controller
 //   - revocation (add-self-service-policy-exceptions 2.6) is recorded by
 //     whichever replica serves it, including without a leader, with the
 //     caller's identity; failover and a repeated revocation through another
-//     replica leave the record, the finalizer and spec.revoked as stored;
+//     replica leave the record and spec.revoked as stored, and the leader
+//     after failover persists a revocation admitted without a leader
+//     exactly as admitted before it releases the finalizer (task 3.6);
 //   - a rejected certificate rotation takes one replica out of readiness
 //     while it stays live and the other keeps serving; a missing external
 //     capability (OCI bundle sources) fails only the affected namespace's
@@ -430,7 +432,9 @@ func TestLiveReplicaAdmission(t *testing.T) {
 	}
 	denied("reactivation via the follower", l.mergePatch(alice, team, revokedOne.Name, `{"spec":{"revoked":false}}`), exception.ReasonRenewalRequired)
 	served(follower, mark)
-	l.record("follower-revokes", map[string]any{"replica": follower.name, "actor": "bob"})
+	// The leader records it independently and releases the finalizer.
+	revokedOneRecord := l.waitHistory(revokedOne)
+	l.record("follower-revokes", map[string]any{"replica": follower.name, "actor": "bob", "record": revokedOneRecord.Name})
 
 	// Everything accepted so far, as the API server stores it.
 	type kept struct {
@@ -438,10 +442,12 @@ func TestLiveReplicaAdmission(t *testing.T) {
 		revision              int64
 		snapshot              string
 		snapshotRV            string
-		revocation            string // the stored lifecycle: spec.revoked, record and finalizers
+		revocation            string // the stored lifecycle: spec.revoked and the record
 	}
+	// The finalizer is not part of it: the leader releases it once the
+	// revocation is recorded independently, checked below.
 	revocationState := func(ex *v1alpha1.ComplianceException) string {
-		return toJSON(map[string]any{"revoked": ex.Spec.Revoked, "record": ex.Annotations[exception.RevocationAnnotation], "finalizers": ex.Finalizers})
+		return toJSON(map[string]any{"revoked": ex.Spec.Revoked, "record": ex.Annotations[exception.RevocationAnnotation]})
 	}
 	before := map[string]kept{}
 	keep := func(ex *v1alpha1.ComplianceException) {
@@ -493,6 +499,9 @@ func TestLiveReplicaAdmission(t *testing.T) {
 		t.Fatalf("revocation without a leader = %+v", r)
 	}
 	keep(gapRevoked)
+	if !slices.Contains(gapRevoked.Finalizers, exception.RevocationFinalizer) {
+		t.Fatal("a revocation without a leader lost its finalizer")
+	}
 	setEligibility(v1alpha1.ExceptionsForbidden)
 	denied("restriction without a leader", alice.Create(l.ctx, newEx(team, "ra-gap-blocked", nil)), exception.ReasonForbidden)
 	setEligibility(v1alpha1.ExceptionsSelfService)
@@ -567,6 +576,12 @@ func TestLiveReplicaAdmission(t *testing.T) {
 			t.Errorf("%s: revocation state changed across failover: %s, was %s", name, revocationState(cur), k.revocation)
 		}
 	}
+	// The new leader persisted the leaderless revocation as admitted, and the
+	// old leader's record is unchanged.
+	gapRecord := l.waitHistory(gapRevoked)
+	if cm := l.snapshotConfigMap(revokedOneRecord.Name); cm == nil || cm.ResourceVersion != revokedOneRecord.ResourceVersion {
+		t.Errorf("the record of %s changed or vanished across failover", revokedOne.Name)
+	}
 	// Repeating a revocation through the replacement keeps the first record.
 	if err := l.mergePatch(alice, team, revokedOne.Name, `{"spec":{"revoked":true},"metadata":{"labels":{"repeated":"replacement"}}}`); err != nil {
 		t.Fatalf("repeat revocation through the replacement: %v", err)
@@ -574,7 +589,7 @@ func TestLiveReplicaAdmission(t *testing.T) {
 	if got := l.exception(team, revokedOne.Name); revocationState(got) != before[revokedOne.Name].revocation {
 		t.Errorf("a repeated revocation through the replacement rewrote %s: %s", revokedOne.Name, revocationState(got))
 	}
-	l.record("failover", map[string]any{"leader": survivor.name, "replacement": gone.name, "unchanged": len(before)})
+	l.record("failover", map[string]any{"leader": survivor.name, "replacement": gone.name, "unchanged": len(before), "leaderlessRecord": gapRecord.Name})
 
 	// 6. A rejected rotation on the follower takes it out of readiness
 	// while it stays live; the leader keeps serving. A valid one restores it.

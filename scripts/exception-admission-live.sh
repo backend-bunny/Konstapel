@@ -2,9 +2,10 @@
 # Live ComplianceException admission checks against an existing disposable
 # cluster from scripts/environment.sh: acceptance admission
 # (add-self-service-policy-exceptions task 2.2), revocation and the
-# documented revoke/renew workflow (tasks 2.6, 2.5), and admission served by
-# each of two elected replicas across leadership changes
-# (add-controller-high-availability tasks 3.1, 3.2).
+# documented revoke/renew workflow (tasks 2.6, 2.5), independent revocation
+# history under injected faults, restarts and Lease handovers (task 3.6),
+# and admission served by each of two elected replicas across leadership
+# changes (add-controller-high-availability tasks 3.1, 3.2).
 #
 # The webhooks are served by in-process managers inside the test. The test
 # binary runs in a container on the kind network, so the API server reaches
@@ -37,5 +38,5 @@ docker run --name "$container" --rm --network kind --user "$(id -u):$(id -g)" \
   -v "$PWD:/src:ro" -v "$out:/out" -w /src/internal/controller \
   -e KONSTAPEL_LIVE_KUBECONFIG=/out/kubeconfig-internal -e KONSTAPEL_LIVE_CONTEXT="kind-$name" -e KONSTAPEL_LIVE_OUTPUT=/out/live \
   -e HOME=/tmp "$KONSTAPEL_WORKLOAD_IMAGE" \
-  sh -c 'KONSTAPEL_LIVE_WEBHOOK_HOST=$(hostname -i) exec /out/controller.test -test.run "^(TestLiveExceptionAdmission|TestLiveExceptionRevocation|TestLiveReplicaAdmission)$" -test.v -test.count=1 -test.timeout 15m' \
+  sh -c 'KONSTAPEL_LIVE_WEBHOOK_HOST=$(hostname -i) exec /out/controller.test -test.run "^(TestLiveExceptionAdmission|TestLiveExceptionRevocation|TestLiveRevocationHistory|TestLiveReplicaAdmission)$" -test.v -test.count=1 -test.timeout 20m' \
   2>&1 | tee "$out/exception-admission-live.log"
