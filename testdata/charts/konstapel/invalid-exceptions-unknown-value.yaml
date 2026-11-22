@@ -1,0 +1,5 @@
+# expect: additional properties 'grantWrites' not allowed
+exceptions:
+  revocationProcessing:
+    enabled: false
+    grantWrites: true

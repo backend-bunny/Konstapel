@@ -111,6 +111,18 @@ download:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 512Mi}
 
+# ComplianceException revocation processing
+# (add-self-service-policy-exceptions task 3.6; docs/charts.md, "Exception
+# revocation processing"). One switch for the controller's gated
+# complianceexceptions update/patch and selfsubjectreviews create grant and
+# for --exception-revocation-processing. Those writes are confined only by the
+# fail-closed exception admission webhooks, which this chart does not deploy
+# yet, so true fails the render. Off: revoked exceptions keep their
+# finalizer and report RevocationProcessingDisabled.
+exceptions:
+  revocationProcessing:
+    enabled: false
+
 # Authenticated controller metrics (docs/charts.md, "Controller metrics"), off
 # by default. Every controller replica serves HTTPS on the
 # konstapel-controller-metrics Service (port 443, name https). Each scrape is

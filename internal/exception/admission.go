@@ -88,6 +88,9 @@ type Mutator struct {
 	Cluster  string
 	Now      func() time.Time
 	Decoder  admission.Decoder
+	// HistoryNamespace holds the independent revocation records a renewal
+	// of a revoked revision must find first (the snapshot namespace).
+	HistoryNamespace string
 }
 
 // Handle implements admission.Handler.
@@ -132,8 +135,14 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 		return nil, d
 	case op == opRevocation:
 		return revoke(req, ex, old, now())
-	case op != opAcceptance:
+	case !op.accepting():
 		return nil, nil
+	case op == opRenewalOfRevoked:
+		// Before resolving anything: the renewal replaces the revocation
+		// record, so its independent copy must already be durable.
+		if err := renewable(ctx, m.Reader, m.HistoryNamespace, old); err != nil {
+			return nil, err
+		}
 	}
 	ns := &corev1.Namespace{}
 	if err := m.Reader.Get(ctx, client.ObjectKey{Name: req.Namespace}, ns); err != nil {
@@ -168,17 +177,34 @@ func (m *Mutator) record(ctx context.Context, req admission.Request) (*v1alpha1.
 	}
 	// Overwrites any caller-supplied value.
 	updated.Annotations[AcceptanceAnnotation] = string(raw)
+	if op == opRenewalOfRevoked {
+		// The revoked revision's intent lives on in its independent record.
+		delete(updated.Annotations, RevocationAnnotation)
+	}
 	return updated, nil
 }
 
 // Validator rejects acceptance and revocation records that do not belong to
 // the operation: on an acceptance or a revocation the record must name the
 // authenticated caller and the requested revision; on any other update both
-// records, and the revocation finalizer, must be unchanged.
+// records, and the revocation finalizer, must be unchanged. Only the
+// controller identity releases the finalizer, and only once the revocation
+// is durably recorded independently; a renewal of a revoked revision needs
+// that record too.
 type Validator struct {
 	Decoder admission.Decoder
 	Cluster string
 	Now     func() time.Time
+	// Reader reads independent revocation records in HistoryNamespace. It
+	// is used only for a renewal of a revoked revision and a finalizer
+	// release; a revocation reads nothing.
+	Reader           client.Reader
+	HistoryNamespace string
+	// Controller is the identity the Konstapel controller runs as, set only
+	// with revocation processing (task 3.6), the only reason the
+	// controller writes an exception. Nil treats no request as the
+	// controller's, so nobody can release RevocationFinalizer.
+	Controller *Identity
 }
 
 // acceptanceSkew bounds how far a recorded acceptance or revocation time may
@@ -186,7 +212,7 @@ type Validator struct {
 const acceptanceSkew = 2 * time.Minute
 
 // Handle implements admission.Handler.
-func (v *Validator) Handle(_ context.Context, req admission.Request) admission.Response {
+func (v *Validator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	ex, old, err := decode(v.Decoder, req)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
@@ -195,22 +221,57 @@ func (v *Validator) Handle(_ context.Context, req admission.Request) admission.R
 	if v.Now != nil {
 		now = v.Now
 	}
-	if err := check(req, ex, old, v.Cluster, now()); err != nil {
+	if err := v.check(ctx, req, ex, old, now()); err != nil {
 		return admission.Denied(err.Error())
 	}
 	return admission.Allowed("")
 }
 
-func check(req admission.Request, ex, old *v1alpha1.ComplianceException, cluster string, now time.Time) error {
+// controller reports whether the request comes from the controller
+// identity. Without revocation processing (Controller nil) the controller
+// has no ComplianceException write permission and nothing may release
+// RevocationFinalizer, so no request is treated as the controller's.
+// With it, the identity is the one learned at startup, so a revocation
+// still reads nothing. Until it is known it is looked up on each request,
+// and while that fails every request is denied: an unknown identity must
+// never let the controller's writes pass as an application identity's.
+func (v *Validator) controller(ctx context.Context, req admission.Request) (bool, error) {
+	if v.Controller == nil {
+		return false, nil
+	}
+	identity, err := v.Controller.Get(ctx)
+	if err != nil {
+		return false, &Denial{ReasonControllerIdentityUnknown, fmt.Sprintf(
+			"the Konstapel controller identity is unknown, so this request cannot be told apart from the controller's, which may only release the %s finalizer; ComplianceException writes are denied until the identity is known: %v",
+			RevocationFinalizer, err)}
+	}
+	return req.UserInfo.Username == identity, nil
+}
+
+func (v *Validator) check(ctx context.Context, req admission.Request, ex, old *v1alpha1.ComplianceException, now time.Time) error {
 	op, d := classify(req, ex, old)
 	if d != nil {
 		return d
 	}
+	isController, err := v.controller(ctx, req)
+	switch {
+	case err != nil:
+		return err
+	case isController && old == nil:
+		return &Denial{ReasonProtectedField, "the Konstapel controller identity cannot create an exception"}
+	case isController:
+		return checkController(ctx, v.Reader, v.HistoryNamespace, req.UserInfo.Username, op, ex, old)
+	case op == opRenewalOfRevoked:
+		if err := renewable(ctx, v.Reader, v.HistoryNamespace, old); err != nil {
+			return err
+		}
+	}
 	if err := checkRevocation(req, op, ex, old, now); err != nil {
 		return err
 	}
+	cluster := v.Cluster
 	got, present := ex.Annotations[AcceptanceAnnotation]
-	if op != opAcceptance {
+	if !op.accepting() {
 		was, wasPresent := old.Annotations[AcceptanceAnnotation]
 		if got != was || present != wasPresent {
 			return fmt.Errorf("%s is protected: it changes only with an explicit renewal (spec.acceptanceRevision + 1)", AcceptanceAnnotation)
@@ -354,11 +415,13 @@ func (r *ClusterResolver) resolve(ctx context.Context, ns targeting.NamespaceRef
 	return nil, restrictive, nil
 }
 
-// NewHandlers builds the mutating and validating handlers.
-func NewHandlers(scheme *runtime.Scheme, reader client.Reader, content targeting.ContentSource, cluster string) (*Mutator, *Validator) {
+// NewHandlers builds the mutating and validating handlers. historyNamespace
+// holds the independent revocation records; controller is the identity the
+// Konstapel controller runs as, nil without revocation processing.
+func NewHandlers(scheme *runtime.Scheme, reader client.Reader, content targeting.ContentSource, cluster, historyNamespace string, controller *Identity) (*Mutator, *Validator) {
 	d := admission.NewDecoder(scheme)
-	return &Mutator{Reader: reader, Resolver: &ClusterResolver{Reader: reader, Content: content, Cluster: cluster}, Cluster: cluster, Decoder: d},
-		&Validator{Decoder: d, Cluster: cluster}
+	return &Mutator{Reader: reader, Resolver: &ClusterResolver{Reader: reader, Content: content, Cluster: cluster}, Cluster: cluster, Decoder: d, HistoryNamespace: historyNamespace},
+		&Validator{Decoder: d, Cluster: cluster, Reader: reader, HistoryNamespace: historyNamespace, Controller: controller}
 }
 
 // Register adds both handlers to a webhook server.

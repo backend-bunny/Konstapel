@@ -112,6 +112,32 @@ const (
 	ReasonAcceptanceInvalid = "AcceptanceInvalid"
 	ReasonAcceptancePending = "AcceptancePending"
 	ReasonSnapshotConflict  = "SnapshotConflict"
+
+	// ConditionRevocationRecorded is True once the revoked current
+	// acceptance revision has a durable independent revocation record that
+	// matches the intent admission recorded. It is absent while the current
+	// revision is not revoked. It says nothing about engine withdrawal.
+	ConditionRevocationRecorded = "RevocationRecorded"
+
+	ReasonRevocationRecorded = "Recorded"
+	// ReasonRevocationHistoryPending: the record is not persisted yet, for
+	// example because the protected namespace cannot be written. Retried;
+	// the intent and its finalizer stay.
+	ReasonRevocationHistoryPending = "RevocationHistoryPending"
+	// ReasonRevocationRecordConflict: another object has the record's name.
+	// It is never overwritten; the intent and its finalizer stay.
+	ReasonRevocationRecordConflict = "RevocationRecordConflict"
+	// ReasonRevocationInvalid: spec.revoked is true but the protected
+	// revocation record is missing or does not belong to this revision.
+	ReasonRevocationInvalid = "RevocationInvalid"
+	// ReasonRevocationProcessingDisabled: revocation processing
+	// (--exception-revocation-processing) is off, the default, so nothing
+	// is recorded independently and the finalizer stays.
+	ReasonRevocationProcessingDisabled = "RevocationProcessingDisabled"
+	// ReasonRevocationProtectionUnverified: processing is on, but the
+	// exception admission webhooks could not be verified to fail closed,
+	// so nothing is recorded or released until they are.
+	ReasonRevocationProtectionUnverified = "RevocationProtectionUnverified"
 )
 
 // ComplianceException is a namespace team's self-service, time-limited

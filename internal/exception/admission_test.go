@@ -37,7 +37,13 @@ var (
 	alice = authenticationv1.UserInfo{Username: "alice", UID: "u-alice", Groups: []string{"team-a-editors", "system:authenticated"}}
 	dave  = authenticationv1.UserInfo{Username: "dave", UID: "u-dave", Groups: []string{"team-a-editors", "system:authenticated"}}
 	argo  = authenticationv1.UserInfo{Username: "system:serviceaccount:argocd:argocd-application-controller", UID: "u-argo", Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+	// controllerUser is the identity the Konstapel controller runs as.
+	controllerUser = authenticationv1.UserInfo{Username: "system:serviceaccount:konstapel-system:konstapel-controller", UID: "u-controller",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:konstapel-system", "system:authenticated"}}
 )
+
+// historyNamespace is the protected namespace of the revocation records.
+const historyNamespace = "konstapel-system"
 
 func scheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
@@ -97,7 +103,7 @@ func world(t *testing.T) client.Client {
 
 func newHandlers(t *testing.T, c client.Client, now time.Time) (*Mutator, *Validator) {
 	t.Helper()
-	m, v := NewHandlers(scheme(t), c, content{}, cluster)
+	m, v := NewHandlers(scheme(t), c, content{}, cluster, historyNamespace, &Identity{Lookup: func(context.Context) (string, error) { return controllerUser.Username, nil }})
 	m.Now = func() time.Time { return now }
 	v.Now = m.Now
 	return m, v
@@ -441,7 +447,7 @@ func TestUnavailableNameWithTheSameDigestAffectsOnlyItsConsumers(t *testing.T) {
 
 			// Through admission: the team namespace is accepted, the org
 			// namespace is denied as unresolved.
-			m, _ := NewHandlers(scheme(t), c, src, cluster)
+			m, _ := NewHandlers(scheme(t), c, src, cluster, historyNamespace, nil)
 			m.Now = func() time.Time { return t0 }
 			if resp := m.Handle(context.Background(), request(t, admissionv1.Create, alice, exceptionObj("team-a", 1, nil), nil)); !resp.Allowed {
 				t.Fatalf("team-a denied: %v", resp.Result)

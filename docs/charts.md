@@ -36,6 +36,7 @@ and doesn't need the charts.
 | Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup; uploads and downloads on the download service (`download.enabled`) with its limits and source retention as `download.attachments` values; platform packages carry supporting evidence only while every download replica runs the controller's image ([Protected-package readers](#protected-package-readers)) | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination` ([supporting evidence](supporting-evidence.md)) |
 | Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
 | Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
+| Exception revocation processing (revocation records, finalizer release) | **no**: `exceptions.revocationProcessing.enabled` is `false`, and `true` fails the render | the exception webhooks above, which confine the controller's exception writes; see [Exception revocation processing](#exception-revocation-processing) |
 
 ## Chart input contract
 
@@ -643,6 +644,53 @@ With metrics disabled, nothing is bound.
 `TestRuntimeChartMetricsEnabled` asserts that these two grants are all that
 `metrics.enabled` adds.
 
+**No exception writes.** The ServiceAccount reads `complianceexceptions` and
+writes their status, nothing more: no rendered configuration grants
+`create`, `update`, `patch` or `delete` on exceptions, `create` on
+`selfsubjectreviews`, or reads of webhook configurations. Those are the
+gated grant of [exception revocation processing](#exception-revocation-processing),
+which the chart doesn't render.
+
+### Exception revocation processing
+
+Revocation processing (add-self-service-policy-exceptions task 3.6) writes
+independent revocation records and releases the revocation finalizer of a
+revoked `ComplianceException`. It needs a grant that lets the controller
+update exceptions: ClusterRole `konstapel-controller-exception-revocation`
+(`config/rbac/controller/exception-revocation.yaml`), with `update`/`patch`
+on `complianceexceptions`, `create` on `selfsubjectreviews`, and `get` on the
+two `konstapel-exception-acceptance` webhook configurations. Only the
+fail-closed exception webhooks confine that grant, to releasing the
+finalizer once the record is durable.
+
+`exceptions.revocationProcessing.enabled` is the one switch for the grant,
+its binding, the identity lookup and the controller's
+`--exception-revocation-processing`. The chart doesn't deploy the exception
+webhooks yet, so it can't provide their protection:
+
+- `false` (the default) renders nothing for it. The ClusterRole, the
+  binding and the flag are absent, and the controller's default roles are
+  unchanged.
+- `true` fails the render with a message saying it can't be enabled until
+  the chart can deploy the exception webhooks. Nothing is applied. An
+  upgrade that sets it fails before any change, so the grant can never come
+  before its protection.
+
+With processing off, revoked exceptions keep their finalizer. Their
+`RevocationRecorded` condition reports `RevocationProcessingDisabled`, and a
+deleted one stays `Terminating`. The non-chart enable and disable order, the
+controller's own check of the webhook configuration, and these effects are
+documented in [policy exceptions](integration/policy-exceptions.md#revocation-processing).
+`TestRuntimeChartExceptionRevocationGated` (`internal/charttest`) checks
+that no supported configuration grants an exception write or the identity
+lookup, and that `true` fails with each of them. The
+`testdata/charts/konstapel/invalid-exception*.yaml` fixtures check the
+refusal and the schema.
+
+When the chart can deploy the exception webhooks, enabling should render
+the grant and the flag only together with both webhook configurations at
+`failurePolicy: Fail`. That is a separate change.
+
 ### Controller metrics
 
 With `metrics.enabled`, every controller replica serves Prometheus metrics
@@ -1033,6 +1081,7 @@ retention.
   - `readers`: monitoring ServiceAccounts `{namespace, name}` bound to `konstapel-metrics-reader`. Explicit names only. Set only with `enabled`.
   - `tls.secretName`: required with `tls.mode=secret`; a `kubernetes.io/tls` Secret for `konstapel-controller-metrics.<namespace>.svc`.
   - `serviceMonitor`, `prometheusRule`: independent optional Prometheus Operator objects, off by default; each needs `enabled` metrics and its API. Timing, CA, authorization, scope matchers and rule groups: [Monitoring integration](#monitoring-integration).
+- **`exceptions.revocationProcessing.enabled`** (false): [exception revocation processing](#exception-revocation-processing). `true` fails the render until the chart can deploy the exception webhooks.
 - **`bundles`:** verified OCI policy bundles, off while `sourcesConfigMap` is empty (the default).
   - `sourcesConfigMap`: the operator-created sources ConfigMap in `konstapel-system`.
   - `cache.capacity` (1Gi) and `cache.sizeLimit` (1536Mi, must be larger): the per-pod content cache and its `emptyDir`.

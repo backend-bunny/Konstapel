@@ -332,6 +332,28 @@
         }
       }
     },
+    "exceptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revocationProcessing"
+      ],
+      "properties": {
+        "revocationProcessing": {
+          "description": "The one switch for ComplianceException revocation processing (add-self-service-policy-exceptions task 3.6): the controller's gated complianceexceptions update/patch and selfsubjectreviews create grant and --exception-revocation-processing. It is safe only with the fail-closed exception admission webhooks, which this chart does not deploy yet, so true fails the render.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
