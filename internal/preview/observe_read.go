@@ -307,10 +307,17 @@ type capture struct {
 	unowned     []ObjectRef
 	exceptions  []ObservedException
 	snapshots   []ObservedAcceptanceSnapshot
+	revocations []ObservedRevocationRecord
 	evidence    []ObservedEvidence
 	sources     *ObservedSources
 	inputs      *sourceInputs
 	limitations []Diagnostic
+
+	// exceptionObjs and exceptionOwners are the decoded exceptions and their
+	// RevocationRecorded conditions, in the order of exceptions, for the
+	// revocation checks (observe_revocation.go).
+	exceptionObjs   []v1alpha1.ComplianceException
+	exceptionOwners []*OwnerCondition
 }
 
 func (r *reader) capture(ctx context.Context, opts ObserveOptions) (*capture, *Diagnostic) {
@@ -318,7 +325,7 @@ func (r *reader) capture(ctx context.Context, opts ObserveOptions) (*capture, *D
 	ctx = withBudget(ctx, c.b)
 	steps := []func(context.Context, ObserveOptions) *Diagnostic{
 		c.readCluster, c.readNamespaces, c.readProfiles, c.readBindings, c.readEnginePolicies,
-		c.readExceptions, c.readSnapshots, c.readSources,
+		c.readExceptions, c.readSnapshots, c.readRevocations, c.readSources,
 	}
 	for _, step := range steps {
 		if d := step(ctx, opts); d != nil {
@@ -640,17 +647,27 @@ func (c *capture) readExceptions(ctx context.Context, _ ObserveOptions) *Diagnos
 					Message: "status.acceptance: " + err.Error()}
 			}
 		}
-		// The protected acceptance record and the snapshot reference are
-		// acceptance inputs; conditions and their timestamps are not.
+		owner, d := revocationCondition(u, &ex)
+		if d != nil {
+			return d
+		}
+		// The protected acceptance and revocation records, the snapshot
+		// reference, the revocation finalizer and the owner's revocation
+		// verdict are acceptance inputs; other conditions, condition
+		// messages and timestamps are not. spec.revoked is in the spec.
 		ref := c.observe(gvrExceptions, u, struct {
 			Generation  int64                                 `json:"generation"`
 			Spec        v1alpha1.ComplianceExceptionSpec      `json:"spec"`
 			Acceptance  string                                `json:"acceptance"`
 			Snapshot    *v1alpha1.AcceptanceSnapshotReference `json:"snapshot"`
 			Terminating bool                                  `json:"terminating"`
-		}{ex.Generation, ex.Spec, ex.Annotations[exception.AcceptanceAnnotation], snapRef, ex.DeletionTimestamp != nil})
+			Revocation  string                                `json:"revocation"`
+			Finalizer   bool                                  `json:"finalizer"`
+			Owner       *OwnerCondition                       `json:"owner"`
+		}{ex.Generation, ex.Spec, ex.Annotations[exception.AcceptanceAnnotation], snapRef, ex.DeletionTimestamp != nil,
+			ex.Annotations[exception.RevocationAnnotation], slices.Contains(ex.Finalizers, exception.RevocationFinalizer), owner})
 		o := ObservedException{ObjectRef: ref, Policy: ex.Spec.Policy, AcceptanceRevision: ex.Spec.AcceptanceRevision,
-			ExpiresAt: ex.Spec.ExpiresAt.UTC(), Terminating: ex.DeletionTimestamp != nil, Snapshot: snapRef}
+			ExpiresAt: ex.Spec.ExpiresAt.UTC(), Terminating: ex.DeletionTimestamp != nil, Snapshot: snapRef, Revoked: ex.Spec.Revoked}
 		a, present, err := exception.ParseAcceptance(&ex)
 		switch {
 		case err != nil:
@@ -662,6 +679,8 @@ func (c *capture) readExceptions(ctx context.Context, _ ObserveOptions) *Diagnos
 			}
 		}
 		c.exceptions = append(c.exceptions, o)
+		c.exceptionObjs = append(c.exceptionObjs, ex)
+		c.exceptionOwners = append(c.exceptionOwners, owner)
 	}
 	return nil
 }
@@ -940,14 +959,14 @@ func (c *capture) fill(s *Snapshot, opts ObserveOptions) {
 	slices.SortFunc(s.Exceptions, func(a, b ObservedException) int { return compareRef(a.ObjectRef, b.ObjectRef) })
 	s.AcceptanceSnapshots = c.snapshots
 	slices.SortFunc(s.AcceptanceSnapshots, func(a, b ObservedAcceptanceSnapshot) int { return compareRef(a.ObjectRef, b.ObjectRef) })
+	s.RevocationRecords = c.revocations
+	slices.SortFunc(s.RevocationRecords, func(a, b ObservedRevocationRecord) int { return compareRef(a.ObjectRef, b.ObjectRef) })
 	s.Sources = c.sources
 	s.Evidence = c.evidence
 	slices.SortFunc(s.Evidence, func(a, b ObservedEvidence) int { return strings.Compare(a.Binding, b.Binding) })
 	s.inputs = c.inputs
 	lims := append(slices.Clone(c.limitations),
-		Diagnostic{Code: LimitNoAtomicSnapshot, Message: "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"},
-		Diagnostic{Code: LimitRevocationUnavailable, Resource: resourceString(gvrExceptions),
-			Message: "exception revocation (spec.revoked and revocation records) is not available in this version; acceptance is observed from the protected acceptance record, its status reference and the frozen snapshots only"})
+		Diagnostic{Code: LimitNoAtomicSnapshot, Message: "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"})
 	s.Limitations = sortDiagnostics(lims)
 }
 

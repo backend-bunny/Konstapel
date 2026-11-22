@@ -75,6 +75,14 @@
         "resourceVersion": "100",
         "pages": 1,
         "objects": 0
+      },
+      {
+        "resource": "/v1/configmaps",
+        "namespace": "konstapel-system",
+        "labelSelector": "app.kubernetes.io/component=revocation-record,app.kubernetes.io/managed-by=konstapel",
+        "resourceVersion": "100",
+        "pages": 1,
+        "objects": 0
       }
     ],
     "objects": [
@@ -156,6 +164,7 @@
     ],
     "contracts": {
       "acceptanceSnapshot": 1,
+      "revocationRecord": 1,
       "targeting": 1
     }
   },
@@ -1107,12 +1116,6 @@
       "code": "no-atomic-snapshot",
       "stage": "observation",
       "message": "Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time"
-    },
-    {
-      "code": "exception-revocation-unavailable",
-      "stage": "observation",
-      "resource": "compliance.erenius.io/v1alpha1/complianceexceptions",
-      "message": "exception revocation (spec.revoked and revocation records) is not available in this version; acceptance is observed from the protected acceptance record, its status reference and the frozen snapshots only"
     },
     {
       "code": "no-workload-evaluation",

@@ -8,7 +8,7 @@ Observation
   complete observation of cluster kube-system:ks-0001 (context staging, server apiserver.test)
   controller namespace konstapel-system, bundle sources not selected (vendored bundle only)
   window 2026-11-20T09:30:00Z to 2026-11-20T09:30:00Z, 2 captures, 7 objects, 4 namespaces
-  contracts: acceptanceSnapshot v1, targeting v1
+  contracts: acceptanceSnapshot v1, revocationRecord v1, targeting v1
 
 Inputs
   proposed ../../testdata/preview/cli/proposed.yaml sha256:6c4dd662dbde3f3535a5b1b489629d4a11e0f1b2d878cc1a5b852d1f6592b986 (204 bytes)
@@ -121,7 +121,6 @@ Evidence (context, never an impact)
 Limitations (informational)
   [bundle-sources-not-selected] observation no bundle-source ConfigMap was selected; only vendored content can be resolved, as for a controller without --bundle-sources-configmap
   [no-atomic-snapshot] observation Kubernetes has no cross-resource transaction: two consecutive captures agreed on every relevant projection, which detects drift but does not prove an atomic snapshot or guarantee the state at apply time
-  [exception-revocation-unavailable] observation compliance.erenius.io/v1alpha1/complianceexceptions: exception revocation (spec.revoked and revocation records) is not available in this version; acceptance is observed from the protected acceptance record, its status reference and the frozen snapshots only
   [no-workload-evaluation] comparison configuration effects only: no workload is evaluated, so nothing here says that a workload will pass, fail or be evicted
   [rendered-input-assumptions] comparison each proposed object is treated as its complete specification; server-side apply field ownership, merge patches, GitOps prune settings and admission other than schema defaults and the enforcement epoch are not reproduced, and nothing here is guaranteed at apply time
   [exception-analysis-unavailable] exceptions the exception owner's acceptance comparison (add-self-service-policy-exceptions) is not integrated yet: renewal, newly forbidden, lifetime and removed-scope consequences are not analyzed
