@@ -35,6 +35,15 @@ func TestElectionTimings(t *testing.T) {
 	}
 }
 
+// Revocation processing is confined only by the exception webhooks this
+// manager serves, so it is refused without them.
+func TestRevocationProcessingNeedsTheWebhooks(t *testing.T) {
+	_, err := NewManager(&rest.Config{Host: "https://127.0.0.1:1"}, Options{ExceptionRevocation: true})
+	if err == nil || !strings.Contains(err.Error(), "--webhook-cert-dir") {
+		t.Fatalf("revocation processing without webhooks accepted: %v", err)
+	}
+}
+
 func TestShutdownTimeoutValidated(t *testing.T) {
 	_, err := NewManager(&rest.Config{Host: "https://127.0.0.1:1"}, Options{ShutdownTimeout: -time.Second})
 	if err == nil || !strings.Contains(err.Error(), "shutdown timeout") {

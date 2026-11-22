@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -33,6 +34,11 @@ import (
 // revocation-history-before-renewal-or-deletion.
 
 var exRevokedAt = exT0.Add(30 * time.Hour)
+
+// revocationOn is revocation processing with verified admission
+// protection, as a manager started with --exception-revocation-processing
+// and the fail-closed webhooks runs it.
+var revocationOn = RevocationGate{Enabled: true, Protected: func(context.Context) error { return nil }}
 
 // revoke returns ex as admission stores it after actor revoked its current
 // revision at at: the protected record, spec.revoked and the finalizer.
@@ -129,7 +135,7 @@ func historyEnv(t *testing.T, f *historyFaults, objs ...client.Object) (client.C
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithObjects(objs...).WithStatusSubresource(&v1alpha1.ComplianceException{}).
 		WithInterceptorFuncs(f.funcs()).Build()
-	return c, &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace}
+	return c, &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace, Revocation: revocationOn}
 }
 
 // step reconciles priv once and returns the result and the stored
@@ -219,7 +225,7 @@ func TestRevocationIsRecordedBeforeTheFinalizerIsReleased(t *testing.T) {
 				t.Errorf("snapshot after revocation: %+v %v", snap, err)
 			}
 			// A restart re-verifies and rewrites nothing.
-			restarted := &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace}
+			restarted := &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace, Revocation: revocationOn}
 			if _, err, _ := step(t, c, restarted); err != nil {
 				t.Fatal(err)
 			}
@@ -276,7 +282,7 @@ func TestRevocationHistoryPersistenceFailure(t *testing.T) {
 	if err := c.Delete(context.Background(), got); err != nil {
 		t.Fatal(err)
 	}
-	for _, rr := range []*ExceptionReconciler{r, {Client: c, Reader: c, Namespace: DefaultSnapshotNamespace}} {
+	for _, rr := range []*ExceptionReconciler{r, {Client: c, Reader: c, Namespace: DefaultSnapshotNamespace, Revocation: revocationOn}} {
 		_, err, got = step(t, c, rr)
 		if err != nil || !holds(got) || got.DeletionTimestamp.IsZero() || got.Annotations[exception.RevocationAnnotation] == "" {
 			t.Fatalf("terminating while persistence fails: err %v, exception %+v", err, got)
@@ -327,7 +333,7 @@ func TestRestartBetweenPersistAndRelease(t *testing.T) {
 		t.Fatal("record not persisted before the release")
 	}
 	f.set(func(f *historyFaults) { f.release = nil })
-	restarted := &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace}
+	restarted := &ExceptionReconciler{Client: c, Reader: c, Namespace: DefaultSnapshotNamespace, Revocation: revocationOn}
 	_, err, got := step(t, c, restarted)
 	if err != nil || holds(got) {
 		t.Fatalf("after restart: %v holds %v", err, holds(got))
@@ -380,7 +386,7 @@ func (s *racingRecordReader) Get(ctx context.Context, key client.ObjectKey, obj 
 func TestConcurrentControllersRecordOnce(t *testing.T) {
 	f := &historyFaults{}
 	c, a := historyEnv(t, f, revoke(t, acceptedException(t, 1, "alice", revA), "alice", exRevokedAt))
-	b := &ExceptionReconciler{Client: c, Namespace: DefaultSnapshotNamespace}
+	b := &ExceptionReconciler{Client: c, Namespace: DefaultSnapshotNamespace, Revocation: revocationOn}
 	b.Reader = &racingRecordReader{Reader: c, other: func() {
 		if _, err, _ := step(t, c, a); err != nil {
 			t.Errorf("controller a: %v", err)
@@ -562,4 +568,115 @@ func TestEachRevokedRevisionKeepsItsRecord(t *testing.T) {
 	if n := len(snapshotConfigMaps(t, c, client.MatchingLabels{exception.LabelComponent: exception.ComponentSnapshot})); n != 2 {
 		t.Errorf("snapshots = %d", n)
 	}
+}
+
+// Without --exception-revocation-processing (the default) the controller
+// reads and writes no revocation record and never releases the finalizer:
+// the intent stays on the resource, a deletion stays pending, and
+// RevocationRecorded says why. A record confirmed before processing was
+// turned off stays reported.
+func TestRevocationProcessingDisabled(t *testing.T) {
+	for name, ex := range map[string]*v1alpha1.ComplianceException{
+		"revoked":     revoke(t, acceptedException(t, 1, "alice", revA), "dave", exRevokedAt),
+		"terminating": terminatingException(revoke(t, acceptedException(t, 1, "alice", revA), "dave", exRevokedAt)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &historyFaults{}
+			c, r := historyEnv(t, f, ex)
+			checks := 0
+			r.Revocation = RevocationGate{Protected: func(context.Context) error { checks++; return nil }}
+			f.beforeRelease = func() { t.Error("finalizer release attempted with revocation processing disabled") }
+			for range 2 {
+				res, err, got := step(t, c, r)
+				if err != nil || res.RequeueAfter != 0 {
+					t.Fatalf("reconcile = %+v %v", res, err)
+				}
+				cond := historyCondition(got)
+				switch {
+				case !holds(got) || got.Annotations[exception.RevocationAnnotation] != ex.Annotations[exception.RevocationAnnotation]:
+					t.Fatalf("the intent or its finalizer is gone: %+v", got.ObjectMeta)
+				case cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.ReasonRevocationProcessingDisabled ||
+					!strings.Contains(cond.Message, "--exception-revocation-processing") || !strings.Contains(cond.Message, exception.RevocationFinalizer):
+					t.Fatalf("condition = %+v", cond)
+				}
+			}
+			f.mu.Lock()
+			creates := f.recordCreates
+			f.mu.Unlock()
+			if creates != 0 || revocationRecord(t, c, "ex-1", 1) != nil || checks != 0 {
+				t.Fatalf("record creates %d, record %v, protection checks %d", creates, revocationRecord(t, c, "ex-1", 1) != nil, checks)
+			}
+		})
+	}
+
+	t.Run("recorded before it was disabled", func(t *testing.T) {
+		f := &historyFaults{}
+		c, r := historyEnv(t, f, revoke(t, acceptedException(t, 1, "alice", revA), "dave", exRevokedAt))
+		if _, err, got := step(t, c, r); err != nil || holds(got) {
+			t.Fatalf("enabled: %v holds %v", err, holds(got))
+		}
+		r.Revocation = RevocationGate{}
+		_, err, got := step(t, c, r)
+		if cond := historyCondition(got); err != nil || cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.ReasonRevocationRecorded {
+			t.Fatalf("disabled after recording: %v %+v", err, cond)
+		}
+	})
+}
+
+// With processing enabled, nothing is recorded or released until the
+// exception admission webhooks are verified to fail closed, rechecked on
+// every attempt: a missing check, a failing one, or webhooks removed later
+// all stop processing, which resumes once they are back.
+func TestRevocationProcessingWaitsForAdmissionProtection(t *testing.T) {
+	f := &historyFaults{}
+	c, r := historyEnv(t, f, revoke(t, acceptedException(t, 1, "alice", revA), "dave", exRevokedAt))
+	f.beforeRelease = func() { t.Error("finalizer release attempted without verified admission protection") }
+	unverified := func(what string) {
+		t.Helper()
+		res, err, got := step(t, c, r)
+		cond := historyCondition(got)
+		switch {
+		case err != nil || res.RequeueAfter != protectionRetry:
+			t.Fatalf("%s: reconcile = %+v %v", what, res, err)
+		case !holds(got) || revocationRecord(t, c, "ex-1", 1) != nil:
+			t.Fatalf("%s: released or recorded", what)
+		case cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.ReasonRevocationProtectionUnverified:
+			t.Fatalf("%s: condition = %+v", what, cond)
+		}
+	}
+	r.Revocation = RevocationGate{Enabled: true}
+	unverified("no protection check")
+	missing := fmt.Errorf("%w: ValidatingWebhookConfiguration %s: webhook %s is not registered", exception.ErrUnprotected, exception.WebhookConfigurationName, exception.ValidatingWebhookName)
+	r.Revocation.Protected = func(context.Context) error { return missing }
+	unverified("webhook missing")
+	if cond := historyCondition(mustGet(t, c)); !strings.Contains(cond.Message, exception.ValidatingWebhookName) {
+		t.Errorf("the condition does not say what is missing: %s", cond.Message)
+	}
+	r.Revocation.Protected = func(context.Context) error {
+		return apierrors.NewForbidden(schema.GroupResource{Resource: "validatingwebhookconfigurations"}, "konstapel-exception-acceptance", errors.New("no grant"))
+	}
+	unverified("configuration unreadable")
+
+	f.beforeRelease = nil
+	r.Revocation.Protected = func(context.Context) error { return nil }
+	if res, err, got := step(t, c, r); err != nil || res.RequeueAfter != 0 || holds(got) || revocationRecord(t, c, "ex-1", 1) == nil {
+		t.Fatalf("protection verified: %+v %v holds %v", res, err, holds(got))
+	}
+}
+
+// terminatingException returns ex with a deletion requested.
+func terminatingException(ex *v1alpha1.ComplianceException) *v1alpha1.ComplianceException {
+	out := ex.DeepCopy()
+	now := metav1.NewTime(exT0.Add(31 * time.Hour))
+	out.DeletionTimestamp = &now
+	return out
+}
+
+func mustGet(t *testing.T, c client.Client) *v1alpha1.ComplianceException {
+	t.Helper()
+	ex := &v1alpha1.ComplianceException{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "team-a", Name: "priv"}, ex); err != nil {
+		t.Fatal(err)
+	}
+	return ex
 }

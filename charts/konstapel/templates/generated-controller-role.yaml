@@ -27,12 +27,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - authentication.k8s.io
-  resources:
-  - selfsubjectreviews
-  verbs:
-  - create
-- apiGroups:
   - authorization.k8s.io
   resources:
   - selfsubjectaccessreviews
@@ -52,6 +46,7 @@ rules:
   resources:
   - assessmentrequests
   - compliancebindings
+  - complianceexceptions
   - complianceprofiles
   verbs:
   - get
@@ -85,7 +80,6 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
-  - complianceexceptions
   - evidenceattachments
   - evidencedestinations
   verbs:

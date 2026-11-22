@@ -3,8 +3,9 @@
 package controller
 
 // Live exception revocation (add-self-service-policy-exceptions tasks 2.6
-// and 2.5, with the revocation history of task 3.6): the in-process manager
-// serves the ComplianceException webhooks from config/webhook/exceptions.yaml
+// and 2.5, with the revocation history of task 3.6, so the manager runs with
+// revocation processing on): the in-process manager serves the
+// ComplianceException webhooks from config/webhook/exceptions.yaml
 // to a real API server, requests are made as impersonated application
 // identities, and the documented example and version-aware patches
 // (docs/examples/policy-exceptions) are applied as written. Faults, restarts
@@ -218,7 +219,7 @@ func TestLiveExceptionRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr, err := NewManager(l.cfg, Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second,
-		SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: revocationWebhookPort})
+		SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: revocationWebhookPort, ExceptionRevocation: true})
 	if err != nil {
 		t.Fatal(err)
 	}

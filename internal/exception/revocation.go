@@ -43,6 +43,10 @@ const (
 	ReasonRenewalRequired             = "RenewalRequired"
 	ReasonRevocationHistoryPending    = "RevocationHistoryPending"
 	ReasonProtectedField              = "ProtectedField"
+	// ReasonControllerIdentityUnknown: with revocation processing, the
+	// webhook could not learn the controller identity, so it denies the
+	// write rather than risk treating the controller as an application.
+	ReasonControllerIdentityUnknown = "ControllerIdentityUnknown"
 )
 
 // Revocation is what admission records when an acceptance revision is

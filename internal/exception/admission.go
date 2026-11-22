@@ -200,7 +200,10 @@ type Validator struct {
 	// release; a revocation reads nothing.
 	Reader           client.Reader
 	HistoryNamespace string
-	// Controller is the identity the Konstapel controller runs as.
+	// Controller is the identity the Konstapel controller runs as, set only
+	// with revocation processing (task 3.6), the only reason the
+	// controller writes an exception. Nil treats no request as the
+	// controller's, so nobody can release RevocationFinalizer.
 	Controller *Identity
 }
 
@@ -225,19 +228,24 @@ func (v *Validator) Handle(ctx context.Context, req admission.Request) admission
 }
 
 // controller reports whether the request comes from the controller
-// identity. The identity is looked up only when the request releases the
-// revocation finalizer, which no other identity may do; otherwise the
-// cached identity is used, so a revocation still reads nothing.
-func (v *Validator) controller(ctx context.Context, req admission.Request, ex, old *v1alpha1.ComplianceException) (bool, error) {
-	identity := v.Controller.Cached()
-	releases := old != nil && slices.Contains(old.Finalizers, RevocationFinalizer) && !slices.Contains(ex.Finalizers, RevocationFinalizer)
-	if identity == "" && releases {
-		var err error
-		if identity, err = v.Controller.Get(ctx); err != nil {
-			return false, fmt.Errorf("finalizer %s is released only by the Konstapel controller, whose identity is unknown: %w", RevocationFinalizer, err)
-		}
+// identity. Without revocation processing (Controller nil) the controller
+// has no ComplianceException write permission and nothing may release
+// RevocationFinalizer, so no request is treated as the controller's.
+// With it, the identity is the one learned at startup, so a revocation
+// still reads nothing. Until it is known it is looked up on each request,
+// and while that fails every request is denied: an unknown identity must
+// never let the controller's writes pass as an application identity's.
+func (v *Validator) controller(ctx context.Context, req admission.Request) (bool, error) {
+	if v.Controller == nil {
+		return false, nil
 	}
-	return identity != "" && req.UserInfo.Username == identity, nil
+	identity, err := v.Controller.Get(ctx)
+	if err != nil {
+		return false, &Denial{ReasonControllerIdentityUnknown, fmt.Sprintf(
+			"the Konstapel controller identity is unknown, so this request cannot be told apart from the controller's, which may only release the %s finalizer; ComplianceException writes are denied until the identity is known: %v",
+			RevocationFinalizer, err)}
+	}
+	return req.UserInfo.Username == identity, nil
 }
 
 func (v *Validator) check(ctx context.Context, req admission.Request, ex, old *v1alpha1.ComplianceException, now time.Time) error {
@@ -245,7 +253,7 @@ func (v *Validator) check(ctx context.Context, req admission.Request, ex, old *v
 	if d != nil {
 		return d
 	}
-	isController, err := v.controller(ctx, req, ex, old)
+	isController, err := v.controller(ctx, req)
 	switch {
 	case err != nil:
 		return err
@@ -409,7 +417,7 @@ func (r *ClusterResolver) resolve(ctx context.Context, ns targeting.NamespaceRef
 
 // NewHandlers builds the mutating and validating handlers. historyNamespace
 // holds the independent revocation records; controller is the identity the
-// Konstapel controller runs as.
+// Konstapel controller runs as, nil without revocation processing.
 func NewHandlers(scheme *runtime.Scheme, reader client.Reader, content targeting.ContentSource, cluster, historyNamespace string, controller *Identity) (*Mutator, *Validator) {
 	d := admission.NewDecoder(scheme)
 	return &Mutator{Reader: reader, Resolver: &ClusterResolver{Reader: reader, Content: content, Cluster: cluster}, Cluster: cluster, Decoder: d, HistoryNamespace: historyNamespace},

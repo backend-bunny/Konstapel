@@ -123,6 +123,7 @@ func runController(args []string) error {
 	staging := fs.String("evidence-staging-dir", "/var/lib/konstapel/staging", "writable directory for captures and packages awaiting publication")
 	webhookCerts := fs.String("webhook-cert-dir", "", "directory with tls.crt and tls.key for the ComplianceException admission webhooks; empty serves none")
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
+	revocation := fs.Bool("exception-revocation-processing", false, "persist ComplianceException revocation records and release their finalizer; needs --webhook-cert-dir, the exception admission webhooks registered with failurePolicy Fail, and the gated config/rbac/controller/exception-revocation.yaml grant. Off by default")
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
 	readers := fs.String("protected-package-readers", "", "the download Deployment (in the pod namespace) that must run this controller's image before platform packages carry supporting evidence, or \"none\" without a download service; empty carries none")
 	bundleOpts := addBundleFlags(fs)
@@ -187,6 +188,7 @@ func runController(args []string) error {
 		Stopping:                func() bool { return ctx.Err() != nil },
 		WebhookCertDir:          *webhookCerts,
 		WebhookPort:             *webhookPort,
+		ExceptionRevocation:     *revocation,
 		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),
 		LocalBundle:             VendoredBundle,
 		Bundles:                 bundles,

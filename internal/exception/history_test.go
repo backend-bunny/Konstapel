@@ -483,22 +483,57 @@ func TestOnlyTheControllerReleasesTheRevocationFinalizer(t *testing.T) {
 	}
 	want("controller with a conflicting record", release(controllerUser.Username, revoked), ReasonRevocationHistoryPending)
 
-	// Unknown controller identity: no release, by anyone; a revocation still
-	// needs nothing from the cluster.
+	// Unknown controller identity: the webhook cannot tell the controller
+	// from an application identity, so it denies every write rather than
+	// let the controller's pass as an application's: no release, no
+	// unrelated edit, and no revocation or acceptance by anyone.
 	m2, v2 := newHandlers(t, c, t0.Add(2*time.Hour))
-	v2.Controller = &Identity{Lookup: func(context.Context) (string, error) { return "", errors.New("api unavailable") }}
+	lookupErr := errors.New("api unavailable")
+	v2.Controller = &Identity{Lookup: func(context.Context) (string, error) {
+		if lookupErr != nil {
+			return "", lookupErr
+		}
+		return controllerUser.Username, nil
+	}}
 	if err := c.Delete(context.Background(), squatter); err != nil {
 		t.Fatal(err)
 	}
 	persist(t, c, revoked)
 	ex := revoked.DeepCopy()
 	ex.Finalizers = nil
-	if resp := v2.Handle(context.Background(), request(t, admissionv1.Update, controllerUser, ex, revoked)); resp.Allowed {
-		t.Error("finalizer released with an unknown controller identity")
+	want("controller release, identity unknown", v2.Handle(context.Background(), request(t, admissionv1.Update, controllerUser, ex, revoked)), ReasonControllerIdentityUnknown)
+	labelled := stored.DeepCopy()
+	labelled.Labels = map[string]string{"by": "controller"}
+	want("controller label edit, identity unknown", v2.Handle(context.Background(), request(t, admissionv1.Update, controllerUser, labelled, stored)), ReasonControllerIdentityUnknown)
+	want("editor label edit, identity unknown", v2.Handle(context.Background(), request(t, admissionv1.Update, alice, labelled, stored)), ReasonControllerIdentityUnknown)
+	if _, err := admit(t, m2, v2, request(t, admissionv1.Update, controllerUser, revokedCopy(stored, nil), stored)); err == nil || !strings.HasPrefix(err.Error(), ReasonControllerIdentityUnknown+":") {
+		t.Errorf("revocation by the controller, identity unknown: want a %s denial, got %v", ReasonControllerIdentityUnknown, err)
 	}
+	if _, err := admit(t, m2, v2, request(t, admissionv1.Update, alice, revokedCopy(stored, nil), stored)); err == nil || !strings.HasPrefix(err.Error(), ReasonControllerIdentityUnknown+":") {
+		t.Errorf("revocation by an editor, identity unknown: want a %s denial, got %v", ReasonControllerIdentityUnknown, err)
+	}
+	if _, err := admit(t, m2, v2, request(t, admissionv1.Create, controllerUser, exceptionObj("team-a", 1, nil), nil)); err == nil {
+		t.Error("acceptance by the controller with an unknown identity was admitted")
+	}
+	// Once learned, the restriction applies again and a revocation needs
+	// nothing from the cluster.
+	lookupErr = nil
+	want("controller label edit, identity known", v2.Handle(context.Background(), request(t, admissionv1.Update, controllerUser, labelled, stored)), ReasonProtectedField)
 	m2.Reader, v2.Reader = unreadable{}, unreadable{}
+	v2.Controller.Lookup = func(context.Context) (string, error) { return "", errors.New("not looked up again") }
 	if _, err := admit(t, m2, v2, request(t, admissionv1.Update, alice, revokedCopy(stored, nil), stored)); err != nil {
-		t.Errorf("revocation with an unknown controller identity and no store: %v", err)
+		t.Errorf("revocation with a known controller identity and no store: %v", err)
+	}
+
+	// Without revocation processing no identity is configured: nobody, the
+	// controller included, releases the finalizer, and a revocation needs
+	// nothing from the cluster.
+	m3, v3 := newHandlers(t, c, t0.Add(2*time.Hour))
+	v3.Controller = nil
+	want("controller release without revocation processing", v3.Handle(context.Background(), request(t, admissionv1.Update, controllerUser, ex, revoked)), ReasonProtectedField)
+	m3.Reader, v3.Reader = unreadable{}, unreadable{}
+	if _, err := admit(t, m3, v3, request(t, admissionv1.Update, alice, revokedCopy(stored, nil), stored)); err != nil {
+		t.Errorf("revocation without revocation processing and no store: %v", err)
 	}
 }
 

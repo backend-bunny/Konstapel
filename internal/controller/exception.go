@@ -41,7 +41,25 @@ const (
 	// historyConflictRetry rechecks a record name another object holds;
 	// only an operator can clear it.
 	historyConflictRetry = time.Minute
+	// protectionRetry rechecks exception admission protection that could
+	// not be verified; an operator must install or repair the webhooks.
+	protectionRetry = 15 * time.Second
 )
+
+// RevocationGate is the revocation processing switch (task 3.6,
+// --exception-revocation-processing). Processing writes revocation records
+// and releases RevocationFinalizer, which needs the gated controller grant
+// (config/rbac/controller/exception-revocation.yaml) and the exception
+// admission webhooks that confine it. It is off by default: the runtime
+// chart cannot deploy those webhooks yet.
+type RevocationGate struct {
+	// Enabled turns processing on.
+	Enabled bool
+	// Protected verifies, before each attempt, that the exception
+	// admission webhooks are registered and fail closed; nothing is
+	// processed while it fails. Nil never verifies.
+	Protected func(context.Context) error
+}
 
 // ExceptionReconciler persists an immutable snapshot of each acceptance
 // revision (add-self-service-policy-exceptions task 3.1) and records its
@@ -60,6 +78,10 @@ type ExceptionReconciler struct {
 	// record is read back from the API server, not from a cache.
 	Reader    client.Reader
 	Namespace string
+	// Revocation gates revocation records and the finalizer release. The
+	// zero value is disabled: revoked exceptions keep the finalizer, and
+	// RevocationRecorded says why.
+	Revocation RevocationGate
 }
 
 func (r *ExceptionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -102,7 +124,7 @@ func (r *ExceptionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// is settled: not pending on a transient error, and not blocked by a
 	// conflicting object, while the acceptance record on this resource is
 	// its last copy.
-	if pending && history != nil && history.Status == metav1.ConditionTrue &&
+	if r.Revocation.Enabled && pending && history != nil && history.Status == metav1.ConditionTrue &&
 		accepted.Reason != "" && accepted.Reason != v1alpha1.ReasonSnapshotConflict {
 		released, err := r.release(ctx, ex)
 		switch {
@@ -128,9 +150,11 @@ func (r *ExceptionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // revocationHistory ensures the independent record of the current revoked
-// revision exists and holds exactly the intent admission recorded. It
-// returns the RevocationRecorded condition (nil when the current revision is
-// not revoked) and when to retry. The record is built from the stored
+// revision exists and holds exactly the intent admission recorded, when
+// revocation processing is enabled and the admission webhooks that confine
+// the finalizer release are verified; otherwise it reads and writes nothing
+// and reports why. It returns the RevocationRecorded condition (nil when
+// the current revision is not revoked) and when to retry. The record is built from the stored
 // resource only and is never rewritten: an existing record either matches
 // or is a conflict.
 func (r *ExceptionReconciler) revocationHistory(ctx context.Context, ex *v1alpha1.ComplianceException) (*metav1.Condition, time.Duration) {
@@ -138,8 +162,34 @@ func (r *ExceptionReconciler) revocationHistory(ctx context.Context, ex *v1alpha
 		return &metav1.Condition{Type: v1alpha1.ConditionRevocationRecorded, Status: status, Reason: reason, Message: msg}
 	}
 	_, annotated := ex.Annotations[exception.RevocationAnnotation]
-	if !ex.Spec.Revoked && !annotated && !slices.Contains(ex.Finalizers, exception.RevocationFinalizer) {
+	held := slices.Contains(ex.Finalizers, exception.RevocationFinalizer)
+	if !ex.Spec.Revoked && !annotated && !held {
 		return nil, 0
+	}
+	// A record confirmed and released earlier stays reported while
+	// processing is off or unverified; nothing is read or written then.
+	recorded := func() *metav1.Condition {
+		if c := meta.FindStatusCondition(ex.Status.Conditions, v1alpha1.ConditionRevocationRecorded); c != nil && c.Status == metav1.ConditionTrue && !held {
+			kept := *c
+			return &kept
+		}
+		return nil
+	}
+	if !r.Revocation.Enabled {
+		if c := recorded(); c != nil {
+			return c, 0
+		}
+		return cond(metav1.ConditionFalse, v1alpha1.ReasonRevocationProcessingDisabled,
+			"revocation processing is disabled (--exception-revocation-processing is off, the default until the chart can deploy the exception admission webhooks): the revocation is recorded only on this resource and the "+
+				exception.RevocationFinalizer+" finalizer stays, so a deletion stays pending and a renewal of this revision is rejected; create a new ComplianceException for a new acceptance (docs/integration/policy-exceptions.md, \"Revocation processing\")"), 0
+	}
+	if err := r.protected(ctx); err != nil {
+		if c := recorded(); c != nil {
+			return c, 0
+		}
+		return cond(metav1.ConditionFalse, v1alpha1.ReasonRevocationProtectionUnverified,
+			"revocation processing is enabled but waits, recording nothing and keeping the "+exception.RevocationFinalizer+
+				" finalizer, until the exception admission webhooks are verified to fail closed: "+err.Error()), protectionRetry
 	}
 	rec, err := exception.NewRevocationRecord(ex, r.Namespace)
 	if err != nil {
@@ -188,6 +238,14 @@ func (r *ExceptionReconciler) revocationHistory(ctx context.Context, ex *v1alpha
 func recordedCondition(cond func(metav1.ConditionStatus, string, string) *metav1.Condition, name string, revision int64, digest string) *metav1.Condition {
 	return cond(metav1.ConditionTrue, v1alpha1.ReasonRevocationRecorded,
 		fmt.Sprintf("revocation of acceptance revision %d is recorded independently in %s (%s)", revision, name, digest))
+}
+
+// protected verifies the admission protection revocation processing needs.
+func (r *ExceptionReconciler) protected(ctx context.Context) error {
+	if r.Revocation.Protected == nil {
+		return errors.New("no admission protection check is configured")
+	}
+	return r.Revocation.Protected(ctx)
 }
 
 // release removes the revocation finalizer with an optimistic lock, so it
@@ -275,7 +333,7 @@ func equalStatus(a, b v1alpha1.ComplianceExceptionStatus) bool {
 	return true
 }
 
-func setupExceptions(mgr manager.Manager, namespace string) error {
+func setupExceptions(mgr manager.Manager, namespace string, revocation bool) error {
 	if namespace == "" {
 		namespace = DefaultSnapshotNamespace
 	}
@@ -284,7 +342,10 @@ func setupExceptions(mgr manager.Manager, namespace string) error {
 		// any change while the revocation finalizer is held, deletion
 		// included, matter; other status updates do not.
 		For(&v1alpha1.ComplianceException{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}, revocationPending))).
-		Complete(&ExceptionReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace})
+		Complete(&ExceptionReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace,
+			Revocation: RevocationGate{Enabled: revocation, Protected: func(ctx context.Context) error {
+				return exception.VerifyProtection(ctx, mgr.GetAPIReader())
+			}}})
 }
 
 // revocationPending passes updates of exceptions that still hold the

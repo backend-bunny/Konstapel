@@ -5,17 +5,32 @@ package controller
 // Live revocation history (add-self-service-policy-exceptions task 3.6).
 // The manager runs as the controller service account with the shipped
 // controller roles, so the webhooks learn that identity from a
-// SelfSubjectReview exactly as a deployed replica does. A fault transport
-// on the manager's own API connection injects the failures:
+// SelfSubjectReview exactly as a deployed replica does. It starts as the
+// default installation does, with revocation processing off and without
+// the gated grant: the controller can write no exception (RBAC), records
+// nothing, keeps the finalizer and reports RevocationProcessingDisabled.
+// Every later manager runs with --exception-revocation-processing and the
+// gated config/rbac/controller/exception-revocation.yaml bound. A fault
+// transport on the manager's own API connection injects the failures:
+//   - enabled: the revocation held while processing was off is recorded
+//     and released;
 //   - revoke: the record is persisted, then the finalizer released, and a
 //     deletion completes; tamper attempts on the record, the protected
 //     annotation and the finalizer are denied, and the controller identity
 //     can release the finalizer but cannot revoke or edit;
+//   - the validating webhook removed: nothing is recorded or released
+//     (RevocationProtectionUnverified) until it is registered again;
+//   - a conflicting object at the record's name: the controller identity
+//     cannot release the finalizer;
 //   - persistence failure: the intent and finalizer stay through a renewal
 //     attempt and a deletion until writes are restored;
 //   - a lost record-create response: recovered without a second write;
-//   - a controller stopped between persisting and releasing: a new manager,
-//     elected after the old Lease expires, verifies and releases;
+//   - a controller stopped between persisting and releasing: while no
+//     webhook serves, every write fails closed, the controller's release
+//     included; the next manager cannot learn its identity at first, and
+//     its webhook denies every write (ControllerIdentityUnknown) instead of
+//     treating the controller as an application identity; once it can, it
+//     is elected after the old Lease expires, verifies and releases;
 //   - the controller unavailable (another holder owns the Lease) while a
 //     never-activated acceptance is revoked and deleted with its namespace,
 //     and while a rapid renewal waits for history: once elected, the
@@ -38,6 +53,7 @@ import (
 	"testing"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -132,6 +148,9 @@ type historyFaultState struct {
 	loseRecord bool
 	// denyRelease fails exception patches (finalizer releases) by name.
 	denyRelease map[string]bool
+	// denyIdentity fails the manager's SelfSubjectReviews, its identity
+	// lookup.
+	denyIdentity bool
 	// posts counts record creates sent, by record name.
 	posts map[string]int
 }
@@ -177,6 +196,13 @@ func (f *historyFaultTransport) RoundTrip(req *http.Request) (*http.Response, er
 				return nil, errors.New("injected: connection reset after the record was sent")
 			}
 			return resp, err
+		}
+	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/apis/authentication.k8s.io/v1/selfsubjectreviews"):
+		s.mu.Lock()
+		deny := s.denyIdentity
+		s.mu.Unlock()
+		if deny {
+			return nil, errors.New("injected: the identity lookup cannot reach the API server")
 		}
 	case req.Method == http.MethodPatch && strings.Contains(req.URL.Path, "/complianceexceptions/") && !strings.HasSuffix(req.URL.Path, "/status"):
 		name := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
@@ -258,15 +284,16 @@ func TestLiveRevocationHistory(t *testing.T) {
 		return faults.posts[name]
 	}
 	// start runs a manager as the controller service account, through the
-	// fault transport, electing it through the shared Lease.
-	start := func(agent string) *candidate {
+	// fault transport, electing it through the shared Lease, with or
+	// without revocation processing.
+	start := func(agent string, revocation bool) *candidate {
 		t.Helper()
 		cfg := rest.CopyConfig(l.cfg)
 		cfg.UserAgent = agent
 		cfg.Impersonate = rest.ImpersonationConfig{UserName: controllerServiceAccount, UID: "uid-" + controllerServiceAccount, Groups: controllerGroups}
 		cfg.WrapTransport = func(rt http.RoundTripper) http.RoundTripper { return &historyFaultTransport{state: faults, next: rt} }
 		mgr, err := NewManager(cfg, Options{Content: content, MetricsAddr: "0", ProbeAddr: "0", EnginePoll: 2 * time.Second,
-			SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: historyWebhookPort,
+			SkipControllerNameValidation: true, WebhookCertDir: certs, WebhookPort: historyWebhookPort, ExceptionRevocation: revocation,
 			LeaderElection: true, LeaderElectionNamespace: DefaultSnapshotNamespace,
 			Election: Election{LeaseDuration: 4 * time.Second, RenewDeadline: 3 * time.Second, RetryPeriod: time.Second}})
 		if err != nil {
@@ -358,12 +385,60 @@ func TestLiveRevocationHistory(t *testing.T) {
 		return cur
 	}
 
-	running = start("eh-manager-1")
+	serving := func(what string) {
+		t.Helper()
+		l.eventually(what, func() (bool, string) {
+			err := alice.Create(l.ctx, newEx(ns, "probe"), client.DryRunAll)
+			return err == nil, fmt.Sprint(err)
+		})
+	}
+	unavailable := func(what string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "failed calling webhook") {
+			t.Fatalf("%s: want the unavailable webhook to fail closed, got %v", what, err)
+		}
+		l.record("fail-closed", map[string]any{"attempt": what})
+	}
+	release := `{"metadata":{"finalizers":null}}`
+
+	// 0. The default installation: processing off, no gated grant. The
+	// controller can neither release nor edit (RBAC), records nothing, and
+	// says why; a renewal of the revoked revision waits.
+	running = start("eh-manager-0", false)
 	l.eventually("manager elected", func() (bool, string) { return running.elected(), "" })
-	l.eventually("exception webhook serving", func() (bool, string) {
-		err := alice.Create(l.ctx, newEx(ns, "probe"), client.DryRunAll)
-		return err == nil, fmt.Sprint(err)
-	})
+	serving("exception webhook serving")
+	off := create(alice, newEx(ns, "disabled"))
+	l.settled(ns, off.Name)
+	off = revoke(dave, off)
+	condition(off, v1alpha1.ReasonRevocationProcessingDisabled)
+	cur := held("processing disabled", off)
+	forbidden("release the finalizer as the controller without the gated grant", l.mergePatch(controllerSA, ns, off.Name, release))
+	forbidden("label as the controller without the gated grant", l.mergePatch(controllerSA, ns, off.Name, `{"metadata":{"labels":{"by":"controller"}}}`))
+	_, err := l.jsonPatch(alice, ns, off.Name, renewalPatch(cur))
+	denied("renew while processing is disabled", err, exception.ReasonRevocationHistoryPending)
+	time.Sleep(2 * historyRetry)
+	if l.snapshotConfigMap(exception.RevocationRecordName(off.UID, 1)) != nil {
+		t.Fatal("a revocation record was written with processing disabled")
+	}
+	held("processing disabled, later", off)
+	l.record("processing-disabled", map[string]any{"reason": v1alpha1.ReasonRevocationProcessingDisabled, "finalizer": exception.RevocationFinalizer})
+
+	// Enabling, in the documented order: the webhooks are registered and
+	// fail closed (above), then the gated grant, then the flag. The held
+	// revocation is recorded and released.
+	stop()
+	gated := l.shippedClusterRole("../../config/rbac/controller/exception-revocation.yaml", "konstapel-controller-exception-revocation")
+	gatedBinding := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exc-history-" + gated},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: gated}, Subjects: []rbacv1.Subject{sa}}
+	if err := l.c.Create(l.ctx, gatedBinding); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, gatedBinding) })
+	running = start("eh-manager-1", true)
+	l.eventually("manager elected", func() (bool, string) { return running.elected(), "" })
+	serving("exception webhook serving with revocation processing")
+	l.waitHistory(off)
+	l.record("processing-enabled", map[string]any{"record": exception.RevocationRecordName(off.UID, 1)})
 
 	// 1. Revoke: the record first, then the finalizer; deletion completes
 	// and the history stays.
@@ -376,7 +451,7 @@ func TestLiveRevocationHistory(t *testing.T) {
 	if parsed.Revocation.Actor.Username != "dave" || parsed.Acceptance == nil || snapRef == nil || *parsed.Acceptance != *snapRef || parsed.Namespace.UID == "" {
 		t.Fatalf("record %+v, snapshot %+v", parsed, snapRef)
 	}
-	cur := l.exception(ns, basic.Name)
+	cur = l.exception(ns, basic.Name)
 	if err := alice.Delete(l.ctx, cur, client.Preconditions{UID: &cur.UID, ResourceVersion: &cur.ResourceVersion}); err != nil {
 		t.Fatal(err)
 	}
@@ -385,6 +460,33 @@ func TestLiveRevocationHistory(t *testing.T) {
 		t.Fatal("deletion changed or removed the record")
 	}
 	l.record("revoke-record-release-delete", map[string]any{"record": rec.Name, "actor": "dave"})
+
+	// 1b. The validating webhook is removed: the controller cannot verify
+	// the protection its release depends on, so it records and releases
+	// nothing until the webhook is registered again.
+	val := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+	if err := l.c.Get(l.ctx, client.ObjectKey{Name: exception.WebhookConfigurationName}, val); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.c.Delete(l.ctx, val); err != nil {
+		t.Fatal(err)
+	}
+	unprotected := create(alice, newEx(ns, "unprotected"))
+	l.settled(ns, unprotected.Name)
+	unprotected = revoke(dave, unprotected)
+	condition(unprotected, v1alpha1.ReasonRevocationProtectionUnverified)
+	held("validating webhook removed", unprotected)
+	if l.snapshotConfigMap(exception.RevocationRecordName(unprotected.UID, 1)) != nil {
+		t.Fatal("a revocation record was written without verified admission protection")
+	}
+	restored := val.DeepCopy()
+	restored.ObjectMeta = metav1.ObjectMeta{Name: val.Name, Labels: val.Labels, Annotations: val.Annotations}
+	if err := l.c.Create(l.ctx, restored); err != nil {
+		t.Fatal(err)
+	}
+	serving("validating webhook registered again")
+	l.waitHistory(unprotected)
+	l.record("protection-removed", map[string]any{"reason": v1alpha1.ReasonRevocationProtectionUnverified, "resumed": true})
 
 	// 2. Tampering: application identities cannot touch the protected
 	// namespace; the controller identity can neither rewrite records nor
@@ -417,7 +519,7 @@ func TestLiveRevocationHistory(t *testing.T) {
 	failing = revoke(alice, failing)
 	condition(failing, v1alpha1.ReasonRevocationHistoryPending)
 	cur = held("persistence failing", failing)
-	_, err := l.jsonPatch(alice, ns, failing.Name, renewalPatch(cur))
+	_, err = l.jsonPatch(alice, ns, failing.Name, renewalPatch(cur))
 	denied("renew while the record is not persisted", err, exception.ReasonRevocationHistoryPending)
 	denied("release the finalizer as a team member", l.mergePatch(alice, ns, failing.Name, `{"metadata":{"finalizers":null}}`), exception.ReasonProtectedField)
 	denied("release the finalizer as the controller before the record exists", l.mergePatch(controllerSA, ns, failing.Name, `{"metadata":{"finalizers":null}}`), exception.ReasonRevocationHistoryPending)
@@ -434,6 +536,26 @@ func TestLiveRevocationHistory(t *testing.T) {
 	rec = l.waitHistory(failing)
 	removed("terminating revoked exception", failing)
 	l.record("persistence-restored", map[string]any{"record": rec.Name, "removed": true})
+
+	// 3b. Another object holds the record's name: it is not this
+	// revocation's record, so the controller identity cannot release the
+	// finalizer, and nothing overwrites it.
+	squatted := create(alice, newEx(ns, "squatted"))
+	l.settled(ns, squatted.Name)
+	squatter := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: exception.RevocationRecordName(squatted.UID, 1), Namespace: DefaultSnapshotNamespace},
+		Data: map[string]string{exception.RevocationRecordDataKey: `{"version":1}`}}
+	if err := l.c.Create(l.ctx, squatter); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.c.Delete(l.ctx, squatter) })
+	squatted = revoke(alice, squatted)
+	condition(squatted, v1alpha1.ReasonRevocationRecordConflict)
+	denied("release the finalizer as the controller with a conflicting record", l.mergePatch(controllerSA, ns, squatted.Name, release), exception.ReasonRevocationHistoryPending)
+	held("conflicting record", squatted)
+	if got := l.snapshotConfigMap(squatter.Name); got == nil || got.Data[exception.RevocationRecordDataKey] != squatter.Data[exception.RevocationRecordDataKey] {
+		t.Fatal("the conflicting object was overwritten")
+	}
+	l.record("conflicting-record", map[string]any{"reason": v1alpha1.ReasonRevocationRecordConflict})
 
 	// 4. The record create succeeds but its response is lost: recovered
 	// from the stored record, without writing it again.
@@ -463,8 +585,29 @@ func TestLiveRevocationHistory(t *testing.T) {
 	held("record persisted, release failing", crash)
 	stop()
 	held("controller stopped", crash)
-	setFault(func(s *historyFaultState) { delete(s.denyRelease, "crash") })
-	running = start("eh-manager-2")
+	// No webhook serves: every write fails closed, the controller's own
+	// release included, although the record is durable.
+	unavailable("release the finalizer as the controller while no webhook serves", l.mergePatch(controllerSA, ns, crash.Name, release))
+	unavailable("revoke while no webhook serves", l.mergePatch(alice, ns, active.Name, `{"spec":{"revoked":true}}`))
+	held("webhook unavailable", crash)
+	// The replacement cannot learn its identity at first: its webhook
+	// denies every write instead of letting the controller's pass as an
+	// application identity's.
+	setFault(func(s *historyFaultState) { delete(s.denyRelease, "crash"); s.denyIdentity = true })
+	running = start("eh-manager-2", true)
+	l.eventually("webhook serving without the controller identity", func() (bool, string) {
+		err := alice.Create(l.ctx, newEx(ns, "probe"), client.DryRunAll)
+		return err != nil && strings.Contains(err.Error(), "denied the request: "+exception.ReasonControllerIdentityUnknown+":"), fmt.Sprint(err)
+	})
+	denied("label as the controller, identity unknown", l.mergePatch(controllerSA, ns, active.Name, `{"metadata":{"labels":{"by":"controller"}}}`), exception.ReasonControllerIdentityUnknown)
+	denied("release the finalizer as the controller, identity unknown", l.mergePatch(controllerSA, ns, crash.Name, release), exception.ReasonControllerIdentityUnknown)
+	denied("revoke as a team member, identity unknown", l.mergePatch(alice, ns, active.Name, `{"spec":{"revoked":true}}`), exception.ReasonControllerIdentityUnknown)
+	held("identity unknown", crash)
+	if cur := l.exception(ns, active.Name); cur.Spec.Revoked || cur.Labels["by"] != "" {
+		t.Fatalf("a write passed while the controller identity was unknown: %s", lifecycle(cur))
+	}
+	setFault(func(s *historyFaultState) { s.denyIdentity = false })
+	serving("webhook serving once the identity is known")
 	l.eventually("replacement elected", func() (bool, string) { return running.elected(), "" })
 	rec = l.waitHistory(crash)
 	if rec.ResourceVersion != persisted.ResourceVersion || posts(rec.Name) != 1 {
@@ -486,7 +629,7 @@ func TestLiveRevocationHistory(t *testing.T) {
 		err := l.c.Update(l.ctx, cur)
 		return err == nil, fmt.Sprint(err)
 	})
-	running = start("eh-manager-3")
+	running = start("eh-manager-3", true)
 	l.eventually("exception webhook serving without a leader", func() (bool, string) {
 		err := alice.Create(l.ctx, newEx(ns, "probe"), client.DryRunAll)
 		return err == nil, fmt.Sprint(err)

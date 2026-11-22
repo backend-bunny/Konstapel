@@ -41,6 +41,20 @@ app.kubernetes.io/component: controller
 {{- include "konstapel.validateAttachments" . -}}
 {{- include "konstapel.validateBundles" . -}}
 {{- include "konstapel.validateMetrics" . -}}
+{{- include "konstapel.validateExceptions" . -}}
+{{- end }}
+
+{{/*
+ComplianceException revocation processing (docs/charts.md, "Exception
+revocation processing"). Its grant lets the controller update exceptions,
+which only the fail-closed exception admission webhooks confine to releasing
+the revocation finalizer. The chart cannot deploy those webhooks yet, so the
+switch cannot be turned on: no render grants the write without them.
+*/}}
+{{- define "konstapel.validateExceptions" -}}
+{{- if .Values.exceptions.revocationProcessing.enabled -}}
+{{- fail "exceptions.revocationProcessing.enabled cannot be enabled until the chart can deploy the ComplianceException admission webhooks: revocation processing grants the controller update/patch on complianceexceptions, which only those webhooks (failurePolicy Fail) confine to releasing the revocation finalizer, and this chart does not deploy them yet. Leave it false (docs/charts.md, \"Exception revocation processing\")" -}}
+{{- end -}}
 {{- end }}
 
 {{/*

@@ -169,6 +169,32 @@ Restart, repeated revoke, rapid renewal, and revoke-then-delete must not lose or
 reassign the revoking actor/time. Previously revoked revisions remain separately
 addressable after newer acceptances replace the current one.
 
+Store each record as an immutable ConfigMap, `revocation-<UID>-<revision>`, built
+only from the stored resource, and release the finalizer with an optimistic lock
+only after reading the record back. Only the controller identity may release the
+finalizer, and the validating webhook confines that identity to the release. The
+webhook learns the identity with a SelfSubjectReview. Until it knows the identity,
+it denies every write, so a failed lookup never lets the controller's request
+pass as an application identity's.
+
+Gate revocation processing (owner decision 2026-11-22). The release needs
+`update`/`patch` on exceptions, which only the fail-closed exception webhooks
+confine. So the grant, the identity lookup (`selfsubjectreviews` create) and
+named reads of the two webhook configurations form one gated ClusterRole
+(`config/rbac/controller/exception-revocation.yaml`), outside the generated
+default role. Processing runs only with `--exception-revocation-processing`, which
+also requires this manager to serve the webhooks. Before each attempt it verifies
+that both webhook configurations exist, use `failurePolicy: Fail`, intercept
+create and update of exceptions, and have no selectors or match conditions. Off
+or unverified, it writes and releases nothing, and the `RevocationRecorded`
+condition says why (`RevocationProcessingDisabled`, `RevocationProtectionUnverified`);
+the annotation remains the intent's only copy and the finalizer keeps it. The
+runtime chart cannot deploy the exception webhooks yet, so its single switch,
+`exceptions.revocationProcessing.enabled`, defaults to off and fails the render
+when on. Outside the chart, enabling registers the webhooks first, then binds the
+grant, then sets the flag; disabling reverses that order. Deploying the webhooks
+from the chart is a separate decision.
+
 The snapshot copies the contribution set protected at acceptance admission.
 Reconciliation must never resolve a replacement set silently. New policy/configuration revisions,
 additional binding contributions, or new restrictive eligibility invalidate the
@@ -304,6 +330,12 @@ after rebasing onto those prerequisites.
   copies; classify missing evaluation-time attribution as unresolved.
 - **Revocation races renewal or deletion:** require revision/version-aware
   updates and persist independent lifecycle records before losing the intent.
+- **The finalizer-release grant outlives its protection:** keep it in a gated role
+  bound with the processing flag, verify the webhooks before every attempt, and
+  refuse it in the chart until the chart deploys the webhooks. A webhook removed
+  between the check and the release, or a grant bound without the flag, is
+  unconfined until the grant is removed, so documented disabling removes the
+  grant before the webhooks.
 - **Self-service can waive a whole eligible policy:** make that scope explicit in
   documentation and central defaults; finer container/value waivers are later work.
 
@@ -316,7 +348,9 @@ single eligible policy to prove acceptance, sibling isolation, expiry, revocatio
 and export before enabling broader self-service.
 
 Existing resources without revoked read as false; adding the field does not
-revoke or renew them. Install the schema/admission/lifecycle support before
+revoke or renew them. Revocation processing ships disabled. Enabling it later
+records every revocation held in the meantime, and disabling it keeps the
+records already written. Install the schema/admission/lifecycle support before
 documenting revocation as available. API validation, authenticated intent, and
 history persistence work can proceed while the engine enablement gate remains
 unresolved. Task 2.6 defines that API work, task 3.6 preserves its history, and

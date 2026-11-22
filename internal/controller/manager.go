@@ -144,6 +144,14 @@ type Options struct {
 	// SnapshotNamespace holds acceptance snapshots; empty means
 	// DefaultSnapshotNamespace.
 	SnapshotNamespace string
+	// ExceptionRevocation enables revocation processing
+	// (--exception-revocation-processing, add-self-service-policy-exceptions
+	// task 3.6): independent revocation records, the finalizer release and
+	// the webhooks' controller-identity restriction, with its
+	// SelfSubjectReview. It needs WebhookCertDir, the exception admission
+	// webhooks registered to fail closed, and the gated grant
+	// config/rbac/controller/exception-revocation.yaml. Off by default.
+	ExceptionRevocation bool
 	// LocalBundle is the bundle name Content serves (the image's vendored
 	// bundle). When set, Content is wrapped in a stack.Router that serves
 	// that name from Content exactly as before and every other name from
@@ -185,6 +193,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}
 	if shutdown < 0 {
 		return nil, fmt.Errorf("shutdown timeout %s must be positive", shutdown)
+	}
+	if opts.ExceptionRevocation && opts.WebhookCertDir == "" {
+		// The webhooks this manager serves are what confine the
+		// controller identity to releasing the finalizer.
+		return nil, errors.New("exception revocation processing needs the exception admission webhooks served by this manager (--webhook-cert-dir)")
 	}
 	metricsOpts, metricsCerts, err := metricsOptions(opts.MetricsAddr, opts.MetricsTLS)
 	if err != nil {
@@ -364,7 +377,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore); err != nil {
 		return nil, err
 	}
-	if err := setupExceptions(mgr, opts.SnapshotNamespace); err != nil {
+	if err := setupExceptions(mgr, opts.SnapshotNamespace, opts.ExceptionRevocation); err != nil {
 		return nil, err
 	}
 	if err := setupAttachments(mgr, attachmentBaselines(opts.Content, currentRuntime()), attachmentStore); err != nil {
@@ -377,13 +390,30 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		if history == "" {
 			history = DefaultSnapshotNamespace
 		}
-		identity := &exception.Identity{Lookup: exception.SelfSubjectReview(mgr.GetClient())}
+		// Only revocation processing writes exceptions as the controller,
+		// so only then is its identity learned and restricted.
+		var identity *exception.Identity
+		if opts.ExceptionRevocation {
+			identity = &exception.Identity{Lookup: exception.SelfSubjectReview(mgr.GetClient())}
+		}
 		m, v := exception.NewHandlers(mgr.GetScheme(), mgr.GetAPIReader(), opts.Content, br.Cluster, history, identity)
 		exception.Register(mgr.GetWebhookServer(), m, v)
-		// Learn the controller identity on every replica at startup, so the
-		// webhook restricts it without a lookup on the revocation path.
-		if err := mgr.Add(identityWarmup{identity: identity, retry: opts.EnginePoll}); err != nil {
-			return nil, err
+		if identity != nil {
+			// Learn the controller identity on every replica at startup, so
+			// the webhook restricts it without a lookup on the revocation
+			// path. Until it is known the webhook denies every write and
+			// the replica is not ready.
+			if err := mgr.Add(identityWarmup{identity: identity, retry: opts.EnginePoll}); err != nil {
+				return nil, err
+			}
+			if err := mgr.AddReadyzCheck("controller-identity", func(*http.Request) error {
+				if identity.Cached() == "" {
+					return errors.New("the controller identity is not known yet")
+				}
+				return nil
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return mgr, nil

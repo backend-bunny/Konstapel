@@ -20,7 +20,8 @@ package controller
 //     caller's identity; failover and a repeated revocation through another
 //     replica leave the record and spec.revoked as stored, and the leader
 //     after failover persists a revocation admitted without a leader
-//     exactly as admitted before it releases the finalizer (task 3.6);
+//     exactly as admitted before it releases the finalizer (task 3.6,
+//     with revocation processing on in every replica);
 //   - a rejected certificate rotation takes one replica out of readiness
 //     while it stays live and the other keeps serving; a missing external
 //     capability (OCI bundle sources) fails only the affected namespace's
@@ -185,6 +186,7 @@ func TestLiveReplicaAdmission(t *testing.T) {
 			o.LocalBundle = content.Name
 			o.ProbeAddr = r.probes
 			o.WebhookCertDir, o.WebhookPort = r.certs, port
+			o.ExceptionRevocation = true
 			o.Election = Election{LeaseDuration: 6 * time.Second, RenewDeadline: 4 * time.Second, RetryPeriod: time.Second}
 		})
 	}

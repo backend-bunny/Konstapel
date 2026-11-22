@@ -39,7 +39,8 @@ Konstapel grants nothing for it.
 | Identity | Access |
 | --- | --- |
 | Application team: ClusterRole `konstapel-exception-editor` (`config/rbac/exception-editor.yaml`), bound with a **RoleBinding in the team's namespace** | get, list, watch, create, update, patch and delete on `complianceexceptions` in that namespace; read-only status. Nothing else. |
-| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It may `update`/`patch` an exception only to release the revocation finalizer once the revocation is recorded independently ([Revocation records](#revocation-records)). Admission rejects any other change it sends, so it cannot accept, renew, revoke or reactivate one. |
+| Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It cannot create, update, patch or delete an exception. |
+| Konstapel controller, only with [revocation processing](#revocation-processing): gated ClusterRole `konstapel-controller-exception-revocation` (`config/rbac/controller/exception-revocation.yaml`) | `update`/`patch` on `complianceexceptions`, only to release the revocation finalizer once the revocation is recorded independently ([Revocation records](#revocation-records)); `create` on `selfsubjectreviews` to learn its identity; `get` on the two `konstapel-exception-acceptance` webhook configurations. The validating webhook rejects any other change it sends, so it cannot accept, renew, revoke or reactivate one. Not part of the default installation, and the chart refuses to render it. |
 | Platform administrators: `konstapel-compliance-admin` | Central profiles and bindings. Does not write exceptions on a team's behalf. |
 
 The editor role is not aggregated into the built-in `admin`/`edit` roles:
@@ -58,7 +59,9 @@ admission test confirms these as denied for a team member:
 - writing in `konstapel-system`
 - creating a native `PolicyException`
 
-It also confirms that the controller identity can write status.
+It also confirms that the controller identity can write status. Without the
+gated grant, `TestLiveRevocationHistory` confirms the controller identity
+cannot release the finalizer or edit an exception (RBAC).
 
 ## Acceptance admission
 
@@ -163,7 +166,7 @@ transitions:
 | Repeat revoke | same revision, `true` to `true` | Admitted. The first record is kept. |
 | Reactivate | same revision, `true` to `false`, including an update that omits `revoked` | Rejected: `RenewalRequired`. |
 | Renew | revision + 1, `revoked` stays `false` | An acceptance (above). |
-| Renew a revoked revision | revision + 1, `true` to `false` | An acceptance (above), once the revocation is recorded independently; until then `RevocationHistoryPending` ([Revocation records](#revocation-records)). The renewal removes the revocation annotation from the resource. |
+| Renew a revoked revision | revision + 1, `true` to `false` | An acceptance (above), once the revocation is recorded independently; until then `RevocationHistoryPending` ([Revocation records](#revocation-records)). The renewal removes the revocation annotation from the resource. Without [revocation processing](#revocation-processing) it is always rejected. |
 | Renew and revoke together | revision + 1 with `revoked: true` | Rejected: `InvalidRevocationTransition`. |
 
 Admission messages start with the reason, as acceptance denials do. Metadata
@@ -186,9 +189,10 @@ is overwritten. The annotation holds:
 In the same write it adds the finalizer
 `compliance.erenius.io/revocation-history`. The record sits next to the
 acceptance record and changes nothing in it: the accepting actor, reason,
-expiry and snapshot stay as accepted. The controller then copies the record
-into an independent [revocation record](#revocation-records) and releases the
-finalizer.
+expiry and snapshot stay as accepted. With
+[revocation processing](#revocation-processing), the controller then copies
+the record into an independent [revocation record](#revocation-records) and
+releases the finalizer. Without it, which is the default, the finalizer stays.
 
 The validating webhook checks that the record belongs to the request: the
 authenticated caller, the stored UID, the current revision, the claim, a time
@@ -206,7 +210,9 @@ durable and matches the annotation: the controller identity releases the
 finalizer, and a renewal of the revoked revision removes the annotation
 (once the finalizer is gone).
 
-Revocation reads nothing from the cluster. It resolves no eligibility and
+Revocation reads nothing from the cluster once the webhook knows the
+controller identity (with revocation processing; without it there is none
+to know). It resolves no eligibility and
 does not need a future `expiresAt`, so an expired acceptance, a policy that
 is now `Forbidden` and one whose configuration cannot be resolved can all be
 revoked. It still needs the webhooks: while admission is unavailable the
@@ -216,11 +222,103 @@ returns the record and finalizer it would store, and stores nothing.
 A GitOps service account that revokes is the recorded actor. A commit author
 or ticket belongs in `claimed-by`, which is kept as an unverified claim.
 
+### Revocation processing
+
+Revocation processing writes the [revocation records](#revocation-records)
+and releases the `compliance.erenius.io/revocation-history` finalizer
+(task 3.6). It is **off by default**, and the runtime chart cannot turn it
+on yet.
+
+Releasing the finalizer means the controller must be allowed to update
+exceptions. Only the validating exception webhook keeps that grant from
+being a general exception write: it confines the controller identity to
+releasing the finalizer, and only once the record is durable. So the grant,
+the identity lookup and the processing belong together, and they are safe
+only while the exception webhooks are registered and fail closed. The chart
+ships the `ComplianceException` CRD and the editor role, but it doesn't
+deploy the exception webhooks, so it can't provide that protection. Its one
+switch, `exceptions.revocationProcessing.enabled`, defaults to `false`, and
+`true` fails the render ([charts](../charts.md#exception-revocation-processing)).
+
+**While processing is off**, a revocation is still admitted and recorded on
+the resource with its finalizer ([Revocation record](#revocation-record)).
+Nothing else happens:
+
+- No independent record is written, and the controller has no grant to
+  release the finalizer.
+- The exception's `RevocationRecorded` condition is `False` with reason
+  `RevocationProcessingDisabled`, and its message says why.
+- Deleting the exception is accepted, but it stays `Terminating`, and so
+  does a namespace that contains it.
+- A renewal of the revoked revision is rejected with
+  `RevocationHistoryPending`. Create a new `ComplianceException` for a new
+  acceptance.
+
+The annotation stays the only copy of the revocation. Nothing is lost, and
+enabling processing later records every held revocation and releases it.
+
+**To enable it** outside the chart (the non-chart test harness does this,
+and so can an operator who deploys the webhooks themselves), keep this order,
+so that the grant never becomes usable before its protection exists:
+
+1. Serve the webhooks: run every controller replica with `--webhook-cert-dir`
+   and provide the `konstapel-system/konstapel-webhook` Service and
+   `caBundle` ([Acceptance admission](#acceptance-admission)).
+2. Register both webhooks from `config/webhook/exceptions.yaml` with
+   `failurePolicy: Fail`, without selectors or match conditions.
+3. Bind the ClusterRole `konstapel-controller-exception-revocation`
+   (`config/rbac/controller/exception-revocation.yaml`) to the controller
+   ServiceAccount with a ClusterRoleBinding.
+4. Restart every replica with `--exception-revocation-processing`. Every
+   replica runs the same flags, because each one serves the webhooks.
+
+The controller refuses to start with the flag but without
+`--webhook-cert-dir`. Before each attempt to record or release, it reads both
+`konstapel-exception-acceptance` webhook configurations and checks that each
+exists, is not being deleted, uses `failurePolicy: Fail`, intercepts `CREATE`
+and `UPDATE` of `compliance.erenius.io/v1alpha1` `complianceexceptions`, and
+has no namespace or object selector and no match conditions. If any check
+fails, or the configurations can't be read, it records and releases nothing.
+The condition is then `RevocationProtectionUnverified`, its message names
+the problem, and the check is retried every 15 seconds.
+
+With the flag, each replica's webhook learns the controller identity with a
+`SelfSubjectReview` at startup. The replica stays unready until it knows the
+identity. A request that reaches it before then is denied with
+`ControllerIdentityUnknown`, from any identity, until a lookup succeeds:
+the webhook can't tell the controller from anyone else, so it never lets the
+controller's request through as an application's.
+
+**To disable it**, reverse the order, so that the grant never outlives its
+protection:
+
+1. Restart every replica without `--exception-revocation-processing`. It then
+   writes no record and releases nothing. Revoked exceptions it hasn't
+   processed report `RevocationProcessingDisabled`. Ones already recorded
+   keep `Recorded`, and their records stay.
+2. Delete the `konstapel-controller-exception-revocation` ClusterRoleBinding,
+   and the ClusterRole if you like.
+3. Only then remove the webhooks, if at all.
+
+If the webhooks are removed while processing is still on, the controller
+stops at its next check (`RevocationProtectionUnverified`). The grant is
+still bound, though, and nothing confines it until step 2. The check runs
+just before each attempt, so a webhook removed between the check and the
+release is noticed only on the next attempt. The controller also can't check
+that the registered endpoint is its own. An endpoint that doesn't answer
+fails closed, and `TestLiveRevocationHistory` shows every write, the
+controller's release included, denied while no webhook serves. Binding the
+gated ClusterRole without the flag gives the controller the grant without
+the webhook's restriction of its identity, because the webhook restricts it
+only with the flag. Bind the two together.
+
 ### Revocation records
 
 The annotation is the only copy of a revocation until the controller
-persists it independently (task 3.6). For every revoked acceptance revision,
-the controller writes an immutable `ConfigMap` in the protected namespace
+persists it independently (task 3.6) with
+[revocation processing](#revocation-processing) enabled. For every revoked
+acceptance revision, the controller writes an immutable `ConfigMap` in the
+protected namespace
 (`konstapel-system`), next to the acceptance snapshots. It is named
 `revocation-<exception UID>-<revision>`, so each revoked revision has its own
 record and a recreated exception never reuses one. Its `revocation.json`
@@ -251,13 +349,16 @@ engine stopped granting; observed withdrawal is group 4 (below).
 
 #### Order of operations
 
-1. The controller writes the record, or finds an existing one and checks
-   that it holds exactly this revocation. An existing object is never
-   overwritten.
+1. The controller verifies that the exception webhooks fail closed
+   ([Revocation processing](#revocation-processing)). It then writes the
+   record, or finds an existing one and checks that it holds exactly this
+   revocation. An existing object is never overwritten.
 2. Only then does it release the finalizer, with an optimistic lock. The
    validating webhook allows the release only from the controller identity,
    which it learns with a `SelfSubjectReview` at startup, and only after it
-   has read the record back from the API server and found it matching. For
+   has read the record back from the API server and found it matching. It
+   restricts the controller only with revocation processing on. Without it,
+   no identity may release the finalizer. For
    a deleted exception, the controller also writes the revoked revision's
    acceptance snapshot first, so an acceptance that was revoked and deleted
    before the controller ever ran keeps its snapshot too.
@@ -275,6 +376,8 @@ current revision. It is absent while the current revision is not revoked.
 | `RevocationHistoryPending` | The record could not be written yet, for example because the protected namespace is not writable. Retried every 5 seconds. | Kept |
 | `RevocationRecordConflict` | Another object has the record's name and does not hold this revocation. It is never overwritten. Rechecked every minute; an operator must remove it. | Kept |
 | `RevocationInvalid` | `spec.revoked` is true but the protected record is missing or belongs to another revision. Nothing can be recorded. | Kept |
+| `RevocationProcessingDisabled` | [Revocation processing](#revocation-processing) is off, which is the default. Nothing is recorded or released. Not retried: enabling processing restarts the controller, which then records it. | Kept |
+| `RevocationProtectionUnverified` | Processing is on, but the exception webhooks couldn't be verified to fail closed. The message names the problem. Rechecked every 15 seconds. | Kept |
 
 The finalizer is also kept while the revoked revision's acceptance snapshot
 cannot be written (a transient error, or `SnapshotConflict`): the acceptance
@@ -293,7 +396,12 @@ replaced by the next leader, which verifies the same record and releases. A
 revocation admitted while no replica leads is recorded by whichever replica
 is elected next. `TestLiveRevocationHistory` exercises each of these against
 a real API server with the controller running as its service account and the
-shipped roles, as does `TestLiveReplicaAdmission` across failover.
+shipped roles: first the default roles with processing off, then the gated
+grant with processing on. It also covers the validating webhook removed and
+restored, a conflicting object at a record's name, an unavailable webhook,
+and an identity lookup that fails. `TestLiveReplicaAdmission` covers
+failover, and with `TestLiveExceptionRevocation` it runs the managers with
+processing on.
 
 An operator who removes the webhooks and then the finalizer by hand, before
 the record exists, erases the only copy of that revocation.
@@ -393,7 +501,8 @@ To renew a **revoked** revision, use
 tests `spec.revoked: true` instead, and sets it to `false` with the revision
 increment. Wait until the exception's `RevocationRecorded` condition is `True`
 and the `compliance.erenius.io/revocation-history` finalizer is gone; before
-that, admission rejects the renewal with `RevocationHistoryPending`. The
+that, admission rejects the renewal with `RevocationHistoryPending`, as it
+always does without [revocation processing](#revocation-processing). The
 renewal is a new acceptance: eligibility and lifetime are checked again, it
 starts unrevoked, and it removes the revocation annotation from the
 resource. The revoked revision stays revoked, and its independent record and
@@ -406,8 +515,9 @@ sends no preconditions, so it deletes whatever resource has that name when
 the request arrives. API clients can send `DeleteOptions.preconditions` with
 the `uid` and `resourceVersion` they reviewed; the API server rejects stale
 values with `409 Conflict`. An exception is removed at once, unless it is
-revoked and its revocation is not yet recorded independently: then it stays
-`Terminating` until the controller has written the record (above). Deletion
+revoked and its revocation is not yet recorded independently. It then stays
+`Terminating` until the controller has written the record (above), and
+without [revocation processing](#revocation-processing) it stays that way. Deletion
 removes neither its snapshots nor its revocation records, and it does not
 delete or stop a workload.
 Withdrawing native grants on deletion is part of the lifecycle work in groups

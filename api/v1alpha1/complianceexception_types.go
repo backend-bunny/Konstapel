@@ -130,6 +130,14 @@ const (
 	// ReasonRevocationInvalid: spec.revoked is true but the protected
 	// revocation record is missing or does not belong to this revision.
 	ReasonRevocationInvalid = "RevocationInvalid"
+	// ReasonRevocationProcessingDisabled: revocation processing
+	// (--exception-revocation-processing) is off, the default, so nothing
+	// is recorded independently and the finalizer stays.
+	ReasonRevocationProcessingDisabled = "RevocationProcessingDisabled"
+	// ReasonRevocationProtectionUnverified: processing is on, but the
+	// exception admission webhooks could not be verified to fail closed,
+	// so nothing is recorded or released until they are.
+	ReasonRevocationProtectionUnverified = "RevocationProtectionUnverified"
 )
 
 // ComplianceException is a namespace team's self-service, time-limited

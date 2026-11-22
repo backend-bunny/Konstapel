@@ -317,3 +317,76 @@ func TestRuntimeChartCannotActivateNativeExceptions(t *testing.T) {
 		})
 	}
 }
+
+// Exception revocation processing (add-self-service-policy-exceptions task
+// 3.6, docs/charts.md "Exception revocation processing") is one switch,
+// exceptions.revocationProcessing.enabled, off by default. Its grant lets
+// the controller update exceptions, which only the fail-closed exception
+// webhooks confine; the chart cannot deploy those yet. So no supported
+// configuration renders the grant, its identity lookup, its webhook-config
+// reads or the controller flag, and turning the switch on fails the render
+// in every configuration, before anything is applied.
+func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
+	configs := map[string][]string{
+		"defaults":         nil,
+		"explicitly false": {"exceptions.revocationProcessing.enabled=false"},
+		"bundles on":       {"bundles.sourcesConfigMap=" + sourcesCM, "bundles.referencedConfigMaps={registry-ca}", "bundles.referencedSecrets={registry-cred,org-key}"},
+		"metrics on":       {"metrics.enabled=true", "metrics.readers[0].namespace=monitoring", "metrics.readers[0].name=prometheus-k8s"},
+		"operator TLS":     {"tls.mode=secret", "tls.secret.name=konstapel-tls"},
+		"one replica":      {"replicaCount=1"},
+	}
+	for name, set := range configs {
+		t.Run(name, func(t *testing.T) {
+			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)
+			if err != nil {
+				t.Fatal(out)
+			}
+			gs := controllerGrants(t, docs)
+			for _, verb := range []string{"create", "update", "patch", "delete", "deletecollection"} {
+				if allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions", verb, "priv") || allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions", verb, "") {
+					t.Errorf("the controller may %s complianceexceptions", verb)
+				}
+			}
+			for _, q := range []grant{
+				{"", "authentication.k8s.io/selfsubjectreviews", "create", ""},
+				{"", "admissionregistration.k8s.io/validatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+				{"", "admissionregistration.k8s.io/mutatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+			} {
+				if allowed(gs, q.ns, q.resource, q.verb, q.name) {
+					t.Errorf("the controller is granted %s without revocation processing", q)
+				}
+			}
+			// Still read-only on exceptions, and the status writer.
+			if !allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions", "get", "priv") ||
+				!allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions/status", "update", "priv") {
+				t.Error("the controller lost its exception read or status write")
+			}
+			if find(docs, "ClusterRole", "konstapel-controller-exception-revocation") != nil {
+				t.Error("the gated revocation ClusterRole is rendered")
+			}
+			for _, d := range docs {
+				if d["kind"] != "Deployment" {
+					continue
+				}
+				for _, c := range at(d, "spec", "template", "spec", "containers").([]any) {
+					for _, a := range at(c, "args").([]any) {
+						if strings.HasPrefix(a.(string), "--exception-revocation") {
+							t.Errorf("Deployment %v enables revocation processing: %s", metadata(d)["name"], a)
+						}
+					}
+				}
+			}
+		})
+	}
+	for name, set := range configs {
+		if name == "explicitly false" {
+			continue
+		}
+		t.Run("enabled with "+name, func(t *testing.T) {
+			_, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest, "exceptions.revocationProcessing.enabled=true"}, set...)...)
+			if err == nil || !strings.Contains(out, "exceptions.revocationProcessing.enabled cannot be enabled until the chart can deploy the ComplianceException admission webhooks") {
+				t.Fatalf("enabled without exception webhooks rendered: %v\n%s", err, out)
+			}
+		})
+	}
+}
