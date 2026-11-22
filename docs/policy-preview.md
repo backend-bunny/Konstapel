@@ -584,9 +584,9 @@ other request occurs.
 | --- | --- | --- | --- | --- |
 | `namespaces` | core | cluster | `get` (`kube-system`), `list` | Cluster identity (`kube-system:<uid>`, as the controller records it); namespace instances (name, UID, labels) |
 | `complianceprofiles`, `compliancebindings` | `compliance.erenius.io` | cluster | `list` | Live desired configuration, including every binding of a shared profile; the bindings' `status.observedGeneration` and `status.assessment.current` for [evidence](#exceptions-and-evidence) |
-| `complianceexceptions` | `compliance.erenius.io` | all namespaces | `list` | Protected acceptance records and snapshot references |
+| `complianceexceptions` | `compliance.erenius.io` | all namespaces | `list` | Protected acceptance and revocation records, `spec.revoked`, snapshot references and the `RevocationRecorded` condition |
 | `validatingpolicies` | `policies.kyverno.io` | cluster | `list`, label `app.kubernetes.io/managed-by=konstapel` | Applied engine policies, their recorded contribution and readiness |
-| `configmaps` | core | controller namespace | `list` (acceptance snapshots, by label); `get` (the bundle-source ConfigMap and the trust ConfigMaps it names) | Frozen acceptance snapshots; source and trust configuration |
+| `configmaps` | core | controller namespace | `list` (acceptance snapshots and revocation records, each by label); `get` (the bundle-source ConfigMap, the trust ConfigMaps it names, and the record name of a revoked exception whose record was not listed) | Frozen acceptance snapshots; independent revocation records; source and trust configuration |
 | `secrets` | core | controller namespace | `get`, only the names the bundle-source ConfigMap references (optional) | Registry credentials and Secret-held trust material of private bundle sources |
 | discovery | `/api/v1`, `/apis/compliance.erenius.io/v1alpha1`, `/apis/policies.kyverno.io/v1` | | `GET` | Required APIs are served (granted to authenticated users by `system:discovery`) |
 
@@ -616,8 +616,35 @@ Exception acceptance is observed from what the exception owner provides today:
 the admission-protected acceptance record, the controller's snapshot reference
 in `status.acceptance`, and the frozen snapshot ConfigMaps, each verified
 against its recorded digest. Reasons, actors and claims are not kept.
-Revocation (`spec.revoked` and revocation records) does not exist yet and is
-reported as the `exception-revocation-unavailable` limitation.
+
+Revocation is observed from the same owner
+([policy exceptions](integration/policy-exceptions.md#revocation)):
+`spec.revoked`, the admission-protected revocation record
+(`compliance.erenius.io/revocation`) and its finalizer, the controller's
+`RevocationRecorded` condition, and the independent revocation record
+ConfigMaps (`revocation-<exception UID>-<revision>`, listed by the
+`app.kubernetes.io/component=revocation-record` label). Each record is
+verified with the owner's own checks; a record that does not verify is the
+`exception-revocation-record-invalid` limitation. If a revoked exception's
+record isn't listed, the record name is read with a `get`, because the
+controller would find an unlabelled object there too. Every exception whose
+current acceptance revision is revoked gets one limitation for the state
+the observation verified:
+
+| Code | State |
+| --- | --- |
+| `exception-revocation-recorded` | Revoked, and an independent record holds exactly this revocation. It records when revocation was requested, not when an engine stopped granting. |
+| `exception-revocation-pending` | Revoked, but no independent record exists yet: the revocation is recorded only on the resource. |
+| `exception-revocation-processing-disabled` | As pending, and the controller's current `RevocationRecorded` condition reports `RevocationProcessingDisabled` (`--exception-revocation-processing` is off, the default). |
+| `exception-revocation-conflict` | Revoked, but the object at the record's name does not hold this revocation. The controller never overwrites it. |
+| `exception-revocation-invalid` | `spec.revoked` and the protected revocation record don't form a recordable revocation of the current revision. |
+
+Each message also gives the controller's `RevocationRecorded` status and
+reason as reported, or says that the condition is missing or describes an
+older generation. The preview reports the owner's condition as it finds it
+and doesn't infer one. The revoking actor and claim are not kept. These
+limitations are observation data only: whether a proposal affects a revoked
+acceptance is part of the exception analysis, which is not available yet.
 
 ### Consistency and limits
 
@@ -627,8 +654,10 @@ collection completely, following list continuations, records each list's
 then reads everything again as a recheck. It compares only relevant projections:
 specifications, generations, enforcement epochs, namespace UIDs and labels,
 ownership and provenance of engine policies and their derived readiness,
-acceptance records and snapshots, and source and trust data, including the
-referenced values of Secrets (compared as a digest keyed per run, so not even
+acceptance records and snapshots, revocation state (`spec.revoked`, the
+protected revocation record, its finalizer, the owner's `RevocationRecorded`
+status and reason, and the revocation records), and source and trust data,
+including the referenced values of Secrets (compared as a digest keyed per run, so not even
 a digest of a credential leaves the process). Status timestamps,
 report times and unrelated annotations are ignored, so constantly changing
 status does not force retries. The bindings' recorded current evidence is

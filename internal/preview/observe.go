@@ -18,7 +18,7 @@ import (
 )
 
 // This file is the read-only cluster observation (tasks 2.1 to 2.3, with the
-// named Secret reads of 4.3). It reads the selected cluster with the caller's
+// named Secret reads of 4.3 and the exception revocation inputs of 2.5). It reads the selected cluster with the caller's
 // own credentials, using only GET requests: discovery, get and list. It never
 // writes, never watches and never sends server-side dry-run or authorization
 // probes. The only Secrets it requests are those the observed bundle-source
@@ -121,9 +121,27 @@ const (
 const (
 	// LimitNoAtomicSnapshot: Kubernetes has no cross-resource transaction.
 	LimitNoAtomicSnapshot ObserveCode = "no-atomic-snapshot"
-	// LimitRevocationUnavailable: exception revocation (spec.revoked and its
-	// lifecycle records) is not available from the exception owner yet.
-	LimitRevocationUnavailable ObserveCode = "exception-revocation-unavailable"
+	// Revocation limitations (observe_revocation.go), one per exception whose
+	// current acceptance revision is revoked, by what the observation could
+	// verify with the exception owner's own checks:
+	//
+	// LimitRevocationRecorded: spec.revoked, the admission-protected
+	// revocation record and a matching independent revocation record agree.
+	LimitRevocationRecorded ObserveCode = "exception-revocation-recorded"
+	// LimitRevocationPending: no independent revocation record exists yet.
+	LimitRevocationPending ObserveCode = "exception-revocation-pending"
+	// LimitRevocationProcessingDisabled: no independent record exists, and
+	// the controller reports that revocation processing is disabled.
+	LimitRevocationProcessingDisabled ObserveCode = "exception-revocation-processing-disabled"
+	// LimitRevocationConflict: the object at the record's name does not hold
+	// this revocation.
+	LimitRevocationConflict ObserveCode = "exception-revocation-conflict"
+	// LimitRevocationInvalid: spec.revoked and the protected revocation
+	// record do not form a recordable revocation of the current revision.
+	LimitRevocationInvalid ObserveCode = "exception-revocation-invalid"
+	// LimitRevocationRecordInvalid: a revocation record ConfigMap does not
+	// verify against its recorded digest and format.
+	LimitRevocationRecordInvalid ObserveCode = "exception-revocation-record-invalid"
 	// LimitSourcesNotSelected: no bundle-source ConfigMap was named, so only
 	// vendored content can be resolved.
 	LimitSourcesNotSelected ObserveCode = "bundle-sources-not-selected"
@@ -252,6 +270,81 @@ type ObservedException struct {
 	AcceptanceError string `json:"acceptanceError,omitempty"`
 	// Snapshot is the controller's status reference to the frozen snapshot.
 	Snapshot *v1alpha1.AcceptanceSnapshotReference `json:"snapshot,omitempty"`
+	// Revoked is spec.revoked.
+	Revoked bool `json:"revoked,omitempty"`
+	// Revocation is set when the current revision is revoked, or carries a
+	// revocation record or finalizer.
+	Revocation *ObservedRevocation `json:"revocation,omitempty"`
+}
+
+// RevocationState is what the observation verified about a revocation,
+// with the exception owner's checks (exception.NewRevocationRecord and
+// exception.VerifyHistory).
+type RevocationState string
+
+const (
+	// RevocationRecorded: a durable independent record holds exactly this
+	// revocation.
+	RevocationRecorded RevocationState = "recorded"
+	// RevocationPending: no independent record exists yet; the revocation is
+	// recorded only on the resource.
+	RevocationPending RevocationState = "pending"
+	// RevocationConflict: the object at the record's name is not the
+	// matching record.
+	RevocationConflict RevocationState = "conflict"
+	// RevocationInvalid: the revocation cannot be recorded (for example, the
+	// protected revocation record is missing or names another revision).
+	RevocationInvalid RevocationState = "invalid"
+)
+
+// ObservedRevocation is the revocation of an exception's current acceptance
+// revision. The revoking actor and claim are not kept.
+type ObservedRevocation struct {
+	State RevocationState `json:"state"`
+	// Revision and RequestedAt come from the admission-protected revocation
+	// record, when it is readable. RequestedAt is when revocation was
+	// requested, not when an engine stopped granting.
+	Revision    int64      `json:"revision,omitempty"`
+	RequestedAt *time.Time `json:"requestedAt,omitempty"`
+	// Finalizer is true while the revocation finalizer holds the exception.
+	Finalizer bool `json:"finalizer,omitempty"`
+	// Record is the independent record's name in the controller namespace
+	// (unset when invalid); RecordDigest is its digest once recorded.
+	Record       string `json:"record,omitempty"`
+	RecordDigest string `json:"recordDigest,omitempty"`
+	// Owner is the controller's RevocationRecorded condition, without its
+	// message and timestamps; nil when the exception has none.
+	Owner *OwnerCondition `json:"owner,omitempty"`
+}
+
+// OwnerCondition is a condition as the owning controller reported it.
+// Current is false when it describes an older generation of the object.
+type OwnerCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason"`
+	ObservedGeneration int64  `json:"observedGeneration"`
+	Current            bool   `json:"current"`
+}
+
+// ObservedRevocationRecord is one independent revocation record ConfigMap
+// in the controller namespace, verified with exception.RevocationRecordFrom.
+// The revoking actor and claim are not kept.
+type ObservedRevocationRecord struct {
+	ObjectRef
+	Digest string `json:"digest,omitempty"`
+	// VerifyError is set when the record does not verify; the identity
+	// fields are then empty.
+	VerifyError        string                                `json:"verifyError,omitempty"`
+	Cluster            string                                `json:"cluster,omitempty"`
+	ExceptionUID       types.UID                             `json:"exceptionUID,omitempty"`
+	ExceptionName      string                                `json:"exceptionName,omitempty"`
+	ExceptionNamespace string                                `json:"exceptionNamespace,omitempty"`
+	AcceptanceRevision int64                                 `json:"acceptanceRevision,omitempty"`
+	Namespace          targeting.NamespaceRef                `json:"namespace"`
+	Policy             string                                `json:"policy,omitempty"`
+	RequestedAt        *time.Time                            `json:"requestedAt,omitempty"`
+	Acceptance         *v1alpha1.AcceptanceSnapshotReference `json:"acceptance,omitempty"`
 }
 
 // Acceptance is the identity part of the protected acceptance record.
@@ -387,7 +480,10 @@ type Snapshot struct {
 	Unowned             []ObjectRef                  `json:"unowned,omitempty"`
 	Exceptions          []ObservedException          `json:"exceptions,omitempty"`
 	AcceptanceSnapshots []ObservedAcceptanceSnapshot `json:"acceptanceSnapshots,omitempty"`
-	Sources             *ObservedSources             `json:"sources,omitempty"`
+	// RevocationRecords are the independent revocation records in the
+	// controller namespace, of every revision ever revoked.
+	RevocationRecords []ObservedRevocationRecord `json:"revocationRecords,omitempty"`
+	Sources           *ObservedSources           `json:"sources,omitempty"`
 	// Evidence is every live binding's recorded evidence state
 	// (evidence.go), informational and not rechecked.
 	Evidence []ObservedEvidence `json:"evidence,omitempty"`
@@ -452,7 +548,8 @@ func Observe(ctx context.Context, opts ObserveOptions) (*Snapshot, error) {
 	defer cancel()
 
 	snap := &Snapshot{Context: opts.Context, Server: serverHost(opts.Config.Host), Namespace: opts.Namespace, Start: now().UTC(),
-		Contracts: map[string]int{"targeting": targeting.ContractVersion, "acceptanceSnapshot": exception.SnapshotVersion}}
+		Contracts: map[string]int{"targeting": targeting.ContractVersion, "acceptanceSnapshot": exception.SnapshotVersion,
+			"revocationRecord": exception.RevocationRecordVersion}}
 	finish := func(final *capture, errs []Diagnostic) (*Snapshot, error) {
 		snap.End = now().UTC()
 		if final != nil {

@@ -170,7 +170,7 @@ func mustIncomplete(t *testing.T, s *Snapshot, err error, code ObserveCode) {
 	if len(s.Errors) == 0 || s.Errors[0].Code != code || len(inc.Errors) != len(s.Errors) {
 		t.Fatalf("want error %s, got %+v", code, s.Errors)
 	}
-	if len(s.Live.Profiles)+len(s.Live.Bindings)+len(s.Namespaces)+len(s.Applied)+len(s.Unowned)+len(s.Exceptions)+len(s.AcceptanceSnapshots)+len(s.Objects) != 0 ||
+	if len(s.Live.Profiles)+len(s.Live.Bindings)+len(s.Namespaces)+len(s.Applied)+len(s.Unowned)+len(s.Exceptions)+len(s.AcceptanceSnapshots)+len(s.RevocationRecords)+len(s.Objects) != 0 ||
 		s.Sources != nil || s.Cluster != "" {
 		t.Fatalf("an incomplete snapshot must not carry partial object sets: %+v", s)
 	}
@@ -335,15 +335,17 @@ func TestObserveReadsAttributableSnapshot(t *testing.T) {
 	}
 	assertReadOnly(t, f.recorded())
 
-	// Limitations are explicit, including the absent revocation contract.
+	// Limitations are explicit. Nothing is revoked, so there is no
+	// revocation limitation and no revocation record.
 	var codes []ObserveCode
 	for _, l := range s.Limitations {
 		codes = append(codes, l.Code)
 	}
-	for _, want := range []ObserveCode{LimitNoAtomicSnapshot, LimitRevocationUnavailable, LimitSourcesNotSelected} {
-		if !slices.Contains(codes, want) {
-			t.Fatalf("limitation %s missing: %v", want, codes)
-		}
+	if !slices.Equal(codes, []ObserveCode{LimitSourcesNotSelected, LimitNoAtomicSnapshot}) {
+		t.Fatalf("limitations: %v", codes)
+	}
+	if s.Exceptions[0].Revoked || s.Exceptions[0].Revocation != nil || len(s.RevocationRecords) != 0 {
+		t.Fatalf("revocation of an unrevoked exception: %+v %+v", s.Exceptions[0], s.RevocationRecords)
 	}
 
 	// No free text, actor or credential material is kept.

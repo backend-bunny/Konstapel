@@ -17,7 +17,8 @@ rules:
   - apiGroups: [""]
     resources: [namespaces]
     verbs: [get, list]
-  # Live desired configuration, and acceptance records in every namespace.
+  # Live desired configuration, and acceptance and revocation records in
+  # every namespace.
   - apiGroups: [compliance.erenius.io]
     resources: [complianceprofiles, compliancebindings, complianceexceptions]
     verbs: [list]
@@ -26,9 +27,10 @@ rules:
     resources: [validatingpolicies]
     verbs: [list]
 ---
-# In the Konstapel controller namespace only: acceptance snapshots (list by
-# label) and the bundle-source ConfigMap plus the trust ConfigMaps it names
-# (get). Replace konstapel-system if the controller runs elsewhere.
+# In the Konstapel controller namespace only: acceptance snapshots and
+# exception revocation records (list by label), and the bundle-source
+# ConfigMap, the trust ConfigMaps it names and the record name of a revoked
+# exception (get). Replace konstapel-system if the controller runs elsewhere.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
