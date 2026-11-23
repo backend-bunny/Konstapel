@@ -155,9 +155,31 @@ for signing, coverage, supporting evidence and `ComplianceException.spec.revoked
 The storage version stays `v1alpha1`, and no existing field is removed or
 narrowed.
 
-The upgrade from the published 0.2.0 charts to 0.3.0 has not been run as an
-automated test. The rolling-upgrade and additive-CRD behavior above is tested
-within one version.
+**Upgrade probe.** The upgrade from the published 0.2.0 charts was run by
+hand on a disposable kind cluster, not as an automated test. The 0.3.0
+candidate was built from main `ab4d3df`: image
+`sha256:c0ea8d948893cd1ec05ec3e50be84d65f8d60a71c5ebae416f78d3576b3b4809`,
+with charts packaged by `scripts/charts/package.sh`. The setup was Kyverno
+3.9.2, cert-manager TLS, two replicas each, and a Deny binding on the vendored
+privileged-containers policy. The release commit changes only version
+strings, so the released archives' bytes differ from the tested ones.
+
+The upgrade ran CRD chart first, then runtime chart. Results:
+- every existing CRD, profile, binding and destination kept its UID,
+  generation and finalizers, with `storedVersions` still `v1alpha1`;
+- the binding kept its enforcement epoch and configuration revision;
+- the delivered Kyverno policy was not recreated (same UID and resourceVersion);
+- both Deployments stayed at two ready replicas;
+- no privileged pod was admitted during the rollout (0 of 324 samples);
+- the logs showed no decode or conversion errors;
+- the controller gained no exception-write grant.
+
+Within one version, the rolling-upgrade and additive-CRD behavior above is
+also covered by the automated tests.
+
+On a single small node, Kyverno's reports controller at its chart-default
+128Mi memory limit caused API-server pressure during the first attempt.
+Size Kyverno for your cluster.
 
 **Retained packages.** 0.3.0 extends the package and record formats rather
 than replacing them. Packages it writes add `coverage.json`/`coverage.txt`,

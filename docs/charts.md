@@ -459,6 +459,18 @@ For a single-node development cluster,
 `docs/examples/charts/development.yaml` runs one replica of each Deployment
 without PodDisruptionBudgets. Leader election stays on.
 
+**Upgrade.** Upgrade the CRD chart first ([CRD chart](#crd-chart)), then the
+runtime chart to the same version, with the values you installed with:
+
+```sh
+helm upgrade konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <newer version> \
+  --namespace konstapel-system --reuse-values
+```
+
+The rollout keeps two ready controllers and download servers, and Kyverno
+keeps enforcing the delivered policies throughout. A release's rollback
+constraints are listed in [release readiness](release-readiness.md#upgrading-from-020).
+
 Clients trust the server through that CA (`ca.crt`) and use the
 `konstapel-download.konstapel-system.svc` name.
 
