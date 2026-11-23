@@ -11,11 +11,11 @@ Do not treat its fixtures as live producer compatibility evidence.
 
 ## 1. Register installed capabilities and define conformance inputs
 
-- [ ] 1.1 Add the minimal installed-provider descriptor/registry and selection checks using the current Kyverno provider identity; test duplicate/unknown identities, incompatible versions, unsupported modes, parameter validation and mixed-provider rejection without changing existing Kyverno policy delivery.
+- [x] 1.1 Add the minimal installed-provider descriptor/registry and selection checks using the current Kyverno provider identity; test duplicate/unknown identities, incompatible versions, unsupported modes, parameter validation and mixed-provider rejection without changing existing Kyverno policy delivery.
   <!-- agent: tier=deep risk=medium reason="Provider selection and backward-compatible capability contracts" -->
-- [ ] 1.2 Define versioned conformance inputs and expected results using current Kyverno fixtures plus a different test-only reporting subject shape; verify raw versus normalized outcomes, independent inventory and explicit unknowns without importing Kyverno policy-name or CEL-index assumptions into the reporting fixture.
+- [x] 1.2 Define versioned conformance inputs and expected results using current Kyverno fixtures plus a different test-only reporting subject shape; verify raw versus normalized outcomes, independent inventory and explicit unknowns without importing Kyverno policy-name or CEL-index assumptions into the reporting fixture.
   <!-- agent: tier=deep risk=medium reason="Cross-provider evidence and result semantics" -->
-- [ ] 1.3 Start docs/assessment-providers.md with the registration/capability contract and test-only boundary; verify examples against descriptor tests and document that bundle content cannot install executables or change provider permissions.
+- [x] 1.3 Start docs/assessment-providers.md with the registration/capability contract and test-only boundary; verify examples against descriptor tests and document that bundle content cannot install executables or change provider permissions.
   <!-- agent: tier=standard risk=medium reason="Document and exercise the installed-provider contract" -->
 
 ## 2. Integrate scoped collection and provider availability

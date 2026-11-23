@@ -1,0 +1,183 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-reporttest/v1",
+  "inventory": [
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "no-critical"
+    },
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "signed"
+    },
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "supported-base"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "no-critical"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "signed"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "supported-base"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "no-critical"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "signed"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "supported-base"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "no-critical"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "signed"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "supported-base"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "no-critical"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "signed"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "supported-base"
+    }
+  ],
+  "observations": [
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "no-critical",
+      "state": "Unresolved"
+    },
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "signed",
+      "state": "Rejected"
+    },
+    {
+      "subject": "ns-api/w-api/cache",
+      "check": "supported-base",
+      "state": "Attributable",
+      "raw": "Passed",
+      "outcome": "pass",
+      "evaluated": "2026-11-20T11:55:00Z"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "no-critical",
+      "state": "Rejected"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "signed",
+      "state": "Missing"
+    },
+    {
+      "subject": "ns-api/w-api/server",
+      "check": "supported-base",
+      "state": "Rejected"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "no-critical",
+      "state": "Unresolved"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "signed",
+      "state": "Unresolved"
+    },
+    {
+      "subject": "ns-api/w-api/sidecar",
+      "check": "supported-base",
+      "state": "Unresolved"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "no-critical",
+      "state": "Attributable",
+      "raw": "Violated",
+      "outcome": "fail",
+      "evaluated": "2026-11-20T11:50:00Z"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "signed",
+      "state": "Attributable",
+      "raw": "NotApplicable",
+      "outcome": "unknown",
+      "notApplicable": true,
+      "evaluated": "2026-11-20T11:50:00Z"
+    },
+    {
+      "subject": "ns-shop/w-web/app",
+      "check": "supported-base",
+      "state": "Attributable",
+      "raw": "Warning",
+      "outcome": "unknown",
+      "evaluated": "2026-11-20T11:50:00Z"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "no-critical",
+      "state": "Attributable",
+      "raw": "Violated",
+      "outcome": "fail",
+      "evaluated": "2026-11-20T11:50:00Z"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "signed",
+      "state": "Attributable",
+      "raw": "NotApplicable",
+      "outcome": "unknown",
+      "notApplicable": true,
+      "evaluated": "2026-11-20T11:50:00Z"
+    },
+    {
+      "subject": "ns-shop/w-worker/app",
+      "check": "supported-base",
+      "state": "Attributable",
+      "raw": "Warning",
+      "outcome": "unknown",
+      "evaluated": "2026-11-20T11:50:00Z"
+    }
+  ],
+  "evidence": {
+    "completeness": "Incomplete",
+    "expected": 15,
+    "attributable": 7,
+    "missing": 1,
+    "rejected": 3,
+    "unresolved": 4
+  },
+  "outcomes": {
+    "pass": 1,
+    "fail": 2,
+    "error": 0,
+    "skip": 0,
+    "acceptedRisk": 0,
+    "notApplicable": 2,
+    "unknown": 2
+  }
+}

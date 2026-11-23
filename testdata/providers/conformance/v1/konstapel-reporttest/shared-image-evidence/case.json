@@ -1,0 +1,103 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-reporttest/v1",
+  "description": "Synthetic, test-only shape (not producer evidence): image subjects share one report per digest; a fresh report object with an old evaluation is stale; an untimed copy is rejected; conflicting equally new verdicts are unresolved; a tag-only image cannot be attributed; Warning and NotApplicable keep their raw verdicts.",
+  "evaluationTime": "2026-11-20T12:00:00Z",
+  "input": {
+    "payloadVersion": 1,
+    "maxEvidenceAge": "1h",
+    "subjects": [
+      {
+        "namespaceUID": "ns-shop",
+        "workloadUID": "w-web",
+        "container": "app",
+        "image": "registry.example/shop@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "namespaceUID": "ns-shop",
+        "workloadUID": "w-worker",
+        "container": "app",
+        "image": "registry.example/shop@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "namespaceUID": "ns-api",
+        "workloadUID": "w-api",
+        "container": "server",
+        "image": "registry.example/api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "namespaceUID": "ns-api",
+        "workloadUID": "w-api",
+        "container": "cache",
+        "image": "registry.example/cache@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      {
+        "namespaceUID": "ns-api",
+        "workloadUID": "w-api",
+        "container": "sidecar",
+        "image": "registry.example/proxy:latest"
+      }
+    ],
+    "checks": [
+      "no-critical",
+      "signed",
+      "supported-base"
+    ],
+    "reports": [
+      {
+        "id": "r-shop",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evaluatedAt": "2026-11-20T11:50:00Z",
+        "updatedAt": "2026-11-20T11:59:00Z",
+        "verdicts": {
+          "no-critical": "Violated",
+          "supported-base": "Warning",
+          "signed": "NotApplicable"
+        }
+      },
+      {
+        "id": "r-api",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "evaluatedAt": "2026-11-20T09:00:00Z",
+        "updatedAt": "2026-11-20T11:59:00Z",
+        "verdicts": {
+          "no-critical": "Passed",
+          "supported-base": "Passed"
+        }
+      },
+      {
+        "id": "r-api-copy",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "updatedAt": "2026-11-20T11:59:30Z",
+        "verdicts": {
+          "no-critical": "Passed"
+        }
+      },
+      {
+        "id": "r-cache-1",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "evaluatedAt": "2026-11-20T11:55:00Z",
+        "verdicts": {
+          "no-critical": "Passed",
+          "supported-base": "Passed"
+        }
+      },
+      {
+        "id": "r-cache-2",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "evaluatedAt": "2026-11-20T11:55:00Z",
+        "verdicts": {
+          "no-critical": "Violated"
+        }
+      },
+      {
+        "id": "r-future",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "evaluatedAt": "2026-11-20T12:30:00Z",
+        "verdicts": {
+          "signed": "Passed"
+        }
+      }
+    ]
+  }
+}

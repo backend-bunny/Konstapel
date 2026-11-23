@@ -1,0 +1,95 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-kyverno/v1",
+  "description": "Synthetic reports over the saved capture's frozen scope: a warn (unknown, raw kept), conflicting same-time results (Unresolved), an untimed result and one evaluated after closure (Rejected), a skip, and every other expected observation Missing.",
+  "evaluationTime": "2026-11-06T21:27:29Z",
+  "input": {
+    "capture": "testdata/assessments/kyverno-1.19.2-background/capture.json",
+    "maxEvidenceAge": "2h",
+    "reports": [
+      {
+        "apiVersion": "wgpolicyk8s.io/v1alpha2",
+        "kind": "PolicyReport",
+        "metadata": {
+          "uid": "synthetic-report",
+          "namespace": "hz-bg"
+        },
+        "scope": {
+          "apiVersion": "v1",
+          "kind": "Pod",
+          "namespace": "hz-bg",
+          "name": "hz-bg-compliant",
+          "uid": "c449a7fd-5403-4ab0-bc14-61d9045c7260"
+        },
+        "results": [
+          {
+            "policy": "konstapel-require-run-as-nonroot-1e869ab60b470d58",
+            "result": "warn",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {},
+            "timestamp": {
+              "seconds": 1794000420,
+              "nanos": 0
+            }
+          },
+          {
+            "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+            "result": "pass",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {
+              "cel.validationIndex": "0"
+            },
+            "timestamp": {
+              "seconds": 1794000420,
+              "nanos": 0
+            }
+          },
+          {
+            "policy": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9",
+            "result": "fail",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {
+              "cel.validationIndex": "0"
+            },
+            "timestamp": {
+              "seconds": 1794000420,
+              "nanos": 0
+            }
+          },
+          {
+            "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+            "result": "fail",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {
+              "cel.validationIndex": "0"
+            }
+          },
+          {
+            "policy": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66",
+            "result": "fail",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {
+              "cel.validationIndex": "1"
+            },
+            "timestamp": {
+              "seconds": 1794000480,
+              "nanos": 0
+            }
+          },
+          {
+            "policy": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58",
+            "result": "skip",
+            "source": "KyvernoValidatingPolicy",
+            "properties": {
+              "cel.validationIndex": "1"
+            },
+            "timestamp": {
+              "seconds": 1794000420,
+              "nanos": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
