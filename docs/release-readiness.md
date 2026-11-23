@@ -93,8 +93,8 @@ describes a candidate.
 | **Coverage.** Every package carries `coverage.json` and `coverage.txt`, listing every baseline control with its authored checks and attributed technical evidence. Run, request and binding status carry a bounded summary, and a tampered coverage file fails package validation | `internal/coverage` tests, `TestRunPackageCarriesCoverage`, `TestValidatePackageRejectsTamperedCoverage`, `TestLiveIntegratedAssessments` |
 | **High availability.** Every replica serves admission and readiness on its own, independent of leadership | `TestServingRunnablesNeedNoLeadership`, `TestInformerSyncGatesReadiness`, `TestWebhookReadinessFollowsTLS`; `TestLiveReplicaAdmission`, `TestLiveHelmAvailability` |
 | **Bundles.** Content is resolved by bundle name and digest, so an unavailable reference affects only its own consumers | bundle resolution unit tests; `TestLiveBundlesOfficial`, `TestLiveBundlesOrganization` (`bundles`), `TestLiveHelmBundles` (`charts`) |
-| **Preview.** `konstapel preview` sends only GET requests under the caller's kubeconfig, with no watch, dry-run, impersonation or access-review probe, and reads only the Secrets that bundle sources reference | `TestReadOnlyTransportRefusesBeforeSending`, `TestReadOnlyTransportAllowsOnlyReferencedSecretGets`, `TestRESTConfigUsesOnlyKubeconfig`; `TestLivePolicyPreviewObservation` (`admission`, wire-recorded as the documented get/list-only reader), `TestLivePolicyPreviewPrivateBundle` (`bundles`) |
-| **Preview.** Inaccessible inputs, persistent drift during observation, untrusted or unavailable content, and a change that could affect an observed exception make the report incomplete (exit 1). Evidence gaps are informational and never change the exit status | `TestObserveIncompleteWhenDriftPersists`, `TestObserveRequiredInputsFailClosed`, `TestObserveRecapturesOnRevocationChange`, `TestBundleContentRejectsUntrustedAndUnavailableContent`, `TestEvidenceGapsAreInformational`, `TestPreviewExitMatrix`, `TestPreviewProcessBoundary` |
+| **Preview.** `konstapel preview` sends only GET requests under the caller's kubeconfig, with no watch, dry-run, impersonation or access-review probe, and reads only the Secrets that bundle sources reference | `TestReadOnlyTransportRefusesBeforeSending`, `TestReadOnlyTransportAllowsOnlyReferencedSecretGets`, `TestRESTConfigUsesOnlyKubeconfig`; `TestLivePolicyPreviewObservation` (`admission`, wire-recorded as the documented get/list-only reader), `TestLivePolicyPreviewPrivateBundle`, `TestLivePolicyPreviewCLI` (`bundles`: the built binary under a reader ServiceAccount token, every request recorded through a proxy, and resourceVersions of profiles, bindings, exceptions, engine policies and controller-namespace ConfigMaps/Secrets unchanged after each of 18 invocations) |
+| **Preview.** Inaccessible inputs, persistent drift during observation, untrusted or unavailable content, and a change that could affect an observed exception make the report incomplete (exit 1). Evidence gaps are informational and never change the exit status | `TestObserveIncompleteWhenDriftPersists`, `TestObserveRequiredInputsFailClosed`, `TestObserveRecapturesOnRevocationChange`, `TestBundleContentRejectsUntrustedAndUnavailableContent`, `TestEvidenceGapsAreInformational`, `TestPreviewExitMatrix`, `TestPreviewProcessBoundary`; live through the binary in `TestLivePolicyPreviewCLI` (selector, mode, shared-profile pin and removal impacts exit 0, or 2 with `--fail-on-impact`; a denied snapshot read, denied bundle Secrets, persistent drift, a rotated publisher key and an exception in a changed namespace exit 1; stale applied policies and missing or unattributable evidence stay informational) |
 | **Exceptions stay disabled.** No chart configuration grants the controller exception writes or serves exception webhooks. The controller refuses revocation processing without the webhooks and stops when it can't verify them; with processing off, nobody can release the revocation finalizer | `TestRuntimeChartExceptionRevocationGated`, `TestRuntimeChartCannotActivateNativeExceptions`, `TestRevocationProcessingDisabled`, `TestRevocationProcessingNeedsTheWebhooks`, `TestRevocationProcessingWaitsForAdmissionProtection`, `TestVerifyProtection`; `TestLiveRevocationHistory` (`assessments`, exception harness) |
 
 ### Recovery
@@ -206,10 +206,11 @@ and status.
   (`add-evidence-signing-recovery`).
 - **Preview limits.** The preview analyzes configuration, content and
   applied state. Exception consequences are `analysis: not-available`.
-  Evidence context is informational. Integrated live acceptance of the full
-  CLI against every integration, including exceptions, is not complete. The
-  read-only transport, observation and private-bundle paths are tested live
-  through the library.
+  Evidence context is informational. The built CLI is acceptance-tested
+  live for configuration, content, trust, drift, access and applied-state
+  cases. Exception consequences and acceptance renewal are not, because that
+  integration doesn't exist in 0.3.0. Revocation observation through
+  admission-recorded state is unit-tested only.
 - **Evidence is configuration, not runtime.** Checks evaluate requested pod
   settings. They don't observe effective UIDs, capabilities or seccomp
   filtering.
