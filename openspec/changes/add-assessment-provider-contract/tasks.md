@@ -20,7 +20,7 @@ Do not treat its fixtures as live producer compatibility evidence.
 
 ## 2. Integrate scoped collection and provider availability
 
-- [ ] 2.1 Extract narrow inventory/collection adapters around existing Kyverno behavior, retaining host-owned scope and expected checks; verify missing reports, zero targets, replaced namespace/workload identities, shared evidence and unsupported subjects without changing existing attribution results.
+- [x] 2.1 Extract narrow inventory/collection adapters around existing Kyverno behavior, retaining host-owned scope and expected checks; verify missing reports, zero targets, replaced namespace/workload identities, shared evidence and unsupported subjects without changing existing attribution results.
   <!-- agent: tier=deep risk=high reason="Scope isolation and evidence attribution" -->
 - [ ] 2.2 Connect descriptor prerequisites to existing capability discovery and bounded watch activation; test absent/unsupported APIs, denied reads, recovery without restart and continued healthy-provider operation, with explicit nonapplicable enforcement for the test-only reporting shape.
   <!-- agent: tier=deep risk=medium reason="Manager lifecycle and independent provider availability" -->
