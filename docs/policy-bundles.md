@@ -3348,7 +3348,10 @@ task acceptance GROUP=bundles OUTPUT=/absolute/fresh/path
 It creates the disposable kind cluster with the pinned Kyverno
 (`scripts/environment.sh`), runs `TestLiveBundlesOfficial`,
 `TestLiveBundlesOrganization` and `TestLiveBundlesHardening`
-(`internal/controller/bundles_live_test.go`) sequentially, tears the cluster down and then checks that no cluster and no
+(`internal/controller/bundles_live_test.go`) sequentially, then the
+policy-change preview cases `TestLivePolicyPreviewPrivateBundle`
+and `TestLivePolicyPreviewCLI` ([policy preview](policy-preview.md#local-and-ci-use)),
+tears the cluster down and then checks that no cluster and no
 test-labelled container is left. CI runs it as `acceptance-live (bundles)` on
 every PR that is not prose-only, and on every main push. The controller runs
 in-process from the checkout with bundle sources enabled, exactly as

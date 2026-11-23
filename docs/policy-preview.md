@@ -301,6 +301,18 @@ These commands, the excerpt and the saved report are verified by
 server with exactly this cluster. In that test the context names reach it
 through `KUBECONFIG`.
 
+`TestLivePolicyPreviewCLI` (the `bundles` acceptance group) runs the built
+command on a disposable cluster, against engine policies that the targeting
+controller delivered, with a CI-style kubeconfig: a ServiceAccount token bound
+only to the [reader permissions](examples/policy-preview/reader-rbac.yaml),
+through a proxy that records every request. Selector, mode, shared-profile pin
+and `--before` removal impacts exit 0, or 2 with `--fail-on-impact`; a denied
+snapshot read, denied bundle Secrets, persistent drift, a changed publisher key
+and an exception in a changed namespace exit 1; stale applied policies and
+missing or unattributable evidence stay complete and informational. Every
+request is a documented read, and no profile, binding, exception, engine
+policy, or ConfigMap or Secret of the controller namespace changes.
+
 ## Rendered-input model
 
 The caller renders the compliance configuration (Helm, Kustomize, or by hand)
