@@ -34,30 +34,32 @@ The intended workflow is to:
 
 Konstapel is under active development with an alpha Kubernetes API under
 `compliance.erenius.io/v1alpha1`. The controller supports centrally managed
-profiles/bindings, namespace targeting, Kyverno policy delivery, continuous and
-on-demand assessments, scoped OSCAL evidence, and S3-compatible publishing,
-downloads, and retention. The initial framework is NIST SP 800-53 Rev. 5 Moderate;
-technical checks provide partial control evidence.
+profiles/bindings, namespace targeting, Kyverno policy delivery from vendored
+or verified OCI policy bundles, continuous and on-demand assessments, scoped
+OSCAL evidence with per-control coverage reports, S3-compatible publishing,
+signed evidence packages, authorized downloads and retention, platform-registered
+supporting documents, authenticated Prometheus metrics, and a read-only
+`konstapel preview` for proposed policy changes. The initial framework is NIST
+SP 800-53 Rev. 5 Moderate; technical checks provide partial control evidence.
 
 Kyverno is installed separately and performs Audit/Deny enforcement through
 `policies.kyverno.io/v1`. The Linux hardening bundle extends the original
-privileged-container check, with further assessment integration in progress.
-Native self-service exceptions remain disabled pending the documented
+privileged-container check. Native self-service exceptions remain disabled
+pending the documented
 [engine compatibility gates](docs/integration/policy-exceptions.md).
 
 Konstapel installs with two Helm charts, distributed as signed OCI artifacts
 alongside a signed, digest-pinned controller image. The CRD chart is installed
 first and keeps its CRDs on uninstall. The runtime chart runs two controller
 and two download-server replicas. See [Helm charts](docs/charts.md) and, for
-exactly what the first early-adopter release (v0.1.0) ships, is tested
-against, and leaves out, the [v0.1.0 readiness](docs/release-readiness.md)
-checklist.
+exactly what release 0.3.0 ships, is tested against, and leaves out, the
+[v0.3.0 readiness](docs/release-readiness.md) checklist.
 
 [Trivy vulnerability assessment](openspec/changes/add-trivy-vulnerability-assessment/proposal.md)
 is planned: read-only scanner evidence through C2P, dedicated Audit bindings, and
 separate scan-coverage and vulnerability-exposure checks. Vulnerability admission
-blocking is deferred. Signed OCI policy bundles, evidence signing and metrics
-are tracked in [active OpenSpec changes](openspec/changes).
+blocking is deferred. Remaining work is tracked in
+[active OpenSpec changes](openspec/changes).
 
 ## Documentation
 
@@ -66,7 +68,7 @@ in-progress capabilities, and historical validation records.
 
 - [Helm charts](docs/charts.md): installation, TLS modes, values, upgrades and
   uninstall.
-- [v0.1.0 readiness](docs/release-readiness.md): what ships, the test behind each
+- [v0.3.0 readiness](docs/release-readiness.md): what ships, the test behind each
   claim, and known limitations.
 - [Development](docs/development.md): Devbox/direnv setup, Task commands, CI,
   and dependency updates with Renovate.

@@ -57,7 +57,7 @@ release can't substitute a fixture or a guess for it.
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
-| Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; replica serving readiness and leader/serving separation do not yet | add-controller-high-availability | resolved for the Lease, shutdown budgets, Deployment and PDB; replica serving readiness is pending |
+| Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; per-replica serving readiness independent of leadership | add-controller-high-availability | resolved |
 | TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server and metrics; the runtime reloads webhook TLS (leaf and CA rotation tested), and the chart renders it with exception admission |
 | OCI policy bundles | `konstapel controller` `--bundle-sources-configmap` (off when empty), `--bundle-cache-dir`, `--bundle-cache-capacity`, `--bundle-refresh-interval` and `POD_NAMESPACE`; the operator-created sources ConfigMap and the Secrets/ConfigMaps it references, read by name in the controller namespace ([Controller wiring](policy-bundles.md#controller-wiring), [RBAC and informers](policy-bundles.md#rbac-and-informers)) | add-policy-bundle-distribution | resolved; values `bundles.*`, off by default |
 | Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
@@ -111,9 +111,10 @@ helm upgrade konstapel-crds oci://ghcr.io/backend-bunny/charts/konstapel-crds \
   supported: new optional fields, for example. Removing or narrowing a field,
   changing the storage version, or adding conversion webhooks needs its own
   migration before such a release can ship. Don't use `helm rollback` of the
-  CRD release as routine recovery. No previous controller release exists yet,
-  so there is no tested runtime transition. The first runtime chart release
-  will add its tested CRD/runtime version pairs here.
+  CRD release as routine recovery. Releases ship the CRD and runtime charts
+  at the same version, and only that pair is tested together. Upgrading
+  from an earlier release, together with its rollback constraints, is covered in
+  [v0.3.0 readiness](release-readiness.md#upgrading-from-020).
 - **Uninstall keeps the CRDs.** `helm uninstall konstapel-crds` keeps every
   CRD and all of their objects, because of the keep policy. Deleting a CRD,
   which deletes every object of that kind, is a separate administrator action
@@ -457,6 +458,18 @@ helm upgrade --install konstapel oci://ghcr.io/backend-bunny/charts/konstapel --
 For a single-node development cluster,
 `docs/examples/charts/development.yaml` runs one replica of each Deployment
 without PodDisruptionBudgets. Leader election stays on.
+
+**Upgrade.** Upgrade the CRD chart first ([CRD chart](#crd-chart)), then the
+runtime chart to the same version, with the values you installed with:
+
+```sh
+helm upgrade konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <newer version> \
+  --namespace konstapel-system --reuse-values
+```
+
+The rollout keeps two ready controllers and download servers, and Kyverno
+keeps enforcing the delivered policies throughout. A release's rollback
+constraints are listed in [release readiness](release-readiness.md#upgrading-from-020).
 
 Clients trust the server through that CA (`ca.crt`) and use the
 `konstapel-download.konstapel-system.svc` name.

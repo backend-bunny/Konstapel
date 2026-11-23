@@ -18,12 +18,11 @@ the parts implemented so far:
 
 **Not implemented yet:** a trigger to re-sign a run that ended with
 `SigningFailed`. Its evidence is retained (see [failure and recovery
-states](#publication-failure-and-recovery-states)). The re-sign is planned
-as its own platform-administrator action, and its API shape still needs an
-owner decision.
-
-Remaining work is tracked in the change's
-[tasks](../../openspec/changes/add-evidence-signing/tasks.md).
+states](#publication-failure-and-recovery-states)). Re-signing is planned
+as a separate platform-administrator action in the
+[`add-evidence-signing-recovery`](../../openspec/changes/add-evidence-signing-recovery/proposal.md)
+change. Until then, fix the key and start a new run. The signing change's
+own tasks are [archived](../../openspec/changes/archive/2026-11-14-add-evidence-signing/tasks.md).
 
 ## What is signed
 

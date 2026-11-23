@@ -64,6 +64,16 @@ events, release-please explicitly dispatches the `test` and `image` checks on
 the release PR branch, and invokes publishing without depending on a tag-push
 event. The repository must allow GitHub Actions to create PRs.
 
+The dispatched runs succeed on the release PR's head commit, but GitHub
+doesn't count them toward the PR's required `checks` and `acceptance`
+gates. GitHub also opens `pull_request` runs for the bot-authored PR and
+holds them at **Approval required** (`action_required`). Until a maintainer
+approves those runs, or release-please gets a token whose events run
+workflows normally, the release PR shows no checks and stays blocked. Approve
+the held `test` and `image` runs for the current head commit, then merge
+only once their checks pass. Don't substitute main-branch runs or the
+dispatched runs for them.
+
 To retry image publication for an existing release, run the `publish` workflow
 on `main` with its `tag` input set to `vX.Y.Z`. The workflow verifies the tag's
 version, release existence and ancestry before publishing. If acceptance failed,
