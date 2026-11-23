@@ -15,10 +15,9 @@ document never adds a control to the list or removes one from it.
 > ([Inspecting coverage](#inspecting-coverage)). Accepted risk is not joined
 > yet: the exception owner's projection does not exist, so no observation is
 > reported as an accepted risk. Reports carry the versioned
-> supporting-evidence section and apply the [scope projection](#scope-projection),
-> but no attachment integration feeds them yet: every package's
-> supporting context is `disabled` until `add-supporting-evidence-attachments`
-> wires its records in ([Supporting evidence](#supporting-evidence)).
+> supporting-evidence section, fed by the platform's EvidenceAttachment
+> records ([Supporting evidence](#supporting-evidence)), and apply the
+> [scope projection](#scope-projection).
 
 ## Inputs
 
