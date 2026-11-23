@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.3.0](https://github.com/backend-bunny/Konstapel/compare/v0.2.0...v0.3.0) (2026-11-23)
+
+
+### Features
+
+* **attachments:** authenticated attachment transfers and konstapel evidence CLI (add-supporting-evidence-attachments 3.1-3.4) ([#289](https://github.com/backend-bunny/Konstapel/issues/289)) ([b36a544](https://github.com/backend-bunny/Konstapel/commit/b36a544856d65ccd5c6e81dd1a3b3911a6318058))
+* **attachments:** chart values and protected-reader gate (7.1) ([#307](https://github.com/backend-bunny/Konstapel/issues/307)) ([bb21fb4](https://github.com/backend-bunny/Konstapel/commit/bb21fb42605acb7f6022b9d96b56985fcd82494b))
+* **attachments:** EvidenceAttachment API, registrant admission, association validation and platform roles ([#282](https://github.com/backend-bunny/Konstapel/issues/282)) ([2b13d79](https://github.com/backend-bunny/Konstapel/commit/2b13d79028819959df601b35dff8f0f90ddebd1b))
+* **attachments:** lifecycle states, no-event expiry, durable withdrawal and bounded cleanup (add-supporting-evidence-attachments 4.1-4.4) ([#291](https://github.com/backend-bunny/Konstapel/issues/291)) ([a69bf76](https://github.com/backend-bunny/Konstapel/commit/a69bf769629f50344b2cc0d0afb86d7b443cec03))
+* **attachments:** RustFS local fixture, compat record and docs (add-supporting-evidence-attachments 6.1-6.3) ([#306](https://github.com/backend-bunny/Konstapel/issues/306)) ([5416663](https://github.com/backend-bunny/Konstapel/commit/5416663aea78463ae54e6a733a12e292004efa0c))
+* **attachments:** source storage, commitment, frozen retention and retention-gated withdrawal (add-supporting-evidence-attachments 2.1-2.5) ([#284](https://github.com/backend-bunny/Konstapel/issues/284)) ([0bae86b](https://github.com/backend-bunny/Konstapel/commit/0bae86b7a022ba48815e18479011dbb5c5cf3701))
+* **attachments:** supporting evidence in coverage and packages (5.1-5.5) ([#304](https://github.com/backend-bunny/Konstapel/issues/304)) ([deb326f](https://github.com/backend-bunny/Konstapel/commit/deb326fff1c26d1514cd23cca16f63180f771799))
+* **availability:** serving readiness and per-replica admission (HA 3.1, 3.2) ([#312](https://github.com/backend-bunny/Konstapel/issues/312)) ([e9f9b2c](https://github.com/backend-bunny/Konstapel/commit/e9f9b2c29cda3efdb242014614de918f0ea1e9a7))
+* **coverage:** attributed technical evidence (add-control-coverage-reporting 2.1, 2.2, 2.4) ([#298](https://github.com/backend-bunny/Konstapel/issues/298)) ([4efcc85](https://github.com/backend-bunny/Konstapel/commit/4efcc85fc342682c545ab149a5eab844df58c729))
+* **coverage:** baseline and mapping inventory (add-control-coverage-reporting 1.1-1.4) ([#297](https://github.com/backend-bunny/Konstapel/issues/297)) ([6091cd1](https://github.com/backend-bunny/Konstapel/commit/6091cd1cfa3ecb719b2dcb4e39bd6a816d9110fd))
+* **coverage:** bounded coverage status, current-summary requeues, inspection docs (add-control-coverage-reporting 3.3-3.5) ([#302](https://github.com/backend-bunny/Konstapel/issues/302)) ([b78b7b8](https://github.com/backend-bunny/Konstapel/commit/b78b7b8eede06c6e2a693af1280aeb34bf81448d))
+* **coverage:** supporting-evidence context and scope projection (add-control-coverage-reporting 4.1-4.3) ([#303](https://github.com/backend-bunny/Konstapel/issues/303)) ([75c8894](https://github.com/backend-bunny/Konstapel/commit/75c8894161e2dc000987c76a8a8419b1a20cc066))
+* **coverage:** versioned coverage reports in assessment packages (add-control-coverage-reporting 3.1, 3.2) ([#301](https://github.com/backend-bunny/Konstapel/issues/301)) ([8ba6965](https://github.com/backend-bunny/Konstapel/commit/8ba69654b35409b8481da216c8c42537e6e000f0))
+* **evidence:** add EvidenceDestination signing policy and signing readiness ([#256](https://github.com/backend-bunny/Konstapel/issues/256)) ([a4b65f5](https://github.com/backend-bunny/Konstapel/commit/a4b65f553a9aab51ffa9ab79a01337d4f714334b))
+* **evidence:** keep signature objects in the evidence lifecycle and make key dependencies visible ([#277](https://github.com/backend-bunny/Konstapel/issues/277)) ([66d3cf5](https://github.com/backend-bunny/Konstapel/commit/66d3cf592fcdfe3f4cdead9a01425d0320028412))
+* **evidence:** retain evidence on signing failure and prove signing recovery (add-evidence-signing 3.4-3.6) ([#268](https://github.com/backend-bunny/Konstapel/issues/268)) ([f31032b](https://github.com/backend-bunny/Konstapel/commit/f31032b35b4a31aea3d251767e15569395a356cd))
+* **evidence:** serve signatures beside archives after verifying the pair ([#276](https://github.com/backend-bunny/Konstapel/issues/276)) ([58fac90](https://github.com/backend-bunny/Konstapel/commit/58fac908bc022a51580eaa913fddac9f2dd16049))
+* **evidence:** sign and gate publication commits (add-evidence-signing 3.1-3.3) ([#261](https://github.com/backend-bunny/Konstapel/issues/261)) ([e6ea47c](https://github.com/backend-bunny/Konstapel/commit/e6ea47cd842f4f3ebe56c4013bdc6eb6f1eac5e4))
+* **exceptions:** persist independent revocation records (exceptions 3.6) ([#333](https://github.com/backend-bunny/Konstapel/issues/333)) ([a33d154](https://github.com/backend-bunny/Konstapel/commit/a33d1543919cc6358aefa47df1e47837fd974112))
+* **exceptions:** revoke acceptances through spec.revoked (exceptions 2.5, 2.6) ([#332](https://github.com/backend-bunny/Konstapel/issues/332)) ([ff502eb](https://github.com/backend-bunny/Konstapel/commit/ff502eb557151897f379c4c8029e9c9bcddbfbc8))
+* **observability:** authenticated TLS controller metrics and reader RBAC (add-prometheus-observability 3.1, 3.2) ([#283](https://github.com/backend-bunny/Konstapel/issues/283)) ([0dbe086](https://github.com/backend-bunny/Konstapel/commit/0dbe086b05887674680ff1c97e93d9c38912e672))
+* **observability:** evaluate documented metric queries with a pinned promtool (add-prometheus-observability 1.6) ([#280](https://github.com/backend-bunny/Konstapel/issues/280)) ([2ef3c1f](https://github.com/backend-bunny/Konstapel/commit/2ef3c1f4a92ed275745675eb52e7543ace04e2f2))
+* **observability:** optional ServiceMonitor and PrometheusRule chart values (add-prometheus-observability 4.1-4.4) ([#287](https://github.com/backend-bunny/Konstapel/issues/287)) ([62b48a2](https://github.com/backend-bunny/Konstapel/commit/62b48a23ac5824b2d0affb8e57f2e7e6ade59d8d))
+* **observability:** record source-evaluation and schedule watermarks for assessment metrics ([#266](https://github.com/backend-bunny/Konstapel/issues/266)) ([9123884](https://github.com/backend-bunny/Konstapel/commit/9123884294e3026ee1bd21d1afdbefea39f86d14))
+* **observability:** starter alert rules, runbooks and promtool suites (add-prometheus-observability 5.1-5.4) ([#288](https://github.com/backend-bunny/Konstapel/issues/288)) ([8b2010e](https://github.com/backend-bunny/Konstapel/commit/8b2010e2955df3a8d64312cd9b722309ec953ed2))
+* **observability:** wire targeting, storage and bundle producers (add-prometheus-observability 2.1, 2.3, 2.4) ([#264](https://github.com/backend-bunny/Konstapel/issues/264)) ([ce61c20](https://github.com/backend-bunny/Konstapel/commit/ce61c200eab997f6b0fe47602065d43520dd1dd0))
+* **preview:** epoch classification and evidence context (preview 5.2, 5.3) ([#334](https://github.com/backend-bunny/Konstapel/issues/334)) ([6b41975](https://github.com/backend-bunny/Konstapel/commit/6b4197553d1533985c8257a1c5bf16f907af7b08))
+* **preview:** konstapel preview CLI, report v1, exit codes (preview 6.1-6.4) ([#331](https://github.com/backend-bunny/Konstapel/issues/331)) ([6c4b389](https://github.com/backend-bunny/Konstapel/commit/6c4b38905742d765aca1f2d90862f40b111bec35))
+* **preview:** observe exception revocation (preview 2.5) ([#336](https://github.com/backend-bunny/Konstapel/issues/336)) ([a978499](https://github.com/backend-bunny/Konstapel/commit/a978499f239f1d3d546dce7c3f908c7c062232c6))
+* **preview:** read-only cluster observation (preview 2.1, 2.3, 2.4) ([#328](https://github.com/backend-bunny/Konstapel/issues/328)) ([b05e6f7](https://github.com/backend-bunny/Konstapel/commit/b05e6f79fa2c0bb2f289d46aa6ca57d4a6789ddf))
+* **preview:** rendered manifest inputs and candidate configuration (preview 1.1-1.4) ([#327](https://github.com/backend-bunny/Konstapel/issues/327)) ([99e63c9](https://github.com/backend-bunny/Konstapel/commit/99e63c93ccc93acc16ac22c033caddb760cc33a9))
+* **preview:** shared resolution and semantic comparison (preview 3.1-3.5) ([#329](https://github.com/backend-bunny/Konstapel/issues/329)) ([9f22f71](https://github.com/backend-bunny/Konstapel/commit/9f22f71c1463e4f255f4597f5bf86e2b8aba6a0d))
+* **preview:** verified bundle resolution under caller access (preview 4.1-4.4) ([#330](https://github.com/backend-bunny/Konstapel/issues/330)) ([7c20ea8](https://github.com/backend-bunny/Konstapel/commit/7c20ea80db5ac5353a5cae9bcfe4acf5e104fe41))
+
+
+### Bug Fixes
+
+* **assessment:** wait for first engine policy delivery before freezing a run's scope ([#278](https://github.com/backend-bunny/Konstapel/issues/278)) ([2a145c7](https://github.com/backend-bunny/Konstapel/commit/2a145c7229880deda3cd3f6bd0945cf955ddf3eb))
+* **bundles:** resolve bundle content per name and digest ([#318](https://github.com/backend-bunny/Konstapel/issues/318)) ([3a6ae00](https://github.com/backend-bunny/Konstapel/commit/3a6ae00b5697a1f2ca1825ac93ad8c8e3699ac19))
+* **deps:** update module go.opentelemetry.io/otel/sdk to v1.47.0 [security] ([#270](https://github.com/backend-bunny/Konstapel/issues/270)) ([155877b](https://github.com/backend-bunny/Konstapel/commit/155877bff88991dce2811937e67858076410c72b))
+* **deps:** update module go.opentelemetry.io/otel/trace to v1.47.0 [security] ([#271](https://github.com/backend-bunny/Konstapel/issues/271)) ([829d915](https://github.com/backend-bunny/Konstapel/commit/829d915ec4af8ea958426b50eff87afc18c8d141))
+
+
+### Build and Image
+
+* **deps:** batch Renovate updates for 0.3.0 ([#337](https://github.com/backend-bunny/Konstapel/issues/337)) ([ab4d3df](https://github.com/backend-bunny/Konstapel/commit/ab4d3df772b8472912e9c5f4e85992fff6249617))
+* **deps:** refresh image runtime lock ([#341](https://github.com/backend-bunny/Konstapel/issues/341)) ([9e479df](https://github.com/backend-bunny/Konstapel/commit/9e479df1a1787ae31a439b3022f651326a48508d))
+* **deps:** update dependency jetify-com/devbox to v0.21.0 ([#263](https://github.com/backend-bunny/Konstapel/issues/263)) ([a117ed6](https://github.com/backend-bunny/Konstapel/commit/a117ed6ff4a928d1de971d21da8864c7d46f087c))
+* **deps:** update dependency jetify-com/devbox to v0.22.0 ([#305](https://github.com/backend-bunny/Konstapel/issues/305)) ([c2ba5f0](https://github.com/backend-bunny/Konstapel/commit/c2ba5f0da9a7547781507e6f415163d7db7ae772))
+* **deps:** update Go modules held below crypto/mldsa ([#265](https://github.com/backend-bunny/Konstapel/issues/265)) ([be5c6d0](https://github.com/backend-bunny/Konstapel/commit/be5c6d0e51271e0cfcb9172efef128e663dc8d6c))
+* **test:** raise the Go unit test package timeout to 30m ([#274](https://github.com/backend-bunny/Konstapel/issues/274)) ([efd4ff4](https://github.com/backend-bunny/Konstapel/commit/efd4ff45da268aad847a41ef7415546e743481fe))
+
 ## [0.2.0](https://github.com/backend-bunny/Konstapel/compare/v0.1.0...v0.2.0) (2026-11-13)
 
 
