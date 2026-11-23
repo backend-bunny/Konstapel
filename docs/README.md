@@ -37,6 +37,9 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 
 - [Development](development.md): Devbox/direnv, Task workflows, parallel CI
   acceptance groups, log locations, and dependency ownership.
+- [Assessment providers](assessment-providers.md): the installed-provider
+  descriptor and registry, selection checks, the conformance harness and the
+  test-only provider boundary (in progress; Kyverno is the only provider).
 - [Images](images.md): melange/apko, SBOMs, license notices, signing, and verification.
 - [Releases](releases.md): release-please, required acceptance, and publication.
 - [v0.3.0 readiness](release-readiness.md): what release 0.3.0 ships, the test

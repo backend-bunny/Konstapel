@@ -1,0 +1,10 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-kyverno/v1",
+  "description": "Saved live Kyverno 1.19.2 background-scan evidence (five Pods, hardening checks), evaluated unchanged at its capture closure.",
+  "evaluationTime": "2026-11-06T21:27:29Z",
+  "input": {
+    "capture": "testdata/assessments/kyverno-1.19.2-background/capture.json",
+    "maxEvidenceAge": "2h"
+  }
+}

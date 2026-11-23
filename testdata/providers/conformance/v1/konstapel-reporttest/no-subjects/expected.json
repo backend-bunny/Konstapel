@@ -1,0 +1,23 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-reporttest/v1",
+  "inventory": [],
+  "observations": [],
+  "evidence": {
+    "completeness": "NoTargets",
+    "expected": 0,
+    "attributable": 0,
+    "missing": 0,
+    "rejected": 0,
+    "unresolved": 0
+  },
+  "outcomes": {
+    "pass": 0,
+    "fail": 0,
+    "error": 0,
+    "skip": 0,
+    "acceptedRisk": 0,
+    "notApplicable": 0,
+    "unknown": 0
+  }
+}

@@ -1,0 +1,379 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-kyverno/v1",
+  "inventory": [
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1"
+    }
+  ],
+  "observations": [
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-compliant uid=c449a7fd-5403-4ab0-bc14-61d9045c7260",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0",
+      "state": "Attributable",
+      "raw": "fail",
+      "outcome": "fail",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1",
+      "state": "Missing"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-capabilities uid=c4606546-30f8-4de0-b92c-4c38ca4353bd",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0",
+      "state": "Attributable",
+      "raw": "fail",
+      "outcome": "fail",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-privilege uid=5c5eba72-df12-494c-86ae-0ea7ad51d3db",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0",
+      "state": "Attributable",
+      "raw": "fail",
+      "outcome": "fail",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-run uid=39ee35a7-d253-4129-bc2e-13870a64f18f",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-capabilities-strict-1eaf6d77d78a3f58#1",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-disallow-privilege-escalation-2f3fe71aa8ca5be9#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-require-run-as-nonroot-1e869ab60b470d58#0",
+      "state": "Attributable",
+      "raw": "pass",
+      "outcome": "pass",
+      "evaluated": "2026-11-06T21:27:12Z"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#0",
+      "state": "Missing"
+    },
+    {
+      "subject": "/v1/pods hz-bg/hz-bg-violates-seccomp uid=811253a0-0bab-4690-b904-3997ee972489",
+      "check": "konstapel-restrict-seccomp-strict-08b587bd9fa7cc66#1",
+      "state": "Attributable",
+      "raw": "fail",
+      "outcome": "fail",
+      "evaluated": "2026-11-06T21:27:12Z"
+    }
+  ],
+  "evidence": {
+    "completeness": "Incomplete",
+    "expected": 30,
+    "attributable": 28,
+    "missing": 2,
+    "rejected": 0,
+    "unresolved": 0
+  },
+  "outcomes": {
+    "pass": 24,
+    "fail": 4,
+    "error": 0,
+    "skip": 0,
+    "acceptedRisk": 0,
+    "notApplicable": 0,
+    "unknown": 0
+  }
+}

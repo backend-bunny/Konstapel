@@ -1,0 +1,24 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-reporttest/v1",
+  "description": "Synthetic, test-only: an empty frozen scope is NoTargets, never a pass, even when reports exist.",
+  "evaluationTime": "2026-11-20T12:00:00Z",
+  "input": {
+    "payloadVersion": 1,
+    "maxEvidenceAge": "1h",
+    "subjects": [],
+    "checks": [
+      "no-critical"
+    ],
+    "reports": [
+      {
+        "id": "r-orphan",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evaluatedAt": "2026-11-20T11:50:00Z",
+        "verdicts": {
+          "no-critical": "Passed"
+        }
+      }
+    ]
+  }
+}
