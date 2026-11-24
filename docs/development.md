@@ -220,7 +220,13 @@ fault proxy and registry services) remains; a leftover fails the run, is
 listed in `teardown.log` and is then removed.
 CI checks that execution did not modify dependency locks. The setup action caches
 Nix packages and Go downloads/build outputs; it does not use a separate Go version
-or download an independently selected Kyverno CLI.
+or download an independently selected Kyverno CLI. Go build caches are reused only
+under the same `devbox.lock`. Go keys cached cgo output by compiler version, not
+by Nix store path, and `runtime/cgo` records the C toolchain's glibc loader. A
+cache from an older lock therefore links test binaries against a loader that a
+fresh runner lacks, and they fail with `fork/exec …test: no such file or
+directory`. Locally the same happens once Nix garbage-collects the previous
+toolchain; run `devbox run -- go clean -cache` after such an update.
 
 ## Dependency ownership and Renovate
 

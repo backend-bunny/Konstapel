@@ -19,8 +19,13 @@ runs:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum', 'devbox.lock') }}
-        restore-keys: go-${{ runner.os }}-${{ runner.arch }}-
+        # Go keys cached cgo output by compiler version, not by its Nix store
+        # path, and runtime/cgo records the C toolchain's glibc loader path. A
+        # build cache from another devbox.lock links test binaries against a
+        # loader this runner may not have (fork/exec ...test: no such file or
+        # directory), so only reuse caches made with the same lock.
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('devbox.lock') }}-${{ hashFiles('go.sum') }}
+        restore-keys: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('devbox.lock') }}-
     - name: Allow unprivileged user namespaces
       if: inputs.image == 'true' || inputs.user-namespaces == 'true'
       shell: bash
