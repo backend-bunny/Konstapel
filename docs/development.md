@@ -292,9 +292,13 @@ timestamp server and Rekor remain allowed.
 
 ### Temporary Go toolchain holds
 
-Devbox's package index currently stops at Go 1.27.3, and the Devbox `go-licenses`
-is built with Go 1.26, whose standard library lacks `crypto/mldsa`. Rules in
-`renovate.json` keep Renovate from opening PRs that cannot pass `task check` or
+Devbox's package index currently stops at Go 1.27.3. The Devbox `go-licenses`
+used to be built with Go 1.26, and its wrapper sets `GOROOT` to that toolchain,
+whose standard library lacks `crypto/mldsa`. Its lock entry now resolves to a
+nixpkgs build made with Go 1.27.3, so go-licenses loads `crypto/mldsa`. Keep it
+on a Go 1.27 build when updating `devbox.lock`: the `GOROOT` exported by the
+`go-licenses` wrapper must name a Go 1.27 store path. Rules in `renovate.json`
+still keep Renovate from opening PRs that have not yet passed `task check` and
 `task image:build`:
 
 - The `go.mod` directive and the `devbox.json` `go@` pin (one "Go toolchain"
@@ -303,15 +307,18 @@ is built with Go 1.26, whose standard library lacks `crypto/mldsa`. Rules in
   `crypto/mldsa`), `github.com/sigstore/sigstore` below 1.11.0 (`pkg/cryptoutils`
   imports it), and `golang.org/x/net` below 0.61.0 and
   `github.com/prometheus/common` below 0.74.0 (they require x/crypto 0.58 or
-  newer). go-licenses fails to load these packages, so `image:build` fails.
+  newer). The Go 1.26 build of go-licenses failed to load these packages, so
+  `image:build` failed; with the Go 1.27.3 build it passes for x/crypto 0.58.0.
 - `github.com/sigstore/sigstore-go` is held below 1.4.0, with its coupled
   `rekor` (up to 1.5.3), `rekor-tiles/v2` (below 2.4.0) and
   `timestamp-authority/v2` (below 2.2.0). sigstore-go 1.4.0 requires rekor
   1.5.5, which requires Trillian 1.8.0, while `task deps:check` pins both
   Trillian images to the version in `go.sum`.
 
-To lift the holds, once Devbox indexes Go 1.27.4 (or ships a `go-licenses`
-built with Go 1.27):
+The x/crypto, sigstore/sigstore, x/net and prometheus/common holds no longer
+wait for Go 1.27.4: lift them with steps 2 and 4. The Go directive hold waits
+for Devbox to index Go 1.27.4 (step 1), and the sigstore-go set for Trillian
+1.8.0 (step 3):
 
 1. Set `go@1.27.4` in `devbox.json`, regenerate `devbox.lock` with Devbox, and
    set the `go.mod` directive.

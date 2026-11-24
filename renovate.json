@@ -194,7 +194,7 @@
       "matchDepNames": [
         "golang.org/x/crypto"
       ],
-      "description": "Temporary (Go toolchain hold): x/crypto v0.58.0+ ships ssh/mldsa.go importing crypto/mldsa, which the Go 1.26-built Devbox go-licenses cannot load (task image:build fails); v0.59.0 also fails on Go 1.27.3. See docs/development.md 'Temporary Go toolchain holds'",
+      "description": "Temporary (Go toolchain hold): x/crypto v0.58.0+ ships ssh/mldsa.go importing crypto/mldsa, which the former Go 1.26-built Devbox go-licenses could not load (task image:build failed). The locked go-licenses is now built with Go 1.27.3; lift this hold with the coupled set in docs/development.md 'Temporary Go toolchain holds'",
       "allowedVersions": "<0.58.0"
     },
     {

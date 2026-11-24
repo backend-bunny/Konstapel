@@ -604,8 +604,8 @@
       }
     },
     "go-licenses@2.0.1": {
-      "last_modified": "2026-11-03T19:55:20Z",
-      "resolved": "github:NixOS/nixpkgs/9d3b8db48266c17be0b5f9c6360c3ecfbac3d1f5#go-licenses",
+      "last_modified": "2026-11-22T18:15:35Z",
+      "resolved": "github:NixOS/nixpkgs/619c39f6eac5d1ed6b8f073a9414baf7034b2356#go-licenses",
       "source": "devbox-search",
       "version": "2.0.1",
       "systems": {
@@ -613,21 +613,21 @@
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/535yp4d5bxnz707x919x55mbnnz38fcf-go-licenses-2.0.1",
+              "path": "/nix/store/xnb7qp35gg0fq8gbj9407yqkm0iv3873-go-licenses-2.0.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/535yp4d5bxnz707x919x55mbnnz38fcf-go-licenses-2.0.1"
+          "store_path": "/nix/store/xnb7qp35gg0fq8gbj9407yqkm0iv3873-go-licenses-2.0.1"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/blsa54mpj721jhpafjivssfapm80i25s-go-licenses-2.0.1",
+              "path": "/nix/store/kpg2zz1qrs0kvnvfsra7k299sk3dll4g-go-licenses-2.0.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/blsa54mpj721jhpafjivssfapm80i25s-go-licenses-2.0.1"
+          "store_path": "/nix/store/kpg2zz1qrs0kvnvfsra7k299sk3dll4g-go-licenses-2.0.1"
         },
         "x86_64-darwin": {
           "outputs": [
@@ -643,11 +643,11 @@
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/pbvy4bva0fzm6dgw9ggk5x1krngv52sl-go-licenses-2.0.1",
+              "path": "/nix/store/d4121sfxjnhgf47lz32idm28v40wiy3c-go-licenses-2.0.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/pbvy4bva0fzm6dgw9ggk5x1krngv52sl-go-licenses-2.0.1"
+          "store_path": "/nix/store/d4121sfxjnhgf47lz32idm28v40wiy3c-go-licenses-2.0.1"
         }
       }
     },
