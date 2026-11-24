@@ -158,6 +158,23 @@ type AssessmentReconciler struct {
 	// from the informer cache, and treating that as "finished" would free
 	// the binding's slot while the run executes. Defaults to Client.
 	Reader client.Reader
+	// CollectionLimits bound each evidence collection. Zero fields are
+	// provider.DefaultLimits, and a zero Timeout is the binding's
+	// collection timeout. It is not configurable outside tests.
+	CollectionLimits provider.Limits
+}
+
+// collectionLimits are the bounds of one collection for b: its collection
+// timeout (spec.assessment.collectionTimeout, 5m when unset or invalid) is
+// the deadline, and the host defaults bound pages, objects and bytes.
+func (r *AssessmentReconciler) collectionLimits(b *v1alpha1.ComplianceBinding) provider.Limits {
+	l := r.CollectionLimits
+	if l.Timeout <= 0 {
+		if _, timeout, _, _ := bindingDurations(b); timeout > 0 {
+			l.Timeout = timeout
+		}
+	}
+	return l.WithDefaults()
 }
 
 func (r *AssessmentReconciler) reader() client.Reader {
@@ -403,8 +420,14 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 	}
 	if reportsUp {
 		// The Kyverno collection adapter reads only its declared report
-		// read, inside the scope.
-		collected, collectLimits, err := kyverno.Collect(ctx, scope, provider.ClientSources(r.Client, kyverno.Descriptor(), scope))
+		// read, inside the scope, under the host's bounds. A canceled
+		// reconcile (leadership loss, shutdown) is an error, so nothing
+		// from this pass is recorded; a bound that stopped collection is a
+		// limitation and no report is used.
+		collected, collectLimits, err := provider.Collect(ctx, r.Client, kyverno.Descriptor(), scope, r.collectionLimits(b),
+			func(ctx context.Context, src provider.Sources) ([]assessment.Object, []string, error) {
+				return kyverno.Collect(ctx, scope, src)
+			})
 		if err != nil {
 			return collector.CaptureV2{}, nil, 0, nil, false, err
 		}

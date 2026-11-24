@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,16 +71,22 @@ type Sources interface {
 }
 
 // ClientSources is the host's Sources: readers over c for the declared
-// reads of d, limited to scope. Only c.List is called, so a reader cannot
-// write even when c can.
+// reads of d, limited to scope and sharing one budget of DefaultLimits
+// (without its timeout: the caller's context is the deadline). Only c.List
+// is called, so a reader cannot write even when c can. Collect is the
+// host's bounded entry point; it also decides what a stopped collection
+// means.
 func ClientSources(c client.Reader, d Descriptor, scope Scope) Sources {
-	return clientSources{c: c, d: d, scope: scope}
+	l := DefaultLimits()
+	l.Timeout = 0
+	return clientSources{c: c, d: d, scope: scope, b: &budget{l: l}}
 }
 
 type clientSources struct {
 	c     client.Reader
 	d     Descriptor
 	scope Scope
+	b     *budget
 }
 
 func (s clientSources) Source(r Read) (SourceReader, error) {
@@ -104,7 +111,7 @@ func (s clientSources) Source(r Read) (SourceReader, error) {
 			names[n.Name] = true
 		}
 	}
-	return clientReader{c: s.c, read: declared, names: names, empty: len(s.scope.Namespaces) == 0}, nil
+	return clientReader{c: s.c, read: declared, names: names, empty: len(s.scope.Namespaces) == 0, b: s.b}, nil
 }
 
 type clientReader struct {
@@ -112,8 +119,14 @@ type clientReader struct {
 	read  Read
 	names map[string]bool
 	empty bool
+	b     *budget
 }
 
+// List reads every page of the source in namespace, within the
+// collection's budget. It returns the complete list or no objects: a source
+// failure is returned unchanged, and a bound returns the collection's
+// LimitError. A continuation that expired restarts the list once from its
+// first page; a second expiry stops the collection.
 func (r clientReader) List(ctx context.Context, namespace string) ([]map[string]any, error) {
 	var opts []client.ListOption
 	switch {
@@ -124,14 +137,69 @@ func (r clientReader) List(ctx context.Context, namespace string) ([]map[string]
 	case namespace != "" || r.empty:
 		return nil, fmt.Errorf("list cluster-scoped %s (namespace %q, empty scope %t): %w", r.read.ID(), namespace, r.empty, ErrOutOfScope)
 	}
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(schema.GroupVersionKind{Group: r.read.Group, Version: r.read.Version, Kind: r.read.Kind + "List"})
-	if err := r.c.List(ctx, list, opts...); err != nil {
-		return nil, err
+	what := r.read.ID()
+	if namespace != "" {
+		what += " in namespace " + namespace
 	}
-	out := make([]map[string]any, 0, len(list.Items))
-	for _, it := range list.Items {
-		out = append(out, it.Object)
+	var (
+		out     []map[string]any
+		seen    = map[string]bool{}
+		cont    string
+		objects int
+		bytes   int64
+		expired bool
+	)
+	for {
+		if err := r.b.request(ctx, what); err != nil {
+			r.b.giveBack(objects, bytes)
+			return nil, err
+		}
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(schema.GroupVersionKind{Group: r.read.Group, Version: r.read.Version, Kind: r.read.Kind + "List"})
+		page := append(slices.Clone(opts), client.Limit(r.b.l.PageSize))
+		if cont != "" {
+			page = append(page, client.Continue(cont))
+		}
+		if err := r.c.List(ctx, list, page...); err != nil {
+			r.b.giveBack(objects, bytes)
+			if cont != "" && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+				if !expired {
+					// Restart from the first page: a list is one
+					// consistent snapshot, never pages of two.
+					expired, out, seen, cont, objects, bytes = true, nil, map[string]bool{}, "", 0, 0
+					continue
+				}
+				return nil, r.b.halt(&LimitError{Code: StopPaginationExpired, Message: fmt.Sprintf("the list of %s expired twice during pagination", what)})
+			}
+			r.b.failed(ctx, err, what)
+			return nil, err
+		}
+		var size int64
+		for _, it := range list.Items {
+			key := it.GetNamespace() + "/" + it.GetName()
+			n, err := jsonSize(it.Object)
+			if err == nil && seen[key] {
+				err = errors.New("returned twice")
+			}
+			if err != nil {
+				r.b.giveBack(objects, bytes)
+				return nil, r.b.halt(&LimitError{Code: StopInvalidList, Message: fmt.Sprintf("the list of %s is not usable: object %s %v", what, key, err)})
+			}
+			seen[key] = true
+			size += n
+		}
+		if err := r.b.take(len(list.Items), size, what); err != nil {
+			return nil, err
+		}
+		objects, bytes = objects+len(list.Items), bytes+size
+		for _, it := range list.Items {
+			out = append(out, it.Object)
+		}
+		if cont = list.GetContinue(); cont == "" {
+			if out == nil {
+				out = []map[string]any{}
+			}
+			return out, nil
+		}
 	}
-	return out, nil
 }

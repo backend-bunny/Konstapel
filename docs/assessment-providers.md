@@ -12,9 +12,13 @@ with its versioned fixtures. Task 2.1 is implemented too: the controller's
 Kyverno assessment path now reaches PolicyReports through a narrow
 collection adapter ([Inventory and collection](#inventory-and-collection)).
 Task 2.2 derives each installed provider's availability, and its evidence
-watches, from its descriptor ([Availability](#availability)). Nothing in
-this guide changes how existing bindings, profiles, delivery, collection,
-evaluation or export behave:
+watches, from its descriptor ([Availability](#availability)). Task 2.3
+bounds every collection with host-owned deadlines, cancellation and
+resource limits ([Collection limits](#collection-limits)), and task 2.4
+documents the [capabilities and permissions](#capabilities-and-permissions)
+of each provider. Within the collection limits, nothing in this guide
+changes how existing bindings, profiles, delivery, collection, evaluation
+or export behave:
 
 - The bundle compatibility check (`content.Compatibility`, allowlist
   `konstapel-kyverno/v1`) and the targeting resolver still make the
@@ -22,9 +26,8 @@ evaluation or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Collection deadlines and resource limits, the provider-aware capture
-  boundary, shared evaluation and the full authoring recipe are later
-  tasks of the change.
+- The provider-aware capture boundary, shared evaluation and the full
+  authoring recipe are later tasks of the change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -243,14 +246,15 @@ status and by every run poll), the steps are:
    not collect becomes the limitation `resource … is not collected`. Its
    subject is unsupported and gets no expected observation.
 4. If the assessment capability is available, `kyverno.Collect` lists
-   PolicyReports through the narrow readers described below.
+   PolicyReports through the narrow readers described below, under the
+   host's [collection limits](#collection-limits).
 5. `kyverno.Inventory` derives the expected inventory from the host input
    alone (`collector.FreezeScope`, unchanged). Reports are attached
    afterwards and are evaluated unchanged by `collector.CaptureV2.Evaluate`.
 
 What `kyverno.Collect` does:
 
-- It makes one namespaced list per scope namespace, in scope order. It
+- It lists each scope namespace, in scope order, page by page. It
   returns the reports unevaluated and unfiltered. The evaluator attributes
   results by workload UID, engine policy and validation index. A report about
   another workload, a replaced workload or an unsupported resource
@@ -259,6 +263,8 @@ What `kyverno.Collect` does:
 - A failed list ends collection with the limitation
   `policy reports unavailable: <error>`. Reports from earlier namespaces are
   kept. Namespaces that were not read have missing evidence, never a pass.
+  A host bound or a canceled reconcile is decided by the host instead,
+  and then no report is kept ([Collection limits](#collection-limits)).
 - An empty scope (no targets) reads nothing. ClusterPolicyReports are never
   read. Collection never triggers the engine and never writes.
 
@@ -299,14 +305,20 @@ descriptor, scope)`, enforces these rules:
 - A cluster-scoped reader lists once, without a namespace, and only for a
   non-empty scope. The adapter must keep only what its inventory can
   attribute (`TestClusterScopedReaderNeedsAScope`).
+- A list is read in pages and returned complete, or not at all
+  ([Collection limits](#collection-limits)).
 - A refused read returns `provider.ErrOutOfScope` without making a request.
 - A reader calls only `List` on a `client.Reader`, so it cannot write even
-  when the underlying client can.
+  when the underlying client can. Neither `Sources` nor a `SourceReader` is
+  a client writer, status writer or subresource client
+  (`TestCollectionCannotWrite`).
 
 `conformance.RecordingClient` is the recording API fixture. Give it to
-collection code as a fully capable client, then check the requests it saw.
-For a scope of namespaces `a` and `b`, the Kyverno adapter makes exactly
-these requests (`TestDocumentedExamples` runs it):
+collection code as a fully capable client, then check the requests it saw,
+writes of every kind included: create, update, patch, apply, delete,
+deletecollection and their subresource forms. For a scope of namespaces
+`a` and `b`, the Kyverno adapter makes exactly these requests under the
+host's bounds (`TestDocumentedExamples` runs it):
 
 <!-- verified: kyverno-collection-requests -->
 ```json
@@ -316,37 +328,262 @@ these requests (`TestDocumentedExamples` runs it):
 ]
 ```
 
-### Permissions
+## Collection limits
 
-The reads above are what a collection adapter can reach through its Go
-interface. They are not the controller's permissions. Every feature of the
-controller shares one service account. Its ClusterRole
-`konstapel-controller` (`config/rbac/controller/role.yaml`, rendered by the
-chart as `generated-controller-role.yaml`) is broader than any provider's
-reads.
+The host bounds every collection; an adapter cannot widen or skip a
+bound. The controller runs the Kyverno adapter through
+`provider.Collect(ctx, client, descriptor, scope, limits, adapter)`. It
+gives the adapter readers that share one budget, and a context that ends at
+the collection deadline or when the reconcile's context ends. When the
+adapter returns, the host decides what its result means:
+
+| What happened | Result | What is recorded |
+| --- | --- | --- |
+| The reconcile's context ended (leadership loss, shutdown) | the context's error, no result | Nothing. Current status is not written, and a run poll freezes no capture and no closure. The next leader's poll collects again for the same run. |
+| A bound stopped the collection, or its deadline passed before the adapter returned | no result, one limitation | The limitation `<contract> evidence is not used: collection stopped (<code>): <bound>`. Every expected observation lacks evidence, so the evidence is `Incomplete` (`NoTargets` when nothing is expected), never `Complete`. |
+| Neither | the adapter's result, unchanged | As before, including the adapter's own limitations such as `policy reports unavailable: <error>`. |
+
+A stopped collection uses nothing it read, not even the namespaces that
+completed. The Kyverno adapter keeps earlier namespaces' reports after a
+failed list, and a stopped list may have read only some pages. Discarding
+everything means truncated input never looks complete. Three tests check
+this: `TestBoundsStopTheWholeCollection` with an adapter that ignores every
+error, and `TestStoppedCollectionUsesNoReports` and
+`TestCollectionLimitIsExplicitlyIncomplete` with the Kyverno path.
+
+The limits, `provider.DefaultLimits` (`TestDefaultLimits`):
+
+<!-- verified: collection-limits -->
+```json
+{
+  "timeout": "5m0s",
+  "pageSize": 500,
+  "maxPages": 20000,
+  "maxObjects": 100000,
+  "maxBytes": 536870912
+}
+```
+
+| Limit | Value | Why |
+| --- | --- | --- |
+| Deadline | the binding's `spec.assessment.collectionTimeout`; 5m when it is unset or invalid | It is the existing collection budget of a run. One collection pass cannot outlast it, so a run's closing poll ends at most one deadline after its window. `TestCollectionDeadlineIsTheCollectionTimeout` checks it. |
+| Page size | 500 objects per list request | The page size of client-go's pager and of the preview observation. |
+| Requests | 20,000 list requests per collection | One list for each namespace of a 10,000-namespace scope (Kubernetes' namespace scalability threshold), plus the 200 full pages that 100,000 objects need, with headroom for short pages. |
+| Objects | 100,000 objects per collection | The preview observation's bound. Kyverno writes one PolicyReport per resource, so this is about 100,000 workload objects in one binding's scope. |
+| Bytes | 512 MiB of object JSON per collection | The preview observation's bound. Decoded objects take about 2.4 times their JSON size (measured on the saved Kyverno 1.19.2 reports), so 512 MiB decodes to about 1.2 GiB. That is more than the chart's 1 GiB controller memory limit, so a collection that completes under the default chart stays below this bound. |
+
+These are host constants, not configuration: there is no flag, Helm value
+or bundle field for them. `AssessmentReconciler.CollectionLimits` exists
+for tests.
+
+How the bounds apply:
+
+- **Pages.** A reader sends `limit=500` and follows `continue` until the
+  list ends. A list is one consistent snapshot. An adapter gets a complete
+  list or no objects, never part of one (`TestPaginatedListIsComplete`).
+- **Expired continuation.** If a continuation expires (`410 Gone`), the
+  list restarts once from its first page. The discarded pages do not count
+  against the object and byte limits. A second expiry stops the collection
+  (`TestExpiredContinuationRestartsOnce`).
+- **Objects and bytes** are counted per collection, across all namespaces
+  and readers. Bytes are each object's JSON encoding, which is what a
+  capture keeps. A page is decoded before it is counted, so at most one
+  page is held beyond the bound.
+- **Invalid lists.** An object returned twice in one list stops the
+  collection.
+- **After a stop**, every further read of that collection returns the same
+  `*provider.LimitError` (`errors.Is(err, provider.ErrCollectionStopped)`)
+  and makes no request (`TestStoppedCollectionRefusesLaterReads`).
+- **Deadline.** A request after the deadline, or one that client-side rate
+  limiting cannot send before it, is refused and stops the collection. An
+  adapter still running at the deadline gets no result, even when its
+  reads completed (`TestDeadlineStopsTheCollection`).
+- **Cancellation.** A request refused because the reconcile's context ended
+  stops the collection, and `Collect` returns the context's error
+  (`TestCancellationIsAnError`).
+- **Source failures are not bounds.** A forbidden or failed request is
+  returned to the adapter unchanged, as before, and the adapter decides
+  what it means (`TestSourceFailuresAreTheAdapters`).
+
+The stop codes are `timeout`, `canceled`, `object-limit`, `byte-limit`,
+`page-limit`, `pagination-expired` and `invalid-list`.
+
+`conformance.PagingClient` serves lists in pages as the API server does;
+the fake client returns every object at once. For namespace `a` with 1,001
+reports and `b` with one, the Kyverno adapter reads these pages:
+
+<!-- verified: kyverno-collection-pages -->
+```json
+[
+  {"kind": "PolicyReport", "namespace": "a", "page": 0},
+  {"kind": "PolicyReport", "namespace": "a", "page": 1},
+  {"kind": "PolicyReport", "namespace": "a", "page": 2},
+  {"kind": "PolicyReport", "namespace": "b", "page": 0}
+]
+```
+
+Behavior within the limits is unchanged:
+
+- `TestBoundedCollectionMatchesTheDirectPath` reads 1,104 reports in pages
+  and gets the same reports, limitations and evaluation as the direct path.
+- `TestCollectionLimitIsExplicitlyIncomplete` checks that a binding at
+  exactly the object limit gets the same status as an unbounded one.
+- The collection characterization tests of task 2.1 are unchanged.
+
+Leadership loss: `TestCanceledCollectionIsAnError`,
+`TestLeadershipLossDuringCollectionRecordsNothing` (no status write) and
+`TestLeadershipLossAtRunClosureFreezesNothing` (a poll after the window
+closes writes no closure; the next poll closes the same run from a complete
+collection). A run whose closing collection meets a bound closes with
+missing evidence (`TestRunClosesIncompleteWhenACollectionLimitIsMet`).
+The reporting adapter meets every bound the same way
+(`TestReportingCollectionUnderHostBounds`).
+
+What the bounds do not cover:
+
+- Host reads: workload and engine policy listing, the binding's profile and
+  content resolution. They run on the reconcile context, as before.
+- Availability checks. They have their own bound of 10 seconds for each
+  discovery or access review request.
+- Watches. The host's report informer lists and watches with client-go's
+  own pager. Collection never reads the informer cache.
+- The reason in a run's package. The package records the missing
+  observations, not the limitation text, which current status shows.
+  Recording collection limitations in a capture belongs to the capture
+  boundary (task 3.1).
+
+## Capabilities and permissions
+
+Three things are easy to confuse:
+
+- **The narrow reader** is what an adapter can request through its Go
+  interface: `list` of its declared reads, inside the host-frozen scope,
+  bounded by the [collection limits](#collection-limits).
+- **The availability checks** are what the host asks before it collects:
+  discovery of every read and prerequisite, and an access review of each
+  read's verbs ([Availability](#availability)).
+- **The controller's effective RBAC** is what its service account may do.
+  Every feature of the controller shares that service account, so its RBAC
+  is broader than any provider's reads. A narrow reader does not reduce it
+  and does not isolate one provider from another. Adapters are trusted
+  in-tree code.
+
+The matrix for each provider, as `TestDocumentedExamples` computes it. It
+uses the descriptors, `capability.ForProvider`, the requests recorded
+during collection and the shipped ClusterRole `konstapel-controller`
+(`config/rbac/controller/role.yaml`, rendered by the chart as
+`generated-controller-role.yaml`):
+
+<!-- verified: capability-matrix -->
+```json
+[
+  {
+    "provider": "konstapel-kyverno/v1",
+    "evidenceCapability": "Assessment",
+    "enforcement": "PolicyDelivery",
+    "collection": [
+      {"resource": "policyreports.wgpolicyk8s.io/v1alpha2", "scope": "namespaced", "verbs": ["list"]}
+    ],
+    "hostWatches": ["policyreports.wgpolicyk8s.io/v1alpha2"],
+    "discovery": [
+      {"resource": "policyreports.wgpolicyk8s.io/v1alpha2", "verbs": ["get", "list", "watch"]},
+      {"resource": "clusterpolicyreports.wgpolicyk8s.io/v1alpha2", "verbs": ["get", "list", "watch"]}
+    ],
+    "accessReview": [
+      {"resource": "policyreports.wgpolicyk8s.io/v1alpha2", "verbs": ["get", "list", "watch"]}
+    ],
+    "controllerRole": [
+      {"resource": "policyreports.wgpolicyk8s.io", "verbs": ["get", "list", "watch"]},
+      {"resource": "clusterpolicyreports.wgpolicyk8s.io", "verbs": []}
+    ]
+  },
+  {
+    "provider": "konstapel-reporttest/v1",
+    "evidenceCapability": "Assessment(konstapel-reporttest/v1)",
+    "enforcement": "NotApplicable",
+    "collection": [
+      {"resource": "postures.reporttest.konstapel.io/v1", "scope": "cluster", "verbs": ["list"]}
+    ],
+    "hostWatches": [],
+    "discovery": [
+      {"resource": "postures.reporttest.konstapel.io/v1", "verbs": ["get", "list"]}
+    ],
+    "accessReview": [
+      {"resource": "postures.reporttest.konstapel.io/v1", "verbs": ["get", "list"]}
+    ],
+    "controllerRole": [
+      {"resource": "postures.reporttest.konstapel.io", "verbs": []}
+    ]
+  }
+]
+```
+
+Reading the matrix:
+
+- `collection` lists the requests that the recording fixture saw. Kyverno
+  makes one `list` per scope namespace and page, as in
+  `kyverno-collection-requests` above. The reporting provider makes one
+  cluster-wide `list` per page, as in `reporttest-collection-requests`
+  below.
+- `hostWatches` are the host's cluster-wide watches
+  ([Availability](#availability)). The reporting provider has none: its
+  source is read only during collection.
+- `controllerRole` is what the shipped ClusterRole grants on each resource
+  in every namespace. It grants Kyverno's reads in full: `get`, `list` and
+  `watch` on policyreports cluster-wide, far more than one list for each
+  scope namespace. It grants nothing on ClusterPolicyReports, which are
+  only discovered.
+- The role grants nothing on the test-only source. The reporting provider
+  is never shipped, and its availability is tested only against fake
+  discovery and access reviews. A new provider adds its reads to the role
+  in its own change. `TestReadersAreNarrowerThanTheControllerRole` then
+  requires every reviewed verb to be granted.
+
+The test-only reporting adapter, for subjects in two namespaces, makes this
+one request:
+
+<!-- verified: reporttest-collection-requests -->
+```json
+[
+  {"verb": "list", "kind": "PostureList"}
+]
+```
+
+The other reads of a snapshot are the host's, not a provider's:
 
 | Reader | Operations | Scope | Owner |
 | --- | --- | --- | --- |
-| Kyverno collection adapter (`kyverno.Collect`) | `list` `policyreports.wgpolicyk8s.io/v1alpha2` | one namespaced list per scope namespace | provider, through `provider.ClientSources` |
-| Report watch | `list`, `watch` `policyreports` | cluster-wide informer, enqueues bindings | host (`setupAssessments`), started once the assessment capability is available |
-| Assessment capability check | discovery of `wgpolicyk8s.io/v1alpha2` (`policyreports`, `clusterpolicyreports`); SelfSubjectAccessReview of `get`, `list`, `watch` `policyreports` | all namespaces | host (`capability.Requirements[Assessment]`, derived from the descriptor's `reads` and `requires`) |
 | Expected inventory | `list` namespaces and `get` the binding's ComplianceProfile; `list` the binding's managed `validatingpolicies`; `list` pods, replicationcontrollers, deployments, daemonsets, statefulsets, replicasets, jobs and cronjobs | workloads in scope namespaces only | host (`snapshotContent`, `listWorkloads`) |
 | Engine delivery (not collection) | create, update, patch, delete `validatingpolicies` | cluster | delivery (`capability.Delivery`) |
 
-The controller service account's effective RBAC includes all of these rows
-and every other feature's permissions:
+The ClusterRole also grants these writes. No reader can reach them, and
+every feature of the controller shares them:
 
-- `get`, `list` and `watch` on policyreports in every namespace
-- read access to workloads
-- writes to ValidatingPolicies and to Konstapel's own resources
+<!-- verified: controller-role-writes -->
+```json
+[
+  {"resource": "assessmentrequests.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "assessmentruns.compliance.erenius.io", "verbs": ["create", "patch", "update"]},
+  {"resource": "assessmentruns.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "compliancebindings.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "complianceexceptions.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "complianceprofiles.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "evidenceattachments.compliance.erenius.io", "verbs": ["patch", "update"]},
+  {"resource": "evidenceattachments.compliance.erenius.io/finalizers", "verbs": ["update"]},
+  {"resource": "evidenceattachments.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "evidencedestinations.compliance.erenius.io", "verbs": ["patch", "update"]},
+  {"resource": "evidencedestinations.compliance.erenius.io/finalizers", "verbs": ["update"]},
+  {"resource": "evidencedestinations.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "selfsubjectaccessreviews.authorization.k8s.io", "verbs": ["create"]},
+  {"resource": "validatingpolicies.policies.kyverno.io", "verbs": ["create", "delete", "patch", "update"]}
+]
+```
 
-A narrow reader limits what an adapter can reach by accident. It does not
-reduce the service account's RBAC, and it does not isolate one provider from
-another. Adapters are trusted in-tree code.
-
-Collection limits are not implemented yet. Collection runs on the reconcile
-context and the client's existing request handling. It has no deadline,
-object limit or byte limit of its own; those are task 2.3.
+The same file holds a namespaced Role `konstapel-controller` in the
+controller namespace (ConfigMaps, Events, Secrets reads and the
+leader-election Lease). When exception revocation processing is enabled,
+`config/rbac/controller/exception-revocation.yaml` adds a gated grant.
+None of them is a provider read.
 
 ## Availability
 
@@ -544,9 +781,11 @@ These are versioned contracts:
 - the conformance case format `konstapel.provider-conformance/v1`
 
 The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
-`Sources`, `SourceReader`, `conformance.Adapter`, `RecordingClient`, and the
-provider adapters) are internal to this repository. They are not a stable
-third-party SDK and may change with the remaining groups of the change.
+`Sources`, `SourceReader`, `Limits`, `Collect`, `LimitError`,
+`conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
+adapters) are internal to this repository. They are not a stable
+third-party SDK and may change with the remaining groups of the change. The
+collection limits are host constants, not a configuration contract.
 
 ## What this contract does not establish
 
