@@ -20,14 +20,30 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
+      # Release PR updates made with GITHUB_TOKEN open pull_request runs held at
+      # approval required, so the PR gets no required checks. An installation
+      # token from the automation App makes those runs start normally. Until the
+      # App is configured (docs/releases.md#automation-app) this falls back to
+      # GITHUB_TOKEN and the dispatch below.
+      - name: Create automation App token
+        id: app
+        if: vars.KONSTAPEL_AUTOMATION_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.KONSTAPEL_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KONSTAPEL_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: rp
         with:
+          token: ${{ steps.app.outputs.token || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # GITHUB_TOKEN updates do not trigger pull_request workflows.
+      # Fallback without the App only. Dispatched runs don't count toward the
+      # required checks; a maintainer must still approve the held PR runs.
       - name: Run checks on the release PR
-        if: steps.rp.outputs.prs_created == 'true'
+        if: steps.rp.outputs.prs_created == 'true' && vars.KONSTAPEL_AUTOMATION_APP_CLIENT_ID == ''
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PRS: ${{ steps.rp.outputs.prs }}
