@@ -24,7 +24,8 @@ const (
 	// ReasonUnknownProvider: no installed provider has the requested name.
 	ReasonUnknownProvider SelectionReason = "UnknownProvider"
 	// ReasonIncompatibleVersion: the provider is installed at another
-	// contract version, or cannot read the capture version.
+	// contract version, cannot read the capture version, or does not
+	// evaluate with the recorded evaluator version.
 	ReasonIncompatibleVersion SelectionReason = "IncompatibleVersion"
 	// ReasonMixedProviders: the checks belong to more than one provider, or
 	// to a provider other than the selected one. A binding uses one provider.

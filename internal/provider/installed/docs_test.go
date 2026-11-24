@@ -38,6 +38,7 @@ func documentedExamples(t *testing.T) map[string]any {
 	}})
 	_, unknown := r.Select(provider.Selection{Provider: "example-scanner/v1", Mode: v1alpha1.ModeAudit, Checks: []provider.CheckSelection{
 		{Name: "disallow-privileged-containers", Kind: kyverno.CheckKind}}})
+	captures, rejectedCaptures := captureExamples(t)
 	return map[string]any{
 		"kyverno-descriptor":             kyverno.Descriptor(),
 		"installed-contracts":            r.Contracts(),
@@ -49,6 +50,8 @@ func documentedExamples(t *testing.T) map[string]any {
 		"collection-limits":              documentedLimits(),
 		"capability-matrix":              capabilityMatrix(t),
 		"controller-role-writes":         controllerRoleWrites(t),
+		"capture-headers":                captures,
+		"capture-rejections":             rejectedCaptures,
 	}
 }
 
@@ -136,7 +139,11 @@ func TestDocumentedTestsExist(t *testing.T) {
 	// The collection limit flags and chart values.
 	flags, _ := filepath.Glob(filepath.Join(root, "cmd/konstapel/*_test.go"))
 	chart, _ := filepath.Glob(filepath.Join(root, "internal/charttest/*_test.go"))
-	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart) {
+	// The capture boundary lives with the collector, package validation
+	// with the storage backend.
+	captures, _ := filepath.Glob(filepath.Join(root, "internal/collector/*_test.go"))
+	storage, _ := filepath.Glob(filepath.Join(root, "internal/s3store/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart, captures, storage) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)

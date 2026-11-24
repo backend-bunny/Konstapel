@@ -27,6 +27,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/coverage"
+	"github.com/backend-bunny/Konstapel/internal/provider/installed"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -571,10 +572,11 @@ func isPreconditionFailed(err error) bool {
 
 // ValidatePackage checks a package directory before it is archived: the
 // descriptor and exact file inventory (no traversal, symlinks, or extra
-// files), OSCAL schemas and reference closure for assessment packages,
-// engine-policy verification for controller (v2) captures, every packaged
-// bundle against the descriptor's content record, and namespace
-// projection for namespace-scope packages.
+// files), a capture this build's installed providers read
+// (collector.ReadCapture), OSCAL schemas and reference closure for
+// assessment packages, engine-policy verification for controller (v2)
+// captures, every packaged bundle against the descriptor's content record,
+// and namespace projection for namespace-scope packages.
 func ValidatePackage(dir string) (publication.Descriptor, error) {
 	d, err := publication.LoadDescriptor(dir)
 	if err != nil {
@@ -609,12 +611,12 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "capture.json"))
 	hasCapture := err == nil
 	v2 := false
+	var capture collector.CaptureDocument
 	if hasCapture {
-		ver, err := collector.CaptureVersion(raw)
-		if err != nil {
+		if capture, err = packageCapture(raw, installed.Registry()); err != nil {
 			return d, err
 		}
-		v2 = ver == collector.CaptureV2Version
+		v2 = capture.Header.PayloadVersion == collector.CaptureV2Version
 	}
 	if d.PackageKind == publication.KindAssessment {
 		schema := filepath.Join(dir, "content/schemas/oscal-1.1.3.json")
@@ -640,8 +642,8 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		if !v2 {
 			return d, errors.New("a namespace package requires a projected controller capture")
 		}
-		var c collector.CaptureV2
-		if err := json.Unmarshal(raw, &c); err != nil {
+		c, err := capture.V2()
+		if err != nil {
 			return d, err
 		}
 		if err := collector.ValidateProjection(c); err != nil {
@@ -652,6 +654,28 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		}
 	}
 	return d, nil
+}
+
+// packageCapture reads a package's capture through the collector's
+// compatibility boundary. A package is archived only when this build can
+// read its payload and evaluate it with the recorded evaluator, so a later
+// reader of the same build can replay what it published. Package
+// verification is provider-specific and exists only for the Kyverno
+// provider's captures (a legacy version 1 or 2 document, or a Kyverno
+// envelope of payload 2): any other installed provider's capture is refused
+// rather than archived unverified.
+func packageCapture(raw []byte, readers collector.CaptureReaders) (collector.CaptureDocument, error) {
+	c, err := collector.ReadCapture(raw, readers)
+	if err != nil {
+		return collector.CaptureDocument{}, err
+	}
+	if err := c.CheckEvaluator(readers); err != nil {
+		return collector.CaptureDocument{}, err
+	}
+	if c.Header.Provider != collector.LegacyProvider {
+		return collector.CaptureDocument{}, fmt.Errorf("%w: %s: this build cannot verify a %s package", collector.ErrUnsupportedCapture, c.Header, c.Header.Provider)
+	}
+	return c, nil
 }
 
 // Archive builds the package archive of a validated package directory
