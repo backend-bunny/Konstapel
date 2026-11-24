@@ -204,7 +204,7 @@ staging requirements; the controller's existing capture/recovery contract decide
 whether storage must survive restart. Probes and hooks cannot assume a shell
 exists inside the application image. Keep C2P executable/content paths aligned
 with the image build. The availability contract in
-[`add-controller-high-availability`](../add-controller-high-availability/design.md)
+[`add-controller-high-availability`](../archive/2026-11-24-add-controller-high-availability/design.md)
 defines the multi-replica runtime and its release tests. This chart change owns
 their Deployment, Service, PDB, scheduling and values-schema integration; the
 availability change owns manager lifecycle and cross-feature fault tests.
@@ -335,10 +335,14 @@ remain disabled and be listed as untested; it cannot be advertised based on a
 skipped case. Use the availability owner's full fault matrix as the existing
 replicated-runtime release gate.
 
-Add a separate GitHub Actions acceptance gate that runs
-`devbox run -- task charts:acceptance` on pull requests and pushes to `main`.
-Keep the workflow and stable gate check present on every PR, and require it in
-the repository's merge rules. Documentation-only changes may explicitly report
+Run live acceptance as dedicated jobs of the existing `test` workflow on pull
+requests and pushes to `main`, separate from its cluster-free `checks` job (owner
+decision 2026-11-24: a separate workflow file is not required). An
+`acceptance-live` matrix runs `devbox run -- task acceptance GROUP=<group>` for
+each group of `scripts/acceptance-groups.json`; the release groups are the ones
+`charts:acceptance` reruns on the frozen inputs before publication. A stable
+`acceptance` job, present on every PR, aggregates the matrix and is required with
+`checks` in the repository's merge rules. Documentation-only changes may explicitly report
 not applicable; charts, Go/runtime code, generated APIs/RBAC/admission, content,
 image recipes, dependency/tool locks, acceptance helpers, version/release inputs
 and CI changes must trigger the tests. Unknown changed paths run the suite rather

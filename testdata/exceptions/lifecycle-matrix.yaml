@@ -380,6 +380,72 @@ cases:
         action: engine-unavailable
         expect: {grant: withdrawal-pending, engineObserved: Unknown}
 
+  - id: native-grant-failover-restriction
+    category: native
+    boundaries: [native-governance, eligibility, revision]
+    scenarios: ["Restrict eligibility or renew during failover"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 1, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: stop-controller
+        note: "the leader is lost; the follower keeps serving admission while no replica leads"
+        expect: {grant: active, acceptanceRevision: 1, snapshot: unchanged}
+      - at: "2026-01-02T00:00:10Z"
+        action: change-contribution
+        contributions:
+          - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+          - {binding: pci, policy: disallow-privileged, revision: r1, eligibility: Forbidden}
+        expect: {eligibility: Ineligible, restrictiveContribution: pci}
+      - at: "2026-01-02T00:00:20Z"
+        action: renew
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        renewal: {acceptanceRevision: 1, reason: "extend during failover", expiresAt: "2026-01-06T00:00:00Z"}
+        note: "renewal reaches the surviving replica before a successor is elected"
+        expect: {admission: rejected, reason: Forbidden, acceptanceRevision: 1, snapshot: unchanged}
+      - at: "2026-01-02T00:00:30Z"
+        action: start-controller
+        note: "the successor leader neither renews, broadens nor revives the grant"
+        expect: {eligibilityRechecked: true, grant: withdrawal-pending, acceptanceRevision: 1, snapshot: unchanged}
+      - at: "2026-01-02T00:01:00Z"
+        action: engine-converged
+        expect: {grant: withdrawn, engineObserved: "False", exceptionRetained: true}
+
+  - id: native-grant-successor-leader
+    category: native
+    boundaries: [native-governance, revision]
+    scenarios: ["A successor leader reconciles native grants"]
+    setup:
+      namespaces: [{name: team-a, uid: ns-a-1}]
+      contributions:
+        - {binding: baseline, policy: disallow-privileged, revision: r1, eligibility: SelfService, maxLifetime: 168h}
+      engineReady: true
+    steps:
+      - at: "2026-01-01T00:00:00Z"
+        action: create
+        actor: {username: alice, uid: u-alice, groups: [team-a-editors]}
+        exception: {name: priv, namespace: team-a, policy: disallow-privileged, selector: {app: debug}, reason: "first", expiresAt: "2026-01-05T00:00:00Z"}
+        expect: {admission: admitted, acceptanceRevision: 1, grant: active}
+      - at: "2026-01-02T00:00:00Z"
+        action: stop-controller
+        note: "the leader pod is removed"
+        expect: {grant: active}
+      - at: "2026-01-02T00:00:30Z"
+        action: start-controller
+        note: "the successor derives the same grant from the same acceptance, revocation and expiry; every replica applies that state"
+        expect: {grant: active, acceptanceRevision: 1, acceptedRevisions: [r1], snapshot: unchanged}
+      - at: "2026-01-05T00:00:00Z"
+        action: expire
+        expect: {grant: withdrawal-pending, acceptanceRevision: 1}
+
   - id: controller-down-at-expiry
     category: revocation
     boundaries: [lifetime, engine]

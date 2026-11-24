@@ -21,6 +21,10 @@ revocation examples in 2.5, and integrate 3.6 with group 4 before claiming durab
 withdrawal history. This API/history work can proceed while engine compatibility
 is unresolved; native grant enablement remains gated by group 1 and governance.
 
+Task 6.4 is the native-grant failover validation split from the archived
+`add-controller-high-availability` change (its former task 3.6). Native exception
+support is not HA-validated until 6.4 passes.
+
 ## 1. Establish lifecycle fixtures and engine compatibility
 
 - [x] 1.1 Add an acceptance/renewal/revocation/report fixture matrix covering namespace and revision boundaries, eligibility, attribution, and expired/missing context; verify every policy-exceptions scenario has an explicit expected outcome and document how to run these independent fixtures.
@@ -97,3 +101,5 @@ is unresolved; native grant enablement remains gated by group 1 and governance.
   <!-- agent: tier=deep risk=high reason="Grant scope, revocation races, and durable acceptance history" -->
 - [ ] 6.3 Run the documented clean-state acceptance and rollback procedures, retaining version pins and diagnostic artifacts; verify the original assessment loop still passes and the bundle agent can consume the merged exception/export contracts.
   <!-- agent: tier=standard risk=medium reason="Bounded implementation or validation against explicit criteria" -->
+- [ ] 6.4 Once native exception grants are delivered (6.2, which waits on the upstream Kyverno expiry fix in 1.3), exercise controller failover and leadership changes against them on the Helm-installed multi-replica controller; verify no native grant is broadened, renewed or revived by failover and that each replica applies the same grant state. Moved from add-controller-high-availability task 3.6 (owner decision 2026-11-24) with its requirement and acceptance criteria unchanged; until it passes, native exception support is not HA-validated. Reuse the availability acceptance harness and record results in [availability](../../../docs/integration/availability.md#handovers-during-outages-trust-changes-and-revocation).
+  <!-- agent: tier=deep risk=high reason="Authorization of native grants across replica lifecycle; depends on 6.2 and upstream Kyverno" -->

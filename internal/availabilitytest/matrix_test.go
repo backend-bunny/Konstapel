@@ -17,9 +17,9 @@ type entry struct {
 // Every availability requirement maps to a boundary, an expected result, an
 // owning change, and a status, and nothing in the matrix is stale.
 func TestLifecycleMatrixCoversEveryRequirement(t *testing.T) {
-	spec, err := os.ReadFile("../../openspec/changes/add-controller-high-availability/specs/controller-availability/spec.md")
+	spec, err := os.ReadFile("../../openspec/specs/controller-availability/spec.md")
 	if err != nil {
-		t.Skipf("change archived or moved: %v", err)
+		t.Fatal(err)
 	}
 	var want []string
 	for _, m := range regexp.MustCompile(`(?m)^### Requirement: (.+)$`).FindAllSubmatch(spec, -1) {

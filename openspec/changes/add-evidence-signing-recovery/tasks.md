@@ -14,8 +14,8 @@ permission, or Taskfile task.
 - Group 3 needs group 2's status vocabulary.
 - Group 5 needs groups 1 and 2 merged into the charts.
 - Rebase before editing the shared publication records, generated RBAC, or
-  the acceptance-group inventory. `add-controller-high-availability` is still
-  active and changes the same manager registration and recovery fixtures.
+  the acceptance-group inventory. `add-controller-high-availability` is
+  archived; its manager registration and recovery fixtures are now on `main`.
 
 ## 1. Request API, admission, and RBAC
 

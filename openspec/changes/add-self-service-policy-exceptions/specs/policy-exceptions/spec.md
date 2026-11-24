@@ -199,6 +199,25 @@ Native exceptions SHALL reference only the authorized managed policy instances.
 - **THEN** its native exception references the acceptance identity and exact authorized policy instances
 - **AND** its namespace condition and expiry cannot be broader than the acceptance
 
+### Requirement: Controller failover does not change native grants
+
+Native exception grants SHALL depend only on protected acceptances under this
+capability's contract, never on which controller replica leads. Leadership
+changes SHALL NOT renew, broaden, or revive a native grant, and every replica
+SHALL apply the same grant state.
+
+#### Scenario: Restrict eligibility or renew during failover
+
+- **WHEN** a central restriction or acceptance renewal races with requests reaching different replicas while leadership changes
+- **THEN** each delivered native grant remains bound to a valid protected acceptance and its revision
+- **AND** leadership changes do not renew, broaden, or revive a native grant
+
+#### Scenario: A successor leader reconciles native grants
+
+- **WHEN** a new leader takes over after the former leader is lost
+- **THEN** it derives native grants from the same protected acceptances, revocations and expiry as its predecessor
+- **AND** each replica observes and applies the same grant state
+
 ### Requirement: Expiry and revocation restore enforcement
 
 Expired, deleted, revoked, or newly ineligible acceptances SHALL cease granting

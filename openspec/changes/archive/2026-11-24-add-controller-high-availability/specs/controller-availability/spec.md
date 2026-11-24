@@ -116,7 +116,7 @@ instead of using stale permissions or granting broader exceptions.
 
 - **WHEN** a central restriction or acceptance renewal races with requests reaching different replicas
 - **THEN** each accepted operation remains bound to a valid protected acceptance under the owning contract
-- **AND** leadership changes do not renew, broaden, or revive a native grant
+- **AND** leadership changes do not renew, broaden, or revive an acceptance record or snapshot
 
 ### Requirement: Downloads do not depend on the elected pod
 
