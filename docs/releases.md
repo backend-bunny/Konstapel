@@ -58,21 +58,20 @@ job summary. See the [image guide](images.md) for SBOMs, license notices and
 verification commands. The trusted signing identities cover the publishing
 workflow and its release-please caller on `main`.
 
-Everything uses `GITHUB_TOKEN`; no personal access token or signing secret is
-needed. Since bot-created PRs and tags do not trigger normal GitHub workflow
-events, release-please explicitly dispatches the `test` and `image` checks on
-the release PR branch, and invokes publishing without depending on a tag-push
-event. The repository must allow GitHub Actions to create PRs.
+Publishing uses `GITHUB_TOKEN`; no personal access token or signing secret is
+needed, and release-please invokes publishing without depending on a tag-push
+event. Release PR updates use the [automation App](#automation-app) token when
+it is configured. Otherwise release-please falls back to `GITHUB_TOKEN`, and the
+repository must allow GitHub Actions to create PRs.
 
-The dispatched runs succeed on the release PR's head commit, but GitHub
-doesn't count them toward the PR's required `checks` and `acceptance`
-gates. GitHub also opens `pull_request` runs for the bot-authored PR and
-holds them at **Approval required** (`action_required`). Until a maintainer
-approves those runs, or release-please gets a token whose events run
-workflows normally, the release PR shows no checks and stays blocked. Approve
-the held `test` and `image` runs for the current head commit, then merge
-only once their checks pass. Don't substitute main-branch runs or the
-dispatched runs for them.
+With the `GITHUB_TOKEN` fallback, GitHub opens the release PR's `pull_request`
+runs held at **Approval required** (`action_required`). release-please also
+dispatches `test` and `image` on the release branch. Those dispatched runs
+report on the PR head commit, but GitHub doesn't count `workflow_dispatch` runs
+toward the PR's required `checks` and `acceptance` gates. The release PR
+therefore shows no checks and stays blocked until a maintainer approves the
+held `test` and `image` runs for the current head commit. Merge only once their
+checks pass. Don't substitute main-branch runs or the dispatched runs for them.
 
 To retry image publication for an existing release, run the `publish` workflow
 on `main` with its `tag` input set to `vX.Y.Z`. The workflow verifies the tag's
@@ -83,6 +82,44 @@ this gate. Re-running the
 failed jobs in the original release-please workflow also retries the release
 notes update. Re-running release-please from scratch after a release already
 exists may only update the next release PR.
+
+## Automation App
+
+GitHub holds `pull_request` runs for PRs that a workflow creates or updates
+with `GITHUB_TOKEN` at approval required. release-please and the image lock
+refresh (`lock-refresh`) therefore open their PRs with an installation token from a
+repository-owned GitHub App. Runs for the App's same-repository branches start
+normally and report the required checks on the PR head commit. Both workflows
+use the App only when the `KONSTAPEL_AUTOMATION_APP_CLIENT_ID` repository
+variable is set. Without it they keep the `GITHUB_TOKEN` fallback described
+above.
+
+To enable it, the repository owner:
+
+1. Creates a GitHub App owned by the repository owner account, with the
+   webhook disabled and installation limited to this account.
+2. Grants it these repository permissions only: **Contents** read and write,
+   **Pull requests** read and write, and **Metadata** read (mandatory). It needs
+   no organization or account permissions, no **Workflows** permission and no
+   event subscriptions.
+3. Installs it on **only** `backend-bunny/Konstapel`.
+4. Generates a private key. Stores it as the Actions repository secret
+   `KONSTAPEL_AUTOMATION_APP_PRIVATE_KEY`, then deletes the downloaded copy.
+5. Sets the App's client ID as the Actions repository variable
+   `KONSTAPEL_AUTOMATION_APP_CLIENT_ID`.
+
+The job requests a token limited to `contents: write` and
+`pull-requests: write` for this repository, and the token is revoked when the
+job ends. The App has no bypass on the `main` ruleset, so its PRs need the same
+`checks` and `acceptance` gates as any other. Without the **Workflows**
+permission it cannot change files under `.github/workflows`. Runs already held
+for an existing release PR still need one approval. Once release-please next
+updates the PR with the App token, confirm that its `pull_request` runs start
+without approval. To roll back, delete the variable. To rotate the key, generate a new one, replace the secret and
+delete the old key in the App settings.
+
+Renovate PRs come from the hosted Renovate GitHub App, so their runs already
+start without approval and need no change.
 
 ## Chart publication
 

@@ -163,8 +163,11 @@ are not emulated by a local dry run.
 Renovate updates Devbox tools, Go modules and GitHub Actions. Runtime APK locks
 use a separate Monday workflow, matching container-dropshipping: it runs
 `task image:lock`, tests, and opens or updates `chore/image-lock-refresh`.
-It explicitly dispatches both PR check workflows because `GITHUB_TOKEN` pushes
-do not trigger them. The repository must allow GitHub Actions to create PRs.
+It opens the PR with the [automation App](releases.md#automation-app) token
+when the App is configured, so the PR's required checks run normally. Without
+the App it falls back to `GITHUB_TOKEN` and dispatches both check workflows.
+The PR's own runs then wait for maintainer approval, and the repository must
+allow GitHub Actions to create PRs.
 Merging the reviewed refresh PR publishes the updated image.
 
 For a manual refresh, run `task image:lock` and `task image:test`, review the
