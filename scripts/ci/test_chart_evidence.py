@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/charts"))
@@ -148,6 +149,35 @@ class FrozenGroupTests(unittest.TestCase):
         for what, groups in bad.items():
             with self.subTest(what), self.assertRaises(evidence.Rejected):
                 evidence.release_groups(groups)
+
+    def test_budgets_are_read_from_the_commit_for_required_groups_only(self):
+        timed = lambda g, minutes: dict(g, timeoutMinutes=minutes)
+        commit = self.commit({"charts": timed(self.group(True), 50), "storage": timed(self.group(False, ["TestLiveS"], None), 45),
+                              "availability": timed(self.group(True, ["TestLiveV"]), 40)})
+        (self.repo / evidence.GROUPS_FILE).write_text(json.dumps({"charts": timed(self.group(True), 5)}))
+        self.assertEqual(list(evidence.frozen_budgets(commit, self.repo).items()), [("charts", 50), ("availability", 40)])
+        out = io.StringIO()
+        read = evidence.frozen_budgets
+        with contextlib.redirect_stdout(out), unittest.mock.patch.object(evidence, "frozen_budgets", lambda c: read(c, self.repo)):
+            self.assertEqual(evidence.main(["groups", "--source", commit]), 0)
+        self.assertEqual(out.getvalue(), "charts 50\navailability 40\n")
+
+    def test_every_group_needs_a_whole_minute_budget(self):
+        good = {"charts": dict(self.group(True), timeoutMinutes=50), "storage": dict(self.group(False), timeoutMinutes=45)}
+        self.assertEqual(evidence.release_budgets(good), {"charts": 50})
+        for what, minutes in {"missing": None, "zero": 0, "negative": -5, "fractional": 1.5, "string": "50",
+                              "boolean": True, "beyond the ceiling": evidence.MAX_TIMEOUT_MINUTES + 1}.items():
+            for group in good:
+                bad = json.loads(json.dumps(good))
+                if minutes is None:
+                    del bad[group]["timeoutMinutes"]
+                else:
+                    bad[group]["timeoutMinutes"] = minutes
+                with self.subTest(what, group=group), self.assertRaisesRegex(evidence.Rejected, "timeoutMinutes"):
+                    evidence.release_budgets(bad)
+        commit = self.commit({"charts": self.group(True)})
+        with self.assertRaisesRegex(evidence.Rejected, "timeoutMinutes"):
+            evidence.frozen_budgets(commit, self.repo)
 
 
 class RecordTests(unittest.TestCase):

@@ -6,7 +6,8 @@
 # acceptance group ("release": true in the committed
 # scripts/acceptance-groups.json), one after another, each through
 # scripts/acceptance.sh on its own fresh disposable cluster and in
-# OUTPUT/groups/GROUP. Every node pulls that exact image by digest and Helm
+# OUTPUT/groups/GROUP, bounded by the group's "timeoutMinutes" (a timeout
+# fails the group). Every node pulls that exact image by digest and Helm
 # installs exactly those archives. scripts/charts/evidence.py then derives
 # each test's result from the group's go test log and writes
 # OUTPUT/chart-acceptance.json only if every required group fully passed,
@@ -30,16 +31,21 @@ source=$(git rev-parse HEAD)
 python3 scripts/charts/manifest.py verify --archives "$archives" --manifest "$archives/publication.json" --source "$source" --image-digest "$digest"
 out=$(realpath -m "$out")
 [[ ! -e $out ]] || { echo 'Acceptance output must be a fresh directory' >&2; exit 1; }
-groups=$(python3 scripts/charts/evidence.py groups --source "$source")
+# "GROUP MINUTES" lines: each required group and its timeoutMinutes budget.
+budgets=$(python3 scripts/charts/evidence.py groups --source "$source")
 mkdir -p "$out/groups"
-for group in $groups; do
-  printf '[%s] Release acceptance group %s on %s\n' "$(date -u +%H:%M:%S)" "$group" "$image"
-  if ! KONSTAPEL_ACCEPTANCE_IMAGE=$image KONSTAPEL_LIVE_CHART_ARCHIVES=$archives scripts/acceptance.sh "$out/groups/$group" "$group"; then
+while read -r group minutes; do
+  [[ $group =~ ^[a-z][a-z0-9-]*$ && $minutes =~ ^[1-9][0-9]*$ ]] || { echo "Malformed release acceptance budget: $group $minutes" >&2; exit 1; }
+  printf '[%s] Release acceptance group %s on %s (budget %sm)\n' "$(date -u +%H:%M:%S)" "$group" "$image" "$minutes"
+  # The budget stops a hung group (exit 124, outcome timed-out) and leaves
+  # time for its diagnostics and teardown inside the job timeout.
+  if ! KONSTAPEL_ACCEPTANCE_TIMEOUT=${minutes}m KONSTAPEL_ACCEPTANCE_IMAGE=$image KONSTAPEL_LIVE_CHART_ARCHIVES=$archives \
+    scripts/acceptance.sh "$out/groups/$group" "$group" </dev/null; then
     # Later groups are not run; the record step reports them as missing.
     echo "Release acceptance group $group failed" >&2
     break
   fi
-done
+done <<<"$budgets"
 source scripts/runtime.env
 runtime=$(jq -cn --arg kind "$(kind version | awk '{print $2}')" --arg node "$KONSTAPEL_NODE_IMAGE" --arg kyverno "$KONSTAPEL_KYVERNO_CHART_VERSION" \
   --arg certManager "$KONSTAPEL_CERT_MANAGER_CHART_VERSION" --arg s3 "$KONSTAPEL_S3_IMAGE" \

@@ -1182,7 +1182,10 @@ rebuilt or re-rendered between acceptance and the registry.
    `availability` (multi-node placement, disruption budgets, upgrades,
    leader, pod and node loss, and recovery). Each group runs through
    `scripts/acceptance.sh` on its own fresh disposable cluster, one after
-   another, in `OUTPUT/groups/<group>/`:
+   another, in `OUTPUT/groups/<group>/`, bounded by the group's
+   `timeoutMinutes` at `HEAD`. A group that exceeds it is stopped, collects
+   diagnostics, tears down and fails (`timed-out`); later groups do not run
+   and no record is written:
    - every kind node pulls the image by its registry digest (`crictl pull`)
      instead of building one (`image-ref.txt` records it);
    - the tests install the frozen `.tgz` files, and the runtime chart's own

@@ -87,7 +87,12 @@ jobs:
   acceptance:
     needs: freeze
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    # The release groups run one after another, each bounded by its
+    # timeoutMinutes in acceptance-groups.json (charts 50 + monitoring 55 +
+    # availability 45 = 150), plus 15 for setup and the evidence steps and 15
+    # for the one group that can time out to collect diagnostics and tear down
+    # (a failed group stops the run). scripts/ci/test_acceptance.py checks it.
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
@@ -108,7 +113,8 @@ jobs:
           path: out/charts
       # Runs every release-required group (acceptance-groups.json at this
       # tag, "release": true) on its own disposable cluster with these exact
-      # archives and image; chart-acceptance.json exists only if all passed.
+      # archives and image, each under its timeoutMinutes budget; a timeout
+      # fails the group, and chart-acceptance.json exists only if all passed.
       - name: Accept the frozen charts with the released image
         env:
           DIGEST: ${{ needs.freeze.outputs.image-digest }}

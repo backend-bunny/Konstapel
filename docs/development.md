@@ -135,6 +135,15 @@ Kyverno deployments, managers watch cluster-wide resources, and tests configure
 process-global assessment settings. Matrix fail-fast is disabled so every group
 can finish and upload diagnostics even if another fails.
 
+Every group also states `"timeoutMinutes"`, its run budget: about 1.5 times
+the longest successful CI run of that group, rounded up to 5 minutes (at least
+15). The `test` workflow passes it as `KONSTAPEL_ACCEPTANCE_TIMEOUT` and sets
+the group's job timeout 20 minutes higher, for setup, the post-timeout
+diagnostics and teardown, and the evidence upload. Release acceptance runs each
+release group under the same budget, and the `charts` workflow's acceptance
+job timeout covers their sum; `task test` checks both. Raise a budget when a
+group's successful runs grow towards it.
+
 The stable `acceptance` gate requires successful `checks` and every matrix group,
 or an explicit allowlisted prose-only PR skip. `checks` and `acceptance` are the
 required status checks on `main`; individual matrix jobs remain conditional.
@@ -187,7 +196,7 @@ without changing the result. Resources a test already deleted in its own
 cleanup are gone by then; their events are in the test log.
 `acceptance-result.json` records the `outcome`: `passed`, `failed`,
 `timed-out` or `interrupted`. `KONSTAPEL_ACCEPTANCE_TIMEOUT` (for example
-`100m`, set by the `test` workflow) stops a hung run, including every process it
+`45m`; CI sets the group's `timeoutMinutes`) stops a hung run, including every process it
 started, so diagnostics and teardown finish inside the job timeout. Once
 cleanup starts it ignores further INT/TERM signals; only SIGKILL stops it.
 

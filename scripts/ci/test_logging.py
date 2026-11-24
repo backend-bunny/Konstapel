@@ -161,6 +161,33 @@ class LoggingTests(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(hung, 0)
 
+    def test_release_acceptance_bounds_each_group_and_stops_at_a_timeout(self):
+        # The real release loop with stubbed group runs: each group gets its
+        # own budget from evidence.py, a timed-out group fails the run, later
+        # groups do not run, and no record can be written.
+        (self.repo / "scripts/charts").mkdir()
+        shutil.copy(ROOT / "scripts/charts/acceptance.sh", self.repo / "scripts/charts/acceptance.sh")
+        (self.repo / "scripts/charts/manifest.py").write_text("")
+        (self.repo / "scripts/charts/evidence.py").write_text(
+            "import sys\n"
+            "if sys.argv[1] == 'groups':\n    print('charts 50\\nmonitoring 55\\navailability 45')\n"
+            "else:\n    open('calls.log', 'a').write('record\\n'); sys.exit(1)\n")
+        # Reading stdin proves a group run cannot consume the remaining budgets.
+        self.stub("scripts/acceptance.sh", 'cat >/dev/null; echo "$2 $KONSTAPEL_ACCEPTANCE_TIMEOUT" >> "$PWD/calls.log"; '
+                  'if [[ $2 == "${TIMEOUT_GROUP:-}" ]]; then exit 124; fi')
+        (self.repo / "archives").mkdir()
+        (self.repo / ".gitignore").write_text("output/\ncalls.log\n")
+        for args in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x"]):
+            subprocess.run(["git", *args], cwd=self.repo, check=True)
+        image = "ghcr.io/backend-bunny/konstapel@sha256:" + "0" * 64
+        result = subprocess.run(["bash", "scripts/charts/acceptance.sh", str(self.out), "archives", image], cwd=self.repo,
+                                env=dict(self.env, TIMEOUT_GROUP="monitoring"), text=True, capture_output=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.repo / "calls.log").read_text().splitlines(), ["charts 50m", "monitoring 55m", "record"])
+        self.assertIn("Release acceptance group monitoring failed", result.stderr)
+        self.assertIn("(budget 55m)", result.stdout)
+        self.assertFalse((self.out / "chart-acceptance.json").exists())
+
     def test_deadline_is_validated(self):
         self.setup_acceptance()
         result = self.run_script("acceptance.sh", self.out, "capabilities", KONSTAPEL_ACCEPTANCE_TIMEOUT="soon")
