@@ -138,6 +138,10 @@ func clone(d Descriptor) Descriptor {
 	for i := range d.Reads {
 		d.Reads[i].Verbs = slices.Clone(d.Reads[i].Verbs)
 	}
+	d.Requires = slices.Clone(d.Requires)
+	for i := range d.Requires {
+		d.Requires[i].Verbs = slices.Clone(d.Requires[i].Verbs)
+	}
 	return d
 }
 

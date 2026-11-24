@@ -50,6 +50,14 @@ type Descriptor struct {
 	// listing for the expected inventory) and engine delivery are not
 	// provider reads.
 	Reads []Read `json:"reads"`
+	// Requires are APIs the provider's evidence source must serve, in the
+	// declared shape and with the declared verbs, that its collection never
+	// reads: for example a report kind served alongside the one it reads.
+	// Discovery checks them, but no access is reviewed or granted for them,
+	// and Sources never grants a reader for one. Together with Reads they
+	// are the provider's capability prerequisites
+	// (capability.ForProvider).
+	Requires []Prerequisite `json:"requires,omitempty"`
 	// TestOnly marks a synthetic provider used only by tests. The production
 	// registry never contains one (internal/provider/installed).
 	TestOnly bool `json:"testOnly,omitempty"`
@@ -122,6 +130,21 @@ type Read struct {
 // ID is "<resource>.<group>/<version>", the read's identity.
 func (r Read) ID() string { return r.Resource + "." + r.Group + "/" + r.Version }
 
+// Prerequisite is an API a provider needs served in a given shape but never
+// reads. Verbs are the discovery verbs the resource must advertise; they
+// grant nothing.
+type Prerequisite struct {
+	Group      string   `json:"group"`
+	Version    string   `json:"version"`
+	Resource   string   `json:"resource"`
+	Kind       string   `json:"kind"`
+	Namespaced bool     `json:"namespaced"`
+	Verbs      []string `json:"verbs"`
+}
+
+// ID is "<resource>.<group>/<version>", the prerequisite's identity.
+func (p Prerequisite) ID() string { return p.Resource + "." + p.Group + "/" + p.Version }
+
 var (
 	namePattern     = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	contractPattern = regexp.MustCompile(`^([a-z0-9]+(?:-[a-z0-9]+)*)/v([0-9]+)$`)
@@ -176,18 +199,32 @@ func (d Descriptor) Validate() error {
 	if !slices.Contains(d.Capture.Read, d.Capture.Write) {
 		fail("capture.read %v must include capture.write %d: readers ship before writers", d.Capture.Read, d.Capture.Write)
 	}
-	reads := map[string]bool{}
+	apis := map[string]bool{}
 	for _, r := range d.Reads {
 		if r.Version == "" || r.Resource == "" || len(r.Verbs) == 0 || !readKindPattern.MatchString(r.Kind) {
 			fail("read %s/%s %s must name a version, a resource, its kind and verbs", r.Group, r.Version, r.Resource)
 		}
-		if reads[r.ID()] {
+		if apis[r.ID()] {
 			fail("read %s is declared twice", r.ID())
 		}
-		reads[r.ID()] = true
+		apis[r.ID()] = true
 		for _, v := range r.Verbs {
 			if !readVerbs[v] {
 				fail("read %s/%s %s: verb %q is not read-only (get, list, watch)", r.Group, r.Version, r.Resource, v)
+			}
+		}
+	}
+	for _, p := range d.Requires {
+		if p.Version == "" || p.Resource == "" || len(p.Verbs) == 0 || !readKindPattern.MatchString(p.Kind) {
+			fail("prerequisite %s/%s %s must name a version, a resource, its kind and verbs", p.Group, p.Version, p.Resource)
+		}
+		if apis[p.ID()] {
+			fail("prerequisite %s is declared twice or is also a read", p.ID())
+		}
+		apis[p.ID()] = true
+		for _, v := range p.Verbs {
+			if !readVerbs[v] {
+				fail("prerequisite %s/%s %s: verb %q is not read-only (get, list, watch)", p.Group, p.Version, p.Resource, v)
 			}
 		}
 	}

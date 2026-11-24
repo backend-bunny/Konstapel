@@ -77,24 +77,34 @@ func TestNewRejectsInconsistentRegistries(t *testing.T) {
 			d.TestOnly = true
 			return []provider.Descriptor{d}
 		}, "test-only"},
-		"bad name":            {"engine/v1", mutate(func(d *provider.Descriptor) { d.Name = "Engine_1" }), "lowercase DNS label"},
-		"version zero":        {"engine/v1", mutate(func(d *provider.Descriptor) { d.Version = 0 }), "version 0"},
-		"no evaluator":        {"engine/v1", mutate(func(d *provider.Descriptor) { d.EvaluatorVersion = 0 }), "evaluatorVersion"},
-		"no checks":           {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks = nil }), "no check kinds"},
-		"bad kind":            {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Kind = "EnginePolicy" }), "group/version/Kind"},
-		"no modes":            {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = nil }), "no modes"},
-		"unknown mode":        {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = []v1alpha1.EnforcementMode{"Warn"} }), "not Audit or Deny"},
-		"repeated mode":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = append(d.Checks[0].Modes, v1alpha1.ModeDeny) }), "declared twice"},
-		"reporting deny":      {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Delivery = false }), "reporting-only"},
-		"unknown params":      {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Parameters.Source = "Bundle" }), "parameters.source"},
-		"schema not used":     {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Parameters.Schema = reportSchema }), "only for source Descriptor"},
-		"capture unreadable":  {"engine/v1", mutate(func(d *provider.Descriptor) { d.Capture.Read = []int{1} }), "readers ship before writers"},
-		"capture zero":        {"engine/v1", mutate(func(d *provider.Descriptor) { d.Capture = provider.CaptureCompatibility{} }), "capture.write 0"},
-		"write verb":          {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = []string{"list", "create"} }), "not read-only"},
-		"read without verbs":  {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = nil }), "verbs"},
-		"read without kind":   {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "" }), "its kind"},
-		"read bad kind":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "engineReport" }), "its kind"},
-		"read twice":          {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads = append(d.Reads, d.Reads[0]) }), "declared twice"},
+		"bad name":           {"engine/v1", mutate(func(d *provider.Descriptor) { d.Name = "Engine_1" }), "lowercase DNS label"},
+		"version zero":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Version = 0 }), "version 0"},
+		"no evaluator":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.EvaluatorVersion = 0 }), "evaluatorVersion"},
+		"no checks":          {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks = nil }), "no check kinds"},
+		"bad kind":           {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Kind = "EnginePolicy" }), "group/version/Kind"},
+		"no modes":           {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = nil }), "no modes"},
+		"unknown mode":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = []v1alpha1.EnforcementMode{"Warn"} }), "not Audit or Deny"},
+		"repeated mode":      {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Modes = append(d.Checks[0].Modes, v1alpha1.ModeDeny) }), "declared twice"},
+		"reporting deny":     {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Delivery = false }), "reporting-only"},
+		"unknown params":     {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Parameters.Source = "Bundle" }), "parameters.source"},
+		"schema not used":    {"engine/v1", mutate(func(d *provider.Descriptor) { d.Checks[0].Parameters.Schema = reportSchema }), "only for source Descriptor"},
+		"capture unreadable": {"engine/v1", mutate(func(d *provider.Descriptor) { d.Capture.Read = []int{1} }), "readers ship before writers"},
+		"capture zero":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Capture = provider.CaptureCompatibility{} }), "capture.write 0"},
+		"write verb":         {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = []string{"list", "create"} }), "not read-only"},
+		"read without verbs": {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = nil }), "verbs"},
+		"read without kind":  {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "" }), "its kind"},
+		"read bad kind":      {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "engineReport" }), "its kind"},
+		"read twice":         {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads = append(d.Reads, d.Reads[0]) }), "declared twice"},
+		"prerequisite write verb": {"engine/v1", mutate(func(d *provider.Descriptor) {
+			d.Requires = []provider.Prerequisite{{Group: "reports.example.io", Version: "v1", Resource: "clusterreports", Kind: "ClusterReport", Verbs: []string{"get", "create"}}}
+		}), "not read-only"},
+		"prerequisite without kind": {"engine/v1", mutate(func(d *provider.Descriptor) {
+			d.Requires = []provider.Prerequisite{{Group: "reports.example.io", Version: "v1", Resource: "clusterreports", Verbs: []string{"get"}}}
+		}), "its kind"},
+		"prerequisite also a read": {"engine/v1", mutate(func(d *provider.Descriptor) {
+			r := d.Reads[0]
+			d.Requires = []provider.Prerequisite{{Group: r.Group, Version: r.Version, Resource: r.Resource, Kind: r.Kind, Namespaced: r.Namespaced, Verbs: r.Verbs}}
+		}), "is also a read"},
 		"schema not object":   {"engine/v1", reportingWith(`{"type":"string"}`), "must describe an object"},
 		"schema remote ref":   {"engine/v1", reportingWith(`{"type":"object","properties":{"a":{"$ref":"https://example.com/s.json"}}}`), "not allowed"},
 		"schema invalid json": {"engine/v1", reportingWith(`{"type":`), "parameters.schema"},
@@ -129,15 +139,19 @@ func reportingWith(schema string) func() []provider.Descriptor {
 
 func TestRegistryIsImmutable(t *testing.T) {
 	d := enforcing()
+	d.Requires = []provider.Prerequisite{{Group: "reports.example.io", Version: "v1", Resource: "clusterreports", Kind: "ClusterReport", Verbs: []string{"get"}}}
 	r, err := provider.New("engine/v1", d)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d.Checks[0].Modes[1] = v1alpha1.ModeAudit
+	d.Requires[0].Verbs[0] = "list"
 	got := r.Descriptors()
 	got[0].Checks[0].Modes[0] = "Changed"
 	got[0].Reads[0].Verbs[0] = "delete"
-	if l, _ := r.Lookup("engine/v1"); !slices.Equal(l.Checks[0].Modes, []v1alpha1.EnforcementMode{v1alpha1.ModeAudit, v1alpha1.ModeDeny}) || l.Reads[0].Verbs[0] != "get" {
+	got[0].Requires[0].Verbs[0] = "delete"
+	if l, _ := r.Lookup("engine/v1"); !slices.Equal(l.Checks[0].Modes, []v1alpha1.EnforcementMode{v1alpha1.ModeAudit, v1alpha1.ModeDeny}) || l.Reads[0].Verbs[0] != "get" ||
+		l.Requires[0].Verbs[0] != "get" {
 		t.Fatalf("registry changed through a caller's copy: %+v", l)
 	}
 }

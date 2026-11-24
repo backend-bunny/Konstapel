@@ -22,7 +22,7 @@ Do not treat its fixtures as live producer compatibility evidence.
 
 - [x] 2.1 Extract narrow inventory/collection adapters around existing Kyverno behavior, retaining host-owned scope and expected checks; verify missing reports, zero targets, replaced namespace/workload identities, shared evidence and unsupported subjects without changing existing attribution results.
   <!-- agent: tier=deep risk=high reason="Scope isolation and evidence attribution" -->
-- [ ] 2.2 Connect descriptor prerequisites to existing capability discovery and bounded watch activation; test absent/unsupported APIs, denied reads, recovery without restart and continued healthy-provider operation, with explicit nonapplicable enforcement for the test-only reporting shape.
+- [x] 2.2 Connect descriptor prerequisites to existing capability discovery and bounded watch activation; test absent/unsupported APIs, denied reads, recovery without restart and continued healthy-provider operation, with explicit nonapplicable enforcement for the test-only reporting shape.
   <!-- agent: tier=deep risk=medium reason="Manager lifecycle and independent provider availability" -->
 - [ ] 2.3 Enforce host deadlines, cancellation and collection resource limits across adapters; test oversized inputs, incomplete pagination/collection and leadership cancellation, and verify reporting adapters issue no scanner/report/workload writes using a recording API fixture.
   <!-- agent: tier=deep risk=high reason="Bounded external access and lifecycle cancellation" -->

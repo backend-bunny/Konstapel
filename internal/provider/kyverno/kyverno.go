@@ -48,6 +48,9 @@ func Descriptor() provider.Descriptor {
 		// namespace listing is host-owned; ValidatingPolicy writes belong to
 		// delivery (capability.Delivery), not to evidence collection.
 		Reads: []provider.Read{Reports()},
+		// ClusterPolicyReports are served alongside by the same reports
+		// API and required, never read.
+		Requires: []provider.Prerequisite{ClusterReports()},
 	}
 }
 
@@ -55,5 +58,14 @@ func Descriptor() provider.Descriptor {
 // wgpolicyk8s.io/v1alpha2 PolicyReports. ClusterPolicyReports are never read.
 func Reports() provider.Read {
 	return provider.Read{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports", Kind: "PolicyReport", Namespaced: true,
+		Verbs: []string{"get", "list", "watch"}}
+}
+
+// ClusterReports is the provider's only prerequisite that it does not read:
+// cluster-scoped wgpolicyk8s.io/v1alpha2 ClusterPolicyReports, served by the
+// same reports API. Discovery requires them; no access is reviewed and no
+// reader is granted.
+func ClusterReports() provider.Prerequisite {
+	return provider.Prerequisite{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "clusterpolicyreports", Kind: "ClusterPolicyReport",
 		Verbs: []string{"get", "list", "watch"}}
 }

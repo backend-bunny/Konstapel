@@ -11,8 +11,10 @@ descriptor and registry, the selection checks, and the conformance harness
 with its versioned fixtures. Task 2.1 is implemented too: the controller's
 Kyverno assessment path now reaches PolicyReports through a narrow
 collection adapter ([Inventory and collection](#inventory-and-collection)).
-Nothing in this guide changes how existing bindings, profiles, delivery,
-collection, evaluation or export behave:
+Task 2.2 derives each installed provider's availability, and its evidence
+watches, from its descriptor ([Availability](#availability)). Nothing in
+this guide changes how existing bindings, profiles, delivery, collection,
+evaluation or export behave:
 
 - The bundle compatibility check (`content.Compatibility`, allowlist
   `konstapel-kyverno/v1`) and the targeting resolver still make the
@@ -20,9 +22,9 @@ collection, evaluation or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Capability wiring of descriptor reads, collection deadlines and resource
-  limits, the provider-aware capture boundary, shared evaluation and the
-  full authoring recipe are later tasks of the change.
+- Collection deadlines and resource limits, the provider-aware capture
+  boundary, shared evaluation and the full authoring recipe are later
+  tasks of the change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -44,9 +46,9 @@ cannot:
   plugin manifest. A contract is `name/vN` and nothing else. A value such as
   `./konstapel-provider` is an `InvalidSelection`, never a path.
 - add a provider, a check kind, a mode or a parameter contract.
-- change a provider's declared reads, the controller's RBAC or its
-  capability requirements. These come from the descriptor in code, the Helm
-  chart and `internal/capability`.
+- change a provider's declared reads or prerequisites, the controller's
+  RBAC or its capability requirements. These come from the descriptor in
+  code, the Helm chart and `internal/capability`.
 
 The C2P plugin binary `konstapel-provider` and its manifest are build
 outputs (`scripts/build.sh`). They are not bundle content. The pinned C2P-Go v2
@@ -66,7 +68,8 @@ provider:
 | `checks[].modes` | Binding modes the kind accepts. `Deny` requires `delivery`. |
 | `checks[].parameters` | `Content`: the bundle declares a schema per check and delivery decides whether it renders parameters. `Descriptor`: a schema in the descriptor. `None`: no parameters. |
 | `capture` | Capture payload versions it `write`s and `read`s. `write` must be in `read`, so readers ship before writers. |
-| `reads[]` | External evidence-source operations its collection performs: the resource, its `kind` and whether it is `namespaced`, and read-only verbs (`get`, `list`, `watch`). A collection adapter can list only these ([readers](#narrow-readers)). |
+| `reads[]` | External evidence-source operations its collection performs: the resource, its `kind` and whether it is `namespaced`, and read-only verbs (`get`, `list`, `watch`). A collection adapter can list only these ([readers](#narrow-readers)). Each read is also an availability prerequisite: served in that shape, and allowed ([Availability](#availability)). |
+| `requires[]` | APIs the evidence source must serve, in the same shape and with read-only discovery verbs, that collection never reads. Discovery checks them. No access is reviewed and no reader is granted. |
 | `testOnly` | A synthetic provider. Never in the production registry, and never a registry default. |
 
 `provider.New` rejects these registries:
@@ -75,6 +78,8 @@ provider:
 - a provider name registered twice
 - a check kind claimed by two providers
 - a write verb in `reads`, a read without its kind, or a read declared twice
+- a prerequisite with a write verb or without its kind, or one declared
+  twice or also declared as a read
 - a reporting-only kind that accepts `Deny`
 - a descriptor schema that is not a self-contained object schema
 - an unreadable capture writer
@@ -107,6 +112,16 @@ against `kyverno.Descriptor()`:
       "namespaced": true,
       "verbs": ["get", "list", "watch"]
     }
+  ],
+  "requires": [
+    {
+      "group": "wgpolicyk8s.io",
+      "version": "v1alpha2",
+      "resource": "clusterpolicyreports",
+      "kind": "ClusterPolicyReport",
+      "namespaced": false,
+      "verbs": ["get", "list", "watch"]
+    }
   ]
 }
 ```
@@ -116,11 +131,14 @@ Notes on the Kyverno entry:
 - `capture.read` covers the prototype's single-policy capture (1) and the
   controller's CaptureV2 (2), exactly the versions `collector.CaptureVersion`
   accepts. The controller writes 2.
-- `reads` lists only the evidence source, matching the access, kind and
-  scope that `capability.Requirements[Assessment]` requires
-  (`TestKyvernoReadsMatchAssessmentCapability`). The host owns namespace and
+- `reads` lists only the evidence source. The host owns namespace and
   workload listing for the expected inventory. ValidatingPolicy writes
   belong to delivery (`capability.Delivery`), not to evidence collection.
+- `requires` names ClusterPolicyReports, which the same reports API serves
+  and the collector never reads.
+- Together they are the assessment capability:
+  `capability.Requirements[Assessment]` is derived from them
+  ([Availability](#availability)).
 - `reads` document and bound the provider's own access. They are not a
   sandbox: adapters are trusted in-tree code, and the controller service
   account's RBAC is shared and broader. Do not read a descriptor as
@@ -311,7 +329,7 @@ reads.
 | --- | --- | --- | --- |
 | Kyverno collection adapter (`kyverno.Collect`) | `list` `policyreports.wgpolicyk8s.io/v1alpha2` | one namespaced list per scope namespace | provider, through `provider.ClientSources` |
 | Report watch | `list`, `watch` `policyreports` | cluster-wide informer, enqueues bindings | host (`setupAssessments`), started once the assessment capability is available |
-| Assessment capability check | discovery of `wgpolicyk8s.io/v1alpha2`; SelfSubjectAccessReview of `get`, `list`, `watch` `policyreports` | all namespaces | host (`capability.Requirements[Assessment]`) |
+| Assessment capability check | discovery of `wgpolicyk8s.io/v1alpha2` (`policyreports`, `clusterpolicyreports`); SelfSubjectAccessReview of `get`, `list`, `watch` `policyreports` | all namespaces | host (`capability.Requirements[Assessment]`, derived from the descriptor's `reads` and `requires`) |
 | Expected inventory | `list` namespaces and `get` the binding's ComplianceProfile; `list` the binding's managed `validatingpolicies`; `list` pods, replicationcontrollers, deployments, daemonsets, statefulsets, replicasets, jobs and cronjobs | workloads in scope namespaces only | host (`snapshotContent`, `listWorkloads`) |
 | Engine delivery (not collection) | create, update, patch, delete `validatingpolicies` | cluster | delivery (`capability.Delivery`) |
 
@@ -328,10 +346,101 @@ another. Adapters are trusted in-tree code.
 
 Collection limits are not implemented yet. Collection runs on the reconcile
 context and the client's existing request handling. It has no deadline,
-object limit or byte limit of its own; those are task 2.3. Descriptor reads
-are not yet connected to capability discovery (task 2.2).
-`TestKyvernoReadsMatchAssessmentCapability` keeps the Kyverno read and the
-assessment capability in agreement until then.
+object limit or byte limit of its own; those are task 2.3.
+
+## Availability
+
+The host decides whether a provider can be used, from the provider's
+descriptor alone. `capability.ForProvider` turns the descriptor into
+capability requirements:
+
+- Each `reads[]` entry must be served in its declared group, version,
+  resource, kind and scope, and advertise its verbs. The controller service
+  account must be allowed those verbs in every namespace
+  (SelfSubjectAccessReview).
+- Each `requires[]` entry must be served in its shape and advertise its
+  verbs. No access is reviewed.
+- Reads are checked first, in declaration order, then prerequisites. The
+  first unmet requirement is the result.
+
+`capability.Providers` checks every installed provider through the one
+capability monitor, so the existing bounds apply: each discovery or review
+request is bounded at 10 seconds, and a result is reused for one poll
+interval. Each provider has its own result:
+
+| Provider | Evidence capability | Enforcement |
+| --- | --- | --- |
+| `konstapel-kyverno/v1` | `Assessment`, with its existing name, messages, Conditions, limitations and metrics label | `PolicyDelivery`, the delivery owner's capability |
+| any other provider (tests only) | `Assessment(<contract>)` | `NotApplicable` (reporting-only) |
+
+`capability.Requirements[Assessment]` is `ForProvider(kyverno.Descriptor())`,
+not a second list. `TestAssessmentIsTheKyvernoDescriptorsPrerequisites`
+pins it to the requirements that were hard-coded before.
+`TestKyvernoAvailabilityIsTheExistingCapabilities` checks that the Kyverno
+provider's evidence and enforcement checks give the same result, reason and
+message as the existing capabilities in every discovery and access state.
+`capability.NewProviders` refuses to start with a Kyverno descriptor whose
+prerequisites differ from the Assessment capability. It also refuses any
+other provider that delivers engine resources: only the Kyverno engine has
+a delivery capability.
+
+A result's reason says what is wrong. It is never a check outcome or an
+evidence-completeness state:
+
+| Reason | Meaning |
+| --- | --- |
+| `Available` | Every prerequisite is met. |
+| `APINotServed` | The group/version is not served. |
+| `ResourceMissing` | The group/version is served without the resource. |
+| `UnsupportedResource` | The resource has another kind or scope, or lacks a verb. |
+| `AccessDenied` | Discovery or a reviewed verb is forbidden to the service account. |
+| `DependencyUnavailable` | Discovery or the access review could not be completed. |
+| `NotApplicable` | Enforcement by a reporting-only provider. It is never `Available`. |
+
+Messages name the capability, for example
+`Assessment(konstapel-reporttest/v1): reporttest.konstapel.io/v1 is not served`,
+so a diagnostic is attributable to its provider.
+
+**Independence.** One provider's missing API, denied read or unreachable
+dependency never makes another provider unavailable. A reporting-only
+provider's checks never consult the delivery capability. Delivery never
+depends on any provider's evidence source.
+`TestProviderAvailabilityIsIndependent` covers each failure for each
+provider. `TestUnavailableProviderDoesNotDegradeKyverno` checks the
+controller path: the Kyverno assessment keeps delivering and assessing,
+with a complete pass, while the reporting source is absent or denied.
+
+**Recovery without restart.** Nothing is decided once. Every check is
+repeated after one poll interval, so a source that is installed, removed,
+denied or allowed again shows up in the next result
+(`TestProviderAvailabilityRecoversWithoutRestart`).
+
+**Watches.** Each read that declares `watch` gets one cluster-wide host
+watch (`providerWatches`). The watch starts once its own provider's
+evidence capability is available, and never because another provider's is.
+It starts at most once, without a restart, and after that the informer
+re-lists and re-watches by itself. For the production registry this is
+exactly the existing `assessment-policy-reports` PolicyReport watch
+(`TestProviderWatchesKeepTheKyvernoReportWatch`).
+`TestProviderWatchesStartIndependentlyAndRecover` covers absent and denied
+sources for both providers. A provider without a watchable read, such as
+the reporting provider, gets no informer. Its source is read only during
+collection. The capability trigger re-reconciles every binding when any
+provider's result changes (`TestCapabilityTriggerFollowsEachProvider`).
+
+**Enforcement.** A reporting-only provider reports enforcement as
+`NotApplicable`, never as ready or satisfied
+(`TestReportingOnlyEnforcementIsNotApplicable`). Its readiness never claims
+enforcement, and it renders no engine resources.
+
+Not yet connected:
+
+- No binding can select a provider other than Kyverno: the registry does
+  not gate the targeting resolver. Binding Conditions and status therefore
+  carry only the Kyverno results.
+- Metrics report only `PolicyDelivery` and `Assessment`
+  (`konstapel_capability_condition`). Another installed provider would need
+  its own metric label before it ships.
 
 ## Conformance
 
