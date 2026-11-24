@@ -57,7 +57,7 @@ func Descriptor() provider.Descriptor {
 			Modes:      []v1alpha1.EnforcementMode{v1alpha1.ModeAudit},
 			Parameters: provider.ParameterContract{Source: provider.ParametersFromDescriptor, Schema: ParameterSchema}}},
 		Capture:  provider.CaptureCompatibility{Write: PayloadVersion, Read: []int{PayloadVersion}},
-		Reads:    []provider.Read{{Group: "reporttest.konstapel.io", Version: "v1", Resource: "postures", Verbs: []string{"get", "list"}}},
+		Reads:    []provider.Read{Postures()},
 		TestOnly: true,
 	}
 }

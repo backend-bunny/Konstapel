@@ -47,6 +47,13 @@ func Descriptor() provider.Descriptor {
 		// The collector reads namespaced PolicyReports only. Workload and
 		// namespace listing is host-owned; ValidatingPolicy writes belong to
 		// delivery (capability.Delivery), not to evidence collection.
-		Reads: []provider.Read{{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports", Verbs: []string{"get", "list", "watch"}}},
+		Reads: []provider.Read{Reports()},
 	}
+}
+
+// Reports is the provider's only evidence-source read: namespaced
+// wgpolicyk8s.io/v1alpha2 PolicyReports. ClusterPolicyReports are never read.
+func Reports() provider.Read {
+	return provider.Read{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports", Kind: "PolicyReport", Namespaced: true,
+		Verbs: []string{"get", "list", "watch"}}
 }

@@ -107,17 +107,26 @@ type CaptureCompatibility struct {
 }
 
 // Read is one external API operation set a provider's collection uses.
+// Kind and Namespaced are the served resource shape: the host lists the
+// resource by kind, and a namespaced read is only ever made inside the
+// host-frozen scope's namespaces (see Sources).
 type Read struct {
-	Group    string   `json:"group"`
-	Version  string   `json:"version"`
-	Resource string   `json:"resource"`
-	Verbs    []string `json:"verbs"`
+	Group      string   `json:"group"`
+	Version    string   `json:"version"`
+	Resource   string   `json:"resource"`
+	Kind       string   `json:"kind"`
+	Namespaced bool     `json:"namespaced"`
+	Verbs      []string `json:"verbs"`
 }
+
+// ID is "<resource>.<group>/<version>", the read's identity.
+func (r Read) ID() string { return r.Resource + "." + r.Group + "/" + r.Version }
 
 var (
 	namePattern     = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	contractPattern = regexp.MustCompile(`^([a-z0-9]+(?:-[a-z0-9]+)*)/v([0-9]+)$`)
 	kindPattern     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/v[0-9][a-z0-9]*/[A-Z][A-Za-z0-9]*$`)
+	readKindPattern = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 	readVerbs       = map[string]bool{"get": true, "list": true, "watch": true}
 )
 
@@ -167,10 +176,15 @@ func (d Descriptor) Validate() error {
 	if !slices.Contains(d.Capture.Read, d.Capture.Write) {
 		fail("capture.read %v must include capture.write %d: readers ship before writers", d.Capture.Read, d.Capture.Write)
 	}
+	reads := map[string]bool{}
 	for _, r := range d.Reads {
-		if r.Version == "" || r.Resource == "" || len(r.Verbs) == 0 {
-			fail("read %s/%s %s must name a version, a resource and verbs", r.Group, r.Version, r.Resource)
+		if r.Version == "" || r.Resource == "" || len(r.Verbs) == 0 || !readKindPattern.MatchString(r.Kind) {
+			fail("read %s/%s %s must name a version, a resource, its kind and verbs", r.Group, r.Version, r.Resource)
 		}
+		if reads[r.ID()] {
+			fail("read %s is declared twice", r.ID())
+		}
+		reads[r.ID()] = true
 		for _, v := range r.Verbs {
 			if !readVerbs[v] {
 				fail("read %s/%s %s: verb %q is not read-only (get, list, watch)", r.Group, r.Version, r.Resource, v)

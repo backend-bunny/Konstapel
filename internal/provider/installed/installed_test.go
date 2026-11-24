@@ -77,7 +77,7 @@ func TestKyvernoReadsMatchAssessmentCapability(t *testing.T) {
 	var want []provider.Read
 	for _, res := range capability.Requirements[capability.Assessment] {
 		if len(res.Access) > 0 {
-			want = append(want, provider.Read{Group: res.Group, Version: res.Version, Resource: res.Resource, Verbs: res.Access})
+			want = append(want, provider.Read{Group: res.Group, Version: res.Version, Resource: res.Resource, Kind: res.Kind, Namespaced: res.Namespaced, Verbs: res.Access})
 		}
 	}
 	got := kyverno.Descriptor().Reads
@@ -85,7 +85,8 @@ func TestKyvernoReadsMatchAssessmentCapability(t *testing.T) {
 		t.Fatalf("reads %+v, capability access %+v", got, want)
 	}
 	for i := range got {
-		if got[i].Group != want[i].Group || got[i].Version != want[i].Version || got[i].Resource != want[i].Resource || !slices.Equal(got[i].Verbs, want[i].Verbs) {
+		if got[i].Group != want[i].Group || got[i].Version != want[i].Version || got[i].Resource != want[i].Resource ||
+			got[i].Kind != want[i].Kind || got[i].Namespaced != want[i].Namespaced || !slices.Equal(got[i].Verbs, want[i].Verbs) {
 			t.Errorf("read %+v, capability access %+v", got[i], want[i])
 		}
 	}

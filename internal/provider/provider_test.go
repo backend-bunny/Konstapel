@@ -25,7 +25,7 @@ func enforcing() provider.Descriptor {
 		Checks: []provider.CheckKind{{Kind: enforceKind, Delivery: true,
 			Modes: []v1alpha1.EnforcementMode{v1alpha1.ModeAudit, v1alpha1.ModeDeny}, Parameters: provider.ParameterContract{Source: provider.ParametersFromContent}}},
 		Capture: provider.CaptureCompatibility{Write: 2, Read: []int{1, 2}},
-		Reads:   []provider.Read{{Group: "reports.example.io", Version: "v1", Resource: "enginereports", Verbs: []string{"get", "list", "watch"}}}}
+		Reads:   []provider.Read{{Group: "reports.example.io", Version: "v1", Resource: "enginereports", Kind: "EngineReport", Namespaced: true, Verbs: []string{"get", "list", "watch"}}}}
 }
 
 func reporting() provider.Descriptor {
@@ -33,7 +33,7 @@ func reporting() provider.Descriptor {
 		Checks: []provider.CheckKind{{Kind: reportKind, Modes: []v1alpha1.EnforcementMode{v1alpha1.ModeAudit},
 			Parameters: provider.ParameterContract{Source: provider.ParametersFromDescriptor, Schema: reportSchema}}},
 		Capture: provider.CaptureCompatibility{Write: 1, Read: []int{1}},
-		Reads:   []provider.Read{{Group: "reports.example.io", Version: "v1", Resource: "posturereports", Verbs: []string{"list"}}}}
+		Reads:   []provider.Read{{Group: "reports.example.io", Version: "v1", Resource: "posturereports", Kind: "PostureReport", Verbs: []string{"list"}}}}
 }
 
 func registry(t *testing.T) *provider.Registry {
@@ -92,6 +92,9 @@ func TestNewRejectsInconsistentRegistries(t *testing.T) {
 		"capture zero":        {"engine/v1", mutate(func(d *provider.Descriptor) { d.Capture = provider.CaptureCompatibility{} }), "capture.write 0"},
 		"write verb":          {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = []string{"list", "create"} }), "not read-only"},
 		"read without verbs":  {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Verbs = nil }), "verbs"},
+		"read without kind":   {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "" }), "its kind"},
+		"read bad kind":       {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads[0].Kind = "engineReport" }), "its kind"},
+		"read twice":          {"engine/v1", mutate(func(d *provider.Descriptor) { d.Reads = append(d.Reads, d.Reads[0]) }), "declared twice"},
 		"schema not object":   {"engine/v1", reportingWith(`{"type":"string"}`), "must describe an object"},
 		"schema remote ref":   {"engine/v1", reportingWith(`{"type":"object","properties":{"a":{"$ref":"https://example.com/s.json"}}}`), "not allowed"},
 		"schema invalid json": {"engine/v1", reportingWith(`{"type":`), "parameters.schema"},

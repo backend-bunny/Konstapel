@@ -8,8 +8,11 @@ the provider contract from
 
 **Status.** Group 1 of that change is implemented: the installed-provider
 descriptor and registry, the selection checks, and the conformance harness
-with its versioned fixtures. Nothing in this guide changes how existing
-bindings, profiles, delivery, collection, evaluation or export behave:
+with its versioned fixtures. Task 2.1 is implemented too: the controller's
+Kyverno assessment path now reaches PolicyReports through a narrow
+collection adapter ([Inventory and collection](#inventory-and-collection)).
+Nothing in this guide changes how existing bindings, profiles, delivery,
+collection, evaluation or export behave:
 
 - The bundle compatibility check (`content.Compatibility`, allowlist
   `konstapel-kyverno/v1`) and the targeting resolver still make the
@@ -17,9 +20,9 @@ bindings, profiles, delivery, collection, evaluation or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Collection adapters, capability wiring, the provider-aware capture
-  boundary, shared evaluation and the full authoring recipe are later groups
-  of the change.
+- Capability wiring of descriptor reads, collection deadlines and resource
+  limits, the provider-aware capture boundary, shared evaluation and the
+  full authoring recipe are later tasks of the change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -63,7 +66,7 @@ provider:
 | `checks[].modes` | Binding modes the kind accepts. `Deny` requires `delivery`. |
 | `checks[].parameters` | `Content`: the bundle declares a schema per check and delivery decides whether it renders parameters. `Descriptor`: a schema in the descriptor. `None`: no parameters. |
 | `capture` | Capture payload versions it `write`s and `read`s. `write` must be in `read`, so readers ship before writers. |
-| `reads[]` | External evidence-source operations its collection performs. These are read-only (`get`, `list`, `watch`). |
+| `reads[]` | External evidence-source operations its collection performs: the resource, its `kind` and whether it is `namespaced`, and read-only verbs (`get`, `list`, `watch`). A collection adapter can list only these ([readers](#narrow-readers)). |
 | `testOnly` | A synthetic provider. Never in the production registry, and never a registry default. |
 
 `provider.New` rejects these registries:
@@ -71,7 +74,7 @@ provider:
 - an invalid descriptor
 - a provider name registered twice
 - a check kind claimed by two providers
-- a write verb in `reads`
+- a write verb in `reads`, a read without its kind, or a read declared twice
 - a reporting-only kind that accepts `Deny`
 - a descriptor schema that is not a self-contained object schema
 - an unreadable capture writer
@@ -100,6 +103,8 @@ against `kyverno.Descriptor()`:
       "group": "wgpolicyk8s.io",
       "version": "v1alpha2",
       "resource": "policyreports",
+      "kind": "PolicyReport",
+      "namespaced": true,
       "verbs": ["get", "list", "watch"]
     }
   ]
@@ -111,8 +116,9 @@ Notes on the Kyverno entry:
 - `capture.read` covers the prototype's single-policy capture (1) and the
   controller's CaptureV2 (2), exactly the versions `collector.CaptureVersion`
   accepts. The controller writes 2.
-- `reads` lists only the evidence source, matching the access that
-  `capability.Requirements[Assessment]` requires. The host owns namespace and
+- `reads` lists only the evidence source, matching the access, kind and
+  scope that `capability.Requirements[Assessment]` requires
+  (`TestKyvernoReadsMatchAssessmentCapability`). The host owns namespace and
   workload listing for the expected inventory. ValidatingPolicy writes
   belong to delivery (`capability.Delivery`), not to evidence collection.
 - `reads` document and bound the provider's own access. They are not a
@@ -199,6 +205,133 @@ A selection that names a provider this build does not contain:
 
 `Registry.CheckCapture(contract, version)` answers whether a retained capture
 can be read. It never falls back to another provider or version.
+
+## Inventory and collection
+
+The host owns scope. A provider derives expected observations from what
+the host froze, and reads its own evidence source inside that scope. It
+never decides which namespaces, workloads or checks are expected. For a
+Kyverno snapshot (`AssessmentReconciler.snapshotContent`, used by current
+status and by every run poll), the steps are:
+
+1. Targeting resolves the binding's subjects. The host reads the binding's
+   delivered engine policies, verifies them against their content, and adds
+   still-applied revisions. An undelivered or drifted policy is stale
+   scope, not a subject.
+2. `collectionScope` takes the subjects' namespace instances, in name
+   order, and the resources they match. This is the `provider.Scope`.
+3. `listWorkloads` lists each collected resource in each scope namespace.
+   This is a host read, not a provider read. A resource the controller does
+   not collect becomes the limitation `resource … is not collected`. Its
+   subject is unsupported and gets no expected observation.
+4. If the assessment capability is available, `kyverno.Collect` lists
+   PolicyReports through the narrow readers described below.
+5. `kyverno.Inventory` derives the expected inventory from the host input
+   alone (`collector.FreezeScope`, unchanged). Reports are attached
+   afterwards and are evaluated unchanged by `collector.CaptureV2.Evaluate`.
+
+What `kyverno.Collect` does:
+
+- It makes one namespaced list per scope namespace, in scope order. It
+  returns the reports unevaluated and unfiltered. The evaluator attributes
+  results by workload UID, engine policy and validation index. A report about
+  another workload, a replaced workload or an unsupported resource
+  establishes nothing.
+- A shared result that names several workloads credits each of them once.
+- A failed list ends collection with the limitation
+  `policy reports unavailable: <error>`. Reports from earlier namespaces are
+  kept. Namespaces that were not read have missing evidence, never a pass.
+- An empty scope (no targets) reads nothing. ClusterPolicyReports are never
+  read. Collection never triggers the engine and never writes.
+
+The test-only reporting adapter (`reporttest.Collect`) is deliberately
+different:
+
+- Its source is cluster-scoped and shared across namespaces, so it lists
+  the source once.
+- It keeps only the reports for an image digest that some frozen subject
+  runs. Other images' reports are never retained.
+- An object with another layout becomes a limitation and is not used as
+  evidence. It is never empty evidence.
+- A tag-only image needs no report: that subject is unresolved.
+- A subject outside the scope is an error before any read.
+
+Behavior equivalence is pinned at three levels:
+
+- `TestCollectionMatchesTheDirectPath` compares the adapter output with the
+  pre-adapter listing path over shared, unsupported, replaced and
+  out-of-scope fixtures: same capture, limitations and evaluation.
+- Controller tests written against the pre-adapter code still pass,
+  among them `TestSnapshotReadsReportsOnlyInScopeNamespacesAndWritesNothing`,
+  `TestReportListFailureIsALimitationAndKeepsEarlierNamespaces` and
+  `TestRunKeepsReplacedWorkloadUnresolved`.
+- The Kyverno conformance goldens are unchanged.
+
+### Narrow readers
+
+`provider.Sources` gives an adapter one `provider.SourceReader` per
+declared read. The host implementation, `provider.ClientSources(client,
+descriptor, scope)`, enforces these rules:
+
+- It grants only a read that the descriptor declares, with the same kind and
+  scope and the `list` verb. Any other read is refused before any request is
+  made (`TestSourcesGrantOnlyDeclaredListReads`).
+- A namespaced reader lists only scope namespace names, one namespaced list
+  each. It never lists cluster-wide (`TestNamespacedReaderStaysInScope`).
+- A cluster-scoped reader lists once, without a namespace, and only for a
+  non-empty scope. The adapter must keep only what its inventory can
+  attribute (`TestClusterScopedReaderNeedsAScope`).
+- A refused read returns `provider.ErrOutOfScope` without making a request.
+- A reader calls only `List` on a `client.Reader`, so it cannot write even
+  when the underlying client can.
+
+`conformance.RecordingClient` is the recording API fixture. Give it to
+collection code as a fully capable client, then check the requests it saw.
+For a scope of namespaces `a` and `b`, the Kyverno adapter makes exactly
+these requests (`TestDocumentedExamples` runs it):
+
+<!-- verified: kyverno-collection-requests -->
+```json
+[
+  {"verb": "list", "kind": "PolicyReportList", "namespace": "a"},
+  {"verb": "list", "kind": "PolicyReportList", "namespace": "b"}
+]
+```
+
+### Permissions
+
+The reads above are what a collection adapter can reach through its Go
+interface. They are not the controller's permissions. Every feature of the
+controller shares one service account. Its ClusterRole
+`konstapel-controller` (`config/rbac/controller/role.yaml`, rendered by the
+chart as `generated-controller-role.yaml`) is broader than any provider's
+reads.
+
+| Reader | Operations | Scope | Owner |
+| --- | --- | --- | --- |
+| Kyverno collection adapter (`kyverno.Collect`) | `list` `policyreports.wgpolicyk8s.io/v1alpha2` | one namespaced list per scope namespace | provider, through `provider.ClientSources` |
+| Report watch | `list`, `watch` `policyreports` | cluster-wide informer, enqueues bindings | host (`setupAssessments`), started once the assessment capability is available |
+| Assessment capability check | discovery of `wgpolicyk8s.io/v1alpha2`; SelfSubjectAccessReview of `get`, `list`, `watch` `policyreports` | all namespaces | host (`capability.Requirements[Assessment]`) |
+| Expected inventory | `list` namespaces and `get` the binding's ComplianceProfile; `list` the binding's managed `validatingpolicies`; `list` pods, replicationcontrollers, deployments, daemonsets, statefulsets, replicasets, jobs and cronjobs | workloads in scope namespaces only | host (`snapshotContent`, `listWorkloads`) |
+| Engine delivery (not collection) | create, update, patch, delete `validatingpolicies` | cluster | delivery (`capability.Delivery`) |
+
+The controller service account's effective RBAC includes all of these rows
+and every other feature's permissions:
+
+- `get`, `list` and `watch` on policyreports in every namespace
+- read access to workloads
+- writes to ValidatingPolicies and to Konstapel's own resources
+
+A narrow reader limits what an adapter can reach by accident. It does not
+reduce the service account's RBAC, and it does not isolate one provider from
+another. Adapters are trusted in-tree code.
+
+Collection limits are not implemented yet. Collection runs on the reconcile
+context and the client's existing request handling. It has no deadline,
+object limit or byte limit of its own; those are task 2.3. Descriptor reads
+are not yet connected to capability discovery (task 2.2).
+`TestKyvernoReadsMatchAssessmentCapability` keeps the Kyverno read and the
+assessment capability in agreement until then.
 
 ## Conformance
 
@@ -301,8 +434,9 @@ These are versioned contracts:
 - the capture versions recorded in packages
 - the conformance case format `konstapel.provider-conformance/v1`
 
-The Go types (`provider.Descriptor`, `Registry`, `Selection`,
-`conformance.Adapter`) are internal to this repository. They are not a stable
+The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
+`Sources`, `SourceReader`, `conformance.Adapter`, `RecordingClient`, and the
+provider adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change.
 
 ## What this contract does not establish

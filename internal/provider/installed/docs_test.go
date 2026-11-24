@@ -1,6 +1,7 @@
 package installed_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,9 +12,15 @@ import (
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/provider"
+	"github.com/backend-bunny/Konstapel/internal/provider/conformance"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
 	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 )
@@ -21,8 +28,8 @@ import (
 var verifiedBlock = regexp.MustCompile("(?s)<!-- verified: ([a-z-]+) -->\n```json\n(.*?)\n```")
 
 // documentedExamples computes every example docs/assessment-providers.md
-// shows, from the installed registry.
-func documentedExamples() map[string]any {
+// shows, from the installed registry and the Kyverno collection adapter.
+func documentedExamples(t *testing.T) map[string]any {
 	r := installed.Registry()
 	_, rejected := r.Select(provider.Selection{Provider: "konstapel-kyverno/v1", Mode: v1alpha1.ModeDeny, Checks: []provider.CheckSelection{
 		{Name: "disallow-privileged-containers", Kind: kyverno.CheckKind, Parameters: &apiextensionsv1.JSON{Raw: []byte(`{"allowPrivileged":true}`)}},
@@ -31,11 +38,37 @@ func documentedExamples() map[string]any {
 	_, unknown := r.Select(provider.Selection{Provider: "example-scanner/v1", Mode: v1alpha1.ModeAudit, Checks: []provider.CheckSelection{
 		{Name: "disallow-privileged-containers", Kind: kyverno.CheckKind}}})
 	return map[string]any{
-		"kyverno-descriptor":  kyverno.Descriptor(),
-		"installed-contracts": r.Contracts(),
-		"rejected-selection":  rejected,
-		"unknown-provider":    unknown,
+		"kyverno-descriptor":          kyverno.Descriptor(),
+		"installed-contracts":         r.Contracts(),
+		"rejected-selection":          rejected,
+		"unknown-provider":            unknown,
+		"kyverno-collection-requests": collectionRequests(t),
 	}
+}
+
+// collectionRequests are the API requests the Kyverno collection adapter
+// makes for a scope of two namespaces, seen by the recording fixture over a
+// cluster that also has reports outside the scope.
+func collectionRequests(t *testing.T) []conformance.Call {
+	t.Helper()
+	gvk := schema.GroupVersionKind{Group: "wgpolicyk8s.io", Version: "v1alpha2", Kind: "PolicyReport"}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(gvk, meta.RESTScopeNamespace)
+	var objs []client.Object
+	for _, ns := range []string{"a", "b", "c"} {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
+		u.SetNamespace(ns)
+		u.SetName("r")
+		objs = append(objs, u)
+	}
+	rec := conformance.NewRecordingClient(fake.NewClientBuilder().WithRESTMapper(mapper).WithObjects(objs...).Build())
+	scope := provider.Scope{Cluster: "c", Namespaces: []provider.Namespace{{Name: "a", UID: "uid-a"}, {Name: "b", UID: "uid-b"}}}
+	reports, limits, err := kyverno.Collect(context.Background(), scope, provider.ClientSources(rec, kyverno.Descriptor(), scope))
+	if err != nil || len(reports) != 2 || len(limits) != 0 {
+		t.Fatalf("collection: %d reports, %v, %v", len(reports), limits, err)
+	}
+	return rec.Calls()
 }
 
 func TestDocumentedExamples(t *testing.T) {
@@ -43,7 +76,7 @@ func TestDocumentedExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := documentedExamples()
+	want := documentedExamples(t)
 	seen := map[string]bool{}
 	for _, m := range verifiedBlock.FindAllSubmatch(doc, -1) {
 		name := string(m[1])
@@ -86,7 +119,9 @@ func TestDocumentedTestsExist(t *testing.T) {
 	var sources strings.Builder
 	files, _ := filepath.Glob(filepath.Join(root, "internal/provider/*/*_test.go"))
 	more, _ := filepath.Glob(filepath.Join(root, "internal/provider/*_test.go"))
-	for _, f := range slices.Concat(files, more) {
+	// The collection characterization lives with the controller.
+	host, _ := filepath.Glob(filepath.Join(root, "internal/controller/*_test.go"))
+	for _, f := range slices.Concat(files, more, host) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)

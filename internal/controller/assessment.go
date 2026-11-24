@@ -51,13 +51,16 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/capability"
 	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/provider"
+	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
 // AssessmentFieldManager owns status.assessment on ComplianceBindings.
 const AssessmentFieldManager = "konstapel-assessments"
 
-// PolicyReportGVK is the report layout the collector reads.
+// PolicyReportGVK is the report layout the collector reads: the Kyverno
+// provider's declared read (kyverno.Reports), which the report watch uses.
 var PolicyReportGVK = schema.GroupVersionKind{Group: "wgpolicyk8s.io", Version: "v1alpha2", Kind: "PolicyReport"}
 
 // workloadKinds maps the collected "group/version/resource" strings to the
@@ -379,44 +382,15 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 			Reason: targeting.Reason(unusable[p]), Message: msg})
 	}
 
-	// List the workloads the subjects can match, in their namespaces only.
-	namespaces, resources := map[string]string{}, map[string]bool{}
-	for _, s := range subjects {
-		namespaces[s.Namespace] = string(s.NamespaceUID)
-		for _, res := range s.Resources {
-			resources[res] = true
-		}
+	// The host owns the collection scope: the namespace instances of the
+	// subjects, and the workloads they can match, listed in those
+	// namespaces only.
+	scope, resources := collectionScope(r.Cluster, subjects)
+	listed, unlisted, err := r.listWorkloads(ctx, scope, resources)
+	if err != nil {
+		return collector.CaptureV2{}, nil, 0, nil, false, err
 	}
-	var listed []collector.ListedObject
-	for _, res := range sortedKeys(resources) {
-		mk, ok := workloadKinds[res]
-		if !ok {
-			if !strings.HasSuffix(res, "/ephemeralcontainers") {
-				limits = append(limits, "resource "+res+" is not collected")
-			}
-			continue
-		}
-		for _, ns := range sortedKeys(namespaces) {
-			_, list := mk()
-			if err := r.Client.List(ctx, list, client.InNamespace(ns)); err != nil {
-				return collector.CaptureV2{}, nil, 0, nil, false, err
-			}
-			items, err := meta.ExtractList(list)
-			if err != nil {
-				return collector.CaptureV2{}, nil, 0, nil, false, err
-			}
-			for _, it := range items {
-				o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(it)
-				if err != nil {
-					return collector.CaptureV2{}, nil, 0, nil, false, err
-				}
-				if ts := assessment.Str(assessment.At(o, "metadata", "deletionTimestamp")); ts != "" {
-					continue
-				}
-				listed = append(listed, collector.ListedObject{Resource: res, NamespaceUID: namespaces[ns], Object: o})
-			}
-		}
-	}
+	limits = append(limits, unlisted...)
 	reportsUp := engineUp
 	if engineUp && r.Reports != nil {
 		if ok, err := r.Reports(ctx); !ok {
@@ -427,17 +401,18 @@ func (r *AssessmentReconciler) snapshotContent(ctx context.Context, b *v1alpha1.
 		}
 	}
 	if reportsUp {
-		for _, ns := range sortedKeys(namespaces) {
-			rs, err := r.listUnstructured(ctx, PolicyReportGVK, ns)
-			if err != nil {
-				limits = append(limits, "policy reports unavailable: "+err.Error())
-				break
-			}
-			reports = append(reports, rs...)
+		// The Kyverno collection adapter reads only its declared report
+		// read, inside the scope.
+		collected, collectLimits, err := kyverno.Collect(ctx, scope, provider.ClientSources(r.Client, kyverno.Descriptor(), scope))
+		if err != nil {
+			return collector.CaptureV2{}, nil, 0, nil, false, err
 		}
+		reports = collected
+		limits = append(limits, collectLimits...)
 	}
 
-	capture, err := collector.FreezeScope(r.Cluster, now, mappingDigest(subjects), subjects, stale, rendered, listed)
+	capture, err := kyverno.Inventory(kyverno.InventoryInput{Cluster: r.Cluster, Started: now, MappingSHA256: mappingDigest(subjects),
+		Subjects: subjects, Stale: stale, EnginePolicies: rendered, Workloads: listed})
 	if err != nil {
 		return collector.CaptureV2{}, nil, 0, nil, false, err
 	}
@@ -499,6 +474,64 @@ func (r *AssessmentReconciler) appliedSubjects(ctx context.Context, rendered []a
 		used = append(used, c)
 	}
 	return subjects, used, limits, nil
+}
+
+// collectionScope is the host-frozen collection scope of subjects: their
+// namespace instances in name order (a name maps to the UID of its last
+// subject) and the resources they match.
+func collectionScope(cluster string, subjects []targeting.EvidenceSubject) (provider.Scope, []string) {
+	namespaces, resources := map[string]string{}, map[string]bool{}
+	for _, s := range subjects {
+		namespaces[s.Namespace] = string(s.NamespaceUID)
+		for _, res := range s.Resources {
+			resources[res] = true
+		}
+	}
+	scope := provider.Scope{Cluster: cluster, Namespaces: []provider.Namespace{}}
+	for _, ns := range sortedKeys(namespaces) {
+		scope.Namespaces = append(scope.Namespaces, provider.Namespace{Name: ns, UID: namespaces[ns]})
+	}
+	return scope, sortedKeys(resources)
+}
+
+// listWorkloads lists, for the expected inventory, the workloads of every
+// collected resource in every scope namespace. Workload listing is the
+// host's, not a provider read. A resource the controller does not collect
+// is a limitation (an unsupported subject has no expected observations);
+// ephemeral containers are assessed on their pod.
+func (r *AssessmentReconciler) listWorkloads(ctx context.Context, scope provider.Scope, resources []string) ([]collector.ListedObject, []string, error) {
+	var listed []collector.ListedObject
+	var limits []string
+	for _, res := range resources {
+		mk, ok := workloadKinds[res]
+		if !ok {
+			if !strings.HasSuffix(res, "/ephemeralcontainers") {
+				limits = append(limits, "resource "+res+" is not collected")
+			}
+			continue
+		}
+		for _, ns := range scope.Namespaces {
+			_, list := mk()
+			if err := r.Client.List(ctx, list, client.InNamespace(ns.Name)); err != nil {
+				return nil, nil, err
+			}
+			items, err := meta.ExtractList(list)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, it := range items {
+				o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(it)
+				if err != nil {
+					return nil, nil, err
+				}
+				if ts := assessment.Str(assessment.At(o, "metadata", "deletionTimestamp")); ts != "" {
+					continue
+				}
+				listed = append(listed, collector.ListedObject{Resource: res, NamespaceUID: ns.UID, Object: o})
+			}
+		}
+	}
+	return listed, limits, nil
 }
 
 // evaluate builds the current-evidence status for b at time now.
