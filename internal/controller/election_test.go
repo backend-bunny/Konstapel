@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"k8s.io/client-go/rest"
+
+	"github.com/backend-bunny/Konstapel/internal/provider"
 )
 
 func TestElectionTimings(t *testing.T) {
@@ -63,5 +65,13 @@ func TestBackgroundWorkersNeedLeadership(t *testing.T) {
 		if !r.NeedLeaderElection() {
 			t.Errorf("%s runs on followers", name)
 		}
+	}
+}
+
+// Configured collection limits are checked before startup, never clamped.
+func TestCollectionLimitsValidated(t *testing.T) {
+	_, err := NewManager(&rest.Config{Host: "https://127.0.0.1:1"}, Options{CollectionLimits: provider.Limits{PageSize: 500, MaxPages: 20_000, MaxObjects: 100, MaxBytes: 1 << 30}})
+	if err == nil || !strings.Contains(err.Error(), "collection limits: --collection-page-size 500 must not exceed --collection-max-objects 100") {
+		t.Fatalf("invalid collection limits accepted: %v", err)
 	}
 }

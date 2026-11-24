@@ -96,6 +96,78 @@ func (l Limits) Validate() error {
 	return nil
 }
 
+// Ranges of the configurable collection limits (the controller's
+// --collection-* flags and the chart's controller.collection values). A
+// ceiling keeps a configured collection bounded; a floor keeps it able to
+// read at least one page.
+const (
+	// MaxPageSize bounds one list response. At the 2.4 to 2.9 KiB of the
+	// saved Kyverno 1.19.2 reports a full page is about 30 MiB of JSON.
+	MaxPageSize int64 = 10_000
+	// MaxConfiguredPages is 50 times DefaultMaxPages.
+	MaxConfiguredPages = 1_000_000
+	// MaxConfiguredObjects is 100 times DefaultMaxObjects.
+	MaxConfiguredObjects = 10_000_000
+	// MaxConfiguredBytes is 128 times DefaultMaxBytes.
+	MaxConfiguredBytes int64 = 64 << 30
+	// MinObjectBytes is the size per object that a byte budget must allow
+	// for one full page, above the saved Kyverno reports' 2.4 to 2.9 KiB.
+	MinObjectBytes int64 = 4 << 10
+	// MinMaxBytes is etcd's default request size limit (1.5 MiB), about the
+	// largest object an API server stores by default. A smaller budget
+	// could refuse a single legitimate object.
+	MinMaxBytes int64 = 3 << 19
+)
+
+// ValidateConfiguration checks host-configured collection limits at
+// startup. Every field but Timeout must be within its range. A value out of
+// range is refused, never clamped:
+//
+//   - PageSize is 1 to MaxPageSize, and at most MaxObjects;
+//   - MaxObjects is 1 to MaxConfiguredObjects;
+//   - MaxPages is at most MaxConfiguredPages, and at least the pages that
+//     MaxObjects objects take at PageSize, so the object limit is reachable;
+//   - MaxBytes is at most MaxConfiguredBytes, and at least MinMaxBytes and
+//     one full page of MinObjectBytes objects.
+//
+// Timeout must be zero: the deadline is each binding's collection timeout,
+// not host configuration.
+func (l Limits) ValidateConfiguration() error {
+	var errs []error
+	if l.Timeout != 0 {
+		errs = append(errs, fmt.Errorf("the collection deadline is each binding's spec.assessment.collectionTimeout, not host configuration (got %s)", l.Timeout))
+	}
+	objectsOK := l.MaxObjects >= 1 && l.MaxObjects <= MaxConfiguredObjects
+	if !objectsOK {
+		errs = append(errs, fmt.Errorf("--collection-max-objects %d must be between 1 and %d", l.MaxObjects, MaxConfiguredObjects))
+	}
+	pageOK := l.PageSize >= 1 && l.PageSize <= MaxPageSize
+	switch {
+	case !pageOK:
+		errs = append(errs, fmt.Errorf("--collection-page-size %d must be between 1 and %d", l.PageSize, MaxPageSize))
+	case objectsOK && l.PageSize > int64(l.MaxObjects):
+		errs = append(errs, fmt.Errorf("--collection-page-size %d must not exceed --collection-max-objects %d: one page could pass the object limit", l.PageSize, l.MaxObjects))
+	}
+	switch {
+	case l.MaxPages < 1 || l.MaxPages > MaxConfiguredPages:
+		errs = append(errs, fmt.Errorf("--collection-max-requests %d must be between 1 and %d", l.MaxPages, MaxConfiguredPages))
+	case pageOK && objectsOK:
+		if need := (int64(l.MaxObjects) + l.PageSize - 1) / l.PageSize; int64(l.MaxPages) < need {
+			errs = append(errs, fmt.Errorf("--collection-max-requests %d is fewer than the %d list requests that --collection-max-objects %d takes at --collection-page-size %d: raise it, or the page size",
+				l.MaxPages, need, l.MaxObjects, l.PageSize))
+		}
+	}
+	switch {
+	case l.MaxBytes > MaxConfiguredBytes:
+		errs = append(errs, fmt.Errorf("--collection-max-bytes %d must be at most %d", l.MaxBytes, MaxConfiguredBytes))
+	case l.MaxBytes < MinMaxBytes:
+		errs = append(errs, fmt.Errorf("--collection-max-bytes %d must be at least %d (1.5 MiB, one maximal object)", l.MaxBytes, MinMaxBytes))
+	case pageOK && l.MaxBytes < l.PageSize*MinObjectBytes:
+		errs = append(errs, fmt.Errorf("--collection-max-bytes %d must be at least %d: one page of %d objects of %d bytes", l.MaxBytes, l.PageSize*MinObjectBytes, l.PageSize, MinObjectBytes))
+	}
+	return errors.Join(errs...)
+}
+
 // StopCode classifies why a bound stopped a collection.
 type StopCode string
 

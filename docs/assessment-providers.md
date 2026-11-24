@@ -14,7 +14,8 @@ collection adapter ([Inventory and collection](#inventory-and-collection)).
 Task 2.2 derives each installed provider's availability, and its evidence
 watches, from its descriptor ([Availability](#availability)). Task 2.3
 bounds every collection with host-owned deadlines, cancellation and
-resource limits ([Collection limits](#collection-limits)), and task 2.4
+resource limits ([Collection limits](#collection-limits)), which an
+operator can raise or lower with controller flags, and task 2.4
 documents the [capabilities and permissions](#capabilities-and-permissions)
 of each provider. Within the collection limits, nothing in this guide
 changes how existing bindings, profiles, delivery, collection, evaluation
@@ -351,7 +352,7 @@ this: `TestBoundsStopTheWholeCollection` with an adapter that ignores every
 error, and `TestStoppedCollectionUsesNoReports` and
 `TestCollectionLimitIsExplicitlyIncomplete` with the Kyverno path.
 
-The limits, `provider.DefaultLimits` (`TestDefaultLimits`):
+The default limits, `provider.DefaultLimits` (`TestDefaultLimits`):
 
 <!-- verified: collection-limits -->
 ```json
@@ -364,17 +365,13 @@ The limits, `provider.DefaultLimits` (`TestDefaultLimits`):
 }
 ```
 
-| Limit | Value | Why |
+| Limit | Default | Why |
 | --- | --- | --- |
 | Deadline | the binding's `spec.assessment.collectionTimeout`; 5m when it is unset or invalid | It is the existing collection budget of a run. One collection pass cannot outlast it, so a run's closing poll ends at most one deadline after its window. `TestCollectionDeadlineIsTheCollectionTimeout` checks it. |
 | Page size | 500 objects per list request | The page size of client-go's pager and of the preview observation. |
 | Requests | 20,000 list requests per collection | One list for each namespace of a 10,000-namespace scope (Kubernetes' namespace scalability threshold), plus the 200 full pages that 100,000 objects need, with headroom for short pages. |
 | Objects | 100,000 objects per collection | The preview observation's bound. Kyverno writes one PolicyReport per resource, so this is about 100,000 workload objects in one binding's scope. |
 | Bytes | 512 MiB of object JSON per collection | The preview observation's bound. Decoded objects take about 2.4 times their JSON size (measured on the saved Kyverno 1.19.2 reports), so 512 MiB decodes to about 1.2 GiB. That is more than the chart's 1 GiB controller memory limit, so a collection that completes under the default chart stays below this bound. |
-
-These are host constants, not configuration: there is no flag, Helm value
-or bundle field for them. `AssessmentReconciler.CollectionLimits` exists
-for tests.
 
 How the bounds apply:
 
@@ -451,6 +448,84 @@ What the bounds do not cover:
   observations, not the limitation text, which current status shows.
   Recording collection limitations in a capture belongs to the capture
   boundary (task 3.1).
+
+### Configuring the limits
+
+The page size and the request, object and byte limits are host
+configuration: controller flags, set through the runtime chart's
+`controller.collection` values ([values contract](charts.md#values-contract)).
+They apply to every collection of every binding. No bundle, profile or
+binding field changes them, and an adapter cannot. The deadline is not a
+flag: it stays each binding's `spec.assessment.collectionTimeout`.
+
+| Flag | Chart value | Default | Accepted |
+| --- | --- | --- | --- |
+| `--collection-page-size` | `controller.collection.pageSize` | 500 | 1 to 10,000, and at most the object limit |
+| `--collection-max-requests` | `controller.collection.maxRequests` | 20,000 | 1 to 1,000,000, and at least the pages the object limit takes (objects / page size, rounded up) |
+| `--collection-max-objects` | `controller.collection.maxObjects` | 100,000 | 1 to 10,000,000 |
+| `--collection-max-bytes` | `controller.collection.maxBytes` | 536,870,912 (512 MiB) | 1,572,864 (1.5 MiB) to 68,719,476,736 (64 GiB), and at least page size × 4,096 |
+
+Unset flags keep the defaults, so behavior is unchanged without them. The
+controller checks the values at startup
+(`provider.Limits.ValidateConfiguration`) and refuses to start with one out
+of range, naming the flag. It never clamps a value. The ranges:
+
+- Each ceiling keeps a configured collection bounded: 50 times the default
+  requests, 100 times the default objects, 128 times the default bytes, and
+  a page of at most 10,000 objects.
+- A page larger than the object limit could pass it in one response.
+- Fewer requests than the object limit's pages would make the object limit
+  unreachable. Raising the object limit, or lowering the page size, can
+  therefore need more requests too.
+- 1.5 MiB is etcd's default request size limit, about the largest object an
+  API server stores, so a smaller budget could refuse one legitimate
+  report. 4,096 bytes per object of a full page is above the 2.4 to 2.9 KiB
+  of the saved Kyverno 1.19.2 reports.
+
+The chart's schema checks each range and its render checks the
+combinations, with the same rules, so an install the controller would
+refuse fails at `helm install` (`TestRuntimeChartCollectionLimits`). The
+flags' parsing and checks are `TestCollectionFlags` and
+`TestValidateConfiguration`. `TestConfiguredCollectionLimitsReachTheCollection`
+checks that the configured limits are the ones the collection enforces: a
+namespace with 100,001 reports is `Incomplete` under the defaults and
+`Complete` with `maxObjects` raised to 200,000, and a lowered limit makes a
+three-report collection `Incomplete`.
+
+**When to raise them.** A binding whose scope has more reports than the
+object limit, or more report JSON than the byte budget, always gets the
+`object-limit` or `byte-limit` limitation and `Incomplete` evidence. Raise
+the limit that its limitation names. A `page-limit` stop means more
+namespaces than requests: raise `maxRequests`.
+
+**Memory.** A collection holds the objects it reads in controller memory,
+and decoded objects take about 2.4 times their JSON size. The default
+512 MiB budget therefore decodes to about 1.2 GiB, above the chart's 1 GiB
+controller memory limit: with the default chart, memory runs out before the
+byte budget does for a collection of large reports. Size the byte budget
+with the memory limit, and raise `controller.resources.limits.memory` (and its
+request) together with `maxBytes` or `maxObjects`, at about 2.4 times
+`maxBytes` plus the controller's baseline. Otherwise a collection that the
+limits allow can get the controller OOM-killed before the byte limit stops
+it. Lowering the limits is the way to keep a controller with less memory
+from reading more than it can hold; the affected bindings then report
+`Incomplete` evidence instead.
+
+For example, for bindings of up to about 300,000 reports of about 3 KiB:
+
+```yaml
+controller:
+  collection:
+    maxObjects: 300000
+    maxRequests: 20000      # 600 pages at 500 per page, plus one per namespace
+    maxBytes: 1073741824    # 1 GiB of JSON, about 2.4 GiB decoded
+  resources:
+    requests: {cpu: 100m, memory: 3Gi}
+    limits: {memory: 3Gi}
+```
+
+`AssessmentReconciler.CollectionLimits` carries the configured limits
+(`controller.Options.CollectionLimits`). Tests also set it directly.
 
 ## Capabilities and permissions
 

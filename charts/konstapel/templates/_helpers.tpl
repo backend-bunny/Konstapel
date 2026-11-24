@@ -38,6 +38,7 @@ app.kubernetes.io/component: controller
 {{- if and .Values.download.enabled (gt (int .Values.download.replicaCount) 1) .Values.podDisruptionBudget.enabled (ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.download.replicaCount)) -}}
 {{- fail (printf "podDisruptionBudget.minAvailable (%v) must be less than download.replicaCount (%v), or no voluntary eviction could ever proceed" .Values.podDisruptionBudget.minAvailable .Values.download.replicaCount) -}}
 {{- end -}}
+{{- include "konstapel.validateCollection" . -}}
 {{- include "konstapel.validateAttachments" . -}}
 {{- include "konstapel.validateBundles" . -}}
 {{- include "konstapel.validateMetrics" . -}}
@@ -54,6 +55,27 @@ switch cannot be turned on: no render grants the write without them.
 {{- define "konstapel.validateExceptions" -}}
 {{- if .Values.exceptions.revocationProcessing.enabled -}}
 {{- fail "exceptions.revocationProcessing.enabled cannot be enabled until the chart can deploy the ComplianceException admission webhooks: revocation processing grants the controller update/patch on complianceexceptions, which only those webhooks (failurePolicy Fail) confine to releasing the revocation finalizer, and this chart does not deploy them yet. Leave it false (docs/charts.md, \"Exception revocation processing\")" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Evidence collection limits (docs/assessment-providers.md, "Collection
+limits"); the schema checks each range. These mirror the controller's
+startup checks (provider.Limits.ValidateConfiguration).
+*/}}
+{{- define "konstapel.validateCollection" -}}
+{{- $c := .Values.controller.collection -}}
+{{- $page := int64 $c.pageSize -}}
+{{- $objects := int64 $c.maxObjects -}}
+{{- if gt $page $objects -}}
+{{- fail (printf "controller.collection.pageSize (%d) must not exceed controller.collection.maxObjects (%d): one page could pass the object limit" $page $objects) -}}
+{{- end -}}
+{{- $need := div (sub (add $objects $page) 1) $page -}}
+{{- if lt (int64 $c.maxRequests) (int64 $need) -}}
+{{- fail (printf "controller.collection.maxRequests (%d) is fewer than the %d list requests that maxObjects (%d) takes at pageSize (%d): raise it, or pageSize" (int64 $c.maxRequests) (int64 $need) $objects $page) -}}
+{{- end -}}
+{{- if lt (int64 $c.maxBytes) (mul $page 4096) -}}
+{{- fail (printf "controller.collection.maxBytes (%d) must be at least %d: one page of pageSize (%d) objects of 4096 bytes" (int64 $c.maxBytes) (mul $page 4096) $page) -}}
 {{- end -}}
 {{- end }}
 

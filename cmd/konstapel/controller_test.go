@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
+	"github.com/backend-bunny/Konstapel/internal/provider"
 )
 
 func TestBundleFlags(t *testing.T) {
@@ -96,5 +97,62 @@ func TestReaderCheck(t *testing.T) {
 	// "none" passes without contacting anything.
 	if check, _ := readerCheck("none", "", "", nil); check(context.Background()) != nil {
 		t.Fatal("none failed")
+	}
+}
+
+// The --collection-* flags default to provider.DefaultLimits without a
+// deadline (each binding's collection timeout stays the deadline), and
+// startup refuses values out of range or combinations that could never
+// complete, naming the flag; nothing is clamped.
+func TestCollectionFlags(t *testing.T) {
+	defaults := provider.DefaultLimits()
+	defaults.Timeout = 0
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		want    provider.Limits
+		wantErr string
+	}{
+		{name: "unset", want: defaults},
+		{name: "defaults spelled out", args: []string{"--collection-page-size=500", "--collection-max-requests=20000", "--collection-max-objects=100000", "--collection-max-bytes=536870912"}, want: defaults},
+		{name: "raised", args: []string{"--collection-max-objects=250000", "--collection-max-bytes=2147483648", "--collection-max-requests=40000", "--collection-page-size=1000"},
+			want: provider.Limits{PageSize: 1000, MaxPages: 40_000, MaxObjects: 250_000, MaxBytes: 2 << 30}},
+		{name: "lowered", args: []string{"--collection-max-objects=10", "--collection-page-size=5", "--collection-max-requests=2", "--collection-max-bytes=1572864"},
+			want: provider.Limits{PageSize: 5, MaxPages: 2, MaxObjects: 10, MaxBytes: 3 << 19}},
+		{name: "zero objects", args: []string{"--collection-max-objects=0"}, wantErr: "--collection-max-objects 0 must be between 1 and 10000000"},
+		{name: "negative bytes", args: []string{"--collection-max-bytes=-1"}, wantErr: "--collection-max-bytes -1 must be at least 1572864"},
+		{name: "zero requests", args: []string{"--collection-max-requests=0"}, wantErr: "--collection-max-requests 0 must be between"},
+		{name: "page size zero", args: []string{"--collection-page-size=0"}, wantErr: "--collection-page-size 0 must be between 1 and 10000"},
+		{name: "page size above the ceiling", args: []string{"--collection-page-size=10001", "--collection-max-bytes=1073741824"}, wantErr: "--collection-page-size 10001"},
+		{name: "page above objects", args: []string{"--collection-max-objects=100"}, wantErr: "--collection-page-size 500 must not exceed --collection-max-objects 100"},
+		{name: "unreachable object limit", args: []string{"--collection-page-size=1"}, wantErr: "--collection-max-requests 20000 is fewer than the 100000 list requests"},
+		{name: "bytes below one page", args: []string{"--collection-page-size=1000", "--collection-max-bytes=4000000"}, wantErr: "--collection-max-bytes 4000000 must be at least 4096000"},
+		{name: "objects above the ceiling", args: []string{"--collection-max-objects=10000001"}, wantErr: "--collection-max-objects 10000001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("controller", flag.ContinueOnError)
+			fs.SetOutput(io.Discard)
+			c := addCollectionFlags(fs)
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.limits()
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.HasPrefix(err.Error(), "collection limits: ") {
+					t.Fatalf("error %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("limits %+v (%v), want %+v", got, err, tc.want)
+			}
+		})
+	}
+	// A value that is not an integer is a parse error, not a default.
+	fs := flag.NewFlagSet("controller", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	addCollectionFlags(fs)
+	if err := fs.Parse([]string{"--collection-max-bytes=1Gi"}); err == nil {
+		t.Fatal("--collection-max-bytes=1Gi parsed")
 	}
 }

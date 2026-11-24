@@ -26,6 +26,7 @@ Do not treat its fixtures as live producer compatibility evidence.
   <!-- agent: tier=deep risk=medium reason="Manager lifecycle and independent provider availability" -->
 - [x] 2.3 Enforce host deadlines, cancellation and collection resource limits across adapters; test oversized inputs, incomplete pagination/collection and leadership cancellation, and verify reporting adapters issue no scanner/report/workload writes using a recording API fixture.
   <!-- agent: tier=deep risk=high reason="Bounded external access and lifecycle cancellation" -->
+  Note (owner decision 2026-11-24): the page size and request, object and byte limits are configurable through `--collection-*` controller flags and the chart's `controller.collection` values, defaulting to the host defaults and validated at startup and render; the deadline stays the binding's collectionTimeout (design.md, decision 2).
 - [x] 2.4 Document the capability/permission matrix and collection limits beside the authoring recipe; verify API operations match fixtures and distinguish narrow Go readers from the service account's effective shared RBAC.
   <!-- agent: tier=standard risk=medium reason="Accurate permissions and collection documentation" -->
 

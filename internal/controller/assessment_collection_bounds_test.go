@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -249,5 +251,82 @@ func TestRunClosesIncompleteWhenACollectionLimitIsMet(t *testing.T) {
 		case !complete && (ev.Completeness != "Incomplete" || ev.Missing != 1 || ev.Attributable != 0 || o.Pass != 0):
 			t.Fatalf("limit %d: evidence %+v outcomes %+v", limit, ev, o)
 		}
+	}
+}
+
+// extraReports adds n PolicyReports about no frozen workload to every
+// PolicyReport list of namespace ns, as a large cluster would.
+type extraReports struct {
+	client.Client
+	ns string
+	n  int
+}
+
+func (x extraReports) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if err := x.Client.List(ctx, list, opts...); err != nil {
+		return err
+	}
+	u, ok := list.(*unstructured.UnstructuredList)
+	if !ok || u.GetKind() != PolicyReportGVK.Kind+"List" || (&client.ListOptions{}).ApplyOptions(opts).Namespace != x.ns {
+		return nil
+	}
+	for i := range x.n {
+		name := "bulk-" + strconv.Itoa(i)
+		u.Items = append(u.Items, unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": PolicyReportGVK.GroupVersion().String(), "kind": PolicyReportGVK.Kind,
+			"metadata": map[string]any{"name": name, "namespace": x.ns, "uid": "uid-" + name},
+			"scope":    map[string]any{"apiVersion": "v1", "kind": "Pod", "namespace": x.ns, "name": name, "uid": "gone-" + name},
+		}})
+	}
+	return nil
+}
+
+// The configured limits (Options.CollectionLimits, from the --collection-*
+// flags) are the ones provider.Collect enforces. A namespace with 100,001
+// reports is above the default object limit, so its evidence is
+// incomplete; a raised limit completes the same collection, and a lowered
+// one makes a small collection incomplete.
+func TestConfiguredCollectionLimitsReachTheCollection(t *testing.T) {
+	raised := provider.Limits{PageSize: provider.DefaultPageSize, MaxPages: provider.DefaultMaxPages, MaxObjects: 200_000, MaxBytes: provider.DefaultMaxBytes}
+	lowered := provider.Limits{PageSize: 1, MaxPages: 3, MaxObjects: 2, MaxBytes: provider.MinMaxBytes}
+	for _, l := range []provider.Limits{raised, lowered} {
+		if err := l.ValidateConfiguration(); err != nil {
+			t.Fatalf("%+v: %v", l, err)
+		}
+	}
+	e := threeNamespaces(t)
+	e.ar.Client = extraReports{Client: e.ar.Client, ns: "c", n: provider.DefaultMaxObjects - 2}
+	for i, tc := range []struct {
+		limits   provider.Limits
+		complete bool
+		stop     string
+	}{
+		{limits: provider.Limits{}, stop: "the collection read more than 100000 objects (at policyreports.wgpolicyk8s.io/v1alpha2 in namespace c)"},
+		{limits: raised, complete: true},
+	} {
+		e.ar.CollectionLimits = tc.limits
+		e.now = a0.Add(time.Duration(3+i) * time.Minute)
+		e.assess("audit-prod")
+		checkCollection(t, *e.current("audit-prod"), tc.limits, tc.complete, tc.stop)
+	}
+
+	e = threeNamespaces(t)
+	e.ar.CollectionLimits = lowered
+	e.assess("audit-prod")
+	checkCollection(t, *e.current("audit-prod"), lowered, false, "the collection read more than 2 objects (at policyreports.wgpolicyk8s.io/v1alpha2 in namespace c)")
+}
+
+func checkCollection(t *testing.T, cur v1alpha1.CurrentEvidence, l provider.Limits, complete bool, stop string) {
+	t.Helper()
+	ev, o := cur.Evidence, cur.Outcomes
+	if complete {
+		if ev.Completeness != "Complete" || ev.Attributable != 3 || o.Pass != 3 || len(collectionLimitations(cur)) != 0 {
+			t.Fatalf("limits %+v: evidence %+v outcomes %+v limitations %q", l, ev, o, cur.Limitations)
+		}
+		return
+	}
+	want := "konstapel-kyverno/v1 evidence is not used: collection stopped (object-limit): " + stop
+	if ev.Completeness != "Incomplete" || ev.Missing != 3 || o.Pass != 0 || !slices.Contains(cur.Limitations, want) {
+		t.Fatalf("limits %+v: evidence %+v outcomes %+v limitations %q", l, ev, o, cur.Limitations)
 	}
 }

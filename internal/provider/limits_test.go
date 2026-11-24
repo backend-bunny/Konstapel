@@ -384,3 +384,62 @@ func TestCollectionCannotWrite(t *testing.T) {
 		}
 	}
 }
+
+// Host-configured limits (the controller's --collection-* flags): the
+// defaults are valid, every range is enforced at both ends, and a
+// combination that could never complete or never reach its object limit is
+// refused rather than clamped.
+func TestValidateConfiguration(t *testing.T) {
+	host := func(f func(*provider.Limits)) provider.Limits {
+		l := provider.DefaultLimits()
+		l.Timeout = 0
+		if f != nil {
+			f(&l)
+		}
+		return l
+	}
+	for name, tc := range map[string]struct {
+		l    provider.Limits
+		want string
+	}{
+		"defaults":         {l: host(nil)},
+		"smallest":         {l: provider.Limits{PageSize: 1, MaxPages: 1, MaxObjects: 1, MaxBytes: provider.MinMaxBytes}},
+		"largest":          {l: provider.Limits{PageSize: provider.MaxPageSize, MaxPages: provider.MaxConfiguredPages, MaxObjects: provider.MaxConfiguredObjects, MaxBytes: provider.MaxConfiguredBytes}},
+		"raised objects":   {l: host(func(l *provider.Limits) { l.MaxObjects = 200_000; l.MaxBytes = 1 << 30 })},
+		"page = objects":   {l: provider.Limits{PageSize: 7, MaxPages: 1, MaxObjects: 7, MaxBytes: provider.MinMaxBytes}},
+		"exact requests":   {l: host(func(l *provider.Limits) { l.MaxPages = 200 })},
+		"exact page bytes": {l: host(func(l *provider.Limits) { l.PageSize = 1_000; l.MaxBytes = 1_000 * provider.MinObjectBytes })},
+
+		"a deadline":         {l: host(func(l *provider.Limits) { l.Timeout = time.Minute }), want: "collectionTimeout"},
+		"zero page":          {l: host(func(l *provider.Limits) { l.PageSize = 0 }), want: "--collection-page-size 0 must be between 1 and 10000"},
+		"page too large":     {l: host(func(l *provider.Limits) { l.PageSize = 10_001; l.MaxBytes = 1 << 30 }), want: "--collection-page-size 10001 must be between"},
+		"page above objects": {l: host(func(l *provider.Limits) { l.MaxObjects = 499 }), want: "--collection-page-size 500 must not exceed --collection-max-objects 499"},
+		"zero objects":       {l: host(func(l *provider.Limits) { l.MaxObjects = 0 }), want: "--collection-max-objects 0 must be between"},
+		"negative objects":   {l: host(func(l *provider.Limits) { l.MaxObjects = -1 }), want: "--collection-max-objects -1 must be between"},
+		"too many objects":   {l: host(func(l *provider.Limits) { l.MaxObjects = provider.MaxConfiguredObjects + 1 }), want: "--collection-max-objects 10000001 must be between"},
+		"zero requests":      {l: host(func(l *provider.Limits) { l.MaxPages = 0 }), want: "--collection-max-requests 0 must be between"},
+		"too many requests":  {l: host(func(l *provider.Limits) { l.MaxPages = provider.MaxConfiguredPages + 1 }), want: "--collection-max-requests 1000001 must be between"},
+		"unreachable object limit": {l: host(func(l *provider.Limits) { l.MaxPages = 199 }),
+			want: "--collection-max-requests 199 is fewer than the 200 list requests that --collection-max-objects 100000 takes at --collection-page-size 500"},
+		"tiny pages": {l: host(func(l *provider.Limits) { l.PageSize = 1 }), want: "fewer than the 100000 list requests"},
+		"zero bytes": {l: host(func(l *provider.Limits) { l.MaxBytes = 0 }), want: "--collection-max-bytes 0 must be at least 1572864"},
+		"below one object": {l: host(func(l *provider.Limits) { l.MaxBytes = provider.MinMaxBytes - 1 }),
+			want: "--collection-max-bytes 1572863 must be at least 1572864"},
+		"below one page": {l: host(func(l *provider.Limits) { l.PageSize = 1_000; l.MaxBytes = 1_000*provider.MinObjectBytes - 1 }),
+			want: "--collection-max-bytes 4095999 must be at least 4096000: one page of 1000 objects"},
+		"too many bytes": {l: host(func(l *provider.Limits) { l.MaxBytes = provider.MaxConfiguredBytes + 1 }), want: "--collection-max-bytes 68719476737 must be at most"},
+		"every error":    {l: provider.Limits{Timeout: time.Second}, want: "collectionTimeout"},
+	} {
+		err := tc.l.ValidateConfiguration()
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: %+v refused: %v", name, tc.l, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: %+v: error %v, want %q", name, tc.l, err, tc.want)
+		}
+	}
+	// Each range is reported, not only the first.
+	if err := (provider.Limits{}).ValidateConfiguration(); err == nil || strings.Count(err.Error(), "\n") != 3 {
+		t.Fatalf("zero limits: %v", err)
+	}
+}

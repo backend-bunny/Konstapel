@@ -158,9 +158,10 @@ type AssessmentReconciler struct {
 	// from the informer cache, and treating that as "finished" would free
 	// the binding's slot while the run executes. Defaults to Client.
 	Reader client.Reader
-	// CollectionLimits bound each evidence collection. Zero fields are
+	// CollectionLimits bound each evidence collection: Options.CollectionLimits,
+	// from the controller's --collection-* flags. Zero fields are
 	// provider.DefaultLimits, and a zero Timeout is the binding's
-	// collection timeout. It is not configurable outside tests.
+	// collection timeout.
 	CollectionLimits provider.Limits
 }
 
@@ -722,9 +723,10 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 
 // setupAssessments registers the assessment reconciler with the manager.
 func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, watches []providerWatch, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration, observe RunObserver,
-	attachmentStore *AttachmentStorage) error {
+	attachmentStore *AttachmentStorage, limits provider.Limits) error {
 	rt := currentRuntime()
-	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
+	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt,
+		CollectionLimits: limits}
 	b := builder.ControllerManagedBy(mgr).Named("assessment").
 		For(&v1alpha1.ComplianceBinding{}).
 		Watches(&v1alpha1.ComplianceProfile{}, handler.EnqueueRequestsFromMapFunc(bindingsForProfile(mgr.GetClient())), builder.WithPredicates(predicate.GenerationChangedPredicate{})).

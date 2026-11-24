@@ -133,7 +133,10 @@ func TestDocumentedTestsExist(t *testing.T) {
 	// the controller; provider availability with the capability monitor.
 	host, _ := filepath.Glob(filepath.Join(root, "internal/controller/*_test.go"))
 	capabilities, _ := filepath.Glob(filepath.Join(root, "internal/capability/*_test.go"))
-	for _, f := range slices.Concat(files, more, host, capabilities) {
+	// The collection limit flags and chart values.
+	flags, _ := filepath.Glob(filepath.Join(root, "cmd/konstapel/*_test.go"))
+	chart, _ := filepath.Glob(filepath.Join(root, "internal/charttest/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
