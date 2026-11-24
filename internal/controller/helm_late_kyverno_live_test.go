@@ -357,6 +357,8 @@ const (
 	lcRegistrar  = "lc-registrar"
 	lcReader     = "lc-reader"
 	lcExceptions = "lc-exceptions"
+	lcRecoverer  = "lc-recoverer"
+	lcRecoveryRd = "lc-recovery-reader"
 	lcNobody     = "lc-nobody"
 	lcController = "system:serviceaccount:konstapel-system:konstapel-controller"
 	lcDownload   = "system:serviceaccount:konstapel-system:konstapel-download"
@@ -623,8 +625,33 @@ spec:
 		},
 		immutable: func(o map[string]any) { lcSet(o, "another-policy", "spec", "policy") },
 		refused:   "policy is immutable; create a new ComplianceException",
+	}, {
+		resource: "evidencesigningrequests", creator: lcRecoverer, readers: []string{lcRecoverer, lcRecoveryRd},
+		valid: lcSigningRequest,
+		// konstapel-evidence-signing-requester (runtime chart) overwrites
+		// the forged requester; the CRD has no schema defaults.
+		expect: []lcField{{[]any{"spec", "requestedBy", "username"}, lcRecoverer}, {[]any{"spec", "requestedBy", "uid"}, "uid-" + lcRecoverer}},
+		invalid: []lcInvalid{
+			{"no reason", func(o map[string]any) { lcDel(o, "spec", "reason") }, "spec.reason: Required value"},
+			{"blank reason", func(o map[string]any) { lcSet(o, " \t ", "spec", "reason") }, "reason must not be blank"},
+			{"run uid not a UUID", func(o map[string]any) { lcSet(o, "lc-run-uid", "spec", "run", "uid") }, "spec.run.uid"},
+			{"malformed key fingerprint", func(o map[string]any) { lcSet(o, "sha256:XYZ", "spec", "expectedKeyFingerprint") }, "spec.expectedKeyFingerprint"},
+		},
+		immutable: func(o map[string]any) { lcSet(o, "another justification", "spec", "reason") },
+		refused:   "spec is immutable; create a new EvidenceSigningRequest",
 	}}
 }
+
+// lcSigningRequest is a recovery request with a forged requester; the run
+// need not exist (admission never looks it up).
+const lcSigningRequest = `
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceSigningRequest
+metadata: {name: lc-signing-request}
+spec:
+  run: {name: lc-run, uid: 0b7c2b5e-8f0e-4a8e-9d55-1f2a3b4c5d6e}
+  reason: Live contract test of the installed recovery API.
+  requestedBy: {username: someone-else}`
 
 // as returns a dynamic client authenticated as user; "" is the test's own
 // cluster-admin identity.
@@ -715,7 +742,9 @@ func (l *live) crdContract(ns string) {
 	l.bind(lcRegistrar, lcRegistrar, role("konstapel-evidence-attachment-registrar"), "")
 	l.bind(lcReader, lcReader, role("konstapel-evidence-attachment-reader"), "")
 	l.bind(lcExceptions, lcExceptions, role("konstapel-exception-editor"), lcTeam)
-	identities := []string{lcAdmin, lcViewer, lcOperator, lcRequester, lcRegistrar, lcReader, lcExceptions, lcNobody, lcController, lcDownload}
+	l.bind(lcRecoverer, lcRecoverer, role("konstapel-evidence-signing-recoverer"), "")
+	l.bind(lcRecoveryRd, lcRecoveryRd, role("konstapel-evidence-signing-recovery-reader"), "")
+	identities := []string{lcAdmin, lcViewer, lcOperator, lcRequester, lcRegistrar, lcReader, lcExceptions, lcRecoverer, lcRecoveryRd, lcNobody, lcController, lcDownload}
 	clients := map[string]dynamic.Interface{"": admin}
 	for _, id := range identities {
 		clients[id] = l.dynAs(id)
@@ -887,6 +916,13 @@ func (l *live) crdContract(ns string) {
 		{lcRegistrar, "complianceprofiles", cases[0].valid, apierrors.IsForbidden, ""},
 		{lcOperator, "assessmentruns", lcNamespaceRun, apierrors.IsForbidden, "only the Konstapel controller (konstapel-system/konstapel-controller) may create"},
 		{lcController, "assessmentruns", lcNamespaceRun, func(err error) bool { return err == nil }, ""},
+		// Recovery is a separate grant: neither the compliance admin, the
+		// assessment operator, the recovery reader nor the controller may
+		// request it.
+		{lcAdmin, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
+		{lcOperator, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
+		{lcRecoveryRd, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
+		{lcController, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
 	} {
 		o := lcObject(t, w.doc)
 		o["metadata"].(map[string]any)["name"] = "lc-write"
@@ -899,11 +935,71 @@ func (l *live) crdContract(ns string) {
 		}
 	}
 
-	// g. The documented examples: valid ones are accepted by the installed
+	// g. Recovery requests are the administrators' audit record: the
+	// runtime chart's status-writer policy refuses status from anyone but
+	// the controller ServiceAccount its ConfigMap names (a cluster
+	// administrator included), and neither recovery role edits or deletes a
+	// request.
+	findings["signing-request"] = l.signingRequestContract(admin, clients)
+
+	// h. The documented examples: valid ones are accepted by the installed
 	// release, invalid ones rejected with their documented reason.
 	examples := l.documentedExamples(admin, clients[lcController])
 	findings["examples"] = examples
 	l.record("crd-contract", map[string]any{"crds": shipped, "checks": findings})
+}
+
+// signingRequestContract checks the installed status-writer policy and the
+// recovery roles on the contract's EvidenceSigningRequest, with dry runs
+// only, and returns how many checks it made.
+func (l *live) signingRequestContract(admin dynamic.Interface, clients map[string]dynamic.Interface) int {
+	t := l.t
+	t.Helper()
+	requests := func(c dynamic.Interface) dynamic.ResourceInterface {
+		return c.Resource(lcGVR("evidencesigningrequests"))
+	}
+	dryRun := []string{metav1.DryRunAll}
+	cur, err := requests(admin).Get(l.ctx, "lc-signing-request", metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("evidencesigningrequests: the contract request is missing: %v", err)
+		return 0
+	}
+	accepted := cur.DeepCopy()
+	accepted.Object["status"] = map[string]any{"phase": "Pending", "reason": "Accepted",
+		"requestedBy": lcGet(cur.Object, "spec", "requestedBy"), "run": lcGet(cur.Object, "spec", "run"), "acceptedAt": "2026-11-24T10:00:00Z",
+		"conditions": []any{map[string]any{"type": "Complete", "status": "False", "reason": "Accepted", "message": "accepted", "lastTransitionTime": "2026-11-24T10:00:00Z"}}}
+	const writer = "konstapel-evidence-signing-status-writer"
+	err = l.retried(func() error {
+		_, err := requests(admin).UpdateStatus(l.ctx, accepted.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
+		return err
+	}, apierrors.IsForbidden)
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), writer) {
+		t.Errorf("evidencesigningrequests/status as a cluster administrator: got %v, want Forbidden by %s", err, writer)
+	}
+	err = l.retried(func() error {
+		_, err := requests(clients[lcController]).UpdateStatus(l.ctx, accepted.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
+		return err
+	}, func(err error) bool { return err == nil })
+	if err != nil {
+		t.Errorf("evidencesigningrequests/status as the controller: %v", err)
+	}
+	misattributed := accepted.DeepCopy()
+	lcSet(misattributed.Object, map[string]any{"username": "someone-else"}, "status", "requestedBy")
+	if _, err := requests(clients[lcController]).UpdateStatus(l.ctx, misattributed, metav1.UpdateOptions{DryRun: dryRun}); !apierrors.IsInvalid(err) ||
+		!strings.Contains(err.Error(), "status.requestedBy must be spec.requestedBy") {
+		t.Errorf("evidencesigningrequests/status misattributed by the controller: got %v, want Invalid", err)
+	}
+	edited := cur.DeepCopy()
+	edited.SetLabels(map[string]string{"change": "lc"})
+	for _, id := range []string{lcRecoverer, lcRecoveryRd} {
+		if _, err := requests(clients[id]).Update(l.ctx, edited.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun}); !apierrors.IsForbidden(err) {
+			t.Errorf("evidencesigningrequests update as %s: %v", id, err)
+		}
+		if err := requests(clients[id]).Delete(l.ctx, cur.GetName(), metav1.DeleteOptions{DryRun: dryRun}); !apierrors.IsForbidden(err) {
+			t.Errorf("evidencesigningrequests delete as %s: %v", id, err)
+		}
+	}
+	return 7
 }
 
 // lcNamespaceRun is a controller-only run: Namespace scope with a Request
