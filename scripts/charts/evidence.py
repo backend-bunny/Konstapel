@@ -3,7 +3,8 @@
 
   evidence.py groups --source SHA
       Print the release-required acceptance groups of the source commit's
-      scripts/acceptance-groups.json, one per line.
+      scripts/acceptance-groups.json, one per line as "GROUP MINUTES": the
+      group and its `timeoutMinutes` budget (KONSTAPEL_ACCEPTANCE_TIMEOUT).
   evidence.py record --archives DIR --groups-dir DIR --image IMAGE@DIGEST \
       --source SHA --runtime JSON --out CHART_ACCEPTANCE_JSON
       Derive each required group's result from its own files and write the
@@ -13,7 +14,9 @@ A group is release-required when acceptance-groups.json marks it
 `"release": true`: it installs the frozen chart archives with the released
 image, so it must run against those exact bytes before publication. Every
 group states the marker explicitly; scripts/ci/test_acceptance.py keeps it
-consistent with the tests that install charts.
+consistent with the tests that install charts. Every group also states a
+`timeoutMinutes` budget; release acceptance runs each required group under
+it, so a hung group fails the gate with diagnostics before the job timeout.
 
 The requirements always come from the frozen source commit (`git show
 SHA:scripts/acceptance-groups.json`), never from the working tree or from the
@@ -78,8 +81,27 @@ def release_groups(groups: dict) -> dict:
     return required
 
 
-def frozen_groups(commit: str, root: Path = ROOT) -> dict:
-    """The release-required groups as committed at the frozen source commit."""
+MAX_TIMEOUT_MINUTES = 240
+
+
+def release_budgets(groups: dict) -> dict:
+    """{group: timeoutMinutes} for the release-required groups, in file order.
+
+    Every group must state a whole-minute budget; release acceptance never
+    runs a required group without one."""
+    required = release_groups(groups)
+    budgets = {}
+    for name, group in groups.items():
+        minutes = group.get("timeoutMinutes")
+        if type(minutes) is not int or not 1 <= minutes <= MAX_TIMEOUT_MINUTES:
+            raise Rejected(f"acceptance group {name!r} must set \"timeoutMinutes\" to whole minutes from 1 to {MAX_TIMEOUT_MINUTES}")
+        if name in required:
+            budgets[name] = minutes
+    return budgets
+
+
+def frozen_file(commit: str, root: Path = ROOT):
+    """scripts/acceptance-groups.json as committed at the frozen source commit."""
     if not isinstance(commit, str) or not frozen.SHA.match(commit):
         raise Rejected(f"source commit {commit!r} is not a full SHA")
     p = subprocess.run(["git", "show", f"{commit}:{GROUPS_FILE}"], cwd=root, capture_output=True, text=True)
@@ -89,7 +111,17 @@ def frozen_groups(commit: str, root: Path = ROOT) -> dict:
         groups = json.loads(p.stdout)
     except json.JSONDecodeError as e:
         raise Rejected(f"{GROUPS_FILE} at {commit}: {e}")
-    return release_groups(groups)
+    return groups
+
+
+def frozen_groups(commit: str, root: Path = ROOT) -> dict:
+    """The release-required groups as committed at the frozen source commit."""
+    return release_groups(frozen_file(commit, root))
+
+
+def frozen_budgets(commit: str, root: Path = ROOT) -> dict:
+    """The release-required groups' budgets at the frozen source commit."""
+    return release_budgets(frozen_file(commit, root))
 
 
 def parse_log(text: str, tests: list) -> tuple:
@@ -273,7 +305,7 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     try:
         if args.command == "groups":
-            print("\n".join(frozen_groups(args.source)))
+            print("\n".join(f"{g} {m}" for g, m in frozen_budgets(args.source).items()))
             return 0
         out = Path(args.out)
         if out.exists():

@@ -18,6 +18,8 @@ jobs:
       reason: ${{ steps.scope.outputs.reason }}
       groups: ${{ steps.scope.outputs.groups }}
       image-groups: ${{ steps.scope.outputs.image-groups }}
+      budgets: ${{ steps.scope.outputs.budgets }}
+      job-timeouts: ${{ steps.scope.outputs.job-timeouts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +34,11 @@ jobs:
           bash scripts/ci/acceptance-scope.sh >> "$GITHUB_OUTPUT"
           echo "groups=$(jq -c 'keys' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
           echo "image-groups=$(jq -c '[to_entries[] | select(.value.image == true) | .key]' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
+          # Each group's timeoutMinutes bounds its run; the job adds 20 minutes
+          # for setup (image build), post-timeout diagnostics and teardown, and
+          # the evidence upload. scripts/ci/test_acceptance.py checks both.
+          echo "budgets=$(jq -c 'map_values(.timeoutMinutes)' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
+          echo "job-timeouts=$(jq -c 'map_values(.timeoutMinutes + 20)' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
   checks:
     runs-on: ubuntu-26.04
     steps:
@@ -63,7 +70,7 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.acceptance-scope.outputs.groups) }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: ${{ fromJSON(needs.acceptance-scope.outputs.job-timeouts)[matrix.group] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,9 +83,9 @@ jobs:
       - name: Run acceptance
         env:
           ACCEPTANCE_GROUP: ${{ matrix.group }}
-          # Stops a hung run early enough for diagnostics and teardown to
-          # finish within the job timeout.
-          KONSTAPEL_ACCEPTANCE_TIMEOUT: 100m
+          # The group's timeoutMinutes stops a hung run early enough for
+          # diagnostics and teardown to finish within the job timeout.
+          KONSTAPEL_ACCEPTANCE_TIMEOUT: ${{ fromJSON(needs.acceptance-scope.outputs.budgets)[matrix.group] }}m
         run: devbox run -- task acceptance GROUP="$ACCEPTANCE_GROUP" OUTPUT="$RUNNER_TEMP/acceptance"
       - name: Verify acceptance did not modify dependency locks
         run: git diff --exit-code -- devbox.json devbox.lock go.mod go.sum

@@ -123,6 +123,88 @@ class ReleaseGroupTests(unittest.TestCase):
         self.assertTrue(found, "no chart-installing live tests found")
 
 
+def job(workflow, name):
+    """The text of one job of a workflow file (no YAML parser in Devbox)."""
+    text = (HERE.parents[1] / ".github/workflows" / workflow).read_text()
+    found = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  \S|\Z)", text)
+    assert found, f"{workflow} has no job {name}"
+    return found.group(1)
+
+
+class AcceptanceBudgetTests(unittest.TestCase):
+    """Every group's run is bounded by its "timeoutMinutes" (scripts/acceptance.sh
+    KONSTAPEL_ACCEPTANCE_TIMEOUT: watchdog, exit 124, diagnostics, teardown), and
+    each enclosing job leaves room for setup and the post-timeout cleanup, so
+    a hung group fails with evidence instead of being killed by the runner."""
+
+    # Measured on successful runs (2026-11-24): release setup about 1 minute
+    # and the evidence steps seconds; PR jobs spend at most about 3 minutes
+    # outside the run (image build included). After expiry, diagnostics alone
+    # may take 5 minutes, then node logs and teardown.
+    RELEASE_SETUP_AND_EVIDENCE = 15
+    PR_SETUP_AND_EVIDENCE = 5
+    POST_TIMEOUT_CLEANUP = 15
+
+    def release_budgets(self):
+        spec = importlib.util.spec_from_file_location("evidence", HERE.parent / "charts/evidence.py")
+        evidence = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evidence)
+        return evidence.release_budgets(acceptance.GROUPS)
+
+    def test_every_group_has_a_budget(self):
+        for name, group in acceptance.GROUPS.items():
+            with self.subTest(group=name):
+                self.assertIs(type(group.get("timeoutMinutes")), int)
+                self.assertGreaterEqual(group["timeoutMinutes"], 15)
+        self.assertEqual(set(self.release_budgets()), {n for n, g in acceptance.GROUPS.items() if g["release"]})
+
+    def test_release_job_timeout_covers_the_sequential_budgets(self):
+        acceptance_job = job("charts.yml", "acceptance")
+        minutes = re.search(r"(?m)^    timeout-minutes: (\d+)$", acceptance_job)
+        self.assertIsNotNone(minutes, "the release acceptance job needs a literal timeout")
+        # Groups run one after another and a failed group stops the run, so at
+        # most one group overruns its budget by the post-timeout cleanup.
+        need = sum(self.release_budgets().values()) + self.RELEASE_SETUP_AND_EVIDENCE + self.POST_TIMEOUT_CLEANUP
+        self.assertGreaterEqual(int(minutes.group(1)), need)
+        # The arithmetic comment must not drift from the budgets.
+        for group, budget in self.release_budgets().items():
+            self.assertIn(f"{group} {budget}", acceptance_job)
+        self.assertIn(f"= {sum(self.release_budgets().values())}", acceptance_job)
+        # The budget is applied by the script, not duplicated in YAML.
+        self.assertNotIn("KONSTAPEL_ACCEPTANCE_TIMEOUT", acceptance_job)
+        script = (HERE.parent / "charts/acceptance.sh").read_text()
+        self.assertIn("KONSTAPEL_ACCEPTANCE_TIMEOUT=${minutes}m", script)
+
+    def test_release_timeout_keeps_evidence_and_blocks_publication(self):
+        acceptance_job = job("charts.yml", "acceptance")
+        steps = re.split(r"(?m)^      - ", acceptance_job)[1:]
+        named = {re.match(r"(?:name: |uses: )(.*)", st).group(1): st for st in steps}
+        for step in ("Release acceptance summary", "Stage sanitized evidence"):
+            self.assertRegex(named[step], r"(?m)^        if: always\(\)$")
+        uploads = [st for st in steps if st.startswith("uses: actions/upload-artifact@")]
+        evidence_upload = next(st for st in uploads if "name: chart-acceptance-evidence" in st)
+        self.assertIn("if: always() && steps.stage-evidence.outcome == 'success'", evidence_upload)
+        # The record is uploaded only when every earlier step, including the
+        # acceptance run, succeeded, and it must exist.
+        record_upload = next(st for st in uploads if "name: chart-acceptance\n" in st)
+        self.assertNotIn("if:", record_upload)
+        self.assertIn("if-no-files-found: error", record_upload)
+        publish = job("charts.yml", "publish")
+        self.assertRegex(publish, r"(?m)^    needs: \[freeze, acceptance\]$")
+        self.assertNotRegex(publish, r"(?m)^    if:", "publish must not run after a failed or timed-out acceptance")
+        self.assertNotIn("continue-on-error", (HERE.parents[1] / ".github/workflows/charts.yml").read_text())
+
+    def test_pr_acceptance_derives_each_groups_budget_and_job_timeout(self):
+        scope = job("test.yml", "acceptance-scope")
+        self.assertIn("echo \"budgets=$(jq -c 'map_values(.timeoutMinutes)' scripts/acceptance-groups.json)\"", scope)
+        overhead = re.search(r"job-timeouts=\$\(jq -c 'map_values\(\.timeoutMinutes \+ (\d+)\)'", scope)
+        self.assertIsNotNone(overhead)
+        self.assertGreaterEqual(int(overhead.group(1)), self.PR_SETUP_AND_EVIDENCE + self.POST_TIMEOUT_CLEANUP)
+        live = job("test.yml", "acceptance-live")
+        self.assertIn("timeout-minutes: ${{ fromJSON(needs.acceptance-scope.outputs.job-timeouts)[matrix.group] }}", live)
+        self.assertIn("KONSTAPEL_ACCEPTANCE_TIMEOUT: ${{ fromJSON(needs.acceptance-scope.outputs.budgets)[matrix.group] }}m", live)
+
+
 class ScopeTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
