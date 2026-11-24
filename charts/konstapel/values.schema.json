@@ -378,11 +378,61 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "webhooks",
         "revocationProcessing"
       ],
       "properties": {
+        "webhooks": {
+          "description": "The ComplianceException admission webhooks (konstapel-exception-acceptance, failurePolicy Fail) served by every controller replica through the konstapel-webhook Service. Off by default. Enabling them does not enable native Kyverno exception grants.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "tls"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "tls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secretName",
+                "caBundle"
+              ],
+              "properties": {
+                "secretName": {
+                  "description": "With tls.mode=secret: the kubernetes.io/tls Secret (tls.crt, tls.key, ca.crt) for konstapel-webhook.<namespace>.svc.",
+                  "type": "string",
+                  "anyOf": [
+                    {
+                      "maxLength": 0
+                    },
+                    {
+                      "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+                      "maxLength": 253
+                    }
+                  ]
+                },
+                "caBundle": {
+                  "description": "With tls.mode=secret: the PEM CA bundle the API server uses to verify the webhook certificate.",
+                  "type": "string",
+                  "anyOf": [
+                    {
+                      "maxLength": 0
+                    },
+                    {
+                      "pattern": "-----BEGIN CERTIFICATE-----"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
         "revocationProcessing": {
-          "description": "The one switch for ComplianceException revocation processing (add-self-service-policy-exceptions task 3.6): the controller's gated complianceexceptions update/patch and selfsubjectreviews create grant and --exception-revocation-processing. It is safe only with the fail-closed exception admission webhooks, which this chart does not deploy yet, so true fails the render.",
+          "description": "The one switch for ComplianceException revocation processing (add-self-service-policy-exceptions task 3.6): the controller's gated complianceexceptions update/patch and selfsubjectreviews create grant, its binding and --exception-revocation-processing. Only the fail-closed exception admission webhooks confine the grant, so true needs exceptions.webhooks.enabled.",
           "type": "object",
           "additionalProperties": false,
           "required": [

@@ -1,0 +1,6 @@
+# expect: ok
+exceptions:
+  webhooks:
+    enabled: true
+  revocationProcessing:
+    enabled: true

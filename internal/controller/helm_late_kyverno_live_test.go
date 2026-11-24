@@ -47,6 +47,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -268,6 +269,9 @@ func (l *live) removeKyverno() *kyvernoRelease {
 			t.Errorf("restoring the Kyverno release: %v\n%s", err, out)
 		}
 	})
+	// Kyverno's own webhook configurations before the uninstall: only
+	// these can be its leftovers.
+	before := l.kyvernoWebhookConfigs()
 	if out, err := l.helmStdout(l.ctx, "uninstall", "kyverno", "--namespace", "kyverno", "--wait", "--timeout", "5m"); err != nil {
 		t.Fatalf("uninstall Kyverno: %v\n%s", err, out)
 	}
@@ -277,8 +281,8 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	}
 	// The chart's pre-delete hook removes the admission controller's
 	// webhooks, so no workload request reaches a removed engine. The cleanup
-	// controller's ttl and cleanup webhooks stay behind upstream; they match
-	// only Kyverno's own cleanup resources and labels and are recorded.
+	// controller's ttl and cleanup webhooks stay behind upstream, calling
+	// Services the uninstall removed; they are handled below.
 	var lingering []string
 	l.eventually("Kyverno's APIs and resource webhooks gone", func() (bool, string) {
 		for _, gv := range []string{"policies.kyverno.io/v1", "wgpolicyk8s.io/v1alpha2"} {
@@ -313,8 +317,94 @@ func (l *live) removeKyverno() *kyvernoRelease {
 		}
 		return len(left) == 0, fmt.Sprint(left)
 	})
-	l.record("kyverno-uninstalled", map[string]any{"lingeringWebhooks": lingering})
+	// Those leftovers are this test's to clean up, not to accept: each
+	// configuration that existed before the uninstall (same UID), is
+	// Kyverno's (kyverno- name) and calls only Services that no longer
+	// exist is deleted, and none may remain. Anything else, including a
+	// Kyverno-named configuration that still reaches a Service, is kept.
+	var removed []string
+	l.eventually("Kyverno's broken leftover webhook configurations removed", func() (bool, string) {
+		var left []string
+		for key, w := range l.kyvernoWebhookConfigs() {
+			if was, ok := before[key]; !ok || was.uid != w.uid || !w.broken {
+				continue
+			}
+			uid := w.uid
+			if err := l.c.Delete(l.ctx, w.obj, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+				left = append(left, key+": "+err.Error())
+				continue
+			}
+			removed = append(removed, key)
+		}
+		for key, w := range l.kyvernoWebhookConfigs() {
+			if w.broken {
+				left = append(left, key+" calls "+strings.Join(w.services, ", "))
+			}
+		}
+		return len(left) == 0, fmt.Sprint(left)
+	})
+	slices.Sort(removed)
+	removed = slices.Compact(removed)
+	l.record("kyverno-uninstalled", map[string]any{"lingeringWebhooks": lingering, "removedBrokenWebhooks": removed})
 	return k
+}
+
+// kyvernoWebhook is one Kyverno-named webhook configuration and whether
+// every webhook in it calls a Service that does not exist.
+type kyvernoWebhook struct {
+	obj      client.Object
+	uid      types.UID
+	services []string
+	broken   bool
+}
+
+// kyvernoWebhookConfigs returns the cluster's kyverno- webhook
+// configurations, keyed by kind and name.
+func (l *live) kyvernoWebhookConfigs() map[string]kyvernoWebhook {
+	l.t.Helper()
+	var vwc admissionregistrationv1.ValidatingWebhookConfigurationList
+	var mwc admissionregistrationv1.MutatingWebhookConfigurationList
+	if err := l.c.List(l.ctx, &vwc); err != nil {
+		l.t.Fatal(err)
+	}
+	if err := l.c.List(l.ctx, &mwc); err != nil {
+		l.t.Fatal(err)
+	}
+	out := map[string]kyvernoWebhook{}
+	add := func(kind string, obj client.Object, configs []admissionregistrationv1.WebhookClientConfig) {
+		if !strings.HasPrefix(obj.GetName(), "kyverno-") {
+			return
+		}
+		w := kyvernoWebhook{obj: obj, uid: obj.GetUID(), broken: len(configs) > 0}
+		for _, cc := range configs {
+			if cc.Service == nil {
+				w.broken = false
+				continue
+			}
+			ref := cc.Service.Namespace + "/" + cc.Service.Name
+			w.services = append(w.services, ref)
+			err := l.c.Get(l.ctx, client.ObjectKey{Namespace: cc.Service.Namespace, Name: cc.Service.Name}, &corev1.Service{})
+			if err == nil || !apierrors.IsNotFound(err) {
+				w.broken = false
+			}
+		}
+		out[kind+"/"+obj.GetName()] = w
+	}
+	for i := range vwc.Items {
+		var cc []admissionregistrationv1.WebhookClientConfig
+		for _, h := range vwc.Items[i].Webhooks {
+			cc = append(cc, h.ClientConfig)
+		}
+		add("ValidatingWebhookConfiguration", &vwc.Items[i], cc)
+	}
+	for i := range mwc.Items {
+		var cc []admissionregistrationv1.WebhookClientConfig
+		for _, h := range mwc.Items[i].Webhooks {
+			cc = append(cc, h.ClientConfig)
+		}
+		add("MutatingWebhookConfiguration", &mwc.Items[i], cc)
+	}
+	return out
 }
 
 // install installs the release again and waits until its APIs are served.

@@ -3319,8 +3319,9 @@ Hand-broken checks: a chart Role without `watch` fails step 1, an image whose
 Pinner runs only on the leader fails step 7, and the image without the cache
 mode fix fails step 3.
 
-**Not covered live:** exception admission webhooks (the chart serves none,
-so no admission path on a non-leader exists to test); a profile digest
+**Not covered live:** exception admission webhooks (off by default in the
+chart and not enabled by this test, so no admission path on a non-leader
+exists to test); a profile digest
 upgrade to a different, semantically changed signed bundle (only one signed
 subject exists as a fixture; the revision advance by another manifest digest
 is unit-tested in `internal/bundle/content`); keyless signatures on the

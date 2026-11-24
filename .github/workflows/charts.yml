@@ -88,11 +88,11 @@ jobs:
     needs: freeze
     runs-on: ubuntu-26.04
     # The release groups run one after another, each bounded by its
-    # timeoutMinutes in acceptance-groups.json (charts 50 + monitoring 55 +
-    # availability 45 = 150), plus 15 for setup and the evidence steps and 15
+    # timeoutMinutes in acceptance-groups.json (charts 65 + monitoring 55 +
+    # availability 45 = 165), plus 15 for setup and the evidence steps and 15
     # for the one group that can time out to collect diagnostics and tear down
     # (a failed group stops the run). scripts/ci/test_acceptance.py checks it.
-    timeout-minutes: 180
+    timeout-minutes: 195
     permissions:
       contents: read
       actions: read

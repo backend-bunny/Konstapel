@@ -9,6 +9,10 @@ package controller
 // default installation does, with revocation processing off and without
 // the gated grant: the controller can write no exception (RBAC), records
 // nothing, keeps the finalizer and reports RevocationProcessingDisabled.
+// Then the ServiceAccount is granted update and patch on exceptions by
+// hand, still without the flag: a restarted manager reconciles a new
+// revocation and a deletion and sends, counted on its own transport, no
+// exception write but status and no record.
 // Every later manager runs with --exception-revocation-processing and the
 // gated config/rbac/controller/exception-revocation.yaml bound. A fault
 // transport on the manager's own API connection injects the failures:
@@ -54,6 +58,7 @@ import (
 	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -153,6 +158,9 @@ type historyFaultState struct {
 	denyIdentity bool
 	// posts counts record creates sent, by record name.
 	posts map[string]int
+	// exceptionWrites lists every ComplianceException write the manager
+	// sent other than status, as method and path.
+	exceptionWrites []string
 }
 
 var recordName = regexp.MustCompile(`revocation-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]+`)
@@ -164,6 +172,11 @@ type historyFaultTransport struct {
 
 func (f *historyFaultTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	s := f.state
+	if req.Method != http.MethodGet && req.Method != http.MethodHead && strings.Contains(req.URL.Path, "/complianceexceptions") && !strings.HasSuffix(req.URL.Path, "/status") {
+		s.mu.Lock()
+		s.exceptionWrites = append(s.exceptionWrites, req.Method+" "+req.URL.Path)
+		s.mu.Unlock()
+	}
 	switch {
 	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/namespaces/"+DefaultSnapshotNamespace+"/configmaps") && req.Body != nil:
 		body, err := io.ReadAll(req.Body)
@@ -422,6 +435,70 @@ func TestLiveRevocationHistory(t *testing.T) {
 	}
 	held("processing disabled, later", off)
 	l.record("processing-disabled", map[string]any{"reason": v1alpha1.ReasonRevocationProcessingDisabled, "finalizer": exception.RevocationFinalizer})
+
+	// 0b. Over-granted by hand, processing still off: update and patch on
+	// complianceexceptions bound to the controller ServiceAccount without
+	// the flag. Without the flag the webhook does not restrict the
+	// controller identity, so only the runtime gate keeps the grant
+	// unused: a restarted manager reconciles a new revocation and a
+	// deletion, and sends no ComplianceException write but status, and no
+	// record. The grant itself stays usable by anyone acting as the
+	// ServiceAccount until it is unbound; the gate cannot revoke it.
+	stop()
+	overgrant := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "exc-history-overgrant"},
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: []string{"complianceexceptions"}, Verbs: []string{"update", "patch"}}}}
+	overgrantBinding := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "exc-history-overgrant"},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: overgrant.Name}, Subjects: []rbacv1.Subject{sa}}
+	for _, o := range []client.Object{overgrant, overgrantBinding} {
+		if err := l.c.Create(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = l.c.Delete(context.Background(), o) })
+	}
+	l.eventually("the controller ServiceAccount over-granted", func() (bool, string) {
+		sar := &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{User: controllerServiceAccount, Groups: controllerGroups,
+			ResourceAttributes: &authorizationv1.ResourceAttributes{Namespace: ns, Group: v1alpha1.GroupVersion.Group, Version: "v1alpha1", Resource: "complianceexceptions", Verb: "patch", Name: off.Name}}}
+		if err := l.c.Create(l.ctx, sar); err != nil {
+			return false, err.Error()
+		}
+		return sar.Status.Allowed, sar.Status.Reason
+	})
+	setFault(func(s *historyFaultState) { s.exceptionWrites = nil })
+	running = start("eh-manager-0b", false)
+	l.eventually("manager elected", func() (bool, string) { return running.elected(), "" })
+	serving("exception webhook serving, over-granted")
+	over := create(alice, newEx(ns, "overgranted"))
+	l.settled(ns, over.Name)
+	over = revoke(dave, over)
+	condition(over, v1alpha1.ReasonRevocationProcessingDisabled)
+	cur = l.exception(ns, over.Name)
+	if err := alice.Delete(l.ctx, cur, client.Preconditions{UID: &cur.UID, ResourceVersion: &cur.ResourceVersion}); err != nil {
+		t.Fatal(err)
+	}
+	// The deletion and two retry intervals' worth of reconciles.
+	time.Sleep(2 * historyRetry)
+	if cur = held("over-granted, deleted", over); cur.DeletionTimestamp == nil {
+		t.Fatal("the deletion of the over-granted exception was not recorded")
+	}
+	held("over-granted, earlier revocation", off)
+	faults.mu.Lock()
+	writes := slices.Clone(faults.exceptionWrites)
+	faults.mu.Unlock()
+	if len(writes) != 0 {
+		t.Fatalf("with processing off and the ServiceAccount over-granted, the manager wrote exceptions: %v", writes)
+	}
+	for _, e := range []*v1alpha1.ComplianceException{off, over} {
+		if name := exception.RevocationRecordName(e.UID, 1); posts(name) != 0 || l.snapshotConfigMap(name) != nil {
+			t.Fatalf("a revocation record %s was written with processing off", name)
+		}
+	}
+	stop()
+	for _, o := range []client.Object{overgrantBinding, overgrant} {
+		if err := l.c.Delete(l.ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.record("processing-disabled-overgranted", map[string]any{"grant": overgrant.Rules, "exceptionWrites": len(writes), "records": 0})
 
 	// Enabling, in the documented order: the webhooks are registered and
 	// fail closed (above), then the gated grant, then the flag. The held

@@ -188,12 +188,36 @@ that both webhook configurations exist, use `failurePolicy: Fail`, intercept
 create and update of exceptions, and have no selectors or match conditions. Off
 or unverified, it writes and releases nothing, and the `RevocationRecorded`
 condition says why (`RevocationProcessingDisabled`, `RevocationProtectionUnverified`);
-the annotation remains the intent's only copy and the finalizer keeps it. The
-runtime chart cannot deploy the exception webhooks yet, so its single switch,
-`exceptions.revocationProcessing.enabled`, defaults to off and fails the render
-when on. Outside the chart, enabling registers the webhooks first, then binds the
-grant, then sets the flag; disabling reverses that order. Deploying the webhooks
-from the chart is a separate decision.
+the annotation remains the intent's only copy and the finalizer keeps it.
+Outside the chart, enabling registers the webhooks first, then binds the
+grant, then sets the flag; disabling reverses that order.
+
+The runtime chart deploys the webhooks as an explicit opt-in (owner decision
+2026-11-24): `exceptions.webhooks.enabled`, off by default, renders both
+configurations from `config/webhook/exceptions.yaml` unchanged (fail closed,
+no selectors or match conditions), the `konstapel-webhook` Service, the
+serving certificate in either chart TLS mode (cert-manager CA injection or an
+operator Secret and `caBundle`) and `--webhook-cert-dir` on every replica,
+whose readiness includes the webhook check. Deploying them enables no native
+Kyverno exception grant; that keeps its own upstream gate (§5).
+`exceptions.revocationProcessing.enabled`, also off, is accepted only together
+with the webhooks: it renders the gated ClusterRole, its binding and the flag,
+and fails the render alone. Helm applies kinds in a fixed order (bindings
+before webhook configurations on install and upgrade, webhook configurations
+first on uninstall) and the charts use no hooks, so the chart cannot order the
+grant after its protection within one release. The documented two-step
+upgrade (webhooks, then processing; disable in reverse, and before uninstall)
+does, and the controller's per-attempt protection check keeps its own writes
+fail-closed in the remaining windows.
+
+The flag is also enforced in the controller at runtime: without it the
+exception reconciler is built with no revocation writer, and its client
+refuses every exception write other than status, and every revocation record,
+before sending it. So a ServiceAccount over-granted by hand still sees no
+exception write from the controller. This governs the controller process
+only. It cannot revoke a grant bound by hand, and without the flag the
+webhook does not restrict the controller identity, so RBAC and admission
+remain the authorization controls.
 
 The snapshot copies the contribution set protected at acceptance admission.
 Reconciliation must never resolve a replacement set silently. New policy/configuration revisions,

@@ -2,6 +2,7 @@ package charttest
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -270,28 +271,48 @@ func TestRuntimeChartControllerLeaseAccess(t *testing.T) {
 
 // Until the exception owner's native grant path and its capability gate
 // land, the runtime chart cannot activate an exception grant
-// (add-helm-oci-distribution 4.3, docs/charts.md "Exception admission"):
-// no rendered role lets any subject touch native Kyverno PolicyExceptions,
-// no admission webhook is registered, and the controller serves none. In
-// every supported configuration, so a missing exception prerequisite cannot
-// be bypassed through chart values.
+// (add-helm-oci-distribution 4.3, docs/charts.md "Exception admission
+// webhooks"): no rendered role lets any subject touch native Kyverno
+// PolicyExceptions, in every supported configuration, the exception
+// webhooks and revocation processing included, so a missing exception
+// prerequisite cannot be bypassed through chart values. Without
+// exceptions.webhooks.enabled no admission webhook is registered and the
+// controller serves none; with it, only the two ComplianceException
+// webhooks are, and they intercept complianceexceptions alone.
 func TestRuntimeChartCannotActivateNativeExceptions(t *testing.T) {
-	for name, set := range map[string][]string{
-		"defaults":     nil,
-		"bundles on":   {"bundles.sourcesConfigMap=" + sourcesCM, "bundles.referencedConfigMaps={registry-ca}", "bundles.referencedSecrets={registry-cred,org-key}"},
-		"metrics on":   {"metrics.enabled=true", "metrics.readers[0].namespace=monitoring", "metrics.readers[0].name=prometheus-k8s"},
-		"operator TLS": {"tls.mode=secret", "tls.secret.name=konstapel-tls"},
-		"one replica":  {"replicaCount=1"},
+	for name, c := range map[string]struct {
+		set      []string
+		webhooks bool
+	}{
+		"defaults":              {},
+		"bundles on":            {set: []string{"bundles.sourcesConfigMap=" + sourcesCM, "bundles.referencedConfigMaps={registry-ca}", "bundles.referencedSecrets={registry-cred,org-key}"}},
+		"metrics on":            {set: []string{"metrics.enabled=true", "metrics.readers[0].namespace=monitoring", "metrics.readers[0].name=prometheus-k8s"}},
+		"operator TLS":          {set: []string{"tls.mode=secret", "tls.secret.name=konstapel-tls"}},
+		"one replica":           {set: []string{"replicaCount=1"}},
+		"exception webhooks":    {set: []string{"exceptions.webhooks.enabled=true"}, webhooks: true},
+		"revocation processing": {set: []string{"exceptions.webhooks.enabled=true", "exceptions.revocationProcessing.enabled=true"}, webhooks: true},
+		"operator TLS with revocation processing": {set: append([]string{"tls.mode=secret", "tls.secret.name=konstapel-tls"}, operatorWebhookTLS...), webhooks: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)
+			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, c.set...)...)
 			if err != nil {
 				t.Fatal(out)
 			}
+			registered := 0
 			for _, d := range docs {
 				switch d["kind"] {
 				case "MutatingWebhookConfiguration", "ValidatingWebhookConfiguration":
-					t.Errorf("%s %v registered before exception prerequisites", d["kind"], metadata(d)["name"])
+					if !c.webhooks || metadata(d)["name"] != "konstapel-exception-acceptance" {
+						t.Errorf("%s %v registered before exception prerequisites", d["kind"], metadata(d)["name"])
+					}
+					registered++
+					for _, w := range at(d, "webhooks").([]any) {
+						for _, r := range at(w, "rules").([]any) {
+							if !reflect.DeepEqual(at(r, "apiGroups"), any([]any{"compliance.erenius.io"})) || !reflect.DeepEqual(at(r, "resources"), any([]any{"complianceexceptions"})) {
+								t.Errorf("%s %v intercepts %v %v", d["kind"], metadata(d)["name"], at(r, "apiGroups"), at(r, "resources"))
+							}
+						}
+					}
 				case "Role", "ClusterRole":
 					rules, _ := d["rules"].([]any)
 					for _, r := range rules {
@@ -305,27 +326,42 @@ func TestRuntimeChartCannotActivateNativeExceptions(t *testing.T) {
 						}
 					}
 				case "Deployment":
-					for _, c := range at(d, "spec", "template", "spec", "containers").([]any) {
-						for _, a := range at(c, "args").([]any) {
-							if strings.HasPrefix(a.(string), "--webhook-") {
+					for _, ctr := range at(d, "spec", "template", "spec", "containers").([]any) {
+						for _, a := range at(ctr, "args").([]any) {
+							if strings.HasPrefix(a.(string), "--webhook-") && (!c.webhooks || metadata(d)["name"] != "konstapel-controller") {
 								t.Errorf("Deployment %v serves admission webhooks: %s", metadata(d)["name"], a)
+							}
+							if strings.Contains(strings.ToLower(a.(string)), "policyexception") || strings.Contains(a.(string), "native") {
+								t.Errorf("Deployment %v configures native exceptions: %s", metadata(d)["name"], a)
 							}
 						}
 					}
 				}
 			}
+			if want := map[bool]int{false: 0, true: 2}[c.webhooks]; registered != want {
+				t.Errorf("%d webhook configurations, want %d", registered, want)
+			}
 		})
 	}
 }
 
+// operatorWebhookTLS is the operator-managed webhook TLS for tls.mode=secret.
+var operatorWebhookTLS = []string{"exceptions.webhooks.enabled=true", "exceptions.revocationProcessing.enabled=true",
+	"exceptions.webhooks.tls.secretName=konstapel-webhook-tls", "exceptions.webhooks.tls.caBundle=" + fixtureCA}
+
+// fixtureCA is a placeholder PEM bundle; the render only copies it.
+const fixtureCA = "-----BEGIN CERTIFICATE-----\nMIIBfixture\n-----END CERTIFICATE-----\n"
+
 // Exception revocation processing (add-self-service-policy-exceptions task
-// 3.6, docs/charts.md "Exception revocation processing") is one switch,
+// 3.6, docs/charts.md "Exception admission webhooks") is one switch,
 // exceptions.revocationProcessing.enabled, off by default. Its grant lets
 // the controller update exceptions, which only the fail-closed exception
-// webhooks confine; the chart cannot deploy those yet. So no supported
-// configuration renders the grant, its identity lookup, its webhook-config
-// reads or the controller flag, and turning the switch on fails the render
-// in every configuration, before anything is applied.
+// webhooks confine. So no configuration without it renders the grant, its
+// identity lookup, its webhook-config reads or the controller flag, the
+// webhooks alone included; turning it on without exceptions.webhooks.enabled
+// fails the render in every configuration, before anything is applied; and
+// turning it on with them adds exactly the gated ClusterRole's rules, its
+// binding and the flag, nothing more.
 func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
 	configs := map[string][]string{
 		"defaults":         nil,
@@ -335,7 +371,34 @@ func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
 		"operator TLS":     {"tls.mode=secret", "tls.secret.name=konstapel-tls"},
 		"one replica":      {"replicaCount=1"},
 	}
-	for name, set := range configs {
+	gatedGrants := []grant{
+		{"team-a", "compliance.erenius.io/complianceexceptions", "update", "priv"},
+		{"team-a", "compliance.erenius.io/complianceexceptions", "patch", "priv"},
+		{"", "authentication.k8s.io/selfsubjectreviews", "create", ""},
+		{"", "admissionregistration.k8s.io/validatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+		{"", "admissionregistration.k8s.io/mutatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+	}
+	revocationArgs := func(docs []map[string]any) []string {
+		var out []string
+		for _, d := range docs {
+			if d["kind"] != "Deployment" {
+				continue
+			}
+			for _, c := range at(d, "spec", "template", "spec", "containers").([]any) {
+				for _, a := range at(c, "args").([]any) {
+					if strings.HasPrefix(a.(string), "--exception-revocation") {
+						out = append(out, fmt.Sprintf("%v: %s", metadata(d)["name"], a))
+					}
+				}
+			}
+		}
+		return out
+	}
+	disabled := maps.Clone(configs)
+	disabled["webhooks only"] = []string{"exceptions.webhooks.enabled=true"}
+	disabled["webhooks only, operator TLS"] = []string{"tls.mode=secret", "tls.secret.name=konstapel-tls", "exceptions.webhooks.enabled=true",
+		"exceptions.webhooks.tls.secretName=konstapel-webhook-tls", "exceptions.webhooks.tls.caBundle=" + fixtureCA}
+	for name, set := range disabled {
 		t.Run(name, func(t *testing.T) {
 			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)
 			if err != nil {
@@ -347,11 +410,7 @@ func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
 					t.Errorf("the controller may %s complianceexceptions", verb)
 				}
 			}
-			for _, q := range []grant{
-				{"", "authentication.k8s.io/selfsubjectreviews", "create", ""},
-				{"", "admissionregistration.k8s.io/validatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
-				{"", "admissionregistration.k8s.io/mutatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
-			} {
+			for _, q := range gatedGrants[2:] {
 				if allowed(gs, q.ns, q.resource, q.verb, q.name) {
 					t.Errorf("the controller is granted %s without revocation processing", q)
 				}
@@ -361,20 +420,11 @@ func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
 				!allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions/status", "update", "priv") {
 				t.Error("the controller lost its exception read or status write")
 			}
-			if find(docs, "ClusterRole", "konstapel-controller-exception-revocation") != nil {
-				t.Error("the gated revocation ClusterRole is rendered")
+			if find(docs, "ClusterRole", "konstapel-controller-exception-revocation") != nil || find(docs, "ClusterRoleBinding", "konstapel-controller-exception-revocation") != nil {
+				t.Error("the gated revocation ClusterRole or its binding is rendered")
 			}
-			for _, d := range docs {
-				if d["kind"] != "Deployment" {
-					continue
-				}
-				for _, c := range at(d, "spec", "template", "spec", "containers").([]any) {
-					for _, a := range at(c, "args").([]any) {
-						if strings.HasPrefix(a.(string), "--exception-revocation") {
-							t.Errorf("Deployment %v enables revocation processing: %s", metadata(d)["name"], a)
-						}
-					}
-				}
+			if a := revocationArgs(docs); len(a) != 0 {
+				t.Errorf("revocation processing enabled: %v", a)
 			}
 		})
 	}
@@ -382,10 +432,60 @@ func TestRuntimeChartExceptionRevocationGated(t *testing.T) {
 		if name == "explicitly false" {
 			continue
 		}
-		t.Run("enabled with "+name, func(t *testing.T) {
+		t.Run("enabled without webhooks, "+name, func(t *testing.T) {
 			_, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest, "exceptions.revocationProcessing.enabled=true"}, set...)...)
-			if err == nil || !strings.Contains(out, "exceptions.revocationProcessing.enabled cannot be enabled until the chart can deploy the ComplianceException admission webhooks") {
+			if err == nil || !strings.Contains(out, "exceptions.revocationProcessing.enabled needs exceptions.webhooks.enabled") {
 				t.Fatalf("enabled without exception webhooks rendered: %v\n%s", err, out)
+			}
+		})
+		t.Run("enabled with webhooks, "+name, func(t *testing.T) {
+			set := append([]string{"image.digest=" + digest, "exceptions.webhooks.enabled=true", "exceptions.revocationProcessing.enabled=true"}, set...)
+			if slices.Contains(set, "tls.mode=secret") {
+				set = append(set, operatorWebhookTLS...)
+			}
+			docs, out, err := render(t, controllerNS, set...)
+			if err != nil {
+				t.Fatal(out)
+			}
+			base, _, err := render(t, controllerNS, slices.DeleteFunc(slices.Clone(set), func(s string) bool { return strings.HasPrefix(s, "exceptions.revocationProcessing.") })...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gs, before := controllerGrants(t, docs), controllerGrants(t, base)
+			var added []grant
+			for _, g := range gs {
+				if !slices.Contains(before, g) {
+					added = append(added, g)
+				}
+			}
+			for _, q := range gatedGrants {
+				if !allowed(gs, q.ns, q.resource, q.verb, q.name) {
+					t.Errorf("the gated grant lacks %s", q)
+				}
+			}
+			// Exactly the gated ClusterRole, cluster-wide.
+			want := []grant{
+				{"", "admissionregistration.k8s.io/mutatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+				{"", "admissionregistration.k8s.io/validatingwebhookconfigurations", "get", "konstapel-exception-acceptance"},
+				{"", "authentication.k8s.io/selfsubjectreviews", "create", ""},
+				{"", "compliance.erenius.io/complianceexceptions", "patch", ""},
+				{"", "compliance.erenius.io/complianceexceptions", "update", ""},
+			}
+			sort.Slice(added, func(i, j int) bool { return added[i].String() < added[j].String() })
+			if !reflect.DeepEqual(added, want) {
+				t.Errorf("revocation processing adds %v, want exactly the gated ClusterRole %v", added, want)
+			}
+			for _, verb := range []string{"create", "delete", "deletecollection"} {
+				if allowed(gs, "team-a", "compliance.erenius.io/complianceexceptions", verb, "") {
+					t.Errorf("the controller may %s complianceexceptions", verb)
+				}
+			}
+			b := find(docs, "ClusterRoleBinding", "konstapel-controller-exception-revocation")
+			if b == nil || at(b, "roleRef", "name") != "konstapel-controller-exception-revocation" || at(b, "subjects", 0, "name") != "konstapel-controller" {
+				t.Errorf("gated binding %v", b)
+			}
+			if a := revocationArgs(docs); !reflect.DeepEqual(a, []string{"konstapel-controller: --exception-revocation-processing"}) {
+				t.Errorf("revocation flag %v", a)
 			}
 		})
 	}

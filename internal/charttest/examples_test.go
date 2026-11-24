@@ -66,6 +66,23 @@ func TestDocumentedExamples(t *testing.T) {
 				t.Errorf("bundles not enabled: %v", args)
 			}
 		},
+		"exception-webhooks.yaml": func(t *testing.T, docs []map[string]any) {
+			m, v := webhookConfigs(t, docs)
+			if m == nil || v == nil || find(docs, "Service", "konstapel-webhook") == nil || find(docs, "Certificate", "konstapel-webhook") == nil {
+				t.Error("the exception webhooks, their Service or certificate are not rendered")
+			}
+			if find(docs, "ClusterRoleBinding", "konstapel-controller-exception-revocation") != nil {
+				t.Error("step 1 binds the revocation grant")
+			}
+		},
+		"exception-revocation.yaml": func(t *testing.T, docs []map[string]any) {
+			m, v := webhookConfigs(t, docs)
+			args := at(find(docs, "Deployment", "konstapel-controller"), "spec", "template", "spec", "containers", 0, "args").([]any)
+			if m == nil || v == nil || find(docs, "ClusterRoleBinding", "konstapel-controller-exception-revocation") == nil ||
+				!slices.Contains(args, any("--exception-revocation-processing")) {
+				t.Error("step 2 lacks the webhooks, the revocation grant or the flag")
+			}
+		},
 		"development.yaml": func(t *testing.T, docs []map[string]any) {
 			for _, name := range []string{"konstapel-controller", "konstapel-download"} {
 				if r := at(find(docs, "Deployment", name), "spec", "replicas"); r != float64(1) && r != 1 {

@@ -1,8 +1,8 @@
 # Gated controller grant for exception revocation processing
 # (add-self-service-policy-exceptions task 3.6). It is NOT part of the
-# default installation, and the runtime chart refuses to render it
-# (exceptions.revocationProcessing.enabled) until it can deploy the exception
-# admission webhooks.
+# default installation. The runtime chart renders and binds it, unchanged,
+# only with exceptions.revocationProcessing.enabled, which it accepts only
+# together with the exception admission webhooks (exceptions.webhooks.enabled).
 #
 # Bind it to the controller ServiceAccount (konstapel-system/
 # konstapel-controller) with a ClusterRoleBinding only together with

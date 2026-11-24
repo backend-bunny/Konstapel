@@ -1,0 +1,46 @@
+{{- /*
+ComplianceException admission webhooks (docs/charts.md, "Exception admission
+webhooks"), off by default. The configurations are config/webhook/exceptions.yaml
+unchanged (generated-webhook-exceptions.yaml), with the chart's labels and the
+CA for this TLS mode added: cert-manager's CA injection, or the operator's
+caBundle. Every controller replica serves them through konstapel-webhook.
+*/ -}}
+{{- if .Values.exceptions.webhooks.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: konstapel-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: ClusterIP
+  # Only ready replicas (a verified, unexpired webhook certificate on a
+  # started server) receive admission requests.
+  selector:
+    {{- include "konstapel.controllerSelector" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: webhook
+{{- range $doc := regexSplit "(?m)^---[ \\t]*$" (include "konstapel.generated.exceptionWebhooks" .) -1 }}
+{{- $o := fromYaml $doc }}
+{{- if $o.Error }}
+{{- fail (printf "config/webhook/exceptions.yaml: %s" $o.Error) }}
+{{- end }}
+{{- if $o }}
+{{- $meta := $o.metadata }}
+{{- $_ := set $meta "labels" (include "konstapel.labels" $ | fromYaml) }}
+{{- if eq $.Values.tls.mode "certManager" }}
+{{- $_ := set $meta "annotations" (dict "cert-manager.io/inject-ca-from" (printf "%s/konstapel-webhook" $.Release.Namespace)) }}
+{{- else }}
+{{- range $w := $o.webhooks }}
+{{- $_ := set $w.clientConfig "caBundle" ($.Values.exceptions.webhooks.tls.caBundle | b64enc) }}
+{{- end }}
+{{- end }}
+---
+{{ toYaml $o }}
+{{- end }}
+{{- end }}
+{{- end }}

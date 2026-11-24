@@ -1,4 +1,4 @@
-{{- if and (or .Values.download.enabled .Values.metrics.enabled) (eq .Values.tls.mode "certManager") }}
+{{- if and (or .Values.download.enabled .Values.metrics.enabled .Values.exceptions.webhooks.enabled) (eq .Values.tls.mode "certManager") }}
 {{- $issuer := (.Values.tls.certManager | default dict).issuerRef | default dict }}
 {{- if not $issuer.name }}
 # Without a platform issuer, the chart issues from its own self-signed CA.
@@ -89,6 +89,40 @@ spec:
     - konstapel-controller-metrics
     - konstapel-controller-metrics.{{ .Release.Namespace }}
     - konstapel-controller-metrics.{{ .Release.Namespace }}.svc
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [server auth, digital signature, key encipherment]
+  issuerRef:
+    {{- if $issuer.name }}
+    name: {{ $issuer.name }}
+    kind: {{ $issuer.kind }}
+    group: cert-manager.io
+    {{- else }}
+    name: konstapel-ca
+    kind: Issuer
+    group: cert-manager.io
+    {{- end }}
+{{- end }}
+{{- if .Values.exceptions.webhooks.enabled }}
+---
+# The exception webhook certificate. cert-manager's CA injector copies the
+# issuing CA (this Secret's ca.crt) into both webhook configurations'
+# caBundle (cert-manager.io/inject-ca-from).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: konstapel-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+spec:
+  secretName: konstapel-webhook-tls
+  dnsNames:
+    - konstapel-webhook
+    - konstapel-webhook.{{ .Release.Namespace }}
+    - konstapel-webhook.{{ .Release.Namespace }}.svc
   privateKey:
     algorithm: ECDSA
     size: 256

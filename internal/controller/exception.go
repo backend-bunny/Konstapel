@@ -50,8 +50,11 @@ const (
 // --exception-revocation-processing). Processing writes revocation records
 // and releases RevocationFinalizer, which needs the gated controller grant
 // (config/rbac/controller/exception-revocation.yaml) and the exception
-// admission webhooks that confine it. It is off by default: the runtime
-// chart cannot deploy those webhooks yet.
+// admission webhooks that confine it. It is off by default; the runtime
+// chart turns it on only together with the webhooks
+// (exceptions.revocationProcessing.enabled needs exceptions.webhooks.enabled).
+// Off, the reconciler is built by newExceptionReconciler without a
+// revocation writer at all.
 type RevocationGate struct {
 	// Enabled turns processing on.
 	Enabled bool
@@ -180,7 +183,7 @@ func (r *ExceptionReconciler) revocationHistory(ctx context.Context, ex *v1alpha
 			return c, 0
 		}
 		return cond(metav1.ConditionFalse, v1alpha1.ReasonRevocationProcessingDisabled,
-			"revocation processing is disabled (--exception-revocation-processing is off, the default until the chart can deploy the exception admission webhooks): the revocation is recorded only on this resource and the "+
+			"revocation processing is disabled (--exception-revocation-processing is off, the default; the chart sets it only with exceptions.revocationProcessing.enabled and the exception admission webhooks): the revocation is recorded only on this resource and the "+
 				exception.RevocationFinalizer+" finalizer stays, so a deletion stays pending and a renewal of this revision is rejected; create a new ComplianceException for a new acceptance (docs/integration/policy-exceptions.md, \"Revocation processing\")"), 0
 	}
 	if err := r.protected(ctx); err != nil {
@@ -337,15 +340,29 @@ func setupExceptions(mgr manager.Manager, namespace string, revocation bool) err
 	if namespace == "" {
 		namespace = DefaultSnapshotNamespace
 	}
+	gate := RevocationGate{Enabled: revocation, Protected: func(ctx context.Context) error {
+		return exception.VerifyProtection(ctx, mgr.GetAPIReader())
+	}}
 	return builder.ControllerManagedBy(mgr).Named("complianceexception").
 		// Spec changes (renewals), the admission records (annotations) and
 		// any change while the revocation finalizer is held, deletion
 		// included, matter; other status updates do not.
 		For(&v1alpha1.ComplianceException{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}, revocationPending))).
-		Complete(&ExceptionReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace,
-			Revocation: RevocationGate{Enabled: revocation, Protected: func(ctx context.Context) error {
-				return exception.VerifyProtection(ctx, mgr.GetAPIReader())
-			}}})
+		Complete(newExceptionReconciler(mgr.GetClient(), mgr.GetAPIReader(), namespace, gate))
+}
+
+// newExceptionReconciler builds the exception reconciler. With revocation
+// processing off it starts no revocation writer: its client is wrapped in
+// exceptionWriteGuard, which refuses, before anything is sent, every
+// ComplianceException write other than status and every revocation record,
+// and the gate is the disabled zero value with no protection check. So a
+// controller ServiceAccount manually granted update or patch on
+// complianceexceptions still sees no exception write from this process.
+func newExceptionReconciler(c client.Client, reader client.Reader, namespace string, gate RevocationGate) *ExceptionReconciler {
+	if !gate.Enabled {
+		c, gate = exceptionWriteGuard{c}, RevocationGate{}
+	}
+	return &ExceptionReconciler{Client: c, Reader: reader, Namespace: namespace, Revocation: gate}
 }
 
 // revocationPending passes updates of exceptions that still hold the

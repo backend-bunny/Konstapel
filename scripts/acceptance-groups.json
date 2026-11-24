@@ -70,14 +70,15 @@
     "image": true,
     "certManager": true,
     "release": true,
-    "timeoutMinutes": 50,
+    "timeoutMinutes": 65,
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall",
       "TestLiveHelmLateKyverno",
       "TestLiveHelmBundles",
       "TestLiveHelmMetrics",
-      "TestLiveHelmSupportingEvidence"
+      "TestLiveHelmSupportingEvidence",
+      "TestLiveHelmExceptionWebhooks"
     ]
   },
   "monitoring": {

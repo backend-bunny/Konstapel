@@ -1,9 +1,12 @@
 # Self-service policy exceptions
 
-Status: **not enabled.** This page tracks the work under the
-`add-self-service-policy-exceptions` change. Native Kyverno exception support
-stays disabled for Konstapel until the engine expiry gate below passes (design
-§5).
+Status: **native exceptions not enabled.** This page tracks the work under
+the `add-self-service-policy-exceptions` change. Native Kyverno exception
+support stays disabled for Konstapel until the engine expiry gate below passes
+(design §5). The runtime chart can deploy the acceptance webhooks and
+revocation processing, both off by default
+([charts](../charts.md#exception-admission-webhooks)); neither enables a
+native grant.
 
 ## ComplianceException API
 
@@ -40,7 +43,7 @@ Konstapel grants nothing for it.
 | --- | --- |
 | Application team: ClusterRole `konstapel-exception-editor` (`config/rbac/exception-editor.yaml`), bound with a **RoleBinding in the team's namespace** | get, list, watch, create, update, patch and delete on `complianceexceptions` in that namespace; read-only status. Nothing else. |
 | Konstapel controller: generated `konstapel-controller` ClusterRole | Reads exceptions; the only identity that writes `complianceexceptions/status`. It cannot create, update, patch or delete an exception. |
-| Konstapel controller, only with [revocation processing](#revocation-processing): gated ClusterRole `konstapel-controller-exception-revocation` (`config/rbac/controller/exception-revocation.yaml`) | `update`/`patch` on `complianceexceptions`, only to release the revocation finalizer once the revocation is recorded independently ([Revocation records](#revocation-records)); `create` on `selfsubjectreviews` to learn its identity; `get` on the two `konstapel-exception-acceptance` webhook configurations. The validating webhook rejects any other change it sends, so it cannot accept, renew, revoke or reactivate one. Not part of the default installation, and the chart refuses to render it. |
+| Konstapel controller, only with [revocation processing](#revocation-processing): gated ClusterRole `konstapel-controller-exception-revocation` (`config/rbac/controller/exception-revocation.yaml`) | `update`/`patch` on `complianceexceptions`, only to release the revocation finalizer once the revocation is recorded independently ([Revocation records](#revocation-records)); `create` on `selfsubjectreviews` to learn its identity; `get` on the two `konstapel-exception-acceptance` webhook configurations. The validating webhook rejects any other change it sends, so it cannot accept, renew, revoke or reactivate one. Not part of the default installation. The chart renders and binds it only with `exceptions.revocationProcessing.enabled`, which needs `exceptions.webhooks.enabled`. |
 | Platform administrators: `konstapel-compliance-admin` | Central profiles and bindings. Does not write exceptions on a team's behalf. |
 
 The editor role is not aggregated into the built-in `admin`/`edit` roles:
@@ -69,9 +72,12 @@ Two Konstapel webhooks (`config/webhook/exceptions.yaml`) authenticate every
 acceptance. The controller serves both on every replica when it is started with
 `--webhook-cert-dir` (a directory holding `tls.crt` and `tls.key`;
 `--webhook-port`, default 9443). The deployment provides the
-`konstapel-system/konstapel-webhook` Service and the `caBundle`: by default
-cert-manager, otherwise an operator-managed CA (add-helm-oci-distribution).
-Both webhooks use `failurePolicy: Fail` and `sideEffects: None`.
+`konstapel-system/konstapel-webhook` Service and the `caBundle`. The runtime
+chart does both with `exceptions.webhooks.enabled`: cert-manager's CA
+injection by default, otherwise an operator-managed CA
+([charts](../charts.md#exception-admission-webhooks)). Both webhooks use
+`failurePolicy: Fail` and `sideEffects: None`, so while they are registered
+no exception can be created or updated unless a ready replica admits it.
 
 On **creation** and on an **explicit renewal** (`spec.acceptanceRevision` + 1),
 the mutating webhook writes the protected annotation
@@ -226,19 +232,20 @@ or ticket belongs in `claimed-by`, which is kept as an unverified claim.
 
 Revocation processing writes the [revocation records](#revocation-records)
 and releases the `compliance.erenius.io/revocation-history` finalizer
-(task 3.6). It is **off by default**, and the runtime chart cannot turn it
-on yet.
+(task 3.6). It is **off by default**.
 
 Releasing the finalizer means the controller must be allowed to update
 exceptions. Only the validating exception webhook keeps that grant from
 being a general exception write: it confines the controller identity to
 releasing the finalizer, and only once the record is durable. So the grant,
 the identity lookup and the processing belong together, and they are safe
-only while the exception webhooks are registered and fail closed. The chart
-ships the `ComplianceException` CRD and the editor role, but it doesn't
-deploy the exception webhooks, so it can't provide that protection. Its one
-switch, `exceptions.revocationProcessing.enabled`, defaults to `false`, and
-`true` fails the render ([charts](../charts.md#exception-revocation-processing)).
+only while the exception webhooks are registered and fail closed. The
+runtime chart's switch, `exceptions.revocationProcessing.enabled`, renders the
+grant, its binding and the flag together, and only together with the
+webhooks (`exceptions.webhooks.enabled`): it fails the render without them.
+Enable the webhooks in one upgrade and processing in the next, and disable in
+reverse. [Charts](../charts.md#exception-revocation-processing) explains what
+Helm's apply order guarantees for each path and what it doesn't.
 
 **While processing is off**, a revocation is still admitted and recorded on
 the resource with its finalizer ([Revocation record](#revocation-record)).
@@ -259,7 +266,8 @@ enabling processing later records every held revocation and releases it.
 
 **To enable it** outside the chart (the non-chart test harness does this,
 and so can an operator who deploys the webhooks themselves), keep this order,
-so that the grant never becomes usable before its protection exists:
+so that the grant never becomes usable before its protection exists. The
+chart's two-step upgrade applies the same order:
 
 1. Serve the webhooks: run every controller replica with `--webhook-cert-dir`
    and provide the `konstapel-system/konstapel-webhook` Service and
@@ -288,6 +296,18 @@ identity. A request that reaches it before then is denied with
 `ControllerIdentityUnknown`, from any identity, until a lookup succeeds:
 the webhook can't tell the controller from anyone else, so it never lets the
 controller's request through as an application's.
+
+**Without the flag** the controller starts no revocation writer. Its
+exception reconciler's client refuses, before sending anything, every
+`ComplianceException` write other than status, and every revocation record.
+That holds even if its ServiceAccount was granted `update` or `patch` on
+exceptions by hand. `TestRevocationDisabledSendsNoExceptionWrite`,
+`TestLiveRevocationHistory` (counted on the manager's transport) and
+`TestLiveHelmExceptionWebhooks` (counted by the API server) check it. This
+only governs the controller process. It can't revoke a permission someone
+bound to the ServiceAccount, and it doesn't stop another process using that
+identity. Without the flag the webhook doesn't restrict the controller
+identity either. RBAC and admission remain the authorization controls.
 
 **To disable it**, reverse the order, so that the grant never outlives its
 protection:

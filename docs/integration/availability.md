@@ -819,9 +819,10 @@ disposable cluster and checks four things:
 
 ## Not yet available
 
-- Chart deployment of the exception admission webhooks, and native exception
-  grants, which wait for an upstream Kyverno release
-  (add-self-service-policy-exceptions).
+- Native exception grants, which wait for an upstream Kyverno release
+  (add-self-service-policy-exceptions). The chart deploys the exception
+  admission webhooks as an opt-in, served by every replica
+  ([charts](../charts.md#exception-admission-webhooks)).
 - HA validation of native exception grants: native exception support is not
   HA-validated until add-self-service-policy-exceptions task 6.4 (failover and
   leadership changes against delivered grants) passes.

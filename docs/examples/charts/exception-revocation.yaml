@@ -1,0 +1,10 @@
+# Step 2, in a later upgrade once step 1's webhooks are registered and
+# served: revocation processing, with the gated
+# konstapel-controller-exception-revocation grant and
+# --exception-revocation-processing. Disable in reverse: this file's
+# revocationProcessing first, then the webhooks.
+exceptions:
+  webhooks:
+    enabled: true
+  revocationProcessing:
+    enabled: true
