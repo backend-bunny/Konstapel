@@ -1,5 +1,16 @@
 # Design
 
+## External-provider follow-up
+
+The approved `add-external-assessment-providers` change consumes these shared
+interfaces and adds separately Helm-installed provider services, OCI distribution,
+a versioned remote protocol and an optional explicit scan-request capability.
+This foundation remains in-tree and read-only: its collection, Generate and
+GetResults paths never initiate scans. Completed work and current Kyverno behavior
+remain unchanged. External registration and scan execution are follow-up scope,
+not requirements to finish or archive this foundation. Coordinate capture and
+evaluation compatibility at handoff; production Prowler/AWS scope remains separate.
+
 ## Context
 
 See proposal.md for motivation and scope. The existing seams are concrete:
