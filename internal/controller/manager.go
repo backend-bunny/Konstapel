@@ -40,6 +40,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/download"
 	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/observability"
+	"github.com/backend-bunny/Konstapel/internal/provider"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
 	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -168,6 +169,13 @@ type Options struct {
 	// caller registers it once per process in the metrics registry. Nil
 	// adds nothing.
 	Observability *observability.Hub
+	// CollectionLimits bound each evidence collection
+	// (--collection-page-size, --collection-max-requests,
+	// --collection-max-objects, --collection-max-bytes). The zero value is
+	// provider.DefaultLimits; any other value must pass
+	// provider.Limits.ValidateConfiguration. The deadline is never set
+	// here: it is each binding's collection timeout.
+	CollectionLimits provider.Limits
 }
 
 // Scheme returns the scheme the manager uses.
@@ -195,6 +203,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	}
 	if shutdown < 0 {
 		return nil, fmt.Errorf("shutdown timeout %s must be positive", shutdown)
+	}
+	if opts.CollectionLimits != (provider.Limits{}) {
+		if err := opts.CollectionLimits.ValidateConfiguration(); err != nil {
+			return nil, fmt.Errorf("collection limits: %w", err)
+		}
 	}
 	if opts.ExceptionRevocation && opts.WebhookCertDir == "" {
 		// The webhooks this manager serves are what confine the
@@ -390,7 +403,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	// One attachment storage serves the attachment reconciler and the runs
 	// that copy supporting documents into platform packages.
 	attachmentStore := attachmentStorage(mgr, currentRuntime(), br.Cluster)
-	if err := setupAssessments(mgr, opts.Content, engine, reports, watches, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore); err != nil {
+	if err := setupAssessments(mgr, opts.Content, engine, reports, watches, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore, opts.CollectionLimits); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace, opts.ExceptionRevocation); err != nil {

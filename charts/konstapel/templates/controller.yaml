@@ -125,6 +125,12 @@ spec:
             {{- end }}
             - --evidence-staging-dir=/var/lib/konstapel/staging
             - --shutdown-timeout={{ .Values.controller.shutdownTimeoutSeconds }}s
+            {{- with .Values.controller.collection }}
+            - --collection-page-size={{ int64 .pageSize }}
+            - --collection-max-requests={{ int64 .maxRequests }}
+            - --collection-max-objects={{ int64 .maxObjects }}
+            - --collection-max-bytes={{ int64 .maxBytes }}
+            {{- end }}
             # Platform packages carry supporting evidence only while every
             # download replica runs this controller's image (it enforces the
             # document-read check); without the download service none serves.

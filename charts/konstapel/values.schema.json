@@ -155,7 +155,8 @@
       "required": [
         "shutdownTimeoutSeconds",
         "terminationGracePeriodSeconds",
-        "stagingSizeLimit"
+        "stagingSizeLimit",
+        "collection"
       ],
       "properties": {
         "shutdownTimeoutSeconds": {
@@ -169,6 +170,47 @@
         "stagingSizeLimit": {
           "type": "string",
           "pattern": "^[0-9]+(Ki|Mi|Gi|Ti)$"
+        },
+        "collection": {
+          "description": "Evidence collection limits per collection; the controller refuses to start with values outside these bounds.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pageSize",
+            "maxRequests",
+            "maxObjects",
+            "maxBytes"
+          ],
+          "properties": {
+            "pageSize": {
+              "description": "Objects per list request; at most maxObjects.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 500
+            },
+            "maxRequests": {
+              "description": "List requests per collection; at least maxObjects / pageSize, rounded up.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000,
+              "default": 20000
+            },
+            "maxObjects": {
+              "description": "Objects read per collection.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000,
+              "default": 100000
+            },
+            "maxBytes": {
+              "description": "Bytes of object JSON read per collection; at least pageSize x 4096. Decoded objects take about 2.4 times this in controller memory.",
+              "type": "integer",
+              "minimum": 1572864,
+              "maximum": 68719476736,
+              "default": 536870912
+            }
+          }
         },
         "resources": {
           "type": "object"

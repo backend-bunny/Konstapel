@@ -308,7 +308,10 @@ renders:
 
 - **Controller Deployment.** `konstapel controller` from the digest-pinned
   image, with `--leader-elect=true` (always on, even with one replica) and
-  `--shutdown-timeout` from `controller.shutdownTimeoutSeconds` (45s).
+  `--shutdown-timeout` from `controller.shutdownTimeoutSeconds` (45s), and
+  the four `--collection-*` evidence collection limits from
+  `controller.collection`, always rendered (their defaults are the
+  controller's own).
   - **Rollout and placement:** two replicas, rolling update with
     `maxUnavailable: 0` and `maxSurge: 1`, and preferred (never required)
     hostname anti-affinity at weight 100. `controller.affinity` replaces that
@@ -358,6 +361,9 @@ renders:
   replica.
 - `download.attachments.maxBytes` above `download.maxTempBytes`, or a
   `download.attachments.timeout` above `1h`.
+- `controller.collection.pageSize` above `maxObjects`, `maxRequests` below
+  the pages `maxObjects` takes at `pageSize`, or `maxBytes` below one page of
+  4096-byte objects; the schema rejects each value out of its range.
 - `bundles.referencedSecrets` or `bundles.referencedConfigMaps` without
   `bundles.sourcesConfigMap`; a `bundles.cache.sizeLimit` that isn't larger
   than `bundles.cache.capacity`; a `bundles.refreshInterval` above `5m`; the
@@ -1077,6 +1083,11 @@ retention.
 - **`controller`:**
   - `shutdownTimeoutSeconds` (45): must be below `terminationGracePeriodSeconds` (60), which the download server shares.
   - `stagingSizeLimit` (2Gi): the per-pod evidence staging volume.
+  - `collection`: evidence collection limits per collection of one binding ([collection limits](assessment-providers.md#configuring-the-limits)). The defaults are the controller's own, and the render refuses what the controller would refuse at startup. A collection that meets one is `Incomplete`. The deadline is not a value: it stays each binding's `spec.assessment.collectionTimeout`.
+    - `pageSize` (500, `--collection-page-size`): objects per list request, 1 to 10000 and at most `maxObjects`.
+    - `maxRequests` (20000, `--collection-max-requests`): list requests, 1 to 1000000 and at least `maxObjects` / `pageSize`, rounded up.
+    - `maxObjects` (100000, `--collection-max-objects`): objects read, 1 to 10000000.
+    - `maxBytes` (536870912, 512 MiB, `--collection-max-bytes`): bytes of object JSON read, 1572864 (1.5 MiB) to 68719476736 (64 GiB) and at least `pageSize` × 4096. Decoded objects take about 2.4 times this in controller memory: raise `resources.limits.memory` together with `maxBytes` or `maxObjects`.
   - `resources`, `affinity` (empty means preferred hostname anti-affinity; a value replaces it), `nodeSelector`, `tolerations`.
 - **`tls.mode`:** exactly one of the following.
   - `certManager` (default), optionally with `certManager.issuerRef {name, kind: Issuer|ClusterIssuer}`.

@@ -19,6 +19,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/bundle/stack"
 	"github.com/backend-bunny/Konstapel/internal/controller"
 	"github.com/backend-bunny/Konstapel/internal/observability"
+	"github.com/backend-bunny/Konstapel/internal/provider"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -82,6 +83,33 @@ func (b bundleFlags) options(fs *flag.FlagSet, namespace string) (stack.Options,
 	return o, nil
 }
 
+// collectionFlags are the host's evidence collection limits
+// (docs/assessment-providers.md, "Collection limits"). Their defaults are
+// provider.DefaultLimits. The deadline is not a flag: it is each binding's
+// spec.assessment.collectionTimeout.
+type collectionFlags struct {
+	pageSize, maxBytes  *int64
+	maxRequests, maxObj *int
+}
+
+func addCollectionFlags(fs *flag.FlagSet) collectionFlags {
+	return collectionFlags{
+		pageSize:    fs.Int64("collection-page-size", provider.DefaultPageSize, fmt.Sprintf("objects per list request of one evidence collection (1 to %d, at most --collection-max-objects)", provider.MaxPageSize)),
+		maxRequests: fs.Int("collection-max-requests", provider.DefaultMaxPages, fmt.Sprintf("list requests of one evidence collection (at most %d, at least the pages --collection-max-objects takes)", provider.MaxConfiguredPages)),
+		maxObj:      fs.Int("collection-max-objects", provider.DefaultMaxObjects, fmt.Sprintf("objects one evidence collection reads (1 to %d); a collection that needs more is incomplete", provider.MaxConfiguredObjects)),
+		maxBytes:    fs.Int64("collection-max-bytes", provider.DefaultMaxBytes, fmt.Sprintf("bytes of object JSON one evidence collection reads (%d to %d, and at least --collection-page-size x %d); decoded objects take about 2.4 times this, so size it with the controller's memory limit", provider.MinMaxBytes, provider.MaxConfiguredBytes, provider.MinObjectBytes)),
+	}
+}
+
+// limits validates the collection flags. Out-of-range values fail startup.
+func (c collectionFlags) limits() (provider.Limits, error) {
+	l := provider.Limits{PageSize: *c.pageSize, MaxPages: *c.maxRequests, MaxObjects: *c.maxObj, MaxBytes: *c.maxBytes}
+	if err := l.ValidateConfiguration(); err != nil {
+		return provider.Limits{}, fmt.Errorf("collection limits: %w", err)
+	}
+	return l, nil
+}
+
 // noReaders is the --protected-package-readers value for an installation
 // without a Konstapel download service.
 const noReaders = "none"
@@ -127,6 +155,7 @@ func runController(args []string) error {
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
 	readers := fs.String("protected-package-readers", "", "the download Deployment (in the pod namespace) that must run this controller's image before platform packages carry supporting evidence, or \"none\" without a download service; empty carries none")
 	bundleOpts := addBundleFlags(fs)
+	collection := addCollectionFlags(fs)
 	zopts := zap.Options{}
 	zopts.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -134,6 +163,10 @@ func runController(args []string) error {
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zopts)))
 	bundles, err := bundleOpts.options(fs, os.Getenv("POD_NAMESPACE"))
+	if err != nil {
+		return err
+	}
+	collectionLimits, err := collection.limits()
 	if err != nil {
 		return err
 	}
@@ -192,6 +225,7 @@ func runController(args []string) error {
 		SnapshotNamespace:       os.Getenv("POD_NAMESPACE"),
 		LocalBundle:             VendoredBundle,
 		Bundles:                 bundles,
+		CollectionLimits:        collectionLimits,
 		Observability:           hub,
 	})
 	if err != nil {

@@ -85,6 +85,21 @@ existing retry/capability mechanisms. Declared limits must cover objects, bytes,
 and collection work; consume current host defaults rather than inventing a second
 configuration API. One unavailable provider cannot block other bindings.
 
+Owner decision (2026-11-24): the host's page size and request, object and byte
+limits are configurable before 2.3 merges, as controller flags
+(`--collection-page-size`, `--collection-max-requests`, `--collection-max-objects`,
+`--collection-max-bytes`) exposed through the runtime chart's
+`controller.collection` values. This is host configuration of the existing
+controller, not a second configuration API: no bundle, profile, binding or
+provider field sets a limit, and an adapter cannot widen one. Unset flags keep
+the defaults. Startup validation refuses, never clamps, values out of range or
+combinations that could not complete (a page above the object limit, fewer
+requests than the object limit's pages, a byte budget below one maximal object or
+one page); the chart schema and render apply the same rules. The deadline stays
+each binding's `collectionTimeout`; there is no global deadline flag. The byte
+budget must be sized with the controller memory limit (decoded objects take about
+2.4 times their JSON size).
+
 ### 3. Shared immutable evaluation, without external plugin collection
 
 Retain the C2P Configure/Generate/GetResults contract and pinned plugin packaging.

@@ -31,6 +31,24 @@ controller:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {memory: 1Gi}
+  # Evidence collection limits (docs/assessment-providers.md, "Collection
+  # limits"), per collection of one binding. A collection that meets one
+  # uses none of its evidence and is Incomplete. The defaults are the
+  # controller's; the deadline is each binding's collectionTimeout. Decoded
+  # objects take about 2.4 times maxBytes in memory: raise
+  # controller.resources.limits.memory together with maxBytes or maxObjects.
+  collection:
+    # --collection-page-size: objects per list request, 1 to 10000 and at
+    # most maxObjects.
+    pageSize: 500
+    # --collection-max-requests: list requests, 1 to 1000000 and at least
+    # the pages maxObjects takes (maxObjects / pageSize, rounded up).
+    maxRequests: 20000
+    # --collection-max-objects: objects read, 1 to 10000000.
+    maxObjects: 100000
+    # --collection-max-bytes: bytes of object JSON read, 1572864 (1.5 MiB)
+    # to 68719476736 (64 GiB), and at least pageSize x 4096.
+    maxBytes: 536870912
   # Empty uses preferred hostname anti-affinity (weight 100). Setting it
   # replaces that default entirely.
   affinity: {}

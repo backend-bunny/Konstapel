@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/provider"
 	"github.com/backend-bunny/Konstapel/internal/provider/conformance"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
@@ -38,11 +39,16 @@ func documentedExamples(t *testing.T) map[string]any {
 	_, unknown := r.Select(provider.Selection{Provider: "example-scanner/v1", Mode: v1alpha1.ModeAudit, Checks: []provider.CheckSelection{
 		{Name: "disallow-privileged-containers", Kind: kyverno.CheckKind}}})
 	return map[string]any{
-		"kyverno-descriptor":          kyverno.Descriptor(),
-		"installed-contracts":         r.Contracts(),
-		"rejected-selection":          rejected,
-		"unknown-provider":            unknown,
-		"kyverno-collection-requests": collectionRequests(t),
+		"kyverno-descriptor":             kyverno.Descriptor(),
+		"installed-contracts":            r.Contracts(),
+		"rejected-selection":             rejected,
+		"unknown-provider":               unknown,
+		"kyverno-collection-requests":    collectionRequests(t),
+		"kyverno-collection-pages":       collectionPages(t),
+		"reporttest-collection-requests": reportingRequests(t),
+		"collection-limits":              documentedLimits(),
+		"capability-matrix":              capabilityMatrix(t),
+		"controller-role-writes":         controllerRoleWrites(t),
 	}
 }
 
@@ -64,7 +70,11 @@ func collectionRequests(t *testing.T) []conformance.Call {
 	}
 	rec := conformance.NewRecordingClient(fake.NewClientBuilder().WithRESTMapper(mapper).WithObjects(objs...).Build())
 	scope := provider.Scope{Cluster: "c", Namespaces: []provider.Namespace{{Name: "a", UID: "uid-a"}, {Name: "b", UID: "uid-b"}}}
-	reports, limits, err := kyverno.Collect(context.Background(), scope, provider.ClientSources(rec, kyverno.Descriptor(), scope))
+	// The controller's path: the adapter under the host's bounds.
+	reports, limits, err := provider.Collect(context.Background(), rec, kyverno.Descriptor(), scope, provider.DefaultLimits(),
+		func(ctx context.Context, src provider.Sources) ([]assessment.Object, []string, error) {
+			return kyverno.Collect(ctx, scope, src)
+		})
 	if err != nil || len(reports) != 2 || len(limits) != 0 {
 		t.Fatalf("collection: %d reports, %v, %v", len(reports), limits, err)
 	}
@@ -123,7 +133,10 @@ func TestDocumentedTestsExist(t *testing.T) {
 	// the controller; provider availability with the capability monitor.
 	host, _ := filepath.Glob(filepath.Join(root, "internal/controller/*_test.go"))
 	capabilities, _ := filepath.Glob(filepath.Join(root, "internal/capability/*_test.go"))
-	for _, f := range slices.Concat(files, more, host, capabilities) {
+	// The collection limit flags and chart values.
+	flags, _ := filepath.Glob(filepath.Join(root, "cmd/konstapel/*_test.go"))
+	chart, _ := filepath.Glob(filepath.Join(root, "internal/charttest/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
