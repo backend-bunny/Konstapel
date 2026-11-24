@@ -715,6 +715,82 @@ spec:
                     have no key
                   rule: 'self.mode == ''Required'' ? has(self.secretName) : (!has(self.secretName)
                     && !has(self.key))'
+              signingRecovery:
+                description: |-
+                  signingRecovery is the controller-owned state of administrator signing
+                  recovery through EvidenceSigningRequests. Absent on every run no
+                  request has claimed or recovered.
+                properties:
+                  active:
+                    description: |-
+                      active is the request currently holding the run's recovery claim,
+                      written with a resourceVersion-conditional update.
+                    properties:
+                      claimedAt:
+                        format: date-time
+                        type: string
+                      deadline:
+                        format: date-time
+                        type: string
+                      name:
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      uid:
+                        maxLength: 128
+                        minLength: 1
+                        type: string
+                    required:
+                    - claimedAt
+                    - deadline
+                    - name
+                    - uid
+                    type: object
+                    x-kubernetes-validations:
+                    - message: claimedAt must be before deadline
+                      rule: timestamp(self.claimedAt) < timestamp(self.deadline)
+                  recovered:
+                    description: recovered is the request that recovered the run.
+                    properties:
+                      at:
+                        format: date-time
+                        type: string
+                      name:
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      requestedBy:
+                        description: Requester is an authenticated Kubernetes user
+                          identity.
+                        properties:
+                          uid:
+                            maxLength: 128
+                            type: string
+                          username:
+                            maxLength: 512
+                            minLength: 1
+                            type: string
+                        required:
+                        - username
+                        type: object
+                      uid:
+                        maxLength: 128
+                        minLength: 1
+                        type: string
+                    required:
+                    - at
+                    - name
+                    - requestedBy
+                    - uid
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: a recovered run holds no recovery claim
+                  rule: '!(has(self.active) && has(self.recovered))'
+                - message: status.signingRecovery.recovered is set once and never
+                    changes
+                  rule: '!has(oldSelf.recovered) || (has(self.recovered) && self.recovered
+                    == oldSelf.recovered)'
               summary:
                 description: |-
                   AssessmentSummary is the sanitized result summary exposed in status. It
@@ -985,6 +1061,9 @@ spec:
         - message: status.signingIntent is never removed
           rule: '!has(oldSelf.status) || !has(oldSelf.status.signingIntent) || (has(self.status)
             && has(self.status.signingIntent))'
+        - message: status.signingRecovery.recovered is never removed
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.signingRecovery) || !has(oldSelf.status.signingRecovery.recovered)
+            || (has(self.status) && has(self.status.signingRecovery) && has(self.status.signingRecovery.recovered))'
     served: true
     storage: true
     subresources:

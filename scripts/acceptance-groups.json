@@ -17,6 +17,7 @@
       "TestLiveLeaderObservability",
       "TestLiveHardeningBackground",
       "TestLiveEvidenceAttachmentAPI",
+      "TestLiveEvidenceSigningRequestAPI",
       "TestLivePolicyPreviewObservation"
     ]
   },

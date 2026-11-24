@@ -1,0 +1,60 @@
+# Only the Konstapel controller writes EvidenceSigningRequest status
+# (add-evidence-signing-recovery 1.2). RBAC already grants
+# evidencesigningrequests/status writes to the controller alone; this policy
+# is defence in depth and also binds cluster administrators.
+#
+# The controller identity is configuration, read the same way
+# konstapel-assessment-run-scope reads it: from the
+# konstapel-assessment-admission ConfigMap shipped with that policy. Edit the
+# ConfigMap, not this policy, when the controller runs under another service
+# account, and restrict write access to it to platform administrators.
+# Missing configuration fails closed: without the ConfigMap every status write
+# is denied, and with an empty key no identity is treated as the controller.
+# Status in a create request is dropped by the status subresource.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: konstapel-evidence-signing-status-writer
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [compliance.erenius.io]
+        apiVersions: [v1alpha1]
+        operations: [UPDATE]
+        resources: [evidencesigningrequests/status]
+  variables:
+    - name: controllerNamespace
+      expression: params.?data.?controllerServiceAccountNamespace.orValue('')
+    - name: controllerName
+      expression: params.?data.?controllerServiceAccountName.orValue('')
+    - name: controller
+      expression: >-
+        variables.controllerNamespace != '' && variables.controllerName != '' &&
+        request.userInfo.username == 'system:serviceaccount:' + variables.controllerNamespace + ':' + variables.controllerName
+  validations:
+    - expression: variables.controller
+      messageExpression: >-
+        'only the Konstapel controller (' +
+        (variables.controllerName == '' ? 'not configured' : variables.controllerNamespace + '/' + variables.controllerName) +
+        ') may write EvidenceSigningRequest status'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: konstapel-evidence-signing-status-writer
+  labels:
+    app.kubernetes.io/part-of: konstapel
+spec:
+  policyName: konstapel-evidence-signing-status-writer
+  validationActions: [Deny]
+  paramRef:
+    name: konstapel-assessment-admission
+    namespace: konstapel-system
+    parameterNotFoundAction: Deny

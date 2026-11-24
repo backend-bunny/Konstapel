@@ -159,6 +159,11 @@ type AssessmentRunStatus struct {
 	// signing existed (unsigned).
 	// +optional
 	SigningIntent *SigningIntent `json:"signingIntent,omitempty"`
+	// signingRecovery is the controller-owned state of administrator signing
+	// recovery through EvidenceSigningRequests. Absent on every run no
+	// request has claimed or recovered.
+	// +optional
+	SigningRecovery *SigningRecoveryStatus `json:"signingRecovery,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -177,6 +182,7 @@ type AssessmentRunStatus struct {
 // +kubebuilder:printcolumn:name="Evidence",type=string,JSONPath=`.status.summary.evidence.completeness`
 // +kubebuilder:printcolumn:name="Publication",type=string,JSONPath=`.status.publication.phase`
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.signingIntent) || (has(self.status) && has(self.status.signingIntent))",message="status.signingIntent is never removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.signingRecovery) || !has(oldSelf.status.signingRecovery.recovered) || (has(self.status) && has(self.status.signingRecovery) && has(self.status.signingRecovery.recovered))",message="status.signingRecovery.recovered is never removed"
 type AssessmentRun struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -267,4 +273,55 @@ type SigningKey struct {
 	// pinnedAt is when the key was pinned.
 	// +required
 	PinnedAt metav1.Time `json:"pinnedAt"`
+}
+
+// SigningRecoveryStatus is a run's signing-recovery state. At most one
+// EvidenceSigningRequest holds the run (active) at a time; the request that
+// recovered it is recorded once (recovered), in the same update that commits
+// the run's signed publication and clears the claim.
+// +kubebuilder:validation:XValidation:rule="!(has(self.active) && has(self.recovered))",message="a recovered run holds no recovery claim"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.recovered) || (has(self.recovered) && self.recovered == oldSelf.recovered)",message="status.signingRecovery.recovered is set once and never changes"
+type SigningRecoveryStatus struct {
+	// active is the request currently holding the run's recovery claim,
+	// written with a resourceVersion-conditional update.
+	// +optional
+	Active *SigningRecoveryClaim `json:"active,omitempty"`
+	// recovered is the request that recovered the run.
+	// +optional
+	Recovered *SigningRecoveryRecord `json:"recovered,omitempty"`
+}
+
+// SigningRecoveryClaim identifies the EvidenceSigningRequest holding a run's
+// recovery and the end of its bounded attempt (claimedAt + PublishTimeout).
+// +kubebuilder:validation:XValidation:rule="timestamp(self.claimedAt) < timestamp(self.deadline)",message="claimedAt must be before deadline"
+type SigningRecoveryClaim struct {
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	UID string `json:"uid"`
+	// +required
+	ClaimedAt metav1.Time `json:"claimedAt"`
+	// +required
+	Deadline metav1.Time `json:"deadline"`
+}
+
+// SigningRecoveryRecord identifies the EvidenceSigningRequest that recovered
+// a run, its admission-recorded requester, and when recovery was recorded.
+type SigningRecoveryRecord struct {
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	UID string `json:"uid"`
+	// +required
+	RequestedBy Requester `json:"requestedBy"`
+	// +required
+	At metav1.Time `json:"at"`
 }
