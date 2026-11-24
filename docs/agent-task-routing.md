@@ -54,8 +54,8 @@ the light tier.
 Run from the repository in its pinned Devbox environment:
 
 ```sh
-devbox run -- python3 scripts/agents/select-task.py add-controller-high-availability 5.3
-devbox run -- python3 scripts/agents/select-task.py add-controller-high-availability 5.3 --provider codex
+devbox run -- python3 scripts/agents/select-task.py add-self-service-policy-exceptions 5.3
+devbox run -- python3 scripts/agents/select-task.py add-self-service-policy-exceptions 5.3 --provider codex
 devbox run -- python3 scripts/agents/select-task.py --check
 ```
 

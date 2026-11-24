@@ -209,18 +209,29 @@ cases. Optional features SHALL respect their owning runtime gates.
 
 ### Requirement: CI execution gates merging
 
-CI SHALL run the shared Devbox `charts:acceptance` task on relevant pull requests
-and main pushes, separately from cluster-free checks. Merge rules SHALL require
-a stable acceptance gate. Documentation-only changes MAY explicitly report not
-applicable; relevant or unknown changes SHALL run tests. Bot release PRs SHALL
-receive the same gate, using explicit dispatch when needed. PR tests SHALL need
-no production credentials; manual or nightly-only testing SHALL NOT replace CI.
+CI SHALL run the shared Devbox acceptance task on relevant pull requests and
+main pushes in acceptance jobs separate from cluster-free checks, and merge rules
+SHALL require a stable acceptance gate. Documentation-only changes MAY explicitly
+report not applicable; relevant or unknown changes SHALL run tests. Bot release
+PRs SHALL receive the same gate. PR tests SHALL need no production credentials;
+manual or nightly-only testing SHALL NOT replace CI.
 
 #### Scenario: Select changes requiring acceptance
 
 - **WHEN** a pull request or main push changes charts, runtime code, APIs/RBAC/admission, content, image builds, dependencies, tools, test helpers, version/release inputs, CI or an unknown path
 - **THEN** the CI acceptance suite runs for the tested revision
 - **AND** documentation-only exclusions report not applicable through the stable gate rather than claiming tests passed
+
+#### Scenario: Acceptance groups run in isolation
+
+- **WHEN** the acceptance jobs run for a revision
+- **THEN** each acceptance group runs the shared Devbox task on its own runner with its own disposable cluster and test-owned services, within a bounded job and run timeout
+- **AND** tests sharing one cluster run sequentially, and every group finishes and retains sanitized diagnostics even when another fails
+
+#### Scenario: A bot opens a release pull request
+
+- **WHEN** release automation opens or updates a release pull request
+- **THEN** the same required checks and acceptance gate run and attach to its head, using explicit dispatch where GitHub token-trigger rules require it
 
 #### Scenario: A runtime regression has passing unit tests
 

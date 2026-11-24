@@ -628,7 +628,7 @@ moves, and is checked by what clients, stored objects and metrics show:
 | A central exception restriction while no replica leads | `TestLiveReplicaAdmission` (assessments) | the surviving replica denies at once; earlier acceptances, revisions and snapshots are unchanged by failover |
 | An exception revoked while no replica leads, or a leader stopped between persisting its revocation record and releasing the finalizer | `TestLiveReplicaAdmission`, `TestLiveRevocationHistory` (assessments) | with [revocation processing](policy-exceptions.md#revocation-processing) on (off by default), the next leader writes the [revocation record](policy-exceptions.md#revocation-records) exactly as admitted, or verifies the one already written without rewriting it, and only then releases the finalizer; nothing is renewed or reactivated |
 
-Native exception grants are not delivered yet, so their handover stays open as task 3.6. It gates exception features, not two-replica availability.
+Native exception grants are not delivered yet, so their handover stays open as add-self-service-policy-exceptions task 6.4 (formerly availability task 3.6). Native exception support is not HA-validated until that task passes. It gates exception features, not two-replica availability.
 
 ## Supported versions
 
@@ -822,3 +822,6 @@ disposable cluster and checks four things:
 - Chart deployment of the exception admission webhooks, and native exception
   grants, which wait for an upstream Kyverno release
   (add-self-service-policy-exceptions).
+- HA validation of native exception grants: native exception support is not
+  HA-validated until add-self-service-policy-exceptions task 6.4 (failover and
+  leadership changes against delivered grants) passes.
