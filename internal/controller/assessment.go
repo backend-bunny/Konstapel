@@ -60,8 +60,9 @@ import (
 const AssessmentFieldManager = "konstapel-assessments"
 
 // PolicyReportGVK is the report layout the collector reads: the Kyverno
-// provider's declared read (kyverno.Reports), which the report watch uses.
-var PolicyReportGVK = schema.GroupVersionKind{Group: "wgpolicyk8s.io", Version: "v1alpha2", Kind: "PolicyReport"}
+// provider's declared read (kyverno.Reports), which the report watch
+// (providerWatches) uses.
+var PolicyReportGVK = schema.GroupVersionKind{Group: kyverno.Reports().Group, Version: kyverno.Reports().Version, Kind: kyverno.Reports().Kind}
 
 // workloadKinds maps the collected "group/version/resource" strings to the
 // typed objects the assessment controller watches and lists. Subresources
@@ -697,7 +698,7 @@ func bindingForPolicy(c client.Client) handler.EventHandler {
 }
 
 // setupAssessments registers the assessment reconciler with the manager.
-func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration, observe RunObserver,
+func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engine, reports EngineAvailable, watches []providerWatch, capabilityEvents <-chan event.GenericEvent, cluster string, poll time.Duration, observe RunObserver,
 	attachmentStore *AttachmentStorage) error {
 	rt := currentRuntime()
 	r := &AssessmentReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Content: content, Engine: engine, Reports: reports, Cluster: cluster, Boundaries: NewBoundaryTracker(), Runtime: rt}
@@ -736,26 +737,33 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Destinations: rt.Destinations}); err != nil {
 		return err
 	}
-	// Engine policies and reports are watched once their capabilities are
-	// available, each independently.
+	// Engine policies and each provider's watchable evidence sources (the
+	// Kyverno provider's PolicyReports) are watched once their own
+	// capabilities are available, each independently.
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(targeting.ValidatingPolicyGVK)
 	managed := predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return o.GetLabels()[targeting.LabelManagedBy] == targeting.ManagedByValue
 	})
-	report := &unstructured.Unstructured{}
-	report.SetGroupVersionKind(PolicyReportGVK)
 	if err := mgr.Add(&deferredWatch{name: "assessment-engine-policies", available: engine, poll: poll, register: func() error {
 		return c.Watch(source.Kind(mgr.GetCache(), client.Object(policy), bindingForPolicy(mgr.GetClient()), managed))
 	}}); err != nil {
 		return err
 	}
-	if reports == nil {
-		reports = engine
+	for _, w := range watches {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(w.gvk)
+		available := w.available
+		if available == nil {
+			available = engine
+		}
+		if err := mgr.Add(&deferredWatch{name: w.name, available: available, poll: poll, register: func() error {
+			return c.Watch(source.Kind(mgr.GetCache(), client.Object(obj), allBindings(mgr.GetClient())))
+		}}); err != nil {
+			return err
+		}
 	}
-	return mgr.Add(&deferredWatch{name: "assessment-policy-reports", available: reports, poll: poll, register: func() error {
-		return c.Watch(source.Kind(mgr.GetCache(), client.Object(report), allBindings(mgr.GetClient())))
-	}})
+	return nil
 }
 
 // destinationForRun requeues the destination a run is pinned to, so

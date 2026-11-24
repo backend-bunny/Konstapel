@@ -119,9 +119,11 @@ func TestDocumentedTestsExist(t *testing.T) {
 	var sources strings.Builder
 	files, _ := filepath.Glob(filepath.Join(root, "internal/provider/*/*_test.go"))
 	more, _ := filepath.Glob(filepath.Join(root, "internal/provider/*_test.go"))
-	// The collection characterization lives with the controller.
+	// The collection characterization and the provider watches live with
+	// the controller; provider availability with the capability monitor.
 	host, _ := filepath.Glob(filepath.Join(root, "internal/controller/*_test.go"))
-	for _, f := range slices.Concat(files, more, host) {
+	capabilities, _ := filepath.Glob(filepath.Join(root, "internal/capability/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)

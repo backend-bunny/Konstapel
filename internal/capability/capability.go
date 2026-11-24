@@ -17,6 +17,8 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/discovery"
+
+	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 )
 
 // Name identifies a capability.
@@ -71,13 +73,12 @@ var Requirements = map[Name][]Resource{
 	Delivery: {{Group: "policies.kyverno.io", Version: "v1", Resource: "validatingpolicies", Kind: "ValidatingPolicy",
 		Verbs:  []string{"get", "list", "watch", "create", "update", "patch", "delete"},
 		Access: []string{"get", "list", "watch", "create", "update", "patch", "delete"}}},
-	Assessment: {
-		{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports", Kind: "PolicyReport", Namespaced: true,
-			Verbs: []string{"get", "list", "watch"}, Access: []string{"get", "list", "watch"}},
-		// Served alongside; the collector reads namespaced reports only.
-		{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "clusterpolicyreports", Kind: "ClusterPolicyReport",
-			Verbs: []string{"get", "list", "watch"}},
-	},
+	// Assessment is the installed Kyverno provider's evidence availability:
+	// the prerequisites its descriptor declares, not a second list. Its
+	// read (namespaced policyreports) must be served and allowed; its
+	// prerequisite (clusterpolicyreports, served alongside and never read)
+	// must be served. See ForProvider.
+	Assessment: ForProvider(kyverno.Descriptor()),
 	// The native exception path is owned by add-self-service-policy-exceptions;
 	// until it uses PolicyExceptions, only their presence is required.
 	Exceptions: {{Group: "policies.kyverno.io", Version: "v1", Resource: "policyexceptions", Kind: "PolicyException", Namespaced: true,
@@ -143,6 +144,25 @@ func (m *Monitor) now() time.Time {
 
 // Check returns the capability's current result.
 func (m *Monitor) Check(ctx context.Context, n Name) Result {
+	reqs, ok := Requirements[n]
+	if !ok {
+		return m.cached(ctx, n, func(context.Context) Result {
+			return Result{Name: n, Reason: Unavailable, Message: fmt.Sprintf("unknown capability %s", n)}
+		})
+	}
+	return m.checkResources(ctx, n, reqs)
+}
+
+// checkResources returns the current result of the capability n, which
+// requires reqs. Every caller of one name must pass the same requirements:
+// the result is cached by name.
+func (m *Monitor) checkResources(ctx context.Context, n Name, reqs []Resource) Result {
+	return m.cached(ctx, n, func(ctx context.Context) Result { return m.check(ctx, n, reqs) })
+}
+
+// cached returns n's result, reusing it for TTL and otherwise running check
+// bounded by Timeout.
+func (m *Monitor) cached(ctx context.Context, n Name, check func(context.Context) Result) Result {
 	ttl := m.TTL
 	if ttl <= 0 {
 		ttl = 15 * time.Second
@@ -159,7 +179,7 @@ func (m *Monitor) Check(ctx context.Context, n Name) Result {
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	res := m.check(cctx, n)
+	res := check(cctx)
 	m.mu.Lock()
 	if m.cache == nil {
 		m.cache = map[Name]cached{}
@@ -179,8 +199,12 @@ func (m *Monitor) Refresh() {
 // Engine adapts a capability to an (available, error) check: an unavailable
 // capability returns false and an *Error carrying its result.
 func (m *Monitor) Engine(n Name) func(context.Context) (bool, error) {
+	return asCheck(func(ctx context.Context) Result { return m.Check(ctx, n) })
+}
+
+func asCheck(result func(context.Context) Result) func(context.Context) (bool, error) {
 	return func(ctx context.Context) (bool, error) {
-		r := m.Check(ctx, n)
+		r := result(ctx)
 		if r.Available() {
 			return true, nil
 		}
@@ -188,11 +212,7 @@ func (m *Monitor) Engine(n Name) func(context.Context) (bool, error) {
 	}
 }
 
-func (m *Monitor) check(ctx context.Context, n Name) Result {
-	reqs, ok := Requirements[n]
-	if !ok {
-		return Result{Name: n, Reason: Unavailable, Message: fmt.Sprintf("unknown capability %s", n)}
-	}
+func (m *Monitor) check(ctx context.Context, n Name, reqs []Resource) Result {
 	fail := func(reason Reason, format string, a ...any) Result {
 		return Result{Name: n, Reason: reason, Message: string(n) + ": " + fmt.Sprintf(format, a...)}
 	}

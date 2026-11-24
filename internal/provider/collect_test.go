@@ -72,6 +72,10 @@ func TestSourcesGrantOnlyDeclaredListReads(t *testing.T) {
 	getOnly.Reads[0].Verbs = []string{"get", "watch"}
 	invalid := enforcing()
 	invalid.Reads[0].Verbs = []string{"list", "delete"}
+	// A prerequisite is required to be served, never granted as a read.
+	required := enforcing()
+	required.Requires = []provider.Prerequisite{{Group: "reports.example.io", Version: "v1", Resource: "clusterreports", Kind: "ClusterReport", Verbs: []string{"get", "list", "watch"}}}
+	prerequisite := provider.Read{Group: "reports.example.io", Version: "v1", Resource: "clusterreports", Kind: "ClusterReport", Verbs: []string{"list"}}
 	for name, tc := range map[string]struct {
 		d    provider.Descriptor
 		read provider.Read
@@ -83,6 +87,7 @@ func TestSourcesGrantOnlyDeclaredListReads(t *testing.T) {
 		"different scope":      {enforcing(), wrongScope, "declares"},
 		"no list verb":         {getOnly, declared, "does not declare list"},
 		"invalid descriptor":   {invalid, declared, "not read-only"},
+		"prerequisite":         {required, prerequisite, "does not declare a read"},
 		"read of another kind": {enforcing(), provider.Read{Version: "v1", Resource: "secrets", Kind: "Secret", Namespaced: true, Verbs: []string{"list"}}, "does not declare a read"},
 	} {
 		t.Run(name, func(t *testing.T) {

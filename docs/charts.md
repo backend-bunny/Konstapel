@@ -159,6 +159,10 @@ interval.
 | Assessment | `wgpolicyk8s.io/v1alpha2` `policyreports` (namespaced) and `clusterpolicyreports` (cluster-scoped) | get, list, watch on `policyreports` (the collector reads namespaced reports) |
 | Exceptions | `policies.kyverno.io/v1` `policyexceptions` (namespaced) | none yet: native exceptions are add-self-service-policy-exceptions's, which has its own expiry and governance gates |
 
+The assessment row is not a separate list. It is the installed Kyverno
+assessment provider's declared reads and prerequisites; see
+[assessment provider availability](assessment-providers.md#availability).
+
 The results are distinct. `APINotServed`, `ResourceMissing`,
 `UnsupportedResource` (kind, scope or verbs), `AccessDenied` (forbidden
 discovery or operation) and `DependencyUnavailable` (transport, timeout) are

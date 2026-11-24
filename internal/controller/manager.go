@@ -40,6 +40,8 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/download"
 	"github.com/backend-bunny/Konstapel/internal/exception"
 	"github.com/backend-bunny/Konstapel/internal/observability"
+	"github.com/backend-bunny/Konstapel/internal/provider/installed"
+	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
 )
 
@@ -317,17 +319,31 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		return nil, err
 	}
 	capabilities := &capability.Monitor{Discovery: dc, Review: capability.SelfReview(reviewer), Timeout: capabilityTimeout, TTL: opts.EnginePoll}
-	engine := capabilities.Engine(capability.Delivery)
-	reports := capabilities.Engine(capability.Assessment)
+	// Each installed provider's availability is derived from its
+	// descriptor and checked on its own. The Kyverno provider enforces
+	// through the delivery capability, and its evidence is the Assessment
+	// capability.
+	installedProviders := installed.Registry().Descriptors()
+	providers, err := capability.NewProviders(capabilities, installedProviders...)
+	if err != nil {
+		return nil, err
+	}
+	engine := EngineAvailable(providers.EnforcementCheck(kyverno.Contract))
+	reports := EngineAvailable(providers.EvidenceCheck(kyverno.Contract))
 	// A capability change (an engine installed, removed, or its permissions
 	// changed) re-reconciles every binding, so Conditions stay truthful
 	// although a Ready binding is otherwise not requeued.
+	checks := []EngineAvailable{engine}
+	for _, c := range providers.Contracts() {
+		checks = append(checks, providers.EvidenceCheck(c))
+	}
 	deliveryEvents := make(chan event.GenericEvent)
 	assessmentEvents := make(chan event.GenericEvent)
 	if err := mgr.Add(&capabilityTrigger{name: "capability-trigger", client: mgr.GetClient(), poll: opts.EnginePoll,
-		checks: []EngineAvailable{engine, reports}, out: []chan<- event.GenericEvent{deliveryEvents, assessmentEvents}}); err != nil {
+		checks: checks, out: []chan<- event.GenericEvent{deliveryEvents, assessmentEvents}}); err != nil {
 		return nil, err
 	}
+	watches := providerWatches(installedProviders, func(c string) EngineAvailable { return providers.EvidenceCheck(c) })
 
 	br, pr := targetingReconcilers(mgr.GetClient(), mgr.GetAPIReader(), opts.Content, engine, "kube-system:"+string(ks.UID))
 	bb := builder.ControllerManagedBy(mgr).
@@ -374,7 +390,7 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	// One attachment storage serves the attachment reconciler and the runs
 	// that copy supporting documents into platform packages.
 	attachmentStore := attachmentStorage(mgr, currentRuntime(), br.Cluster)
-	if err := setupAssessments(mgr, opts.Content, engine, reports, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore); err != nil {
+	if err := setupAssessments(mgr, opts.Content, engine, reports, watches, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore); err != nil {
 		return nil, err
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace, opts.ExceptionRevocation); err != nil {
