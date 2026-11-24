@@ -47,7 +47,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -271,7 +270,7 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	})
 	// Kyverno's own webhook configurations before the uninstall: only
 	// these can be its leftovers.
-	before := l.kyvernoWebhookConfigs()
+	before, _ := l.kyvernoWebhookConfigs()
 	if out, err := l.helmStdout(l.ctx, "uninstall", "kyverno", "--namespace", "kyverno", "--wait", "--timeout", "5m"); err != nil {
 		t.Fatalf("uninstall Kyverno: %v\n%s", err, out)
 	}
@@ -324,19 +323,19 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	// Kyverno-named configuration that still reaches a Service, is kept.
 	var removed []string
 	l.eventually("Kyverno's broken leftover webhook configurations removed", func() (bool, string) {
-		var left []string
-		for key, w := range l.kyvernoWebhookConfigs() {
-			if was, ok := before[key]; !ok || was.uid != w.uid || !w.broken {
-				continue
-			}
-			uid := w.uid
-			if err := l.c.Delete(l.ctx, w.obj, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+		now, lookups := l.kyvernoWebhookConfigs()
+		left := lookups
+		for _, key := range leftoversToRemove(before, now) {
+			uid := now[key].uid
+			if err := l.c.Delete(l.ctx, now[key].obj, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
 				left = append(left, key+": "+err.Error())
 				continue
 			}
 			removed = append(removed, key)
 		}
-		for key, w := range l.kyvernoWebhookConfigs() {
+		now, lookups = l.kyvernoWebhookConfigs()
+		left = append(left, lookups...)
+		for key, w := range now {
 			if w.broken {
 				left = append(left, key+" calls "+strings.Join(w.services, ", "))
 			}
@@ -349,18 +348,10 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	return k
 }
 
-// kyvernoWebhook is one Kyverno-named webhook configuration and whether
-// every webhook in it calls a Service that does not exist.
-type kyvernoWebhook struct {
-	obj      client.Object
-	uid      types.UID
-	services []string
-	broken   bool
-}
-
 // kyvernoWebhookConfigs returns the cluster's kyverno- webhook
-// configurations, keyed by kind and name.
-func (l *live) kyvernoWebhookConfigs() map[string]kyvernoWebhook {
+// configurations, keyed by kind and name, and any Service lookup that
+// failed (classifyKyvernoWebhook).
+func (l *live) kyvernoWebhookConfigs() (map[string]kyvernoWebhook, []string) {
 	l.t.Helper()
 	var vwc admissionregistrationv1.ValidatingWebhookConfigurationList
 	var mwc admissionregistrationv1.MutatingWebhookConfigurationList
@@ -370,25 +361,23 @@ func (l *live) kyvernoWebhookConfigs() map[string]kyvernoWebhook {
 	if err := l.c.List(l.ctx, &mwc); err != nil {
 		l.t.Fatal(err)
 	}
+	exists := func(namespace, name string) (bool, error) {
+		err := l.c.Get(l.ctx, client.ObjectKey{Namespace: namespace, Name: name}, &corev1.Service{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}
 	out := map[string]kyvernoWebhook{}
+	var failed []string
 	add := func(kind string, obj client.Object, configs []admissionregistrationv1.WebhookClientConfig) {
-		if !strings.HasPrefix(obj.GetName(), "kyverno-") {
-			return
+		kyverno, services, broken, err := classifyKyvernoWebhook(obj.GetName(), configs, exists)
+		if err != nil {
+			failed = append(failed, kind+"/"+obj.GetName()+": "+err.Error())
 		}
-		w := kyvernoWebhook{obj: obj, uid: obj.GetUID(), broken: len(configs) > 0}
-		for _, cc := range configs {
-			if cc.Service == nil {
-				w.broken = false
-				continue
-			}
-			ref := cc.Service.Namespace + "/" + cc.Service.Name
-			w.services = append(w.services, ref)
-			err := l.c.Get(l.ctx, client.ObjectKey{Namespace: cc.Service.Namespace, Name: cc.Service.Name}, &corev1.Service{})
-			if err == nil || !apierrors.IsNotFound(err) {
-				w.broken = false
-			}
+		if kyverno {
+			out[kind+"/"+obj.GetName()] = kyvernoWebhook{obj: obj, uid: obj.GetUID(), services: services, broken: broken}
 		}
-		out[kind+"/"+obj.GetName()] = w
 	}
 	for i := range vwc.Items {
 		var cc []admissionregistrationv1.WebhookClientConfig
@@ -404,7 +393,7 @@ func (l *live) kyvernoWebhookConfigs() map[string]kyvernoWebhook {
 		}
 		add("MutatingWebhookConfiguration", &mwc.Items[i], cc)
 	}
-	return out
+	return out, failed
 }
 
 // install installs the release again and waits until its APIs are served.

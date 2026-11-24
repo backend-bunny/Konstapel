@@ -70,7 +70,7 @@
     "image": true,
     "certManager": true,
     "release": true,
-    "timeoutMinutes": 65,
+    "timeoutMinutes": 50,
     "goTests": [
       "TestLiveCRDChartLifecycle",
       "TestLiveHelmInstall",

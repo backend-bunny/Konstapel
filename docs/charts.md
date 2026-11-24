@@ -267,8 +267,13 @@ result.
 **Installing before Kyverno.** `TestLiveHelmLateKyverno` (`charts` group)
 checks the same behavior on the installed charts and the packaged image, with
 no in-process controller. It uninstalls the disposable cluster's Kyverno
-release, so neither `policies.kyverno.io` nor `wgpolicyk8s.io` is served, and
-then installs both charts as documented:
+release, so neither `policies.kyverno.io` nor `wgpolicyk8s.io` is served.
+Kyverno's uninstall can leave the cleanup controller's `kyverno-cleanup-` and
+`kyverno-ttl-` webhook configurations behind, calling Services it removed.
+The test deletes each configuration that existed before its uninstall (same
+UID), is Kyverno-named and calls only missing Services, keeps everything
+else, and requires that none remains (`TestKyvernoLeftoverSelection` covers
+the selection). It then installs both charts as documented:
 1. Every controller and download replica becomes ready without Kyverno.
 2. A Deny binding reports `EngineAPINotServed` (or `EngineResourceMissing`).
    Its current evidence lists `no engine policies or reports can be read`,
