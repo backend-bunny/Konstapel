@@ -260,7 +260,7 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 		next = h
 		return ok, d
 	})
-	l.record("deleted-holder", map[string]any{"deleted": holder, "holder": next, "claim": claimNow()})
+	l.record("deleted-holder", map[string]any{"deleted": holder, "holder": next, "claim": toJSON(claimNow())})
 
 	// 4. The holder ends terminally (as a failed attempt does): it releases
 	// its claim and exactly one waiting request takes it over; the terminal
@@ -282,7 +282,7 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 	if got := get(next); got.Status.Reason != v1alpha1.RecoverySigningFailed || got.Status.Message != ended.Status.Message {
 		t.Fatalf("the terminal request was rewritten: %s", toJSON(got.Status))
 	}
-	l.record("terminal-holder", map[string]any{"ended": next, "holder": last, "claim": claimNow()})
+	l.record("terminal-holder", map[string]any{"ended": next, "holder": last, "claim": toJSON(claimNow())})
 	stop()
 	stopped = true
 
