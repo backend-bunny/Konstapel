@@ -196,7 +196,7 @@ func liveSigningRecoveryAttempt(t *testing.T, l *live, a liveAttempt) {
 	drive(plain, a.holder, 1)
 	wantEnded(a.holder, v1alpha1.RecoveryKeyMismatch)
 	unpinned("KeyMismatch")
-	l.record("key-mismatch", map[string]any{"request": a.holder, "secretKey": fpB, "confirmed": a.fpA, "pinned": false})
+	l.record("key-mismatch", map[string]any{"request": a.holder, "recordedSecretFingerprint": fpB, "confirmed": a.fpA, "pinned": false})
 
 	// 7. No confirmation: KeyConfirmationRequired before any signing Secret
 	// is read.
