@@ -23,6 +23,10 @@ backend reads every package capture through it, and nothing the controller
 writes changes. Task 3.2 connects captures to the run's content set
 ([Run content](#run-content)): the controller and the exporter derive a
 Kyverno capture's applied content through it, with unchanged results.
+Task 3.3 adds the shared namespace projection check and provider-specific
+extraction ([Namespace projection](#namespace-projection)). Every namespace
+package's capture and evaluation pass that check before export, summaries
+and archiving.
 Within the collection limits, nothing in this guide
 changes how existing bindings, profiles, delivery, collection, evaluation
 or export behave:
@@ -33,8 +37,8 @@ or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Namespace projection, shared evaluation and the full authoring recipe
-  are later tasks of the change.
+- Shared evaluation and the full authoring recipe are later tasks of the
+  change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -997,6 +1001,118 @@ reporting-only capture is not exported or collected yet: OSCAL conversion
 of other providers is task 4.2, and the registry does not gate the
 targeting resolver.
 
+## Namespace projection
+
+A namespace package discloses one namespace instance's evidence to the team
+that requested it. It must never contain a sibling namespace's subjects or
+findings, private source metadata, credentials, or anything whose scope
+cannot be established. Two parts keep every provider's payload safe to
+disclose:
+
+- **Provider-specific safe extraction.** Only a provider can read its own
+  payload, so it extracts the payload for one namespace
+  (`projection.Extractor.Extract`). It rebuilds each item it keeps
+  from allowlisted fields, records the item's provenance, and withholds
+  what it cannot attribute. A source object shared with other namespaces
+  contributes only its attributable part.
+- **Shared validation.** The host checks the scope of every
+  namespace-attributable item (`projection.Check`). The provider reads that
+  scope back from the extract alone (`projection.Extractor.Disclosures`),
+  never from the source, and lists
+  every item, including one it cannot attribute. Each item must name the
+  authorized namespace instance by UID, by name, or by both. An item that
+  names neither has unknown scope, and an extract with such an item is
+  refused. A refusal locates the offending items. It never repeats their
+  content or another namespace's name or UID.
+
+Package `internal/provider/projection` holds the scope, the shared check and
+the extractor interface. It imports no provider or Kyverno package
+(`TestHarnessHasNoKyvernoDependencies`), so any provider can implement an
+extractor. `collector.CaptureDocument.ProjectNamespace(scope, extractors)`
+and `ValidateNamespace(scope, extractors)` are the shared entry points. They
+dispatch by the capture's provider and payload version:
+
+| Capture | Extraction | Validation |
+| --- | --- | --- |
+| Kyverno payload 2, legacy or envelope | `collector.Project` and `ProjectReports` | `collector.ValidateProjection`: Kyverno's field allowlist, then `projection.Check` |
+| Kyverno payload 1 (the prototype capture) | refused | refused: it predates namespace projection |
+| Any other payload | its installed extractor | its extractor's `Disclosures`, then `projection.Check` |
+| A payload without an installed extractor | refused (`ErrNamespaceProjection`) | refused: it is never disclosed unprojected |
+
+The production build installs no extractor besides Kyverno's, so only a
+Kyverno projection can be a namespace package. The storage backend also
+refuses every non-Kyverno package capture
+([Readers of captures](#readers-of-captures)).
+
+`ValidateProjection` accepts exactly what the Kyverno extraction produces:
+
+- A report extract keeps only `apiVersion`, `kind`, `metadata.uid`,
+  `metadata.namespace` and at least one result. It has no `summary`,
+  `scope`, labels or annotations.
+- A result keeps only its policy, result, source, rule, timestamp,
+  `cel.validationIndex` and in-scope resource references, with their source
+  types. Its provenance (`konstapelSource`) names its own source report,
+  report digest, result index and transformation. Only an exact extract
+  keeps its message. A resource-filtered result of a mixed-namespace report
+  loses its message, because the message may describe the sibling.
+- Stale scopes keep their reasons, and their messages are redacted. The
+  capture keeps no collection errors.
+- A binding-wide scope change is a configuration change or a watch
+  discontinuity. It names no namespace or workload, and its detail is empty,
+  the controller's fixed restart text, or a stale reason with its message
+  redacted.
+- Checks, engine policies and contributions belong to a projected subject.
+- A withheld result records only its source report UID and index, with the
+  fixed reason.
+- Subjects, workloads, expected observations, scope changes (with their
+  workloads), report extracts and resource references all name the
+  projection's namespace instance.
+
+`collector.ValidateProjectedEvaluation` checks the evaluation that a
+package or summary reports from a projection. Every observation must be
+one of the projection's expected observations, evaluated once. Every
+report an observation references must be one of its extracts, and the
+summary must count exactly those observations. Three readers run it before
+anything is disclosed:
+
+- `collector.Export` runs it, and requires the scope's namespace UID and
+  name to be the projection's, before it writes a namespace package.
+- The namespace coverage projection (`coverage.Build`) runs it before it
+  reports any technical evidence.
+- The storage backend's `ValidatePackage` runs it before archiving, together
+  with `ValidateNamespace` against the descriptor's scope.
+
+Protected supporting evidence keeps its existing boundary. Only a
+binding-scope package carries it, and a namespace package's coverage shows
+only sanitized supporting context. A provider payload that references a
+supporting document, such as a result property with a document link, loses
+that reference in extraction, and an extract that keeps it is refused.
+
+The synthetic `reporttest` provider proves the seam with a shape unlike
+Kyverno's. Its posture reports are cluster-wide, are shared by every
+namespace that runs an image, and name no namespace. Its
+`reporttest.Extractor` keeps the team's subjects and only the reports for
+images they run, each with the frozen checks' verdicts only. It attributes
+a kept report to the subjects that run its image.
+
+The tests are `TestCheck`,
+`TestOwnersProjectionsPassTheSharedCheck`,
+`TestValidateProjectionRefusesEveryLeak`,
+`TestProjectedEvaluationIsChecked`,
+`TestNamespaceExportChecksEvaluationAndScope`,
+`TestNamespaceProjectionDispatch`,
+`TestStorageRefusesTamperedNamespacePackages`,
+`TestStorageRefusesNamespacePackageOfAnotherScope`,
+`TestNamespaceExtractOfSharedSource`,
+`TestNamespaceExtractUnknownScopeFailsClosed`,
+`TestTamperedNamespaceExtractsAreRefused` and
+`TestFaultyExtractorIsCaughtByTheSharedCheck`. The existing projection
+tests (`TestProjectionExcludesSiblingData`,
+`TestNamespacePackageContainsOnlyItsScope`) are unchanged. The Kyverno
+extraction and everything the controller writes are unchanged, so today's
+namespace packages keep their bytes. The check refuses only what the
+extraction never produces.
+
 ## Conformance
 
 `internal/provider/conformance` is the shared harness. It imports no
@@ -1104,6 +1220,9 @@ The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `Sources`, `SourceReader`, `Limits`, `Collect`, `LimitError`,
 `collector.ReadCapture`, `CaptureDocument`, `CaptureReaders`,
 `ContentRoles`, `ContentUse`, `RunContent.Resolve`, `PackageContent`,
+`NamespaceExtractors`, `ProjectNamespace`, `ValidateNamespace`,
+`ValidateProjectedEvaluation`, `projection.Scope`, `Disclosure`, `Check`,
+`Extractor`,
 `conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change. The

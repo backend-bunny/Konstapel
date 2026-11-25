@@ -28,6 +28,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/coverage"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
+	"github.com/backend-bunny/Konstapel/internal/provider/projection"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
@@ -646,18 +647,30 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		}
 	}
 	if d.Scope.Kind == publication.ScopeNamespace {
-		if !v2 {
+		if !v2 || d.Scope.Request == nil {
 			return d, errors.New("a namespace package requires a projected controller capture")
+		}
+		// The shared projection check, then the evaluation the descriptor
+		// summarizes. No other provider's payload has an installed
+		// extractor, so only a Kyverno projection is a namespace package.
+		ns := projection.Scope{Name: d.Scope.Request.Namespace, UID: d.Scope.Request.NamespaceUID}
+		if err := capture.ValidateNamespace(ns, nil); err != nil {
+			return d, fmt.Errorf("namespace scope: %w", err)
 		}
 		c, err := capture.V2()
 		if err != nil {
 			return d, err
 		}
-		if err := collector.ValidateProjection(c); err != nil {
-			return d, fmt.Errorf("namespace scope: %w", err)
+		var ev collector.Evaluation
+		raw, err := os.ReadFile(filepath.Join(dir, "evaluation.json"))
+		if err == nil {
+			err = json.Unmarshal(raw, &ev)
 		}
-		if c.Projection.NamespaceUID != d.Scope.Request.NamespaceUID {
-			return d, errors.New("namespace scope does not match the packaged projection")
+		if err != nil {
+			return d, fmt.Errorf("namespace scope: evaluation: %w", err)
+		}
+		if err := collector.ValidateProjectedEvaluation(c, ev); err != nil {
+			return d, fmt.Errorf("namespace scope: %w", err)
 		}
 	}
 	return d, nil
