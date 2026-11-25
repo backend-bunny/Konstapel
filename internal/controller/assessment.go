@@ -567,7 +567,8 @@ func (r *AssessmentReconciler) evaluate(ctx context.Context, b *v1alpha1.Complia
 	}
 	capture.Window.Closed = now
 	boundaries := r.Boundaries.Observe(now, capture.Workloads)
-	ev, err := capture.Evaluate(boundaries, maxAge)
+	// The current projection evaluates at the current assessment boundary.
+	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: capture, Boundaries: boundaries, MaxEvidenceAge: maxAge}, now)
 	if err != nil {
 		return nil, err
 	}

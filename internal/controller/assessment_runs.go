@@ -39,6 +39,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/coverage"
+	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/schedule"
 	"github.com/backend-bunny/Konstapel/internal/targeting"
@@ -975,7 +976,8 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 	}
 	trial := c
 	trial.Window.Closed = now
-	ev, err := trial.Evaluate(r.boundaries(trial), maxAge)
+	// A closing run evaluates at the closure boundary it freezes.
+	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: trial, Boundaries: r.boundaries(trial), MaxEvidenceAge: maxAge}, trial.Window.Closed)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

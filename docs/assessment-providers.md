@@ -264,7 +264,8 @@ status and by every run poll), the steps are:
    host's [collection limits](#collection-limits).
 5. `kyverno.Inventory` derives the expected inventory from the host input
    alone (`collector.FreezeScope`, unchanged). Reports are attached
-   afterwards and are evaluated unchanged by `collector.CaptureV2.Evaluate`.
+   afterwards and are evaluated unchanged by `kyverno.Evaluate` at an explicit
+   time (see [pure evaluators](#pure-evaluators)).
 
 What `kyverno.Collect` does:
 
@@ -1249,7 +1250,7 @@ duplicate credit, inconsistent normalization, nondeterminism, and others.
 Cases live under `testdata/providers/conformance/v1/<provider>/`:
 
 - `konstapel-kyverno/background-1.19.2`: the saved live Kyverno 1.19.2
-  background evidence, evaluated unchanged by `collector.CaptureV2.Evaluate`.
+  background evidence, evaluated unchanged by `kyverno.Evaluate` at its closure.
   The result is 30 expected, 28 attributable, 2 missing, 24 pass and 4 fail.
 - `konstapel-kyverno/synthetic-unknowns`: synthetic reports over that frozen
   scope, with a warn, conflicting results, untimed and future results, and a
@@ -1257,10 +1258,48 @@ Cases live under `testdata/providers/conformance/v1/<provider>/`:
 - `konstapel-reporttest/*`: the synthetic reporting shape described below.
 
 `TestKyvernoHarnessSummaryMatchesCollector` checks that the harness summary
-equals the controller's `collector.Tally` result for the Kyverno cases. The
-current Kyverno evaluator closes at the capture window. Its adapter refuses
-any other evaluation time rather than substituting the closure; explicit
-time inputs are task 4.1.
+equals the controller's `collector.Tally` result for the Kyverno cases.
+
+## Pure evaluators
+
+Evaluation takes frozen inputs and an explicit evaluation time, and nothing
+else: no clock, cluster, registry or engine access. Callers differ only in
+the time they pass.
+
+- `kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`
+  is the Kyverno evaluator. It is `collector.CaptureV2.EvaluateAt`, the
+  unchanged freshness and attribution rules with the capture closed at
+  `at`, summarized by `collector.Tally`. The current projection passes the
+  current assessment boundary. A closing run passes the closure it freezes,
+  and replay passes the frozen closure (`CaptureV2.Evaluate`). A zero time,
+  a time before the window started or one before a recorded scope change is
+  refused, never replaced by another time.
+- `reporttest.Evaluate(Input, at)` is the test-only reporting evaluator;
+  its conformance adapter only decodes the payload strictly first.
+
+Both evaluators apply the same rules:
+
+- Evidence exactly `maxEvidenceAge` old at `at` is still current; older
+  evidence, or evidence evaluated after `at`, is `Rejected`.
+- Conflicting results evaluated at the same time are `Unresolved`, as is
+  evidence that cannot name its subject (a Kyverno scope change, a
+  tag-only image). An unindexed Kyverno non-pass of a multi-validation
+  policy names no validation and establishes nothing.
+- Repeated or shared evidence attributes each expected observation once.
+  A reporting payload that lists a subject or check twice is refused.
+- Out-of-scope checks are `NotApplicable`, keep their raw result and never
+  count as a pass.
+- A raw warning (Kyverno `warn`) stays on the observation and counts once
+  as `unknown`. No new outcome field or accepted risk is introduced.
+
+`internal/provider/kyverno/evaluate_test.go` and
+`internal/provider/reporttest/evaluate_test.go` test these boundaries.
+`TestEvaluatorsReadNoClockAndCallersPassTime` checks that neither evaluator
+calls a `time` clock function. It also checks that non-test code reaches
+Kyverno evaluation only through `kyverno.Evaluate`.
+`TestKyvernoHonorsTheExplicitEvaluationTime` checks that the conformance
+adapter uses the case's time: three hours after closure the saved evidence
+is all rejected.
 
 The cases run in the normal test entry points (`task test`, `task check`).
 After an intended semantic change, rewrite the golden results and review the
