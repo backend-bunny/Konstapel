@@ -117,6 +117,16 @@ type Retention struct {
 	// BindingConfiguration is the binding revision the duration was read from.
 	BindingConfiguration string    `json:"bindingConfiguration"`
 	SelectedAt           time.Time `json:"selectedAt"`
+	// NotAfter optionally bounds the expiry of a recovered signed
+	// publication (add-evidence-signing-recovery decision 7): it is set only
+	// by signing recovery, to the expiry recorded when signing failed, so a
+	// late commit never extends retention. When set, the publication expires
+	// at NotAfter, which must not be after publishedAt + Duration. A commit
+	// landing at or after it is expired at once. Unset, the expiry is
+	// publishedAt + Duration and the record is byte for byte the one of
+	// releases without this field. Readers without it reject a record that
+	// has it as an unsupported record (strict decoding), never as unbounded.
+	NotAfter *time.Time `json:"notAfter,omitempty"`
 }
 
 // ParseDuration returns the positive retention duration.
@@ -126,6 +136,25 @@ func (r Retention) ParseDuration() (time.Duration, error) {
 		return 0, fmt.Errorf("retention %q must be a positive duration", r.Duration)
 	}
 	return d, nil
+}
+
+// Expiry returns the fixed expiry of a publication committed at
+// publishedAt under this retention: NotAfter when set, otherwise
+// publishedAt + Duration. A NotAfter after publishedAt + Duration would
+// extend retention and is an error.
+func (r Retention) Expiry(publishedAt time.Time) (time.Time, error) {
+	d, err := r.ParseDuration()
+	if err != nil {
+		return time.Time{}, err
+	}
+	full := publishedAt.Add(d)
+	if r.NotAfter == nil {
+		return full, nil
+	}
+	if r.NotAfter.IsZero() || r.NotAfter.After(full) {
+		return time.Time{}, fmt.Errorf("retention notAfter %s must not be after publication time plus retention (%s)", r.NotAfter.UTC().Format(time.RFC3339Nano), full.UTC().Format(time.RFC3339Nano))
+	}
+	return *r.NotAfter, nil
 }
 
 // Cleanup is the retention cleanup record.
@@ -161,9 +190,11 @@ type Receipt struct {
 	Signature *Signature `json:"signature,omitempty"`
 }
 
-// Validate checks receipt consistency, including expiresAt = publishedAt + retention.
+// Validate checks receipt consistency: expiresAt = publishedAt + retention,
+// or, for a recovered signed publication with retention.notAfter,
+// expiresAt = notAfter <= publishedAt + retention.
 func (r Receipt) Validate() error {
-	d, err := r.Retention.ParseDuration()
+	expires, err := r.Retention.Expiry(r.PublishedAt)
 	if err != nil {
 		return err
 	}
@@ -173,13 +204,26 @@ func (r Receipt) Validate() error {
 	if !sha256Hex.MatchString(r.PackageSHA256) || !sha256Hex.MatchString(r.DescriptorSHA256) || r.PackageSize <= 0 {
 		return errors.New("receipt requires package and descriptor SHA-256 and size")
 	}
-	if r.PublishedAt.IsZero() || !r.ExpiresAt.Equal(r.PublishedAt.Add(d)) {
+	if r.PublishedAt.IsZero() || !r.ExpiresAt.Equal(expires) {
+		if r.Retention.NotAfter != nil && !r.PublishedAt.IsZero() {
+			return errors.New("receipt expiry must equal its retention notAfter")
+		}
 		return errors.New("receipt expiry must equal publication time plus retention")
+	}
+	if r.Retention.NotAfter != nil && r.Signature == nil {
+		return errors.New("only a signed (recovered) receipt records a retention notAfter")
 	}
 	if g := r.Signature; g != nil && (g.Key == "" || !sha256Hex.MatchString(g.SHA256) || g.Size <= 0 || g.MediaType == "" || g.Algorithm == "" || g.KeyFingerprint == "") {
 		return errors.New("a signed receipt requires the signature's key, SHA-256, size, media type, algorithm, and key fingerprint")
 	}
 	return nil
+}
+
+// ExpiredAt reports whether the publication is expired at now. A commit
+// that landed at or after its retention bound (a late recovery commit) is
+// expired at once, whatever the reader's clock says.
+func (r Receipt) ExpiredAt(now time.Time) bool {
+	return !now.Before(r.ExpiresAt) || !r.PublishedAt.Before(r.ExpiresAt)
 }
 
 // Status is the run's publication status. It holds references and bounded

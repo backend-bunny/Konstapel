@@ -525,6 +525,14 @@ spec:
                           "2160h".
                         maxLength: 64
                         type: string
+                      notAfter:
+                        description: |-
+                          notAfter bounds the expiry of a signed publication committed by
+                          signing recovery: it is the expiry recorded when signing failed, so a
+                          late commit never extends retention. expiresAt is then notAfter, never
+                          after publishedAt + duration. It is absent on every other publication.
+                        format: date-time
+                        type: string
                       selectedAt:
                         format: date-time
                         type: string

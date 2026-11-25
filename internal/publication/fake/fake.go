@@ -56,7 +56,10 @@ type Publisher struct {
 	destination publication.Destination
 	// DurableStaging controls whether staged bytes survive Restart.
 	DurableStaging bool
-	records        map[string]*record
+	// ServerSkew is added to the clock for commit times only, modeling a
+	// storage server clock ahead of (positive) the controller's.
+	ServerSkew time.Duration
+	records    map[string]*record
 	// signatures are durable signature objects by publication ID; like the
 	// S3 object, the first stored bundle wins and survives restarts.
 	signatures map[string][]byte
@@ -222,19 +225,43 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 	if err != nil {
 		return publication.Receipt{}, err
 	}
+	// The S3 publisher's retention-bound guard (signing recovery): a bound
+	// is recorded only on a signed commit, never once the clock reached it,
+	// and never after the full retention.
+	if na := req.Retention.NotAfter; na != nil {
+		now := p.now()
+		switch {
+		case req.Signing == nil || req.Signing.Mode != publication.SigningRequired || na.IsZero():
+			return publication.Receipt{}, publication.ErrUnsupportedRecord
+		case !now.Before(*na):
+			return publication.Receipt{}, publication.ErrExpired
+		case na.After(now.Add(d)):
+			return publication.Receipt{}, fmt.Errorf("retention notAfter is after the commit time plus retention")
+		}
+	}
 	var sig *publication.Signature
 	if sg := req.Signing; sg != nil && sg.Mode == publication.SigningRequired {
 		if sig, err = p.requireSignature(r.staged, sg); err != nil {
 			return publication.Receipt{}, err
 		}
 	}
-	at := p.now().UTC().Truncate(time.Second)
+	at := p.now().Add(p.ServerSkew).UTC().Truncate(time.Second)
+	retention := req.Retention
+	if na := retention.NotAfter; na != nil {
+		u := na.UTC()
+		retention.NotAfter = &u
+	}
+	expires, err := retention.Expiry(at)
+	if err != nil {
+		// The server clock is behind: storage would hold an invalid record.
+		return publication.Receipt{}, fmt.Errorf("%w: %v", publication.ErrUnsupportedRecord, err)
+	}
 	id := r.staged.PublicationID
 	rc := publication.Receipt{
 		PublicationID: id, Destination: p.destination,
 		Commit:           publication.Commit{ManifestKey: p.destination.Prefix + id + "/commit.json", ManifestVersionID: "v1", ArchiveKey: p.destination.Prefix + id + "/attempts/1/package.tar", ArchiveVersionID: "v1"},
 		DescriptorSHA256: r.staged.DescriptorSHA256, PackageSHA256: r.staged.PackageSHA256, PackageSize: r.staged.PackageSize,
-		PublishedAt: at, Retention: req.Retention, ExpiresAt: at.Add(d), Signature: sig,
+		PublishedAt: at, Retention: retention, ExpiresAt: expires, Signature: sig,
 	}
 	r.receipt = &rc
 	return rc, lost(f, nil)
@@ -259,7 +286,7 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 	switch {
 	case r.deleted:
 		s.Phase, s.Availability = publication.PhaseDeleted, publication.AvailabilityUnavailable
-	case !p.now().Before(r.receipt.ExpiresAt):
+	case r.receipt.ExpiredAt(p.now()):
 		s.Phase, s.Availability = publication.PhaseExpired, publication.AvailabilityExpired
 		if s.Cleanup.State == publication.CleanupNotDue {
 			s.Cleanup.State = publication.CleanupPending
@@ -293,7 +320,7 @@ func (p *Publisher) Delete(ctx context.Context, run publication.RunRef) (publica
 		return publication.Cleanup{}, publication.ErrNotFound
 	}
 	now := p.now().UTC()
-	if r.receipt != nil && now.Before(r.receipt.ExpiresAt) {
+	if r.receipt != nil && !r.receipt.ExpiredAt(now) {
 		return r.cleanup, publication.ErrRetentionActive
 	}
 	r.deleted = true
@@ -349,7 +376,7 @@ func (p *Publisher) Open(ctx context.Context, run publication.RunRef) (io.ReadCl
 		return nil, publication.Status{}, publication.ErrNotFound
 	}
 	st := publication.Committed(*r.receipt)
-	if r.deleted || !p.now().Before(r.receipt.ExpiresAt) {
+	if r.deleted || r.receipt.ExpiredAt(p.now()) {
 		return nil, st, publication.ErrExpired
 	}
 	if r.archive == nil {

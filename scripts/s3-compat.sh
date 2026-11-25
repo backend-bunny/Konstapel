@@ -60,7 +60,7 @@ ENVEOF
 fi
 KONSTAPEL_S3_ENDPOINT=$endpoint KONSTAPEL_S3_ACCESS_KEY=$access KONSTAPEL_S3_SECRET_KEY=$secret \
 KONSTAPEL_S3_OUTPUT=$out KONSTAPEL_S3_IMAGE=$KONSTAPEL_S3_IMAGE KONSTAPEL_S3_VERSION="$(cat "$out/s3-version.txt")" \
-  go test -mod=readonly -tags s3compat -count=1 -run '^(TestCompatibility|TestPublisherRoundTrip|TestSignedPublisherRoundTrip|TestAttachmentStoreCompatibility)$' -v ./internal/s3store/ > "$out/s3-compat.log" 2>&1 \
+  go test -mod=readonly -tags s3compat -count=1 -run '^(TestCompatibility|TestPublisherRoundTrip|TestSignedPublisherRoundTrip|TestBoundedSignedPublisherRoundTrip|TestAttachmentStoreCompatibility)$' -v ./internal/s3store/ > "$out/s3-compat.log" 2>&1 \
   || { tail -40 "$out/s3-compat.log" >&2; exit 1; }
 for f in s3-compat.json attachment-compat.json; do
   [ -s "$out/$f" ] || { echo "missing $out/$f" >&2; exit 1; }

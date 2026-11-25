@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -105,6 +106,11 @@ func decodeCommit(b []byte) (manifest, *commitSignature, error) {
 		if err := strict(&m); err != nil {
 			return manifest{}, nil, err
 		}
+		// The unsigned commit keeps its original document: a retention
+		// bound exists only on recovered signed commits.
+		if m.Retention.NotAfter != nil {
+			return manifest{}, nil, fmt.Errorf("%w: an unsigned commit has a retention notAfter", publication.ErrUnsupportedRecord)
+		}
 		return m, nil, nil
 	case kindSignedCommit:
 		var sm signedManifest
@@ -121,6 +127,9 @@ func decodeCommit(b []byte) (manifest, *commitSignature, error) {
 		pub, err := evidencesign.ParsePublicKey([]byte(g.PublicKey))
 		if err != nil || pub.Fingerprint != g.KeyFingerprint {
 			return manifest{}, nil, fmt.Errorf("%w: signed commit's public key does not match its fingerprint", publication.ErrUnsupportedRecord)
+		}
+		if na := sm.Retention.NotAfter; na != nil && na.IsZero() {
+			return manifest{}, nil, fmt.Errorf("%w: signed commit has an empty retention notAfter", publication.ErrUnsupportedRecord)
 		}
 		sub := sm.Subject
 		return manifest{APIVersion: sm.APIVersion, Kind: sm.Kind, PublicationID: sm.PublicationID, Run: sub.Run, DescriptorSHA256: sub.DescriptorSHA256,
@@ -208,6 +217,34 @@ func checkCommitSigning(existing *commitSignature, sg *publication.Signing) erro
 		return fmt.Errorf("a signed commit exists for a run whose signing intent is Disabled: %w", publication.ErrConflict)
 	case required && existing.KeyFingerprint != sg.KeyFingerprint:
 		return fmt.Errorf("the commit is signed by %s, the intent requires %s: %w: %w", existing.KeyFingerprint, sg.KeyFingerprint, publication.ErrSignatureRequired, publication.ErrConflict)
+	}
+	return nil
+}
+
+// checkNotAfter guards a new commit's retention bound (signing recovery):
+// it is recorded only on a signed commit, and a bound already reached by
+// the controller clock is never committed. A commit that still lands at or
+// after the bound (the server clock is ahead) is expired at once: readers
+// derive expiresAt = notAfter from the record, never serve it, and
+// retention deletes it.
+func checkNotAfter(req publication.PublishRequest, now time.Time) error {
+	na := req.Retention.NotAfter
+	if na == nil {
+		return nil
+	}
+	if sg := req.Signing; sg == nil || sg.Mode != publication.SigningRequired {
+		return fmt.Errorf("%w: a retention notAfter is recorded only on a signed commit", publication.ErrUnsupportedRecord)
+	}
+	if na.IsZero() {
+		return fmt.Errorf("%w: empty retention notAfter", publication.ErrUnsupportedRecord)
+	}
+	if !now.Before(*na) {
+		return fmt.Errorf("%w: the retention bound %s has passed; nothing is committed", publication.ErrExpired, na.UTC().Format(time.RFC3339))
+	}
+	// A bound after the full retention from now would make the record
+	// invalid (readers reject notAfter > publishedAt + duration).
+	if d, _ := req.Retention.ParseDuration(); na.After(now.Add(d)) {
+		return fmt.Errorf("retention notAfter %s is after the commit time plus retention %s; nothing is committed", na.UTC().Format(time.RFC3339), req.Retention.Duration)
 	}
 	return nil
 }
