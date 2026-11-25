@@ -105,7 +105,8 @@
       "TestLiveLeaderHandoverRecovery",
       "TestLiveLeaderHandoverLoss",
       "TestLiveSupportingEvidenceRecovery",
-      "TestLivePublicationFaults"
+      "TestLivePublicationFaults",
+      "TestLiveSigningRecoveryClaim"
     ]
   },
   "availability": {

@@ -25,10 +25,10 @@ import (
 // before any storage write (task 2.2). Eligibility is decided from an
 // uncached read of the run and its destination, then from read-only
 // storage checks under the destination fence. A terminal request is never
-// re-evaluated. The per-run claim and the recovery itself (tasks 2.3 to
-// 2.6) build on recoveryEligibility; until they exist an eligible request
-// is accepted and waits, and the reconciler is not registered with the
-// manager.
+// re-evaluated. An eligible request then takes the run's recovery claim or
+// waits for it (task 2.3, signing_recovery_claim.go). The recovery attempt
+// itself (tasks 2.4 to 2.6) runs under the claim; until it exists the holder
+// stays Pending/Accepted.
 
 // recoveryEligibility is the outcome of evaluating a request against its
 // run. A terminal reason ends the request; otherwise the run is eligible
@@ -76,24 +76,57 @@ func (r *SigningRecoveryReconciler) reader() client.Reader {
 	return r.Client
 }
 
-// Reconcile evaluates one request. Terminal requests are left untouched.
+// Reconcile evaluates one request. A terminal request is never evaluated
+// again; it only releases a recovery claim it still holds. A returned error
+// is transient (API or storage unavailable, or a conflicting write): the
+// request is retried and nothing is decided.
 func (r *SigningRecoveryReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	esr := &v1alpha1.EvidenceSigningRequest{}
 	if err := r.Client.Get(ctx, req.NamespacedName, esr); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if esr.Status.Phase.Terminal() {
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, r.release(ctx, esr)
 	}
-	el, err := r.eligibility(ctx, esr)
-	if err != nil {
-		// Transient (API or storage unavailable): retry; nothing is decided.
+	el, err := r.runEligibility(ctx, esr)
+	switch {
+	case err != nil:
 		return reconcile.Result{}, err
+	case el.recovered:
+		return reconcile.Result{}, r.finishRecovered(ctx, esr, el.run)
+	case el.reason != "":
+		return reconcile.Result{}, r.end(ctx, esr, el.reason, el.message)
 	}
-	if el.reason != "" {
-		return reconcile.Result{}, r.fail(ctx, esr, el.reason, el.message)
+	run := el.run
+	held := claimOf(run)
+	if held != nil && !holdsClaim(held, esr) {
+		stale, err := r.staleClaim(ctx, held)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if !stale {
+			return r.wait(ctx, esr, held)
+		}
+		// Cleared against the read that found it stale; the run's new
+		// resourceVersion carries the claim below.
+		if err := r.clearClaim(ctx, run, held); err != nil {
+			return reconcile.Result{}, err
+		}
+		held = nil
 	}
-	return reconcile.Result{}, r.accept(ctx, esr)
+	if el, err = r.storageEligibility(ctx, run); err != nil {
+		return reconcile.Result{}, err
+	} else if el.reason != "" {
+		return reconcile.Result{}, r.end(ctx, esr, el.reason, el.message)
+	}
+	if held == nil {
+		if err := r.claim(ctx, run, esr); err != nil {
+			return reconcile.Result{}, err
+		}
+		held = claimOf(run)
+	}
+	return reconcile.Result{}, r.pending(ctx, esr, v1alpha1.RecoveryAccepted,
+		fmt.Sprintf("accepted; holds the signing recovery of AssessmentRun %s until %s", run.Name, held.Deadline.UTC().Format(time.RFC3339)))
 }
 
 // eligibility decides whether a request may proceed. It issues no write to
@@ -270,20 +303,6 @@ func (r *SigningRecoveryReconciler) record(esr *v1alpha1.EvidenceSigningRequest,
 	if st.AcceptedAt == nil {
 		st.AcceptedAt = &now
 	}
-}
-
-// accept records a non-terminal request as Pending/Accepted once.
-func (r *SigningRecoveryReconciler) accept(ctx context.Context, esr *v1alpha1.EvidenceSigningRequest) error {
-	if esr.Status.Phase != "" {
-		return nil
-	}
-	now := metav1.NewTime(r.now())
-	r.record(esr, now)
-	esr.Status.Phase, esr.Status.Reason = v1alpha1.SigningRequestPending, v1alpha1.RecoveryAccepted
-	esr.Status.Message = "accepted; the run is eligible for signing recovery"
-	meta.SetStatusCondition(&esr.Status.Conditions, metav1.Condition{Type: v1alpha1.ConditionSigningRequestComplete, Status: metav1.ConditionFalse,
-		Reason: string(v1alpha1.RecoveryAccepted), Message: esr.Status.Message, ObservedGeneration: esr.Generation, LastTransitionTime: now})
-	return r.Client.Status().Update(ctx, esr)
 }
 
 // fail ends a request with a terminal Failed reason. The resourceVersion

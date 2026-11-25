@@ -289,32 +289,46 @@ func TestSigningRecoveryConflict(t *testing.T) {
 	e.expectTerminal("other-key", v1alpha1.RecoveryConflict, "not the pinned "+pinned, nil)
 }
 
-// An eligible request is accepted once and waits for the claim (task 2.3);
-// eligibility issues no storage write and leaves the run unchanged. This
-// includes a matching signed commit whose response was lost (adopted
-// unchanged by recovery) and a run already recovered (AlreadyRecovered).
+// An eligible request is accepted once and claims the run (task 2.3);
+// eligibility issues no storage write, and the claim is the only change to
+// the run. This includes a matching signed commit whose response was lost
+// (adopted unchanged by recovery). A run already recovered is not a failure
+// (AlreadyRecovered, TestSigningRecoveryAlreadyRecovered).
 func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 	e := newRecoveryEnv(t)
 	accepted := func(name string) {
 		t.Helper()
-		writes, run := storageWrites(e.store()), js(e.run_())
+		writes, before := storageWrites(e.store()), e.run_()
 		esr := e.reconcile(name)
 		st := esr.Status
 		if st.Phase != v1alpha1.SigningRequestPending || st.Reason != v1alpha1.RecoveryAccepted || st.CompletedAt != nil || st.AcceptedAt == nil ||
 			st.Run == nil || st.RequestedBy == nil || meta.IsStatusConditionTrue(st.Conditions, v1alpha1.ConditionSigningRequestComplete) {
 			t.Fatalf("%s: want Pending/Accepted: %s", name, js(st))
 		}
-		if storageWrites(e.store()) != writes || js(e.run_()) != run {
-			t.Fatalf("%s: eligibility wrote storage or the run", name)
+		after := e.run_()
+		unclaimed := after.Status.DeepCopy()
+		unclaimed.SigningRecovery = before.Status.SigningRecovery
+		if storageWrites(e.store()) != writes || !holdsClaim(claimOf(after), esr) || js(unclaimed) != js(before.Status) {
+			t.Fatalf("%s: eligibility wrote storage, or the run changed other than by the claim", name)
 		}
-		if again := e.reconcile(name); js(again.Status) != js(st) {
-			t.Fatalf("%s: acceptance rewritten:\n%s\n%s", name, js(st), js(again.Status))
+		if again := e.reconcile(name); js(again.Status) != js(st) || js(e.run_()) != js(after) {
+			t.Fatalf("%s: acceptance or claim rewritten:\n%s\n%s", name, js(st), js(again.Status))
 		}
 	}
 	e.request("eligible", e.name, e.uid())
+	unclaimed := js(e.run_().Status)
 	accepted("eligible")
-	// Eligibility is re-checked while the request is not terminal.
+	// Eligibility is re-checked while the request is not terminal; the
+	// holder's terminal outcome releases its claim, leaving the run's status
+	// exactly as before it, and is never evaluated again.
 	e.now = e.run_().Status.Publication.ExpiresAt.Time
+	writes := storageWrites(e.store())
+	if st := e.reconcile("eligible").Status; st.Phase != v1alpha1.SigningRequestFailed || st.Reason != v1alpha1.RecoveryExpired || !strings.Contains(st.Message, "expired at") {
+		t.Fatalf("want Failed/Expired: %s", js(st))
+	}
+	if js(e.run_().Status) != unclaimed || storageWrites(e.store()) != writes {
+		t.Fatalf("the expired holder wrote storage or kept its claim: %s", js(e.run_().Status.SigningRecovery))
+	}
 	e.expectTerminal("eligible", v1alpha1.RecoveryExpired, "expired at", nil)
 
 	// A matching signed commit from before the signing failure.
@@ -354,8 +368,7 @@ func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 		r.Status.SigningRecovery = &v1alpha1.SigningRecoveryStatus{Recovered: &v1alpha1.SigningRecoveryRecord{Name: "first", UID: "uid-first", At: metav1.NewTime(e.now)}}
 	})
 	e.request("late", e.name, e.uid())
-	accepted("late")
-	if el, err := e.rec.eligibility(ctx, e.reconcile("late")); err != nil || !el.recovered {
+	if el, err := e.rec.eligibility(ctx, e.esr("late")); err != nil || !el.recovered {
 		t.Fatalf("already recovered: %+v %v", el, err)
 	}
 }

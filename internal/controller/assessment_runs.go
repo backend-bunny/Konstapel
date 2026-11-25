@@ -1426,11 +1426,19 @@ var requestMessages = map[string]string{
 
 // finishRequest copies a namespace run's sanitized outcome to its request.
 func (r *AssessmentRunReconciler) finishRequest(ctx context.Context, run *v1alpha1.AssessmentRun, reason string) error {
+	return finishRequestStatus(ctx, r.Client, run, reason)
+}
+
+// finishRequestStatus projects a terminal run onto its namespace
+// AssessmentRequest (sanitized: summary, phase, artifact reference). A
+// missing or recreated request is never recreated or overwritten, and an
+// unchanged projection is not written.
+func finishRequestStatus(ctx context.Context, c client.Client, run *v1alpha1.AssessmentRun, reason string) error {
 	q := run.Spec.Request
 	if run.Spec.Scope != v1alpha1.RunScopeNamespace || q == nil {
 		return nil
 	}
-	return setRequestStatus(ctx, r.Client, q.Namespace, q.Name, q.UID, func(s *v1alpha1.AssessmentRequestStatus) {
+	return setRequestStatus(ctx, c, q.Namespace, q.Name, q.UID, func(s *v1alpha1.AssessmentRequestStatus) {
 		s.Run = &v1alpha1.RunReference{Name: run.Name, UID: string(run.UID)}
 		if run.Status.Summary != nil {
 			sum := *run.Status.Summary

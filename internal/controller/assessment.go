@@ -762,6 +762,14 @@ func setupAssessments(mgr manager.Manager, content targeting.ContentSource, engi
 		Complete(&DestinationReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: rt.ControllerNamespace, Destinations: rt.Destinations}); err != nil {
 		return err
 	}
+	// Signing recovery requests (add-evidence-signing-recovery): eligibility
+	// and the per-run claim read runs, destinations and holders uncached.
+	if err := builder.ControllerManagedBy(mgr).Named("evidencesigningrequest").
+		For(&v1alpha1.EvidenceSigningRequest{}).
+		Watches(&v1alpha1.AssessmentRun{}, signingRequestsForRun(mgr.GetClient()), builder.WithPredicates(signingRecoveryChanged())).
+		Complete(&SigningRecoveryReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Runtime: rt}); err != nil {
+		return err
+	}
 	// Engine policies and each provider's watchable evidence sources (the
 	// Kyverno provider's PolicyReports) are watched once their own
 	// capabilities are available, each independently.
