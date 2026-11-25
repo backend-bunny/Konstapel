@@ -1,0 +1,40 @@
+# Evidence signing recovery roles (add-evidence-signing-recovery 1.3). Bind
+# each with a ClusterRoleBinding to platform subjects only. Neither is
+# aggregated into the built-in admin/edit/view roles, no namespace role
+# (assessment requester, exception editor) receives either, and
+# konstapel-compliance-admin does not include them: recovery is a separate
+# grant.
+#
+# Recoverers create EvidenceSigningRequests and follow their progress. The
+# spec, including the admission-recorded requester, is immutable, and status
+# is controller-owned, so there is no update, patch or status write. Requests
+# are the audit record: there is no delete either; removing one needs a
+# cluster-administrator grant outside these roles. A recoverer finds failed
+# runs through konstapel-assessment-operator; neither role grants run status
+# writes, Secret access or destination changes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-signing-recoverer
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidencesigningrequests]
+    verbs: [get, list, watch, create]
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidencesigningrequests/status]
+    verbs: [get]
+---
+# Readers audit requests and their outcomes; they cannot create, change or
+# delete them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-evidence-signing-recovery-reader
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [evidencesigningrequests, evidencesigningrequests/status]
+    verbs: [get, list, watch]

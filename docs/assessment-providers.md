@@ -658,6 +658,7 @@ every feature of the controller shares them:
   {"resource": "evidencedestinations.compliance.erenius.io", "verbs": ["patch", "update"]},
   {"resource": "evidencedestinations.compliance.erenius.io/finalizers", "verbs": ["update"]},
   {"resource": "evidencedestinations.compliance.erenius.io/status", "verbs": ["patch", "update"]},
+  {"resource": "evidencesigningrequests.compliance.erenius.io/status", "verbs": ["patch", "update"]},
   {"resource": "selfsubjectaccessreviews.authorization.k8s.io", "verbs": ["create"]},
   {"resource": "validatingpolicies.policies.kyverno.io", "verbs": ["create", "delete", "patch", "update"]}
 ]
