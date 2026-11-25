@@ -321,11 +321,21 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	// Kyverno's (kyverno- name) and calls only Services that no longer
 	// exist is deleted, and none may remain. Anything else, including a
 	// Kyverno-named configuration that still reaches a Service, is kept.
+	//
+	// The uninstall returns once the Deployments are deleted; their pods
+	// terminate afterwards, and a terminating cleanup controller recreates
+	// a webhook configuration deleted under it (with a new UID, which is
+	// then no longer this test's to remove). So nothing is deleted until no
+	// Kyverno pod is left (leftoversToRemove).
 	var removed []string
 	l.eventually("Kyverno's broken leftover webhook configurations removed", func() (bool, string) {
+		writers := l.kyvernoPods()
 		now, lookups := l.kyvernoWebhookConfigs()
 		left := lookups
-		for _, key := range leftoversToRemove(before, now) {
+		if len(writers) > 0 {
+			left = append(left, "Kyverno pods still running: "+strings.Join(writers, ", "))
+		}
+		for _, key := range leftoversToRemove(before, now, writers) {
 			uid := now[key].uid
 			if err := l.c.Delete(l.ctx, now[key].obj, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
 				left = append(left, key+": "+err.Error())
@@ -337,7 +347,11 @@ func (l *live) removeKyverno() *kyvernoRelease {
 		left = append(left, lookups...)
 		for key, w := range now {
 			if w.broken {
-				left = append(left, key+" calls "+strings.Join(w.services, ", "))
+				detail := key + " calls " + strings.Join(w.services, ", ")
+				if was, ok := before[key]; ok && was.uid != w.uid {
+					detail += fmt.Sprintf(" (recreated: uid %s, was %s)", w.uid, was.uid)
+				}
+				left = append(left, detail)
 			}
 		}
 		return len(left) == 0, fmt.Sprint(left)
@@ -346,6 +360,21 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	removed = slices.Compact(removed)
 	l.record("kyverno-uninstalled", map[string]any{"lingeringWebhooks": lingering, "removedBrokenWebhooks": removed})
 	return k
+}
+
+// kyvernoPods returns the pods, terminating ones included, left in the
+// Kyverno release's namespace.
+func (l *live) kyvernoPods() []string {
+	l.t.Helper()
+	var pods corev1.PodList
+	if err := l.c.List(l.ctx, &pods, client.InNamespace("kyverno")); err != nil {
+		l.t.Fatal(err)
+	}
+	var out []string
+	for _, p := range pods.Items {
+		out = append(out, p.Namespace+"/"+p.Name)
+	}
+	return out
 }
 
 // kyvernoWebhookConfigs returns the cluster's kyverno- webhook
