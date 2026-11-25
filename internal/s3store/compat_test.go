@@ -341,3 +341,112 @@ func TestSignedPublisherRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestBoundedSignedPublisherRoundTrip is add-evidence-signing-recovery 2.1
+// on the real service: a recovered commit records retention.notAfter and
+// expires there; a commit landing at or after its bound (the controller's
+// clock behind the server's) is expired at once, never served, and deleted
+// by retention; adopting an existing commit never rewrites it; and the
+// current release's strict reader rejects the stored bounded record.
+func TestBoundedSignedPublisherRoundTrip(t *testing.T) {
+	endpoint := os.Getenv("KONSTAPEL_S3_ENDPOINT")
+	requireTestOwned(t, endpoint)
+	creds := &StaticCredentials{AccessKeyID: os.Getenv("KONSTAPEL_S3_ACCESS_KEY"), SecretAccessKey: os.Getenv("KONSTAPEL_S3_SECRET_KEY")}
+	if endpoint == "" || creds.AccessKeyID == "" {
+		t.Fatal("KONSTAPEL_S3_ENDPOINT and credentials are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	for _, mode := range []Versioning{Unversioned, Enabled, Suspended} {
+		t.Run(string(mode), func(t *testing.T) {
+			d := Destination{ID: "compat", Endpoint: endpoint, Bucket: "konstapel-compat-" + lower(mode), Region: "us-east-1",
+				Prefix: "konstapel-test/bounded", Addressing: AddressingPath, CredentialSecret: &SecretRef{Name: "compat"}, DevelopmentFixture: true}
+			c, err := NewClient(ctx, d, creds)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stage := func(p *Publisher, uid string) (publication.RunRef, publication.Staged, *publication.Signing) {
+				t.Helper()
+				run := testRun
+				run.RunUID = uid + "-" + lower(mode)
+				dir := filepath.Join(t.TempDir(), "pkg")
+				if _, err := publicationtest.FullAssessmentPackage(repoRoot(t), dir, run); err != nil {
+					t.Fatal(err)
+				}
+				s, err := p.Stage(ctx, publication.StageRequest{Run: run, Dir: dir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				signer := testSigner(t)
+				if _, _, err := p.StoreSignature(ctx, run, signStaged(t, signer, s)); err != nil {
+					t.Fatal(err)
+				}
+				return run, s, requiredBy(signer)
+			}
+			p := &Publisher{Client: c, Dest: d, Now: time.Now}
+
+			// In bound: expiresAt = notAfter, a retry converges, the record
+			// is one the current release cannot read.
+			run, s, sg := stage(p, "bounded")
+			notAfter := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+			req := publication.PublishRequest{Staged: s, Retention: boundedRetention("2h", notAfter), Signing: sg}
+			r, err := p.Publish(ctx, req)
+			if err != nil || !r.ExpiresAt.Equal(notAfter) || !r.PublishedAt.Before(notAfter) || r.Validate() != nil {
+				t.Fatalf("bounded publish: %+v %v", r, err)
+			}
+			if again, err := (&Publisher{Client: c, Dest: d, Now: time.Now}).Publish(ctx, req); err != nil || !reflect.DeepEqual(again, r) {
+				t.Fatalf("bounded retry: %v", err)
+			}
+			raw, err := p.read(ctx, r.Commit.ManifestKey, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := releasedDecode(raw); err == nil {
+				t.Fatal("the current release's reader accepted a bounded commit")
+			}
+			if st, err := p.Inspect(ctx, run); err != nil || st.Phase != publication.PhaseCommitted || !st.ExpiresAt.Equal(notAfter) {
+				t.Fatalf("bounded inspect: %+v %v", st, err)
+			}
+
+			// Late: the controller clock is a minute behind the server, so
+			// the guard passes and the commit lands after its bound.
+			late := &Publisher{Client: c, Dest: d, Now: func() time.Time { return time.Now().Add(-time.Minute) }}
+			run2, s2, sg2 := stage(late, "late")
+			bound := time.Now().Add(-time.Second).UTC()
+			r2, err := late.Publish(ctx, publication.PublishRequest{Staged: s2, Retention: boundedRetention("2h", bound), Signing: sg2})
+			if err != nil || r2.PublishedAt.Before(r2.ExpiresAt) || r2.Validate() != nil {
+				t.Fatalf("late publish: %+v %v", r2, err)
+			}
+			if st, err := late.Inspect(ctx, run2); err != nil || st.Phase != publication.PhaseExpired {
+				t.Fatalf("late commit not expired for a lagging reader: %+v %v", st, err)
+			}
+			if _, _, err := p.Open(ctx, run2); !errors.Is(err, publication.ErrExpired) {
+				t.Fatalf("late commit served: %v", err)
+			}
+			if cl, err := p.Delete(ctx, run2); err != nil || cl.State != publication.CleanupDeleted {
+				t.Fatalf("late commit retention deletion: %+v %v", cl, err)
+			}
+			if left, err := p.listVersions(ctx, p.runPrefix(run2)); err != nil || len(left) != 0 {
+				t.Fatalf("late commit left %d versions: %v", len(left), err)
+			}
+
+			// Adoption keeps an existing commit's own expiry and bytes.
+			run3, s3, sg3 := stage(p, "adopted")
+			orig, err := p.Publish(ctx, publication.PublishRequest{Staged: s3, Retention: retention("2h"), Signing: sg3})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := p.read(ctx, orig.Commit.ManifestKey, "")
+			got, err := p.Publish(ctx, publication.PublishRequest{Staged: s3, Retention: boundedRetention("2h", orig.ExpiresAt.Add(-time.Hour)), Signing: sg3})
+			after, _ := p.read(ctx, orig.Commit.ManifestKey, "")
+			if err != nil || !reflect.DeepEqual(got, orig) || got.Retention.NotAfter != nil || !bytes.Equal(before, after) {
+				t.Fatalf("adoption changed the commit: %+v %v", got, err)
+			}
+			for _, rr := range []publication.RunRef{run, run3} {
+				if err := p.CleanupAttempts(ctx, rr); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}

@@ -181,7 +181,8 @@ func retention(d, config string) publication.Retention {
 var ctx = context.Background()
 
 func sameRetention(a, b publication.Retention) bool {
-	return a.Duration == b.Duration && a.BindingConfiguration == b.BindingConfiguration && a.SelectedAt.Equal(b.SelectedAt)
+	return a.Duration == b.Duration && a.BindingConfiguration == b.BindingConfiguration && a.SelectedAt.Equal(b.SelectedAt) &&
+		(a.NotAfter == nil) == (b.NotAfter == nil) && (a.NotAfter == nil || a.NotAfter.Equal(*b.NotAfter))
 }
 
 // sameReceipt compares the identity, commit, bytes and retention of two

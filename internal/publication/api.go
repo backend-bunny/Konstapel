@@ -30,7 +30,7 @@ func ToAPI(s Status) v1alpha1.PublicationStatus {
 		out.Commit = &v1alpha1.PublicationCommit{ManifestKey: c.ManifestKey, ManifestVersionID: c.ManifestVersionID, ArchiveKey: c.ArchiveKey, ArchiveVersionID: c.ArchiveVersionID}
 	}
 	if r := s.Retention; r != nil {
-		out.Retention = &v1alpha1.PublicationRetention{Duration: r.Duration, BindingConfiguration: r.BindingConfiguration, SelectedAt: metav1.NewTime(r.SelectedAt)}
+		out.Retention = &v1alpha1.PublicationRetention{Duration: r.Duration, BindingConfiguration: r.BindingConfiguration, SelectedAt: metav1.NewTime(r.SelectedAt), NotAfter: mt(r.NotAfter)}
 	}
 	if f := s.Failure; f != nil {
 		out.Failure = &v1alpha1.PublicationFailure{Reason: f.Reason, Message: f.Message, Retryable: f.Retryable, At: metav1.NewTime(f.At)}
@@ -63,7 +63,7 @@ func FromAPI(s v1alpha1.PublicationStatus) Status {
 		out.Commit = &Commit{ManifestKey: c.ManifestKey, ManifestVersionID: c.ManifestVersionID, ArchiveKey: c.ArchiveKey, ArchiveVersionID: c.ArchiveVersionID}
 	}
 	if r := s.Retention; r != nil {
-		out.Retention = &Retention{Duration: r.Duration, BindingConfiguration: r.BindingConfiguration, SelectedAt: r.SelectedAt.UTC()}
+		out.Retention = &Retention{Duration: r.Duration, BindingConfiguration: r.BindingConfiguration, SelectedAt: r.SelectedAt.UTC(), NotAfter: tm(r.NotAfter)}
 	}
 	if f := s.Failure; f != nil {
 		out.Failure = &Failure{Reason: f.Reason, Message: f.Message, Retryable: f.Retryable, At: f.At.UTC()}

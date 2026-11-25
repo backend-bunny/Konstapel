@@ -286,6 +286,12 @@ type PublicationRetention struct {
 	// +kubebuilder:validation:MaxLength=128
 	BindingConfiguration string      `json:"bindingConfiguration"`
 	SelectedAt           metav1.Time `json:"selectedAt"`
+	// notAfter bounds the expiry of a signed publication committed by
+	// signing recovery: it is the expiry recorded when signing failed, so a
+	// late commit never extends retention. expiresAt is then notAfter, never
+	// after publishedAt + duration. It is absent on every other publication.
+	// +optional
+	NotAfter *metav1.Time `json:"notAfter,omitempty"`
 }
 
 // PublicationCleanup is the retention cleanup record.

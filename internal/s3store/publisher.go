@@ -296,6 +296,13 @@ func (p *Publisher) Publish(ctx context.Context, req publication.PublishRequest)
 	if sg := req.Signing; sg != nil && sg.Mode != publication.SigningRequired && sg.Mode != publication.SigningDisabled {
 		return publication.Receipt{}, fmt.Errorf("%w: signing mode %q", publication.ErrUnsupportedRecord, sg.Mode)
 	}
+	if err := checkNotAfter(req, p.now()); err != nil {
+		return publication.Receipt{}, err
+	}
+	if na := req.Retention.NotAfter; na != nil {
+		u := na.UTC()
+		req.Retention.NotAfter = &u
+	}
 	a, err := p.stagedAttempt(ctx, s)
 	if err != nil {
 		return publication.Receipt{}, err
@@ -403,16 +410,16 @@ func (p *Publisher) receipt(m manifest, sig *commitSignature, head *s3.HeadObjec
 	if head.LastModified == nil {
 		return publication.Receipt{}, fmt.Errorf("%w: commit has no server time", publication.ErrUnavailable)
 	}
-	d, err := m.Retention.ParseDuration()
-	if err != nil {
-		return publication.Receipt{}, err
-	}
 	at := head.LastModified.UTC()
+	expires, err := m.Retention.Expiry(at)
+	if err != nil {
+		return publication.Receipt{}, fmt.Errorf("%w: commit retention: %v", publication.ErrUnsupportedRecord, err)
+	}
 	r := publication.Receipt{PublicationID: m.PublicationID,
 		Destination:      publication.Destination{ID: p.Dest.ID, Endpoint: p.Dest.Endpoint, Bucket: p.Dest.Bucket, Prefix: p.Dest.Prefix},
 		Commit:           publication.Commit{ManifestKey: p.commitKey(m.Run), ManifestVersionID: versionID(head.VersionId), ArchiveKey: m.ArchiveKey, ArchiveVersionID: m.ArchiveVersionID},
 		DescriptorSHA256: m.DescriptorSHA256, PackageSHA256: m.PackageSHA256, PackageSize: m.PackageSize,
-		PublishedAt: at, Retention: m.Retention, ExpiresAt: at.Add(d)}
+		PublishedAt: at, Retention: m.Retention, ExpiresAt: expires}
 	if p.Dest.CredentialSecret != nil {
 		r.Destination.CredentialRef = &publication.SecretRef{Name: p.Dest.CredentialSecret.Name}
 	}
@@ -440,7 +447,7 @@ func (p *Publisher) Inspect(ctx context.Context, run publication.RunRef) (public
 		return publication.Status{}, err
 	}
 	st := publication.Committed(r)
-	if !p.now().Before(r.ExpiresAt) {
+	if r.ExpiredAt(p.now()) {
 		st.Phase, st.Availability, st.Cleanup.State = publication.PhaseExpired, publication.AvailabilityExpired, publication.CleanupPending
 		return st, nil
 	}

@@ -52,7 +52,7 @@ func newAssessEnv(t *testing.T, objs ...client.Object) *assessEnv {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
 	c := fake.NewClientBuilder().WithScheme(Scheme()).WithRESTMapper(mapper).WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.AssessmentRun{}, &v1alpha1.AssessmentRequest{}, &v1alpha1.EvidenceDestination{}).
+		WithStatusSubresource(&v1alpha1.ComplianceBinding{}, &v1alpha1.ComplianceProfile{}, &v1alpha1.AssessmentRun{}, &v1alpha1.AssessmentRequest{}, &v1alpha1.EvidenceDestination{}, &v1alpha1.EvidenceSigningRequest{}).
 		// The API server assigns UIDs on create; the fake client does not.
 		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			if obj.GetUID() == "" {
