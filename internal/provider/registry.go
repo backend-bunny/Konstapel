@@ -136,6 +136,22 @@ func (r *Registry) CheckEvaluator(contract string, version int) error {
 	return nil
 }
 
+// ReportingOnly reports whether every check kind of the installed provider
+// for contract is reporting-only (Delivery false): it delivers no engine
+// resources, so its captures name no applied content and use the run's
+// frozen selection (collector.ContentSelected). It never falls back to
+// the default or another provider: an empty contract is invalid.
+func (r *Registry) ReportingOnly(contract string) (bool, error) {
+	if contract == "" {
+		return false, &SelectionError{Reason: ReasonInvalidSelection, Message: "no provider contract is named"}
+	}
+	d, serr := r.Lookup(contract)
+	if serr != nil {
+		return false, serr
+	}
+	return !slices.ContainsFunc(d.Checks, func(k CheckKind) bool { return k.Delivery }), nil
+}
+
 func (r *Registry) lookupContract(contract string) (Descriptor, bool) {
 	name, version, err := ParseContract(contract)
 	if err != nil {

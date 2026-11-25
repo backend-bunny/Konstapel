@@ -139,27 +139,6 @@ func (r *AssessmentRunReconciler) readRunContent(run *v1alpha1.AssessmentRun) (*
 	return &rc, nil
 }
 
-// appliedContent is the set of bundles a capture's contributions were
-// applied from: the bundles its subjects and contributions name, sorted by
-// manifest digest.
-func appliedContent(c collector.CaptureV2) []v1alpha1.BundleReference {
-	refs := map[v1alpha1.BundleReference]bool{}
-	for _, s := range c.Subjects {
-		refs[v1alpha1.BundleReference{Name: s.BundleName, Digest: s.BundleDigest}] = true
-	}
-	for _, x := range c.Contributions {
-		refs[v1alpha1.BundleReference{Name: x.BundleName, Digest: x.BundleDigest}] = true
-	}
-	out := make([]v1alpha1.BundleReference, 0, len(refs))
-	for ref := range refs {
-		out = append(out, ref)
-	}
-	slices.SortFunc(out, func(a, b v1alpha1.BundleReference) int {
-		return strings.Compare(a.Digest+"\x00"+a.Name, b.Digest+"\x00"+b.Name)
-	})
-	return out
-}
-
 // freezeContent decides and stages the content of a starting run. A run
 // whose applied and desired content is only the vendored bundle stages
 // nothing. Any other run stages its record and, for every OCI member that
@@ -173,7 +152,9 @@ func (r *AssessmentRunReconciler) freezeContent(ctx context.Context, run *v1alph
 		return err
 	}
 	local := vendoredName(r.Assess.Content)
-	applied := appliedContent(c)
+	// The capture boundary's applied content of the Kyverno payload:
+	// every bundle its subjects and contributions name.
+	applied := collector.KyvernoContentUse(c).Bundles()
 	rec := runContent{Version: runContentVersion, Desired: desired, Members: []runMember{}}
 	for _, ref := range applied {
 		rec.Members = append(rec.Members, runMember{Ref: ref, Applied: true, Vendored: local != "" && ref.Name == local})

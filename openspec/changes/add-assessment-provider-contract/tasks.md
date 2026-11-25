@@ -45,7 +45,7 @@ Do not treat its fixtures as live producer compatibility evidence.
 
 - [ ] 3.1 Add the provider-discriminated capture boundary and explicit version checks through the collector owner; test supported legacy CaptureV2 fixtures, unknown providers/payloads, evaluator compatibility and reader-before-writer behavior without rewriting retained evidence or existing Kyverno identities.
   <!-- agent: tier=deep risk=high reason="Historical evidence and capture compatibility" -->
-- [ ] 3.2 Connect provider captures to existing RunContent and verified-content ownership; test applied A versus desired B, overlapping applied revisions, reporting-only frozen selection and unavailable content, retaining exact content for replay after cache eviction without vendored fallback or digest-only resolution identity.
+- [x] 3.2 Connect provider captures to existing RunContent and verified-content ownership; test applied A versus desired B, overlapping applied revisions, reporting-only frozen selection and unavailable content, retaining exact content for replay after cache eviction without vendored fallback or digest-only resolution identity.
   <!-- agent: tier=deep risk=high reason="Frozen content identity and immutable assessment history" -->
 - [ ] 3.3 Add shared projection validation and provider-specific safe extraction before summaries/export; test mixed-namespace sources, unknown scope, diagnostics/references and protected supporting-evidence boundaries so no sibling findings, private metadata or credentials enter team output.
   <!-- agent: tier=deep risk=high reason="Namespace confidentiality across extensible payloads" -->
