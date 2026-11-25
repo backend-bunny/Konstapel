@@ -21,7 +21,8 @@ const (
 	// Contract is the compatibility.provider value of Kyverno bundles.
 	Contract = Name + "/v1"
 	// EvaluatorVersion versions the evaluation semantics of
-	// collector.CaptureV2.Evaluate and collector.Tally as of Konstapel 0.3.0.
+	// collector.CaptureV2.EvaluateAt (reached through Evaluate) and
+	// collector.Tally as of Konstapel 0.3.0.
 	EvaluatorVersion = 1
 	// CheckKind is the only check definition the provider evaluates.
 	CheckKind = "policies.kyverno.io/v1/ValidatingPolicy"

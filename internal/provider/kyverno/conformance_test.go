@@ -32,7 +32,8 @@ type input struct {
 }
 
 // adapter drives the existing, unchanged Kyverno evaluator
-// (collector.CaptureV2.Evaluate) through the shared harness.
+// (kyverno.Evaluate over collector.CaptureV2.EvaluateAt) through the
+// shared harness.
 type adapter struct{ root string }
 
 func (adapter) Contract() string { return kyverno.Contract }
@@ -95,13 +96,9 @@ func (a adapter) evaluate(raw json.RawMessage, at time.Time) (collector.Evaluati
 	if err != nil {
 		return collector.Evaluation{}, c, err
 	}
-	// The current evaluator closes at the capture window; explicit
-	// evaluation-time inputs are task 4.1. Refuse any other time rather
-	// than silently evaluating at a different boundary.
-	if !at.Equal(c.Window.Closed) {
-		return collector.Evaluation{}, c, fmt.Errorf("the Kyverno evaluator evaluates at capture closure %s, not %s", c.Window.Closed.Format(time.RFC3339), at.Format(time.RFC3339))
-	}
-	ev, err := c.Evaluate(nil, age)
+	// The case's explicit time is the evaluation boundary; the capture's
+	// own closure is never substituted for it.
+	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: c, MaxEvidenceAge: age}, at)
 	return ev, c, err
 }
 
@@ -204,16 +201,32 @@ func TestKyvernoSavedEvidenceInterpretation(t *testing.T) {
 	}
 }
 
-// An evaluation time other than the capture's closure is refused, not
-// silently replaced by it.
-func TestKyvernoRefusesAnotherEvaluationTime(t *testing.T) {
+// The case's evaluation time is used, never replaced by the capture's
+// closure: evaluated past every result's evidence-age limit, the saved
+// evidence no longer matches its golden result and is all rejected, and a
+// zero time is refused.
+func TestKyvernoHonorsTheExplicitEvaluationTime(t *testing.T) {
 	root := repoRoot(t)
-	c, _, err := conformance.Load(filepath.Join(root, cases, "background-1.19.2"))
-	if err != nil {
+	dir := filepath.Join(root, cases, "background-1.19.2")
+	c, want, err := conformance.Load(dir)
+	if err != nil || want == nil {
 		t.Fatal(err)
 	}
-	c.EvaluationTime = c.EvaluationTime.Add(time.Hour)
-	if _, errs := conformance.Check(adapter{root: root}, c); len(errs) == 0 {
-		t.Fatal("a different evaluation time was accepted")
+	later := c
+	later.EvaluationTime = c.EvaluationTime.Add(3 * time.Hour)
+	if errs := conformance.Verify(adapter{root: root}, later, *want); len(errs) == 0 {
+		t.Fatal("a later evaluation time reproduced the closure result")
+	}
+	got, errs := conformance.Check(adapter{root: root}, later)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if e := got.Evidence; e.Attributable != 0 || e.Rejected != want.Evidence.Attributable || got.Outcomes.Pass != 0 || got.Outcomes.Fail != 0 {
+		t.Fatalf("three hours later: %+v %+v", e, got.Outcomes)
+	}
+	zero := c
+	zero.EvaluationTime = time.Time{}
+	if _, err := (adapter{root: root}).Evaluate(zero.Input, zero.EvaluationTime); err == nil {
+		t.Fatal("a zero evaluation time was accepted")
 	}
 }

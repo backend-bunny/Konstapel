@@ -98,7 +98,22 @@ type candidate struct {
 	index     int
 }
 
-// Evaluate applies the freshness rules to a capture closed at c.Window.Closed.
+// Evaluate applies the freshness rules to a capture closed at c.Window.Closed:
+// it is EvaluateAt(c.Window.Closed, ...), the frozen closure boundary that
+// closed runs and replay use.
+func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration) (Evaluation, error) {
+	return c.EvaluateAt(c.Window.Closed, boundaries, maxEvidenceAge)
+}
+
+// EvaluateAt applies the freshness rules to the capture closed at the
+// explicit evaluation time at; c.Window.Closed is not consulted. It is pure:
+// it reads only its arguments, never a clock, the cluster or a registry,
+// so equal inputs give equal evaluations. Current projections pass the
+// current assessment boundary; closed runs and replay pass their frozen
+// closure (Evaluate). A zero time, a time before the window started, or one
+// before a recorded scope change is an error, never replaced by another
+// time.
+//
 // An expected observation is attributable only if a matching result:
 //   - names its engine policy (whose name binds binding, policy, and revision)
 //     and sub-validation index, and its workload UID;
@@ -110,14 +125,18 @@ type candidate struct {
 //   - does not conflict with another result evaluated at the same time.
 //
 // Collection time and report update time are never used as evaluation time.
-func (c CaptureV2) Evaluate(boundaries []Boundary, maxEvidenceAge time.Duration) (Evaluation, error) {
+func (c CaptureV2) EvaluateAt(at time.Time, boundaries []Boundary, maxEvidenceAge time.Duration) (Evaluation, error) {
+	// c is a copy: closing it at the evaluation time validates the window
+	// and scope changes against that boundary (a zero time fails as an
+	// unclosed window) without touching the caller's capture.
+	c.Window.Closed = at
 	if err := c.Validate(); err != nil {
 		return Evaluation{}, err
 	}
 	if maxEvidenceAge <= 0 {
 		return Evaluation{}, fmt.Errorf("maxEvidenceAge must be positive")
 	}
-	closed := c.Window.Closed
+	closed := at
 	since := map[string]Boundary{}
 	for _, b := range boundaries {
 		since[b.WorkloadUID] = b

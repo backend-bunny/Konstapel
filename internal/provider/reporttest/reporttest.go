@@ -109,14 +109,41 @@ func decode(raw json.RawMessage) (Input, time.Duration, error) {
 	if err := dec.Decode(&in); err != nil {
 		return in, 0, err
 	}
+	age, err := in.validate()
+	return in, age, err
+}
+
+// validate checks the frozen payload's version and returns its
+// evidence-age limit.
+func (in Input) validate() (time.Duration, error) {
 	if in.PayloadVersion != PayloadVersion {
-		return in, 0, fmt.Errorf("payload version %d is not supported (reads %d)", in.PayloadVersion, PayloadVersion)
+		return 0, fmt.Errorf("payload version %d is not supported (reads %d)", in.PayloadVersion, PayloadVersion)
 	}
 	age, err := time.ParseDuration(in.MaxEvidenceAge)
 	if err != nil || age <= 0 {
-		return in, 0, fmt.Errorf("maxEvidenceAge %q must be a positive duration", in.MaxEvidenceAge)
+		return 0, fmt.Errorf("maxEvidenceAge %q must be a positive duration", in.MaxEvidenceAge)
 	}
-	return in, age, nil
+	return age, nil
+}
+
+// unique refuses a subject or check listed twice: a duplicate association
+// is an invalid payload, never two independent observations.
+func (in Input) unique() error {
+	subjects := map[string]bool{}
+	for _, s := range in.Subjects {
+		if subjects[s.key()] {
+			return fmt.Errorf("subject %s is listed twice", s.key())
+		}
+		subjects[s.key()] = true
+	}
+	checks := map[string]bool{}
+	for _, c := range in.Checks {
+		if checks[c] {
+			return fmt.Errorf("check %q is listed twice", c)
+		}
+		checks[c] = true
+	}
+	return nil
 }
 
 func (s Subject) key() string { return s.NamespaceUID + "/" + s.WorkloadUID + "/" + s.Container }
@@ -136,6 +163,9 @@ func (s Subject) digest() string {
 func (Adapter) Inventory(raw json.RawMessage) ([]conformance.Expectation, error) {
 	in, _, err := decode(raw)
 	if err != nil {
+		return nil, err
+	}
+	if err := in.unique(); err != nil {
 		return nil, err
 	}
 	var out []conformance.Expectation
@@ -171,14 +201,35 @@ type candidate struct {
 	at      time.Time
 }
 
-// Evaluate implements conformance.Adapter. Per subject and check, a report
-// for the subject's exact digest is usable when it has an evaluation time
-// not after at and within maxEvidenceAge. The newest usable verdict counts;
-// equally new conflicting verdicts are unresolved; a subject without a
-// digest is unresolved for every check.
+// Evaluate implements conformance.Adapter: it decodes the payload strictly
+// and evaluates it with the pure evaluator.
 func (Adapter) Evaluate(raw json.RawMessage, at time.Time) (conformance.Evaluation, error) {
-	in, age, err := decode(raw)
+	in, _, err := decode(raw)
 	if err != nil {
+		return conformance.Evaluation{}, err
+	}
+	return Evaluate(in, at)
+}
+
+// Evaluate is the synthetic provider's pure evaluator: it reads only the
+// frozen input and the explicit evaluation time at, never a clock. Per
+// subject and check, a report for the subject's exact digest is usable when
+// it has an evaluation time not after at and at most maxEvidenceAge before
+// it (evidence exactly maxEvidenceAge old is still usable). The newest
+// usable verdict counts once, however many reports repeat it; equally new
+// conflicting verdicts are unresolved; a subject without a digest is
+// unresolved for every check. Report update time never counts. The raw
+// verdict is kept; unrecognized verdicts (a warning, say) normalize to
+// unknown. A zero time is refused.
+func Evaluate(in Input, at time.Time) (conformance.Evaluation, error) {
+	if at.IsZero() {
+		return conformance.Evaluation{}, fmt.Errorf("an explicit evaluation time is required")
+	}
+	age, err := in.validate()
+	if err != nil {
+		return conformance.Evaluation{}, err
+	}
+	if err := in.unique(); err != nil {
 		return conformance.Evaluation{}, err
 	}
 	ev := conformance.Evaluation{Observations: []conformance.Observation{}}
