@@ -2,10 +2,12 @@
 
 package controller
 
-// Live signing-recovery claim (add-evidence-signing-recovery 2.3) on real
-// Kubernetes APIs and the test-owned S3 service. A Required destination whose
-// key Secret was never installed ends a real run SigningFailed with its
-// archive retained. Then, with the API server's resourceVersion checks:
+// Live signing recovery (add-evidence-signing-recovery 2.3 and 2.4) on real
+// Kubernetes APIs and the test-owned S3 service (RustFS). A Required
+// destination whose key Secret was never installed ends a real run
+// SigningFailed with its archive retained. The requests confirm a
+// runtime-generated key that is not installed yet, so the claim phase writes
+// no storage. With the API server's resourceVersion checks:
 //   - requests reconciled at the same time by separate reconcilers (as
 //     overlapping leaders would) converge on exactly one claim holder, the
 //     others waiting, and the claim passes the run's CEL rules;
@@ -13,9 +15,23 @@ package controller
 //     registered reconciler) resumes the holder with the same claim;
 //   - a holder deleted while holding the claim, and a holder that ended
 //     terminally, are replaced by exactly one waiting request;
-//   - nothing is written to storage: no signature and no commit.
-// The recovery attempt itself (2.4 to 2.6) and its live faults (5.2) build on
-// this. Run through scripts/targeting-live.sh (recovery group).
+//   - nothing is written to storage while the key is absent.
+// Then the attempt (2.4):
+//   - the recorded Secret holding another key ends the holder KeyMismatch,
+//     and a request without expectedKeyFingerprint ends
+//     KeyConfirmationRequired without reading a signing Secret; neither pins;
+//   - with the confirmed key installed and the destination rotated to
+//     another Secret, overlapping reconcilers pin the confirmed key once,
+//     sign, and store one signature while the commit is refused;
+//   - with the key Secret deleted, a successor commits the stored signature
+//     without reading a signing Secret, and after a lost commit response the
+//     registered reconciler adopts the commit without publishing again;
+//   - storage holds exactly one signature version and one commit version,
+//     signed under the pinned key, with the run's recorded retention bounded
+//     by its recorded expiry.
+// Recording the recovered publication (2.6), the attempt deadline (2.5), and
+// the live faults (5.2) build on this. Run through scripts/targeting-live.sh
+// (recovery group).
 
 import (
 	"context"
@@ -38,6 +54,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
 	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
 func TestLiveSigningRecoveryClaim(t *testing.T) {
@@ -74,7 +91,18 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 			_ = l.c.Delete(context.Background(), got)
 		}
 	})
-	dp := &DestinationPublishers{Reader: l.c, Namespace: ns}
+	// Real publishers of the destination, with injectable commit faults.
+	faults := &liveCommitFaults{}
+	dp := &DestinationPublishers{Reader: l.c, Namespace: ns, New: func(ctx context.Context, d s3store.Destination, r client.Reader, ns string) (publication.Publisher, error) {
+		p, err := s3store.NewPublisher(ctx, d, r, controllerNamespace(ns))
+		if err != nil {
+			return nil, err
+		}
+		return &liveFaultPublisher{Publisher: p, f: faults}, nil
+	}}
+	// The key the requests confirm, generated at runtime and installed only
+	// in step 8.
+	keyA, fpA := signingKeySecret(t, "src-never-installed", "live-pw-a")
 	rt := AssessmentRuntime{StagingDir: t.TempDir(), ContentRoot: root, Poll: 3 * time.Second, PublishTimeout: 30 * time.Second, Workers: 1,
 		ControllerNamespace: ns, Destinations: dp}
 	ConfigureAssessments(rt)
@@ -141,15 +169,19 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 	}
 	l.record("signing-failed", map[string]any{"run": run.Name, "failure": run.Status.Publication.Failure.Reason, "expiresAt": run.Status.Publication.ExpiresAt})
 
-	newRequest := func(name string) *v1alpha1.EvidenceSigningRequest {
+	newRequestKey := func(name, fp string) *v1alpha1.EvidenceSigningRequest {
 		t.Helper()
 		esr := &v1alpha1.EvidenceSigningRequest{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.EvidenceSigningRequestSpec{
-			Run: v1alpha1.ExactRunReference{Name: run.Name, UID: string(run.UID)}, Reason: "Live claim test of signing recovery.",
+			Run: v1alpha1.ExactRunReference{Name: run.Name, UID: string(run.UID)}, Reason: "Live claim test of signing recovery.", ExpectedKeyFingerprint: fp,
 			RequestedBy: &v1alpha1.Requester{Username: "platform-admin", UID: "uid-platform-admin"}}}
 		if err := l.c.Create(l.ctx, esr); err != nil {
 			t.Fatal(err)
 		}
 		return esr
+	}
+	newRequest := func(name string) *v1alpha1.EvidenceSigningRequest {
+		t.Helper()
+		return newRequestKey(name, fpA)
 	}
 	get := func(name string) *v1alpha1.EvidenceSigningRequest {
 		esr := &v1alpha1.EvidenceSigningRequest{}
@@ -165,8 +197,9 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 		}
 		return claimOf(r)
 	}
-	// converged reports whether exactly one of names holds the claim as
-	// Pending/Accepted and every other waits for it.
+	// converged reports whether exactly one of names holds the claim, as
+	// Pending/Accepted or, once it resumed into its attempt, Running/Signing
+	// (the confirmed key is not installed), and every other waits for it.
 	converged := func(names []string) (string, bool, string) {
 		c := claimNow()
 		if c == nil {
@@ -179,7 +212,8 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 				return "", false, n + " missing"
 			}
 			switch {
-			case holdsClaim(c, esr) && esr.Status.Phase == v1alpha1.SigningRequestPending && esr.Status.Reason == v1alpha1.RecoveryAccepted:
+			case holdsClaim(c, esr) && esr.Status.Phase == v1alpha1.SigningRequestPending && esr.Status.Reason == v1alpha1.RecoveryAccepted,
+				holdsClaim(c, esr) && esr.Status.Phase == v1alpha1.SigningRequestRunning && esr.Status.Reason == v1alpha1.RecoverySigning:
 				holder = n
 			case esr.Status.Phase == v1alpha1.SigningRequestPending && esr.Status.Reason == v1alpha1.RecoveryWaiting:
 			default:
@@ -286,7 +320,8 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 	stop()
 	stopped = true
 
-	// 5. Claiming wrote no storage: no signature and no commit.
+	// 5. Without the confirmed key, nothing was written to storage: no
+	// signature and no commit.
 	cur := &v1alpha1.AssessmentRun{}
 	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(run), cur); err != nil {
 		t.Fatal(err)
@@ -306,6 +341,9 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 		t.Fatalf("the run is no longer the retained failure: %s", toJSON(cur.Status))
 	}
 	l.record("storage", map[string]any{"signature": "absent", "commit": "absent", "run": "retained SigningFailed"})
+
+	liveSigningRecoveryAttempt(t, l, liveAttempt{run: run, ed: ed, dp: dp, faults: faults, s3: pub, s3Secret: s3secret.Name, keyA: keyA, fpA: fpA,
+		holder: last, waiting: without(remaining, last), newRequestKey: newRequestKey, get: get, startManager: l.startManager})
 }
 
 func without(names []string, drop string) []string {

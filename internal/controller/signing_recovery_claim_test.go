@@ -42,8 +42,9 @@ func reconcileErr(rec *SigningRecoveryReconciler, name string) (reconcile.Result
 }
 
 // wantHolder checks that the run's claim names exactly the request and the
-// request is Pending/Accepted as its holder, with the attempt bounded by
-// PublishTimeout from the claim.
+// request is its holder, with the attempt bounded by PublishTimeout from the
+// claim: Pending/Accepted right after claiming, and Running once it resumed
+// into the attempt (task 2.4).
 func (e *recoveryEnv) wantHolder(name string) *v1alpha1.SigningRecoveryClaim {
 	e.t.Helper()
 	esr, run := e.esr(name), e.run_()
@@ -55,9 +56,10 @@ func (e *recoveryEnv) wantHolder(name string) *v1alpha1.SigningRecoveryClaim {
 		e.t.Fatalf("claim deadline is %s after the claim, want PublishTimeout %s", got, e.rec.publishTimeout())
 	}
 	st := esr.Status
-	if st.Phase != v1alpha1.SigningRequestPending || st.Reason != v1alpha1.RecoveryAccepted || !strings.Contains(st.Message, "holds the signing recovery") ||
-		st.CompletedAt != nil || st.AcceptedAt == nil || meta.IsStatusConditionTrue(st.Conditions, v1alpha1.ConditionSigningRequestComplete) {
-		e.t.Fatalf("holder %s: want Pending/Accepted: %s", name, js(st))
+	accepted := st.Phase == v1alpha1.SigningRequestPending && st.Reason == v1alpha1.RecoveryAccepted && strings.Contains(st.Message, "holds the signing recovery")
+	attempting := st.Phase == v1alpha1.SigningRequestRunning && (st.Reason == v1alpha1.RecoverySigning || st.Reason == v1alpha1.RecoveryCommitting)
+	if !accepted && !attempting || st.CompletedAt != nil || st.AcceptedAt == nil || meta.IsStatusConditionTrue(st.Conditions, v1alpha1.ConditionSigningRequestComplete) {
+		e.t.Fatalf("holder %s: want Pending/Accepted or Running: %s", name, js(st))
 	}
 	return c
 }
@@ -82,6 +84,9 @@ func TestSigningRecoveryClaimOneHolder(t *testing.T) {
 	}
 	e.reconcile("first")
 	claim := e.wantHolder("first")
+	// The holder resumes into its attempt; the key it confirms is not
+	// installed, so it retries without a storage write or a pin.
+	e.reconcile("first")
 	for _, n := range []string{"second", "third"} {
 		res, err := reconcileErr(e.rec, n)
 		if err != nil || res.RequeueAfter != e.rec.poll() {
