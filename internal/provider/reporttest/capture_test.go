@@ -5,6 +5,11 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/bundle"
+	"github.com/backend-bunny/Konstapel/internal/bundle/bundletest"
 
 	"github.com/backend-bunny/Konstapel/internal/collector"
 	"github.com/backend-bunny/Konstapel/internal/provider"
@@ -84,5 +89,80 @@ func TestReportingCaptureCrossesTheBoundary(t *testing.T) {
 	}
 	if _, err := (reporttest.Adapter{}).Evaluate(doc.Payload, c.EvaluationTime); err == nil {
 		t.Fatal("the reporting adapter evaluated a payload of another version")
+	}
+}
+
+// A reporting capture connects to the run's content as its frozen
+// selection: with a registry that installs the provider it names no
+// applied content, resolves to the one bundle frozen when the run started,
+// and evaluates unchanged. Applied content is never read as its selection;
+// an unavailable selection stays a failure and nothing is substituted. The
+// production registry has no reporting-only provider: Kyverno names applied
+// content.
+func TestReportingCaptureUsesFrozenSelection(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, want, err := conformance.Load(filepath.Join(root, "testdata/providers/conformance/v1/konstapel-reporttest/shared-image-evidence"))
+	if err != nil || want == nil {
+		t.Fatal(err)
+	}
+	a, err := bundletest.Differing(root, bundletest.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "frozen")
+	f, err := bundle.WriteFrozen(dir, a.Manifest, a.Layer, bundletest.Identity(a, "rule-rev-1", "trust-rev-1", time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := v1alpha1.BundleReference{Name: f.Identity.Name, Digest: f.Identity.Digests.OCI}
+	r, err := provider.New(kyverno.Contract, kyverno.Descriptor(), reporttest.Descriptor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(collector.CaptureEnvelope{Version: collector.CaptureEnvelopeVersion, Provider: reporttest.Contract,
+		PayloadVersion: reporttest.PayloadVersion, EvaluatorVersion: 1, Payload: c.Input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := collector.ReadCapture(raw, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	use, err := doc.ContentUse(r)
+	if err != nil || use.Role != collector.ContentSelected || len(use.Bundles()) != 0 {
+		t.Fatalf("%+v %v", use, err)
+	}
+	rc := &collector.RunContent{Desired: &sel, Members: []collector.ContentMember{{Ref: sel, Root: dir, Frozen: f}}}
+	members, err := rc.Resolve(use)
+	if err != nil || len(members) != 1 || members[0].Root != dir || members[0].Applied {
+		t.Fatalf("%+v %v", members, err)
+	}
+	if _, err := collector.FrozenContentSet(members[0].Frozen); err != nil {
+		t.Fatal(err)
+	}
+	replayed := c
+	replayed.Input = doc.Payload
+	if errs := conformance.Verify(reporttest.Adapter{}, replayed, *want); len(errs) > 0 {
+		t.Fatal(errors.Join(errs...))
+	}
+
+	var cf *collector.ContentFailure
+	applied := &collector.RunContent{Desired: &sel, Members: []collector.ContentMember{{Ref: sel, Applied: true, Root: dir, Frozen: f}}}
+	if _, err := applied.Resolve(use); !errors.As(err, &cf) || cf.Reason != collector.ReasonContentMismatch {
+		t.Fatalf("applied content read as a reporting-only selection: %v", err)
+	}
+	unavailable := &collector.RunContent{Desired: &sel, Members: []collector.ContentMember{{Ref: sel,
+		Failure: &collector.ContentFailure{Reason: collector.ReasonContentUnavailable, Message: "not resolvable"}}}}
+	if _, err := unavailable.Resolve(use); !errors.As(err, &cf) || cf.Reason != collector.ReasonContentUnavailable {
+		t.Fatalf("an unavailable selection resolved: %v", err)
+	}
+	if ro, err := installed.Registry().ReportingOnly(kyverno.Contract); err != nil || ro {
+		t.Fatalf("Kyverno is reporting-only: %v %v", ro, err)
+	}
+	if _, err := doc.ContentUse(installed.Registry()); !errors.Is(err, collector.ErrUnsupportedCapture) {
+		t.Fatalf("the production registry decided a test-only provider's content: %v", err)
 	}
 }

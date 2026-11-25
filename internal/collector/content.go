@@ -132,37 +132,6 @@ func memberContent(m ContentMember, trustedRoot string) (assessment.ContentSet, 
 	return FrozenContentSet(m.Frozen)
 }
 
-// captureUses requires every subject and contribution of c to name an
-// applied member, and every applied member to be named by one: the run's
-// content is exactly the content its contributions were applied from.
-func captureUses(c CaptureV2, applied map[v1alpha1.BundleReference]bool) error {
-	named := map[v1alpha1.BundleReference]bool{}
-	check := func(what, n, d string) error {
-		ref := v1alpha1.BundleReference{Name: n, Digest: d}
-		if !applied[ref] {
-			return contentFailure(ReasonContentMismatch, "%s references %s@%s, which the run did not freeze", what, n, d)
-		}
-		named[ref] = true
-		return nil
-	}
-	for _, s := range c.Subjects {
-		if err := check("subject "+s.EnginePolicy, s.BundleName, s.BundleDigest); err != nil {
-			return err
-		}
-	}
-	for _, x := range c.Contributions {
-		if err := check("contribution "+x.Policy, x.BundleName, x.BundleDigest); err != nil {
-			return err
-		}
-	}
-	for ref := range applied {
-		if !named[ref] {
-			return contentFailure(ReasonContentMismatch, "the run froze %s@%s, but the capture assesses nothing applied from it", ref.Name, ref.Digest)
-		}
-	}
-	return nil
-}
-
 // FrozenContentSet is a frozen bundle's content set: the component
 // definitions it declares as OSCAL entry points, in declaration order, and
 // each declared check's policy manifest.

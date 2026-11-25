@@ -20,7 +20,10 @@ documents the [capabilities and permissions](#capabilities-and-permissions)
 of each provider. Task 3.1 adds the provider-discriminated capture
 boundary and its version checks ([Captures](#captures)). The storage
 backend reads every package capture through it, and nothing the controller
-writes changes. Within the collection limits, nothing in this guide
+writes changes. Task 3.2 connects captures to the run's content set
+([Run content](#run-content)): the controller and the exporter derive a
+Kyverno capture's applied content through it, with unchanged results.
+Within the collection limits, nothing in this guide
 changes how existing bindings, profiles, delivery, collection, evaluation
 or export behave:
 
@@ -30,9 +33,8 @@ or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Connecting provider captures to run content and namespace projection,
-  shared evaluation and the full authoring recipe are later tasks of the
-  change.
+- Namespace projection, shared evaluation and the full authoring recipe
+  are later tasks of the change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -943,6 +945,58 @@ installed provider without package verification.
   record their evaluator only implicitly. A capture records
   `evaluatorVersion` explicitly once a release writes the envelope.
 
+### Run content
+
+A run's content set (`collector.RunContent`) stays owned by the collector
+and the controller that freezes it (see
+[policy bundles](policy-bundles.md)). A provider never resolves, fetches or
+caches content. A capture uses the set in one of two roles, decided by its
+installed provider (`CaptureDocument.ContentUse(registry)`):
+
+| Capture | Role | Content it is evaluated and exported from |
+| --- | --- | --- |
+| Kyverno payload 2, legacy or envelope | `Applied` | The bundles its subjects and contributions name (`KyvernoContentUse`), each by name and manifest digest. When nothing was applied, the desired bundle the plan names. |
+| A provider whose check kinds all have `delivery: false` (`Registry.ReportingOnly`) | `Selected` | The run's frozen selection: the one bundle the binding selected when the run started, frozen then. The capture names no bundle and has no engine-applied state. |
+| Kyverno payload 1 (the prototype capture) | refused | It predates content sets and is read only against its package's vendored content. |
+| Any other provider | refused | Only the Kyverno payload names the content its checks were applied from. |
+
+`RunContent.Resolve(use)` returns the members a capture reads, or an
+explicit content failure that makes the package a Diagnostic:
+
+- A run-level or member failure (`ContentUnavailable`, `ContentLost`) is
+  returned unchanged. Desired, vendored or another provider's content is
+  never substituted.
+- `Applied`: every reference must name an applied member, and every applied
+  member must be referenced. An enforcing contribution still applied from
+  bundle A while the profile desires B reads A, and B stays desired intent.
+  Overlapping applied revisions keep their own members.
+- `Selected`: the run must have frozen exactly one member, not applied, and
+  that member must be the selection it recorded when it started. Applied
+  content is never read as a selection, and no selection is invented. A
+  binding that changes after the freeze affects the next run; this run keeps
+  its frozen copy. Its descriptor records the selection as the frozen
+  desired bundle (`DesiredNotApplied`), with no applied identity.
+- Identity is the bundle name and manifest digest, never the digest alone:
+  another name for a frozen digest is a `ContentMismatch`.
+
+Replay reads a retained package alone. `collector.PackageContent(dir,
+descriptor)` returns the members packaged under their recorded paths,
+verified against the descriptor's record (`VerifyContent`). It never reads
+the cache, a registry or this image's vendored content. A packaged vendored
+member is the copy the run packaged. A missing, altered or renamed member is
+`ContentLost`, and a bundle a Diagnostic package did not carry is
+`ContentUnavailable`. A vendored run has no content record, so its content
+is its own `content/` tree. The tests are `TestResolve*`,
+`TestPackageContent*`, `TestCaptureContentUseByProvider`,
+`TestReportingCaptureUsesFrozenSelection` and
+`TestOCIRunReplaysFromPackageAfterEviction`.
+
+No wire format changes. The controller still writes CaptureV2 and the same
+content record, and the descriptor's `revisions.content` is unchanged. A
+reporting-only capture is not exported or collected yet: OSCAL conversion
+of other providers is task 4.2, and the registry does not gate the
+targeting resolver.
+
 ## Conformance
 
 `internal/provider/conformance` is the shared harness. It imports no
@@ -1049,6 +1103,7 @@ These are versioned contracts:
 The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `Sources`, `SourceReader`, `Limits`, `Collect`, `LimitError`,
 `collector.ReadCapture`, `CaptureDocument`, `CaptureReaders`,
+`ContentRoles`, `ContentUse`, `RunContent.Resolve`, `PackageContent`,
 `conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change. The

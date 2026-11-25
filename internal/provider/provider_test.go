@@ -223,6 +223,38 @@ func TestCheckEvaluator(t *testing.T) {
 	}
 }
 
+// ReportingOnly decides a capture's content role (collector.ContentUse): a
+// provider whose kinds all deliver nothing uses the run's frozen
+// selection. One delivering kind makes it a provider with applied content.
+// It never falls back to the default provider.
+func TestReportingOnly(t *testing.T) {
+	mixed := enforcing()
+	mixed.Name = "mixed"
+	report := reporting().Checks[0]
+	mixed.Checks[0].Kind, report.Kind = "policies.mixed.io/v1/EnginePolicy", "reports.mixed.io/v1/ImagePosture"
+	mixed.Checks = append(mixed.Checks, report)
+	r, err := provider.New("engine/v1", enforcing(), reporting(), mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for contract, want := range map[string]bool{"engine/v1": false, "posture/v3": true, "mixed/v1": false} {
+		if got, err := r.ReportingOnly(contract); err != nil || got != want {
+			t.Errorf("%s: %v %v, want %v", contract, got, err, want)
+		}
+	}
+	for contract, reason := range map[string]provider.SelectionReason{
+		"":           provider.ReasonInvalidSelection,
+		"posture/v1": provider.ReasonIncompatibleVersion,
+		"unknown/v1": provider.ReasonUnknownProvider,
+	} {
+		got, err := r.ReportingOnly(contract)
+		var serr *provider.SelectionError
+		if got || !errors.As(err, &serr) || serr.Reason != reason {
+			t.Errorf("%q: %v %v, want %s", contract, got, err, reason)
+		}
+	}
+}
+
 func TestSelect(t *testing.T) {
 	r := registry(t)
 	engineCheck := func(name string) provider.CheckSelection {

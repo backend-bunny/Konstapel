@@ -235,13 +235,8 @@ func exportParts(req ExportRequest) ([]*oscalPart, string, error) {
 	if req.TrustedRoot == "" {
 		return nil, "", contentFailure(ReasonContentIncompatible, "no trusted content root is configured to validate frozen bundle content")
 	}
-	applied := map[v1alpha1.BundleReference]bool{}
-	for _, m := range rc.Members {
-		if m.Applied {
-			applied[m.Ref] = true
-		}
-	}
-	if err := captureUses(req.Capture, applied); err != nil {
+	members, err := rc.Resolve(KyvernoContentUse(req.Capture))
+	if err != nil {
 		return nil, "", err
 	}
 	// Each observation belongs to the bundle its contribution was applied
@@ -252,11 +247,7 @@ func exportParts(req ExportRequest) ([]*oscalPart, string, error) {
 		bundleOf[contribution{string(s.BindingUID), s.Revision, s.EnginePolicy}] = v1alpha1.BundleReference{Name: s.BundleName, Digest: s.BundleDigest}
 	}
 	var parts []*oscalPart
-	for i := range rc.Members {
-		m := &rc.Members[i]
-		if !m.Applied && len(applied) > 0 {
-			continue
-		}
+	for _, m := range members {
 		set, err := memberContent(*m, req.TrustedRoot)
 		if err != nil {
 			return nil, "", err
@@ -270,9 +261,6 @@ func exportParts(req ExportRequest) ([]*oscalPart, string, error) {
 		})
 		prefix := m.Path() + "/"
 		parts = append(parts, &oscalPart{prefix: prefix, root: m.Root, set: set, member: m, capture: sub, mapping: prefix + set.Definitions[0]})
-	}
-	if len(parts) == 0 {
-		return nil, "", contentFailure(ReasonContentMismatch, "the run's content set has no content to export")
 	}
 	return parts, req.TrustedRoot, nil
 }
