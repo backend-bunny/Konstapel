@@ -322,11 +322,12 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	// exist is deleted, and none may remain. Anything else, including a
 	// Kyverno-named configuration that still reaches a Service, is kept.
 	//
-	// The uninstall returns once the Deployments are deleted; their pods
-	// terminate afterwards, and a terminating cleanup controller recreates
-	// a webhook configuration deleted under it (with a new UID, which is
-	// then no longer this test's to remove). So nothing is deleted until no
-	// Kyverno pod is left (leftoversToRemove).
+	// The stopping admission controller deletes every Kyverno-labelled
+	// configuration, and a cleanup controller still running recreates its
+	// two with new UIDs; those are this uninstall's leftovers too. The
+	// uninstall returns once the Deployments are deleted while their pods
+	// still terminate, so nothing is deleted until no Kyverno pod is left
+	// to recreate it (leftoversToRemove).
 	var removed []string
 	l.eventually("Kyverno's broken leftover webhook configurations removed", func() (bool, string) {
 		writers := l.kyvernoPods()
@@ -349,7 +350,7 @@ func (l *live) removeKyverno() *kyvernoRelease {
 			if w.broken {
 				detail := key + " calls " + strings.Join(w.services, ", ")
 				if was, ok := before[key]; ok && was.uid != w.uid {
-					detail += fmt.Sprintf(" (recreated: uid %s, was %s)", w.uid, was.uid)
+					detail += fmt.Sprintf(" (uid %s created %s managed=%v; before: uid %s created %s managed=%v)", w.uid, w.created.Format(time.RFC3339), w.managed, was.uid, was.created.Format(time.RFC3339), was.managed)
 				}
 				left = append(left, detail)
 			}
@@ -405,7 +406,7 @@ func (l *live) kyvernoWebhookConfigs() (map[string]kyvernoWebhook, []string) {
 			failed = append(failed, kind+"/"+obj.GetName()+": "+err.Error())
 		}
 		if kyverno {
-			out[kind+"/"+obj.GetName()] = kyvernoWebhook{obj: obj, uid: obj.GetUID(), services: services, broken: broken}
+			out[kind+"/"+obj.GetName()] = kyvernoWebhook{obj: obj, uid: obj.GetUID(), created: obj.GetCreationTimestamp().Time, managed: obj.GetLabels()["webhook.kyverno.io/managed-by"] == "kyverno", services: services, broken: broken}
 		}
 	}
 	for i := range vwc.Items {

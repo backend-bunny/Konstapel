@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -14,8 +15,12 @@ import (
 // kyvernoWebhook is one Kyverno-named webhook configuration as
 // TestLiveHelmLateKyverno sees it after its own Kyverno uninstall.
 type kyvernoWebhook struct {
-	obj      client.Object
-	uid      types.UID
+	obj     client.Object
+	uid     types.UID
+	created time.Time
+	// managed: labelled webhook.kyverno.io/managed-by=kyverno, the label
+	// Kyverno puts on every webhook configuration it writes.
+	managed  bool
 	services []string
 	// broken: every webhook in it calls a Service that does not exist.
 	broken bool
@@ -49,19 +54,28 @@ func classifyKyvernoWebhook(name string, configs []admissionregistrationv1.Webho
 }
 
 // leftoversToRemove returns the configurations the test owns as leftovers of
-// its Kyverno uninstall: present before it with the same UID, and broken.
-// A configuration created since (another UID) or still reaching a Service
-// is kept. Nothing is removed while a Kyverno pod (writers) still runs:
-// Kyverno's cleanup controller recreates its webhook configuration on
-// deletion, so one deleted while its terminating pod still watches comes
-// back with a new UID that is no longer the test's to remove.
+// its Kyverno uninstall, all broken: present before it with the same UID, or
+// recreated by Kyverno during it. The uninstall stops the admission
+// controller, which on shutdown deletes every configuration labelled
+// webhook.kyverno.io/managed-by=kyverno, the cleanup controller's ttl and
+// cleanup ones included; a cleanup controller still running then recreates
+// them, with new UIDs and the same name and label, calling its Service that
+// the uninstall removes next. So a configuration also counts when it has the
+// name of one present before, both carry Kyverno's label and it was created
+// no earlier. Anything else (not there before, unlabelled, or still reaching
+// a Service) is kept. Nothing is removed while a Kyverno pod (writers) is
+// left, since it could still recreate what is deleted.
 func leftoversToRemove(before, now map[string]kyvernoWebhook, writers []string) []string {
 	if len(writers) > 0 {
 		return nil
 	}
 	var out []string
 	for key, w := range now {
-		if was, ok := before[key]; ok && was.uid == w.uid && w.broken {
+		was, ok := before[key]
+		if !ok || !w.broken {
+			continue
+		}
+		if was.uid == w.uid || (was.managed && w.managed && !w.created.Before(was.created)) {
 			out = append(out, key)
 		}
 	}
@@ -71,8 +85,8 @@ func leftoversToRemove(before, now map[string]kyvernoWebhook, writers []string) 
 
 // The late-Kyverno test removes exactly the leftovers its own Kyverno
 // uninstall left behind: Kyverno-named configurations, present before the
-// uninstall, whose every webhook calls a removed Service, once no Kyverno
-// pod is left to recreate them. Others are kept, and a failed Service
+// uninstall or recreated by Kyverno during it, whose every webhook calls a
+// removed Service, once no Kyverno pod is left to recreate them. Others are kept, and a failed Service
 // lookup decides nothing.
 func TestKyvernoLeftoverSelection(t *testing.T) {
 	svc := func(ns, name string) admissionregistrationv1.WebhookClientConfig {
@@ -110,23 +124,35 @@ func TestKyvernoLeftoverSelection(t *testing.T) {
 		})
 	}
 
+	installed := time.Date(2026, 11, 25, 2, 46, 0, 0, time.UTC)
+	uninstalled := installed.Add(17 * time.Minute)
 	before := map[string]kyvernoWebhook{
-		"ValidatingWebhookConfiguration/kyverno-cleanup": {uid: "u1", broken: false},
-		"ValidatingWebhookConfiguration/kyverno-ttl":     {uid: "u2"},
-		"ValidatingWebhookConfiguration/kyverno-live":    {uid: "u3"},
-		"MutatingWebhookConfiguration/kyverno-recreated": {uid: "u4"},
+		"ValidatingWebhookConfiguration/kyverno-cleanup":           {uid: "u1", broken: false, managed: true, created: installed},
+		"ValidatingWebhookConfiguration/kyverno-ttl":               {uid: "u2", managed: true, created: installed},
+		"ValidatingWebhookConfiguration/kyverno-live":              {uid: "u3", managed: true, created: installed},
+		"ValidatingWebhookConfiguration/kyverno-cleanup-recreated": {uid: "u6", managed: true, created: installed},
+		"MutatingWebhookConfiguration/kyverno-recreated":           {uid: "u4", created: installed},
+		"MutatingWebhookConfiguration/kyverno-relabelled":          {uid: "u7", managed: true, created: installed},
+		"MutatingWebhookConfiguration/kyverno-older":               {uid: "u8", managed: true, created: uninstalled},
 	}
 	now := map[string]kyvernoWebhook{
-		"ValidatingWebhookConfiguration/kyverno-cleanup":  {uid: "u1", broken: true},
-		"ValidatingWebhookConfiguration/kyverno-ttl":      {uid: "u2", broken: true},
-		"ValidatingWebhookConfiguration/kyverno-live":     {uid: "u3", broken: false},
-		"MutatingWebhookConfiguration/kyverno-recreated":  {uid: "u9", broken: true},
-		"MutatingWebhookConfiguration/kyverno-new-broken": {uid: "u5", broken: true},
+		"ValidatingWebhookConfiguration/kyverno-cleanup": {uid: "u1", broken: true, managed: true, created: installed},
+		"ValidatingWebhookConfiguration/kyverno-ttl":     {uid: "u2", broken: true, managed: true, created: installed},
+		"ValidatingWebhookConfiguration/kyverno-live":    {uid: "u3", broken: false, managed: true, created: installed},
+		// Deleted by the stopping admission controller and recreated by the
+		// cleanup controller while it still ran.
+		"ValidatingWebhookConfiguration/kyverno-cleanup-recreated": {uid: "u10", broken: true, managed: true, created: uninstalled},
+		// Another UID is kept unless both carry Kyverno's label and it is
+		// no older; one not there before is never the test's.
+		"MutatingWebhookConfiguration/kyverno-recreated":  {uid: "u9", broken: true, created: uninstalled},
+		"MutatingWebhookConfiguration/kyverno-relabelled": {uid: "u11", broken: true, created: uninstalled},
+		"MutatingWebhookConfiguration/kyverno-older":      {uid: "u12", broken: true, managed: true, created: installed},
+		"MutatingWebhookConfiguration/kyverno-new-broken": {uid: "u5", broken: true, managed: true, created: uninstalled},
 	}
 	if got := leftoversToRemove(before, now, []string{"kyverno/kyverno-cleanup-controller-588fc84c5d-wf2zj"}); got != nil {
 		t.Fatalf("leftovers removed while a Kyverno pod still runs: %v", got)
 	}
-	want := []string{"ValidatingWebhookConfiguration/kyverno-cleanup", "ValidatingWebhookConfiguration/kyverno-ttl"}
+	want := []string{"ValidatingWebhookConfiguration/kyverno-cleanup", "ValidatingWebhookConfiguration/kyverno-cleanup-recreated", "ValidatingWebhookConfiguration/kyverno-ttl"}
 	if got := leftoversToRemove(before, now, nil); !slices.Equal(got, want) {
 		t.Fatalf("leftovers to remove %v, want %v", got, want)
 	}
