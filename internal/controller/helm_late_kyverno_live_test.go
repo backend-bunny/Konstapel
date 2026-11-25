@@ -1058,9 +1058,10 @@ func (l *live) crdContract(ns string) {
 	l.record("crd-contract", map[string]any{"crds": shipped, "checks": findings})
 }
 
-// signingRequestContract checks the installed status-writer policy and the
-// recovery roles on the contract's EvidenceSigningRequest, with dry runs
-// only, and returns how many checks it made.
+// signingRequestContract checks the installed controller's outcome for the
+// contract's EvidenceSigningRequest, and the status-writer policy and the
+// recovery roles on it with dry runs only, and returns how many checks it
+// made.
 func (l *live) signingRequestContract(admin dynamic.Interface, clients map[string]dynamic.Interface) int {
 	t := l.t
 	t.Helper()
@@ -1068,31 +1069,53 @@ func (l *live) signingRequestContract(admin dynamic.Interface, clients map[strin
 		return c.Resource(lcGVR("evidencesigningrequests"))
 	}
 	dryRun := []string{metav1.DryRunAll}
-	cur, err := requests(admin).Get(l.ctx, "lc-signing-request", metav1.GetOptions{})
-	if err != nil {
-		t.Errorf("evidencesigningrequests: the contract request is missing: %v", err)
+	// The installed controller (add-evidence-signing-recovery 2.3) ends the
+	// request at once: its run does not exist. That status is the
+	// controller's own write, attributed from the admission-recorded spec.
+	var cur *unstructured.Unstructured
+	ended := func() (bool, string) {
+		got, err := requests(admin).Get(l.ctx, "lc-signing-request", metav1.GetOptions{})
+		if err != nil {
+			return false, err.Error()
+		}
+		cur = got
+		return lcGet(got.Object, "status", "phase") == "Failed" && lcGet(got.Object, "status", "reason") == "RunNotFound", toJSON(got.Object["status"])
+	}
+	if ok, _ := ended(); !ok && cur == nil {
+		t.Errorf("evidencesigningrequests: the contract request is missing")
 		return 0
 	}
-	accepted := cur.DeepCopy()
-	accepted.Object["status"] = map[string]any{"phase": "Pending", "reason": "Accepted",
-		"requestedBy": lcGet(cur.Object, "spec", "requestedBy"), "run": lcGet(cur.Object, "spec", "run"), "acceptedAt": "2026-11-24T10:00:00Z",
-		"conditions": []any{map[string]any{"type": "Complete", "status": "False", "reason": "Accepted", "message": "accepted", "lastTransitionTime": "2026-11-24T10:00:00Z"}}}
+	l.eventually("the controller ends the contract EvidenceSigningRequest with RunNotFound", ended)
+	if toJSON(lcGet(cur.Object, "status", "requestedBy")) != toJSON(lcGet(cur.Object, "spec", "requestedBy")) ||
+		toJSON(lcGet(cur.Object, "status", "run")) != toJSON(lcGet(cur.Object, "spec", "run")) || lcGet(cur.Object, "status", "completedAt") == nil {
+		t.Errorf("evidencesigningrequests: the controller's outcome is not attributed and complete: %s", toJSON(cur.Object["status"]))
+	}
+	// The unchanged terminal status passes the schema, so the writer policy
+	// alone decides who may write it.
 	const writer = "konstapel-evidence-signing-status-writer"
-	err = l.retried(func() error {
-		_, err := requests(admin).UpdateStatus(l.ctx, accepted.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
+	err := l.retried(func() error {
+		_, err := requests(admin).UpdateStatus(l.ctx, cur.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
 		return err
 	}, apierrors.IsForbidden)
 	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), writer) {
 		t.Errorf("evidencesigningrequests/status as a cluster administrator: got %v, want Forbidden by %s", err, writer)
 	}
 	err = l.retried(func() error {
-		_, err := requests(clients[lcController]).UpdateStatus(l.ctx, accepted.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
+		_, err := requests(clients[lcController]).UpdateStatus(l.ctx, cur.DeepCopy(), metav1.UpdateOptions{DryRun: dryRun})
 		return err
 	}, func(err error) bool { return err == nil })
 	if err != nil {
 		t.Errorf("evidencesigningrequests/status as the controller: %v", err)
 	}
-	misattributed := accepted.DeepCopy()
+	reopened := cur.DeepCopy()
+	reopened.Object["status"] = map[string]any{"phase": "Pending", "reason": "Accepted",
+		"requestedBy": lcGet(cur.Object, "spec", "requestedBy"), "run": lcGet(cur.Object, "spec", "run"), "acceptedAt": lcGet(cur.Object, "status", "acceptedAt"),
+		"conditions": []any{map[string]any{"type": "Complete", "status": "False", "reason": "Accepted", "message": "accepted", "lastTransitionTime": "2026-11-24T10:00:00Z"}}}
+	if _, err := requests(clients[lcController]).UpdateStatus(l.ctx, reopened, metav1.UpdateOptions{DryRun: dryRun}); !apierrors.IsInvalid(err) ||
+		!strings.Contains(err.Error(), "a terminal outcome is never rewritten") {
+		t.Errorf("evidencesigningrequests/status reopened by the controller: got %v, want Invalid", err)
+	}
+	misattributed := cur.DeepCopy()
 	lcSet(misattributed.Object, map[string]any{"username": "someone-else"}, "status", "requestedBy")
 	if _, err := requests(clients[lcController]).UpdateStatus(l.ctx, misattributed, metav1.UpdateOptions{DryRun: dryRun}); !apierrors.IsInvalid(err) ||
 		!strings.Contains(err.Error(), "status.requestedBy must be spec.requestedBy") {
@@ -1108,7 +1131,7 @@ func (l *live) signingRequestContract(admin dynamic.Interface, clients map[strin
 			t.Errorf("evidencesigningrequests delete as %s: %v", id, err)
 		}
 	}
-	return 7
+	return 10
 }
 
 // lcNamespaceRun is a controller-only run: Namespace scope with a Request
