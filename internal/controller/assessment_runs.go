@@ -933,7 +933,7 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 	if c.Observer != r.Instance {
 		// Another process collected until now; continuity across the gap
 		// cannot be proven, so earlier evaluations no longer count.
-		collector.NewTracker(&c).Discontinuity(now, "controller restart or leader change; earlier observations are not continuous")
+		collector.NewTracker(&c).Discontinuity(now, collector.ObserverDiscontinuity)
 		c.Observer = r.Instance
 	}
 	cur, _, maxAge, err := r.Assess.snapshot(ctx, b, now)
@@ -948,7 +948,7 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		workloads = slices.DeleteFunc(slices.Clone(workloads), func(w collector.Workload) bool { return w.NamespaceUID != p.NamespaceUID })
 		stale = slices.Clone(stale)
 		for i := range stale {
-			stale[i].Message = "redacted in namespace scope"
+			stale[i].Message = collector.RedactedInNamespace
 		}
 		np := collector.Projection{Namespace: p.Namespace, NamespaceUID: p.NamespaceUID}
 		cur.Reports = collector.ProjectReports(cur.Reports, &np)

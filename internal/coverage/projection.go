@@ -82,35 +82,13 @@ func project(in Input) (Input, projection) {
 }
 
 // projectedTo reports whether ev is verifiably the owner's projection to
-// namespace ns: the capture is projected to it and passes the owner's
-// independent projection check, every evaluated observation is one of its
-// expected observations, and the evaluation's summary counts exactly those.
-// The reason for a failure is not kept: it may name another namespace.
+// namespace ns: the capture is projected to it, and the owner's shared
+// check (collector.ValidateProjectedEvaluation) accepts the capture and the
+// evaluation summarized from it. The reason for a failure is not kept: it
+// may name another namespace.
 func projectedTo(ev Evidence, ns string) bool {
 	c := ev.Capture
-	if ns == "" || c.Projection == nil || c.Projection.NamespaceUID != ns || collector.ValidateProjection(c) != nil {
-		return false
-	}
-	expected := map[string]bool{}
-	for _, e := range c.Expected {
-		if e.NamespaceUID != ns {
-			return false
-		}
-		expected[e.Key()] = true
-	}
-	seen := map[string]bool{}
-	var obs []collector.Observation
-	for _, o := range ev.Evaluation.Observations {
-		if !expected[o.Key] {
-			return false
-		}
-		if !seen[o.Key] {
-			seen[o.Key] = true
-			obs = append(obs, o)
-		}
-	}
-	e, o := collector.Tally(obs, len(c.Stale))
-	return e == ev.Evaluation.Evidence && o == ev.Evaluation.Outcomes
+	return ns != "" && c.Projection != nil && c.Projection.NamespaceUID == ns && collector.ValidateProjectedEvaluation(c, ev.Evaluation) == nil
 }
 
 // supporting is an entry as the projection may disclose it. A namespace

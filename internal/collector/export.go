@@ -84,11 +84,12 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	}
 	switch {
 	case req.Scope.Kind == publication.ScopeNamespace:
-		// Projection happens before export; verify it independently.
-		if err := ValidateProjection(req.Capture); err != nil {
+		// Projection happens before export; verify it, and the evaluation
+		// the package summarizes, independently.
+		if err := ValidateProjectedEvaluation(req.Capture, req.Evaluation); err != nil {
 			return publication.Descriptor{}, fmt.Errorf("namespace package: %w", err)
 		}
-		if req.Scope.Request == nil || req.Scope.Request.NamespaceUID != req.Capture.Projection.NamespaceUID {
+		if req.Scope.Request == nil || req.Scope.Request.NamespaceUID != req.Capture.Projection.NamespaceUID || req.Scope.Request.Namespace != req.Capture.Projection.Namespace {
 			return publication.Descriptor{}, errors.New("namespace package scope does not match its projection")
 		}
 	case req.Capture.Projection != nil:

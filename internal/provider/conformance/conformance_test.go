@@ -53,6 +53,16 @@ func TestHarnessHasNoKyvernoDependencies(t *testing.T) {
 			t.Errorf("the synthetic reporting adapter imports %s", p)
 		}
 	}
+	// The shared namespace projection seam is provider-neutral too.
+	projection := goList(t, "-deps", module+"/internal/provider/projection")
+	if !slices.Contains(projection, module+"/internal/provider/projection") {
+		t.Fatalf("deps %v lack the projection package itself; the check is not working", projection)
+	}
+	for _, p := range kyvernoPackages {
+		if slices.Contains(projection, p) {
+			t.Errorf("the shared projection seam depends on %s", p)
+		}
+	}
 }
 
 func reportingCase(t *testing.T) (conformance.Case, conformance.Expected) {
