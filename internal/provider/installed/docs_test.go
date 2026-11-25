@@ -52,6 +52,8 @@ func documentedExamples(t *testing.T) map[string]any {
 		"controller-role-writes":         controllerRoleWrites(t),
 		"capture-headers":                captures,
 		"capture-rejections":             rejectedCaptures,
+		"retained-interpretations":       retainedInterpretations(t),
+		"earlier-release-readers":        earlierReaders(t),
 	}
 }
 
@@ -143,9 +145,11 @@ func TestDocumentedTestsExist(t *testing.T) {
 	// with the storage backend.
 	captures, _ := filepath.Glob(filepath.Join(root, "internal/collector/*_test.go"))
 	storage, _ := filepath.Glob(filepath.Join(root, "internal/s3store/*_test.go"))
-	// Run content replay through the complete bundle stack.
+	// Run content replay through the complete bundle stack, and the
+	// package descriptor's closed set of file roles.
 	stack, _ := filepath.Glob(filepath.Join(root, "internal/bundle/stack/*_test.go"))
-	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart, captures, storage, stack) {
+	descriptors, _ := filepath.Glob(filepath.Join(root, "internal/publication/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart, captures, storage, stack, descriptors) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)

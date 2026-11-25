@@ -929,26 +929,6 @@ is verified against the packaged content like a legacy capture, and
 `TestPackageCaptureRefusesProvidersWithoutVerification` covers an
 installed provider without package verification.
 
-### Readers before writers
-
-- **This build writes nothing new.** The controller still writes version 2
-  (`kyverno.Descriptor().capture.write`). No production code writes an
-  envelope. A rollback from this build to an earlier release therefore
-  reads everything this build wrote.
-- **The envelope is read here and written nowhere.** A later release may
-  write it only after a release with these readers has shipped. A rollback
-  from that release to one with these readers keeps its packages readable.
-  The earlier releases (up to 0.3.0) refuse version 3 explicitly:
-  `CaptureVersion`, `CaptureV2.Validate` and `assessment.Reconcile` are
-  their readers, unchanged since 0.1.0. Such a release refuses to validate
-  or evaluate an envelope package. It never reads one as an empty Kyverno
-  capture (`TestReadersBeforeWriters`).
-- **Version 2 never grows envelope fields.** An earlier reader ignores an
-  appended `evaluatorVersion`, and would read the capture as evaluator 1
-  whatever it says (`TestReadersBeforeWriters`). So version 2 captures
-  record their evaluator only implicitly. A capture records
-  `evaluatorVersion` explicitly once a release writes the envelope.
-
 ### Run content
 
 A run's content set (`collector.RunContent`) stays owned by the collector
@@ -1112,6 +1092,123 @@ tests (`TestProjectionExcludesSiblingData`,
 extraction and everything the controller writes are unchanged, so today's
 namespace packages keep their bytes. The check refuses only what the
 extraction never produces.
+
+## Compatibility, retention and rollback
+
+A package outlives the release that wrote it. Retention keeps it for the
+configured period, and replay reads it alone. Every build therefore keeps
+the readers that its retained packages need, and a rollback is safe only to
+a release that reads everything written since. This section covers the
+capture and package formats only. Other rollback constraints, such as those
+for signing destinations, are in
+[release readiness](release-readiness.md).
+
+### Retained formats
+
+| Retained form | Written by | This build | 0.3.0 and earlier |
+| --- | --- | --- | --- |
+| Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package | Read by the prototype and the C2P plugin |
+| Capture version 2 | The controller, in every release including this one | Read with evaluator 1, unchanged | Read |
+| Capture version 3 (envelope) | Nothing yet | Read: in production, Kyverno payload 2 only | Refused explicitly |
+| Descriptor, file roles and content record | Unchanged since 0.3.0 | Read | 0.3.0 reads them. 0.2.0 refuses the `coverage-summary`, `coverage-summary-text` and `supporting-*` roles 0.3.0 added as unknown roles |
+
+The file roles are a closed set, so a descriptor reader that predates a role
+refuses the package instead of ignoring the file (`TestDescriptorValidation`).
+This change adds no role, no descriptor field and no change to the content
+record.
+
+### Retained interpretation
+
+The saved captures keep their bytes and their interpretation. Read through
+the boundary with the production registry, and evaluated with the evaluator
+their version implies (`assessment.Reconcile` for version 1 and
+`CaptureV2.Evaluate` for version 2, with the chart's 2h maximum evidence
+age), they give (`TestDocumentedExamples`):
+
+<!-- verified: retained-interpretations -->
+```json
+[
+  {
+    "capture": "testdata/capture.json",
+    "sha256": "d7bb94aa5dc968ae6951e4a806ddb7349d163ba0700fcd5613ec03ae505546e8",
+    "evidence": {"complete": true, "missing": 0, "rejected": 0},
+    "outcomes": {"pass": 1, "fail": 1}
+  },
+  {
+    "capture": "testdata/assessments/kyverno-1.19.2-background/capture.json",
+    "sha256": "b6dfee9fba0d6f1f7f9a847e8d7fb822c890f90a8e6d7a2ee24565a0b5364a5f",
+    "evidence": {"completeness": "Incomplete", "expected": 30, "attributable": 28, "missing": 2, "rejected": 0, "unresolved": 0},
+    "outcomes": {"pass": 24, "fail": 4, "error": 0, "skip": 0, "acceptedRisk": 0, "notApplicable": 0, "unknown": 0}
+  }
+]
+```
+
+The digests are the same pins `TestLegacyCapturesReadUnchanged` checks. A
+change to the Kyverno evaluation that changes these results needs a new
+evaluator version, with evaluator 1 still installed for the captures that
+record it. `TestProductionRegistryReadsLegacyCaptures` fails if the
+installed Kyverno provider stops reading payload 1 or 2 or evaluator 1.
+
+### Content retention
+
+A package carries the content its capture was evaluated from, under the
+paths and digests its descriptor records ([Run content](#run-content)). The
+content is retained, and retired, with the package. Replay never reads the
+bundle cache, a registry or the image's vendored content, so cache eviction
+or a removed bundle does not change a retained package's interpretation
+(`TestOCIRunReplaysFromPackageAfterEviction`). A missing or altered member
+is an explicit `ContentLost`, never a substitute.
+
+Package validation, including the namespace projection checks, runs when a
+package is staged for publication (`s3store.ValidatePackage` in
+`Publisher.Stage`). It never rewrites a package, and an archived package is
+not revalidated. The projection checks refuse only what the Kyverno
+extraction never produces, and the extraction is unchanged, so packages
+written by earlier releases would pass them too.
+
+### Rollback
+
+- **This build writes nothing new.** The controller still writes capture
+  version 2 (`kyverno.Descriptor().capture.write`), with the same
+  descriptor, roles and content record as 0.3.0. No production code writes
+  an envelope. A rollback to 0.3.0 reads every package this build wrote.
+- **The envelope is read here and written nowhere.** A later release may
+  write it only after a release with these readers has shipped (readers
+  before writers). A rollback from that release is supported only to a
+  release with these readers. The earlier releases (up to 0.3.0) refuse an
+  envelope package explicitly. Their capture readers are
+  `CaptureVersion`, `CaptureV2.Validate` and `assessment.Reconcile`,
+  unchanged in this build, and none reads an envelope as an empty Kyverno
+  capture (`TestReadersBeforeWriters`). Given a Kyverno envelope of the
+  saved CaptureV2, they report:
+
+<!-- verified: earlier-release-readers -->
+```json
+[
+  {"reader": "collector.CaptureVersion", "error": "unsupported capture version 3"},
+  {"reader": "CaptureV2.Validate", "error": "capture version 3 is not 2"},
+  {"reader": "CaptureV2.Evaluate", "error": "capture version 3 is not 2"},
+  {"reader": "assessment.Reconcile", "error": "invalid capture identity, time boundary, or empty expected inventory"}
+]
+```
+
+- **Version 2 never grows envelope fields.** An earlier reader ignores an
+  appended `evaluatorVersion`, and would read the capture as evaluator 1
+  whatever it says (`TestReadersBeforeWriters`). So version 2 captures
+  record their evaluator only implicitly, and this build refuses a version
+  2 capture with an envelope field. A capture records `evaluatorVersion`
+  explicitly once a release writes the envelope.
+- **Readers stay while their packages are retained.** A rollback, or a
+  later release, can disable selecting a provider. It must not remove the
+  provider's capture or evaluator readers while packages that need them
+  are retained. A build without them refuses those packages explicitly
+  (`TestCaptureBoundaryRejectsWhatItDoesNotSupport`,
+  `TestProductionRegistryRejectsUnsupportedCaptures`,
+  `TestEvaluatorCompatibility`). It never evaluates them with other
+  semantics or drops them.
+- **Older package readers fail closed.** A role a reader does not know
+  refuses the package. 0.2.0 cannot read packages with coverage or
+  supporting evidence, as recorded in the 0.3.0 rollback constraints.
 
 ## Conformance
 
