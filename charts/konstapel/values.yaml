@@ -129,15 +129,34 @@ download:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 512Mi}
 
-# ComplianceException revocation processing
-# (add-self-service-policy-exceptions task 3.6; docs/charts.md, "Exception
-# revocation processing"). One switch for the controller's gated
-# complianceexceptions update/patch and selfsubjectreviews create grant and
-# for --exception-revocation-processing. Those writes are confined only by the
-# fail-closed exception admission webhooks, which this chart does not deploy
-# yet, so true fails the render. Off: revoked exceptions keep their
-# finalizer and report RevocationProcessingDisabled.
+# ComplianceException admission webhooks and revocation processing
+# (add-self-service-policy-exceptions; docs/charts.md, "Exception admission
+# webhooks"). Both are off by default; neither enables native Kyverno
+# exception grants, which keep their own upstream capability gate.
 exceptions:
+  # The two konstapel-exception-acceptance webhooks (failurePolicy Fail), the
+  # konstapel-webhook Service and every controller replica serving them
+  # (--webhook-cert-dir). While enabled, no ComplianceException can be
+  # created or updated unless a ready replica admits it. The certificate
+  # comes from tls.mode: cert-manager issues konstapel-webhook-tls and
+  # injects its CA, or with tls.mode=secret set tls below.
+  webhooks:
+    enabled: false
+    tls:
+      # With tls.mode=secret only: a kubernetes.io/tls Secret in the release
+      # namespace with tls.crt, tls.key and ca.crt covering
+      # konstapel-webhook.<namespace>.svc, and the PEM CA bundle the API
+      # server uses to verify it (written to both webhooks' caBundle).
+      secretName: ""
+      caBundle: ""
+  # Revocation records and the revocation finalizer's release: the gated
+  # ClusterRole konstapel-controller-exception-revocation, its binding and
+  # --exception-revocation-processing, together. Needs webhooks.enabled
+  # (the render fails otherwise): only those webhooks confine the grant's
+  # complianceexceptions update/patch to releasing the finalizer. Enable the
+  # webhooks in one upgrade and this in the next; disable in reverse. Off:
+  # revoked exceptions keep their finalizer and report
+  # RevocationProcessingDisabled.
   revocationProcessing:
     enabled: false
 

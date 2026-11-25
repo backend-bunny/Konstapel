@@ -1,0 +1,6 @@
+# expect: exceptions.webhooks.tls.secretName and exceptions.webhooks.tls.caBundle are for tls.mode=secret
+exceptions:
+  webhooks:
+    enabled: true
+    tls:
+      secretName: konstapel-webhook-tls

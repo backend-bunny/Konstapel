@@ -1,0 +1,8 @@
+# Step 1 of enabling exception admission (docs/charts.md, "Exception
+# admission webhooks"): every controller replica serves the two
+# ComplianceException webhooks (failurePolicy Fail) through
+# konstapel-webhook, with a cert-manager certificate and injected CA.
+# Revocation processing stays off.
+exceptions:
+  webhooks:
+    enabled: true

@@ -268,6 +268,9 @@ func (l *live) removeKyverno() *kyvernoRelease {
 			t.Errorf("restoring the Kyverno release: %v\n%s", err, out)
 		}
 	})
+	// Kyverno's own webhook configurations before the uninstall: only
+	// these can be its leftovers.
+	before, _ := l.kyvernoWebhookConfigs()
 	if out, err := l.helmStdout(l.ctx, "uninstall", "kyverno", "--namespace", "kyverno", "--wait", "--timeout", "5m"); err != nil {
 		t.Fatalf("uninstall Kyverno: %v\n%s", err, out)
 	}
@@ -277,8 +280,8 @@ func (l *live) removeKyverno() *kyvernoRelease {
 	}
 	// The chart's pre-delete hook removes the admission controller's
 	// webhooks, so no workload request reaches a removed engine. The cleanup
-	// controller's ttl and cleanup webhooks stay behind upstream; they match
-	// only Kyverno's own cleanup resources and labels and are recorded.
+	// controller's ttl and cleanup webhooks stay behind upstream, calling
+	// Services the uninstall removed; they are handled below.
 	var lingering []string
 	l.eventually("Kyverno's APIs and resource webhooks gone", func() (bool, string) {
 		for _, gv := range []string{"policies.kyverno.io/v1", "wgpolicyk8s.io/v1alpha2"} {
@@ -313,8 +316,114 @@ func (l *live) removeKyverno() *kyvernoRelease {
 		}
 		return len(left) == 0, fmt.Sprint(left)
 	})
-	l.record("kyverno-uninstalled", map[string]any{"lingeringWebhooks": lingering})
+	// Those leftovers are this test's to clean up, not to accept: each
+	// configuration that existed before the uninstall (same UID), is
+	// Kyverno's (kyverno- name) and calls only Services that no longer
+	// exist is deleted, and none may remain. Anything else, including a
+	// Kyverno-named configuration that still reaches a Service, is kept.
+	//
+	// The stopping admission controller deletes every Kyverno-labelled
+	// configuration, and a cleanup controller still running recreates its
+	// two with new UIDs; those are this uninstall's leftovers too. The
+	// uninstall returns once the Deployments are deleted while their pods
+	// still terminate, so nothing is deleted until no Kyverno pod is left
+	// to recreate it (leftoversToRemove).
+	var removed []string
+	l.eventually("Kyverno's broken leftover webhook configurations removed", func() (bool, string) {
+		writers := l.kyvernoPods()
+		now, lookups := l.kyvernoWebhookConfigs()
+		left := lookups
+		if len(writers) > 0 {
+			left = append(left, "Kyverno pods still running: "+strings.Join(writers, ", "))
+		}
+		for _, key := range leftoversToRemove(before, now, writers) {
+			uid := now[key].uid
+			if err := l.c.Delete(l.ctx, now[key].obj, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+				left = append(left, key+": "+err.Error())
+				continue
+			}
+			removed = append(removed, key)
+		}
+		now, lookups = l.kyvernoWebhookConfigs()
+		left = append(left, lookups...)
+		for key, w := range now {
+			if w.broken {
+				detail := key + " calls " + strings.Join(w.services, ", ")
+				if was, ok := before[key]; ok && was.uid != w.uid {
+					detail += fmt.Sprintf(" (uid %s created %s managed=%v; before: uid %s created %s managed=%v)", w.uid, w.created.Format(time.RFC3339), w.managed, was.uid, was.created.Format(time.RFC3339), was.managed)
+				}
+				left = append(left, detail)
+			}
+		}
+		return len(left) == 0, fmt.Sprint(left)
+	})
+	slices.Sort(removed)
+	removed = slices.Compact(removed)
+	l.record("kyverno-uninstalled", map[string]any{"lingeringWebhooks": lingering, "removedBrokenWebhooks": removed})
 	return k
+}
+
+// kyvernoPods returns the pods, terminating ones included, left in the
+// Kyverno release's namespace.
+func (l *live) kyvernoPods() []string {
+	l.t.Helper()
+	var pods corev1.PodList
+	if err := l.c.List(l.ctx, &pods, client.InNamespace("kyverno")); err != nil {
+		l.t.Fatal(err)
+	}
+	var out []string
+	for _, p := range pods.Items {
+		out = append(out, p.Namespace+"/"+p.Name)
+	}
+	return out
+}
+
+// kyvernoWebhookConfigs returns the cluster's kyverno- webhook
+// configurations, keyed by kind and name, and any Service lookup that
+// failed (classifyKyvernoWebhook).
+func (l *live) kyvernoWebhookConfigs() (map[string]kyvernoWebhook, []string) {
+	l.t.Helper()
+	var vwc admissionregistrationv1.ValidatingWebhookConfigurationList
+	var mwc admissionregistrationv1.MutatingWebhookConfigurationList
+	if err := l.c.List(l.ctx, &vwc); err != nil {
+		l.t.Fatal(err)
+	}
+	if err := l.c.List(l.ctx, &mwc); err != nil {
+		l.t.Fatal(err)
+	}
+	exists := func(namespace, name string) (bool, error) {
+		err := l.c.Get(l.ctx, client.ObjectKey{Namespace: namespace, Name: name}, &corev1.Service{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	out := map[string]kyvernoWebhook{}
+	var failed []string
+	add := func(kind string, obj client.Object, configs []admissionregistrationv1.WebhookClientConfig) {
+		kyverno, services, broken, err := classifyKyvernoWebhook(obj.GetName(), configs, exists)
+		if err != nil {
+			failed = append(failed, kind+"/"+obj.GetName()+": "+err.Error())
+		}
+		if kyverno {
+			out[kind+"/"+obj.GetName()] = kyvernoWebhook{obj: obj, uid: obj.GetUID(), created: obj.GetCreationTimestamp().Time, managed: obj.GetLabels()["webhook.kyverno.io/managed-by"] == "kyverno", services: services, broken: broken}
+		}
+	}
+	for i := range vwc.Items {
+		var cc []admissionregistrationv1.WebhookClientConfig
+		for _, h := range vwc.Items[i].Webhooks {
+			cc = append(cc, h.ClientConfig)
+		}
+		add("ValidatingWebhookConfiguration", &vwc.Items[i], cc)
+	}
+	for i := range mwc.Items {
+		var cc []admissionregistrationv1.WebhookClientConfig
+		for _, h := range mwc.Items[i].Webhooks {
+			cc = append(cc, h.ClientConfig)
+		}
+		add("MutatingWebhookConfiguration", &mwc.Items[i], cc)
+	}
+	return out, failed
 }
 
 // install installs the release again and waits until its APIs are served.

@@ -2,8 +2,9 @@
 # task 2.2). The Konstapel controller serves both on every replica when started
 # with --webhook-cert-dir. The deployment supplies the Service and injects
 # clientConfig.caBundle (cert-manager or an operator-managed CA; see
-# add-helm-oci-distribution). Both fail closed: without the webhook no
-# acceptance can be recorded.
+# add-helm-oci-distribution). The runtime chart renders this file unchanged
+# with exceptions.webhooks.enabled, adding only its labels and the CA. Both
+# fail closed: without the webhook no acceptance can be recorded.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:

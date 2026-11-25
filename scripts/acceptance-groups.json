@@ -77,7 +77,8 @@
       "TestLiveHelmLateKyverno",
       "TestLiveHelmBundles",
       "TestLiveHelmMetrics",
-      "TestLiveHelmSupportingEvidence"
+      "TestLiveHelmSupportingEvidence",
+      "TestLiveHelmExceptionWebhooks"
     ]
   },
   "monitoring": {

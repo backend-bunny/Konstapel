@@ -15,8 +15,10 @@ cert-manager.
 **Status.** The CRD chart packages the generated definitions and has been
 lifecycle-tested in kind (groups 1–2). The runtime chart installs the
 controller and the download server from a digest-pinned image. It supports
-both TLS modes and is tested installed in kind (group 3). Exception admission
-is not in the chart yet, and nothing is published (groups 5–6). Every
+both TLS modes and is tested installed in kind (group 3). The
+ComplianceException admission webhooks and revocation processing are in the
+chart, off by default ([Exception admission webhooks](#exception-admission-webhooks));
+native exception grants are not, and nothing is published (groups 5–6). Every
 remaining piece is listed with its owner and prerequisite under Phases.
 
 ## Feature availability
@@ -35,8 +37,9 @@ and doesn't need the charts.
 | Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
 | Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup; uploads and downloads on the download service (`download.enabled`) with its limits and source retention as `download.attachments` values; platform packages carry supporting evidence only while every download replica runs the controller's image ([Protected-package readers](#protected-package-readers)) | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination` ([supporting evidence](supporting-evidence.md)) |
 | Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
-| Exception admission (`ComplianceException` webhooks) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. The chart serves no webhook and grants no exception. The CRD and the `konstapel-exception-editor` role ship, but nothing acts on them. |
-| Exception revocation processing (revocation records, finalizer release) | **no**: `exceptions.revocationProcessing.enabled` is `false`, and `true` fails the render | the exception webhooks above, which confine the controller's exception writes; see [Exception revocation processing](#exception-revocation-processing) |
+| Exception admission (`ComplianceException` webhooks: authenticated acceptance and revocation records) | yes, with `exceptions.webhooks.enabled` (off by default) | a TLS certificate (either TLS mode); every exception create and update then fails closed unless a ready controller replica admits it. See [Exception admission webhooks](#exception-admission-webhooks). It grants nothing: native Kyverno exceptions stay off, behind their own upstream gate |
+| Exception revocation processing (revocation records, finalizer release) | yes, with `exceptions.revocationProcessing.enabled` (off by default) | `exceptions.webhooks.enabled`, which confines the controller's exception writes; the render refuses it alone. See [Exception revocation processing](#exception-revocation-processing) |
+| Native Kyverno exception grants (`PolicyException`) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. Neither switch above enables them. |
 
 ## Chart input contract
 
@@ -52,13 +55,13 @@ release can't substitute a fixture or a guess for it.
 | Admission policies | `config/admission/*.yaml` (Mutating/ValidatingAdmissionPolicies; MutatingAdmissionPolicy needs Kubernetes ≥ 1.36, hence `kubeVersion: >=1.36.0-0`) | continuous-assessments, s3-evidence-publishing, supporting-evidence-attachments | resolved |
 | Manager entry point | `konstapel controller`: `--content-root` (`/usr/share/konstapel/content`), `--evidence-staging-dir` (`/var/lib/konstapel/staging`), `--leader-elect` (true), `--leader-election-namespace` (`POD_NAMESPACE`), `--metrics-bind-address` (`0`; with `metrics.enabled`, `:8443` plus `--metrics-cert-dir` and `--metrics-server-name`), `--health-probe-bind-address` (`:8081`), `--webhook-cert-dir`, `--webhook-port` (9443), and `POD_NAMESPACE` | targeting (manager), continuous-assessments, s3-evidence-publishing | resolved |
 | Probes | `GET /healthz` and `/readyz` on the probe address. `/readyz` requires this replica's informer sync and, when webhooks are served, a verified unexpired webhook certificate on a started server; it fails while the manager shuts down. Leadership and engine health are not readiness inputs: they are reported in Conditions. | targeting, add-controller-high-availability | resolved |
-| Admission webhooks | ComplianceException webhooks, served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`) | self-service-policy-exceptions | pending: that change waits for an upstream Kyverno release, so the chart must not advertise exceptions |
+| Admission webhooks | ComplianceException webhooks (`config/webhook/exceptions.yaml`), served only when `--webhook-cert-dir` is set (`tls.crt`/`tls.key`); revocation processing `--exception-revocation-processing` with the gated `config/rbac/controller/exception-revocation.yaml` | self-service-policy-exceptions | resolved; values `exceptions.webhooks` and `exceptions.revocationProcessing`, off by default. Native exception grants stay pending: that change waits for an upstream Kyverno release |
 | Download service | `konstapel download-server`: `--listen` (`:8443`), `--tls-cert-file`, `--tls-private-key-file`, `--audience` (`konstapel-download`), `--temp-dir`, `--max-concurrent`, `--max-temp-bytes`, `--tls-ca-file`, `--tls-server-name`, `--shutdown-drain`, and the attachment limits `--attachment-max-bytes`, `--attachment-timeout`, `--attachment-max-concurrent` and `--attachment-retention` (chart values `download.attachments`); HTTPS probes `/healthz` and `/readyz` (certificate valid, reloaded from the mounted files); RBAC `config/rbac/evidence-download.yaml` | s3-evidence-publishing, supporting-evidence-attachments | resolved |
 | Evidence destinations | EvidenceDestination resources, the default ConfigMap `konstapel-system/konstapel-evidence-destination`, and credential Secrets in the controller namespace. There are no chart values for locations or credentials. | s3-evidence-publishing | resolved |
 | Writable storage | the evidence staging directory (it must survive restarts for capture recovery) and the download temp directory (bounded by `--max-temp-bytes`) | continuous-assessments, s3-evidence-publishing | resolved |
 | Image | `ghcr.io/backend-bunny/konstapel`; entrypoint `/usr/bin/konstapel`; user 65532, no shell; work dir `/usr/share/konstapel`; C2P provider at `/usr/share/konstapel/bin/konstapel-provider` (`apko.yaml`, `melange.yaml`). The chart pins a digest and never a mutable tag. | image packaging (`docs/images.md`) | resolved; the release digest is injected by group 5 |
 | Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; per-replica serving readiness independent of leadership | add-controller-high-availability | resolved |
-| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server and metrics; the runtime reloads webhook TLS (leaf and CA rotation tested), and the chart renders it with exception admission |
+| TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server, metrics and the exception webhooks (cert-manager `inject-ca-from`, or the operator's `caBundle`); the runtime reloads webhook TLS (leaf and CA rotation tested) |
 | OCI policy bundles | `konstapel controller` `--bundle-sources-configmap` (off when empty), `--bundle-cache-dir`, `--bundle-cache-capacity`, `--bundle-refresh-interval` and `POD_NAMESPACE`; the operator-created sources ConfigMap and the Secrets/ConfigMaps it references, read by name in the controller namespace ([Controller wiring](policy-bundles.md#controller-wiring), [RBAC and informers](policy-bundles.md#rbac-and-informers)) | add-policy-bundle-distribution | resolved; values `bundles.*`, off by default |
 | Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
 
@@ -253,16 +256,24 @@ policy. With reports readable again the same report counts.
 The exceptions capability gates nothing yet because there is nothing to gate:
 the native grant path of add-self-service-policy-exceptions isn't merged.
 `TestRuntimeChartCannotActivateNativeExceptions` checks that no supported
-chart configuration grants any subject access to native `PolicyException`
-objects, registers an admission webhook, or makes the controller serve one.
+chart configuration, the exception webhooks and revocation processing
+included, grants any subject access to native `PolicyException` objects.
+Without `exceptions.webhooks.enabled` it also checks that no admission
+webhook is registered and the controller serves none; with it, only the two
+ComplianceException webhooks, which intercept `complianceexceptions` alone.
 When that path lands, its activation consumes the exceptions capability
 result.
 
 **Installing before Kyverno.** `TestLiveHelmLateKyverno` (`charts` group)
 checks the same behavior on the installed charts and the packaged image, with
 no in-process controller. It uninstalls the disposable cluster's Kyverno
-release, so neither `policies.kyverno.io` nor `wgpolicyk8s.io` is served, and
-then installs both charts as documented:
+release, so neither `policies.kyverno.io` nor `wgpolicyk8s.io` is served.
+Kyverno's uninstall can leave the cleanup controller's `kyverno-cleanup-` and
+`kyverno-ttl-` webhook configurations behind, calling Services it removed.
+The test deletes each configuration that existed before its uninstall (same
+UID), is Kyverno-named and calls only missing Services, keeps everything
+else, and requires that none remains (`TestKyvernoLeftoverSelection` covers
+the selection). It then installs both charts as documented:
 1. Every controller and download replica becomes ready without Kyverno.
 2. A Deny binding reports `EngineAPINotServed` (or `EngineResourceMissing`).
    Its current evidence lists `no engine policies or reports can be read`,
@@ -553,8 +564,9 @@ runs `TestLiveHelmInstall`, which uses only the cluster API and Helm:
 devbox run -- task acceptance OUTPUT=/absolute/fresh/path GROUP=charts
 ```
 
-The schema also rejects unknown values. The exception webhooks are
-unavailable, so no webhook Service or configuration is rendered.
+The schema also rejects unknown values. Without
+`exceptions.webhooks.enabled` (the default) no webhook Service or
+configuration is rendered.
 `internal/charttest` checks the defaults, the development case, the download
 server and all three TLS shapes, that every binding refers to a shipped role,
 the controller ServiceAccount's exact effective Secret and ConfigMap rules,
@@ -667,12 +679,93 @@ With metrics disabled, nothing is bound.
 `TestRuntimeChartMetricsEnabled` asserts that these two grants are all that
 `metrics.enabled` adds.
 
-**No exception writes.** The ServiceAccount reads `complianceexceptions` and
-writes their status, nothing more: no rendered configuration grants
-`create`, `update`, `patch` or `delete` on exceptions, `create` on
-`selfsubjectreviews`, or reads of webhook configurations. Those are the
-gated grant of [exception revocation processing](#exception-revocation-processing),
-which the chart doesn't render.
+**No exception writes by default.** The ServiceAccount reads
+`complianceexceptions` and writes their status, nothing more: no rendered
+configuration without `exceptions.revocationProcessing.enabled`, the exception
+webhooks alone included, grants `create`, `update`, `patch` or `delete` on
+exceptions, `create` on `selfsubjectreviews`, or reads of webhook
+configurations. Those are the gated grant of
+[exception revocation processing](#exception-revocation-processing), and
+`create`, `delete` and `deletecollection` are never granted.
+
+### Exception admission webhooks
+
+`exceptions.webhooks.enabled` (false by default) deploys the
+`ComplianceException` acceptance webhooks of add-self-service-policy-exceptions
+([acceptance admission](integration/policy-exceptions.md#acceptance-admission)):
+
+- The two `konstapel-exception-acceptance` configurations (mutating
+  `record.acceptance.compliance.erenius.io`, validating
+  `verify.acceptance.compliance.erenius.io`). `scripts/charts/runtime.sh`
+  copies them unchanged from `config/webhook/exceptions.yaml`:
+  `failurePolicy: Fail`, `CREATE` and `UPDATE` of
+  `compliance.erenius.io/v1alpha1` `complianceexceptions`, and no namespace
+  selector, object selector or match conditions. The chart adds only its
+  labels and the CA. No value changes the failure policy, rules, selectors
+  or timeout, and the schema rejects any attempt.
+- The `konstapel-webhook` Service (port 443 to container port 9443,
+  `webhook`), selecting every controller replica.
+- `--webhook-cert-dir=/etc/konstapel/webhook-tls` and `--webhook-port=9443`
+  on every controller replica, with the certificate Secret mounted read-only.
+
+That is all it enables. The controller gets no new permission: admission
+reads through its existing grants. Native Kyverno exceptions stay off, behind
+their own upstream gate ([external engine capabilities](#external-engine-capabilities)).
+Revocation processing stays off unless its own switch is set.
+
+**Fail closed.** While the webhooks are enabled, every create and update of
+a `ComplianceException` is denied unless a ready controller replica admits
+it. That applies to everyone, cluster administrators included. It covers the
+first rollout, a time when no replica is ready (all down, or every
+certificate invalid), and a `caBundle` that doesn't verify the served
+certificate. Deletion isn't intercepted. Run two replicas (the default) in
+production.
+
+**TLS.**
+
+- `tls.mode=certManager`: the chart issues `konstapel-webhook-tls` from the
+  download server's issuer (the chart CA or `tls.certManager.issuerRef`) for
+  `konstapel-webhook`, `konstapel-webhook.konstapel-system` and
+  `konstapel-webhook.konstapel-system.svc`. It annotates both configurations
+  with `cert-manager.io/inject-ca-from: konstapel-system/konstapel-webhook`,
+  so cert-manager's CA injector, part of a default cert-manager
+  installation, writes the issuing CA (the Secret's `ca.crt`) into their
+  `caBundle`. The issuer must provide `ca.crt`. With one that doesn't, the
+  webhooks fail closed.
+- `tls.mode=secret`: set `exceptions.webhooks.tls.secretName`, a
+  `kubernetes.io/tls` Secret with `tls.crt`, `tls.key` and `ca.crt` covering
+  the Service name, and `exceptions.webhooks.tls.caBundle`, the PEM CA the
+  API server trusts, which the chart writes into both `caBundle`s. Both are
+  required in this mode and rejected in `certManager` mode. The chart never
+  creates, changes or deletes your Secret.
+
+The controller verifies the certificate at start and re-reads it while
+serving ([Phases](#phases) describes the tested rotation). To move to a new CA
+in `secret` mode, first upgrade with a `caBundle` holding both CAs, then
+rotate the Secret, then drop the old CA. In `certManager` mode the injector
+and the controller's reload run independently. A leaf from a new chart CA
+can be served before the injector updates `caBundle`, and admission then
+fails closed, never open, until it does.
+
+**Readiness.** Each replica's `/readyz` includes the `webhook` check: a
+verified, unexpired certificate on a started webhook server. With revocation
+processing it also includes `controller-identity`. Only ready replicas are
+endpoints of `konstapel-webhook`.
+
+**Enable and disable.** Enable with
+`docs/examples/charts/exception-webhooks.yaml`:
+
+```sh
+helm upgrade konstapel oci://ghcr.io/backend-bunny/charts/konstapel --version <version> \
+  --namespace konstapel-system --reuse-values -f docs/examples/charts/exception-webhooks.yaml
+```
+
+To disable, turn [revocation processing](#exception-revocation-processing)
+off first, then upgrade with `exceptions.webhooks.enabled=false`. cert-manager
+keeps the `konstapel-webhook-tls` Secret when the chart removes its
+Certificate, so delete it if you no longer need it. Without the webhooks,
+nothing authenticates acceptances or protects their records
+([policy exceptions](integration/policy-exceptions.md#acceptance-admission)).
 
 ### Exception revocation processing
 
@@ -686,33 +779,132 @@ two `konstapel-exception-acceptance` webhook configurations. Only the
 fail-closed exception webhooks confine that grant, to releasing the
 finalizer once the record is durable.
 
-`exceptions.revocationProcessing.enabled` is the one switch for the grant,
-its binding, the identity lookup and the controller's
-`--exception-revocation-processing`. The chart doesn't deploy the exception
-webhooks yet, so it can't provide their protection:
+`exceptions.revocationProcessing.enabled` is the one switch for that
+ClusterRole (copied unchanged by `scripts/charts/runtime.sh`), its
+ClusterRoleBinding `konstapel-controller-exception-revocation`, the identity
+lookup and the controller's `--exception-revocation-processing`:
 
-- `false` (the default) renders nothing for it. The ClusterRole, the
-  binding and the flag are absent, and the controller's default roles are
-  unchanged.
-- `true` fails the render with a message saying it can't be enabled until
-  the chart can deploy the exception webhooks. Nothing is applied. An
-  upgrade that sets it fails before any change, so the grant can never come
-  before its protection.
+- `false` (the default) renders none of them, with or without the webhooks.
+  The controller's default roles are unchanged.
+- `true` without `exceptions.webhooks.enabled` fails the render before
+  anything is applied. The grant can never come from the chart without its
+  protection in the same release.
+- `true` with the webhooks adds exactly the gated ClusterRole's grants, its
+  binding and the flag on every replica.
+
+**Order.** The grant is safe only while the webhooks are registered and fail
+closed. Enable it in two upgrades:
+
+1. `-f docs/examples/charts/exception-webhooks.yaml`: the webhooks, with
+   processing off. Let the rollout finish (`--wait`).
+2. `-f docs/examples/charts/exception-revocation.yaml`: the gated
+   ClusterRole, its binding and the flag. The webhooks already exist when
+   the binding is created.
+
+Disable in reverse: upgrade with `exceptions.revocationProcessing.enabled=false`
+while the webhooks stay, which deletes the binding and rolls out the
+replicas without the flag. Only then turn the webhooks off. Before
+`helm uninstall`, turn processing off the same way.
+
+**What Helm guarantees.** Helm 4.3, the pinned version, applies resources in
+a fixed kind order (`InstallOrder` in Helm's
+`pkg/release/v1/util/kind_sorter.go`). It finishes each kind's requests
+before it starts the next: ClusterRole, ClusterRoleBinding, and so on through
+Service and Deployment, then MutatingWebhookConfiguration and
+ValidatingWebhookConfiguration, then kinds Helm doesn't know, such as
+cert-manager's. Only hooks could order resources differently, and the charts
+have none (`TestChartsHaveNoHooksOrCleanupJobs`). So:
+
+| Operation | What Helm does | Effect on the grant |
+| --- | --- | --- |
+| Two-step enable, step 2 | creates the binding; the webhooks exist from step 1 | never bound without registered webhooks |
+| Two-step disable, step 1 | deletes the binding; the webhooks stay | gone before the protection |
+| Both on in one upgrade | creates the binding before the webhook configurations | bound without protection until Helm reaches the webhooks, a few requests later |
+| Both off in one upgrade | deletes the removed binding before the webhook configurations, in the old release's `InstallOrder` | gone before the protection |
+| `helm uninstall` with both on | deletes in `UninstallOrder`: webhook configurations first, then the Service and Deployment, then the binding | outlives the protection until Helm reaches the binding |
+
+`TestLiveHelmExceptionWebhooks` observes the first four on the installed
+chart, ordered by etcd revision. The uninstall order comes from Helm's
+source. RBAC changes also take a moment to reach the API server's
+authorizer.
+
+The controller itself writes no exception in any of these windows:
+
+- Replicas without the flag start no revocation writer (see the runtime
+  enforcement below).
+- Replicas with the flag check both registered configurations before each
+  attempt. They record and release nothing until the check passes, and the
+  condition reads `RevocationProtectionUnverified` meanwhile
+  ([policy exceptions](integration/policy-exceptions.md#revocation-processing)).
+- Registered webhooks fail closed while unserved and before their CA is
+  injected.
+
+Helm can't stop another identity that can act as the controller
+ServiceAccount from using a bound grant during such a window. That includes
+anyone who can create its tokens or Pods in `konstapel-system`, or
+impersonate it. This is why the two-step order exists, and why processing
+goes off before uninstall. The check runs just before each attempt, so a
+webhook removed between the check and the release is noticed at the next
+attempt.
+
+**Runtime enforcement of the flag.** Without `--exception-revocation-processing`,
+the controller's exception reconciler is built without a revocation writer.
+Before anything is sent, its client refuses every `ComplianceException` write
+other than status, and every revocation record. A ServiceAccount
+over-granted by hand (the gated role, or any `update`/`patch` on exceptions
+bound without the flag) therefore still sees no exception write from the
+controller. `TestRevocationDisabledSendsNoExceptionWrite` checks this in
+unit tests, `TestLiveRevocationHistory` on the manager's own transport, and
+`TestLiveHelmExceptionWebhooks` through the API server's request counts on
+the installed chart. This isn't an authorization control. It can't revoke a
+grant bound by hand, and without the flag the validating webhook doesn't
+restrict the controller identity, so anything else using that ServiceAccount
+could use such a grant. RBAC and the admission webhooks remain the controls,
+so don't bind the gated role yourself.
 
 With processing off, revoked exceptions keep their finalizer. Their
 `RevocationRecorded` condition reports `RevocationProcessingDisabled`, and a
-deleted one stays `Terminating`. The non-chart enable and disable order, the
-controller's own check of the webhook configuration, and these effects are
-documented in [policy exceptions](integration/policy-exceptions.md#revocation-processing).
-`TestRuntimeChartExceptionRevocationGated` (`internal/charttest`) checks
-that no supported configuration grants an exception write or the identity
-lookup, and that `true` fails with each of them. The
-`testdata/charts/konstapel/invalid-exception*.yaml` fixtures check the
-refusal and the schema.
+deleted one stays `Terminating`. Enabling processing later records and
+releases every held revocation. The controller's own check of the webhook
+configuration, the non-chart order and these effects are documented in
+[policy exceptions](integration/policy-exceptions.md#revocation-processing).
 
-When the chart can deploy the exception webhooks, enabling should render
-the grant and the flag only together with both webhook configurations at
-`failurePolicy: Fail`. That is a separate change.
+**Tests.**
+
+- `internal/charttest`:
+  - `TestRuntimeChartExceptionWebhooks` renders both TLS modes and the
+    platform issuer. The rendered configurations pass the controller's
+    `VerifyProtection` and equal `config/webhook/exceptions.yaml` apart from
+    labels and CA. It also checks the Service, the replicas' flags, port and
+    mount, and the certificate.
+  - `TestRuntimeChartExceptionWebhooksOffByDefault` checks that the default
+    render has none of it. The default render is byte-identical to the chart
+    before this feature.
+  - `TestRuntimeChartExceptionRevocationGated` checks that only both switches
+    grant an exception write or the identity lookup, and then exactly the
+    gated ClusterRole.
+  - The `testdata/charts/konstapel/*exception*.yaml` fixtures check the
+    refusals and the schema.
+- `TestLiveHelmExceptionWebhooks` (the `charts` group) runs the cert-manager
+  mode on the packaged image, in order:
+  1. A default install has nothing of the feature.
+  2. The webhooks are enabled. They pass `VerifyProtection`, the injected CA
+     verifies the served certificate for the Service name, every ready
+     replica reports the `webhook` check and is an endpoint, an acceptance
+     records the caller, and a revocation is held.
+  3. The ServiceAccount is over-granted `update`/`patch` on exceptions with
+     processing off. Across a new revocation, a deletion and a restart, the
+     API server counts no exception write but the test's own.
+  4. With no ready replica, creates and updates are denied for everyone.
+  5. Processing is enabled. The binding is created after the webhooks, the
+     held revocations are recorded and released, a new one runs end to end,
+     the controller identity can't edit, and a removed validating webhook
+     stops processing.
+  6. Processing is disabled. The binding goes while the webhooks stay.
+  7. The webhooks are disabled.
+  8. Both are enabled in one upgrade, then disabled in one, with the orders
+     in the table above. Nothing is recorded before the webhooks are
+     registered.
 
 ### Controller metrics
 
@@ -1050,8 +1242,14 @@ cluster stay. In detail:
 | scheduled and requested assessment runs | completed runs and their status, and the packages already published to S3 |
 | downloads (the download Service goes away) | the S3 objects; operators can still read them with storage credentials |
 | retention cleanup: expired packages are **not** deleted until a controller runs again | the runs' retention finalizer, which keeps a run until its package is deleted |
-| the admission policies that protect run and destination status | `ComplianceException` objects (exception admission isn't served in v0.1.0) |
+| the admission policies that protect run and destination status | `ComplianceException` objects and their acceptance and revocation records |
+| with `exceptions.webhooks.enabled`, exception admission: the webhook configurations are removed first, so acceptances are no longer authenticated or protected | revoked exceptions keep the revocation finalizer, and deleted ones stay `Terminating` until a controller with revocation processing runs again |
 | releasing deleted `EvidenceAttachment` records and expiring their source documents | records pending deletion keep their retention finalizer, storage pin and commitment until a controller runs again; their documents stay in S3 |
+
+With revocation processing enabled, first upgrade with
+`exceptions.revocationProcessing.enabled=false`: `helm uninstall` deletes the
+webhook configurations before the gated binding
+([what Helm guarantees](#exception-revocation-processing)).
 
 To remove Konstapel completely, keep the controller running while you remove
 its work:
@@ -1109,7 +1307,10 @@ retention.
   - `readers`: monitoring ServiceAccounts `{namespace, name}` bound to `konstapel-metrics-reader`. Explicit names only. Set only with `enabled`.
   - `tls.secretName`: required with `tls.mode=secret`; a `kubernetes.io/tls` Secret for `konstapel-controller-metrics.<namespace>.svc`.
   - `serviceMonitor`, `prometheusRule`: independent optional Prometheus Operator objects, off by default; each needs `enabled` metrics and its API. Timing, CA, authorization, scope matchers and rule groups: [Monitoring integration](#monitoring-integration).
-- **`exceptions.revocationProcessing.enabled`** (false): [exception revocation processing](#exception-revocation-processing). `true` fails the render until the chart can deploy the exception webhooks.
+- **`exceptions`:** off by default; neither switch enables native exception grants.
+  - `webhooks.enabled` (false): the [exception admission webhooks](#exception-admission-webhooks), failing closed.
+  - `webhooks.tls.secretName` and `webhooks.tls.caBundle` (PEM): both required with `tls.mode=secret`, both rejected with `certManager`.
+  - `revocationProcessing.enabled` (false): [exception revocation processing](#exception-revocation-processing). `true` needs `webhooks.enabled`; enable it in a later upgrade than the webhooks, and disable it first.
 - **`bundles`:** verified OCI policy bundles, off while `sourcesConfigMap` is empty (the default).
   - `sourcesConfigMap`: the operator-created sources ConfigMap in `konstapel-system`.
   - `cache.capacity` (1Gi) and `cache.sizeLimit` (1536Mi, must be larger): the per-pod content cache and its `emptyDir`.
@@ -1117,8 +1318,8 @@ retention.
   - `referencedSecrets`, `referencedConfigMaps`: the names `sources.yaml` references; the controller may `get` only these. Set only with `sourcesConfigMap`.
 
 There are no values for evidence locations, credentials (only the names of
-bundle credential Secrets), Kyverno or cert-manager installation, or exception
-enablement.
+bundle credential Secrets), Kyverno or cert-manager installation, or native
+exception enablement.
 
 The CRD chart accepts no values. Its definitions are generated, and retention
 can't be turned off.
@@ -1291,15 +1492,16 @@ Fixtures stay outside `charts/` so they are never packaged.
 | --- | --- | --- |
 | 1 | Input contract, metadata, values schema, version alignment, packaging-input manifest fixtures (done) | none |
 | 2 | Package the generated CRDs with `helm.sh/resource-policy: keep`; upgrade, uninstall and reinstall lifecycle in kind (done) | the merged APIs (available) |
-| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download, metrics and webhook certificate reload, serving readiness, documented examples and installed-image acceptance done; rendering the exception webhook and its CA injection waits for exception admission) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
+| 3 | Deployment, Services, RBAC, cert-manager or operator TLS, probes and availability defaults (controller and download Deployments, RBAC, availability defaults, both TLS modes, download, metrics and webhook certificate reload, serving readiness, documented examples and installed-image acceptance done; the exception webhooks with their CA injection, and gated revocation processing, done and off by default) | the merged manager (available); the replica lifecycle (add-controller-high-availability, Lease and shutdown merged) |
 | 4 | Capability discovery and recovery without restart (done except the exceptions gate, which waits for add-self-service-policy-exceptions's native path) | the merged manager |
 | 5 | Package, sign, attest and publish the OCI charts from the verified image digest (packaging, frozen-input acceptance, write-once publisher, signing/verification tooling, release workflow, release notes and recovery done; the keyless signing identity and release-please integration are exercised by the first release) | groups 2 and 3 tested |
 | 6 | `charts:package` and `charts:acceptance` tasks (done), Go black-box acceptance of the installed charts, the required CI gate (the `charts` group within the required `acceptance` check) and release gating (done) | groups 2–5 |
 
-Exception admission and its webhook stay out of the chart until
-add-self-service-policy-exceptions merges its handlers and passes its gates.
-The chart then enables them behind tested capability detection.
-The runtime side is ready for that: every replica serves the webhook,
+The exception webhooks render only with `exceptions.webhooks.enabled`
+([Exception admission webhooks](#exception-admission-webhooks)). Native
+exception grants stay out of the chart until add-self-service-policy-exceptions
+passes its gates; their activation then consumes the exceptions capability.
+On the runtime side, every replica serves the webhook,
 re-reads its certificate, and leaves its Service while the mounted
 certificate is invalid or expired. `TestLiveReplicaAdmission` rotates the
 webhook CA against the real API server. A leaf from a CA that the webhook
@@ -1307,4 +1509,7 @@ configurations don't trust yet fails admission closed and stores nothing.
 Trusting the old and new CA, then only the new one, admits through both
 rotated replicas with the caller's attribution. A replica left on the
 retired CA is refused, never bypassed. The chart's CA injection must
-therefore reach the `caBundle` before a leaf from a new CA is served.
+therefore reach the `caBundle` before a leaf from a new CA is served. In
+`secret` mode the documented bundle order guarantees that. In `certManager`
+mode the injector usually wins, but a chart CA rotation can briefly fail
+admission closed ([TLS](#exception-admission-webhooks)).

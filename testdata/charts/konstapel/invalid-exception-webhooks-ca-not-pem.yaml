@@ -1,0 +1,11 @@
+# expect: does not match pattern '-----BEGIN CERTIFICATE-----'
+tls:
+  mode: secret
+  secret:
+    name: konstapel-download-tls
+exceptions:
+  webhooks:
+    enabled: true
+    tls:
+      secretName: konstapel-webhook-tls
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t

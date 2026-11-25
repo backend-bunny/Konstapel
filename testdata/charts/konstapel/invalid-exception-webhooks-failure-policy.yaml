@@ -1,0 +1,5 @@
+# expect: additional properties 'failurePolicy' not allowed
+exceptions:
+  webhooks:
+    enabled: true
+    failurePolicy: Ignore

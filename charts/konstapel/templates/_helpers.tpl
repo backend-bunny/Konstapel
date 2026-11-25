@@ -1,7 +1,8 @@
 {{/*
 Runtime templates use the controller's merged entry point and the inputs in
 docs/charts.md. The generated-*.yaml manifests are copied unchanged from
-config/rbac and config/admission by scripts/charts/runtime.sh.
+config/rbac, config/admission and config/webhook by scripts/charts/runtime.sh;
+the exception ones render only with their switches.
 */}}
 {{- define "konstapel.labels" -}}
 app.kubernetes.io/name: konstapel
@@ -46,15 +47,34 @@ app.kubernetes.io/component: controller
 {{- end }}
 
 {{/*
-ComplianceException revocation processing (docs/charts.md, "Exception
-revocation processing"). Its grant lets the controller update exceptions,
-which only the fail-closed exception admission webhooks confine to releasing
-the revocation finalizer. The chart cannot deploy those webhooks yet, so the
-switch cannot be turned on: no render grants the write without them.
+ComplianceException admission webhooks and revocation processing
+(docs/charts.md, "Exception admission webhooks"). The webhooks are off by
+default and fail closed. Revocation processing grants the controller
+update/patch on complianceexceptions, which only those webhooks confine to
+releasing the revocation finalizer, so it is accepted only together with
+them: no render grants the write without its protection.
 */}}
 {{- define "konstapel.validateExceptions" -}}
-{{- if .Values.exceptions.revocationProcessing.enabled -}}
-{{- fail "exceptions.revocationProcessing.enabled cannot be enabled until the chart can deploy the ComplianceException admission webhooks: revocation processing grants the controller update/patch on complianceexceptions, which only those webhooks (failurePolicy Fail) confine to releasing the revocation finalizer, and this chart does not deploy them yet. Leave it false (docs/charts.md, \"Exception revocation processing\")" -}}
+{{- $e := .Values.exceptions -}}
+{{- $w := $e.webhooks -}}
+{{- if and $e.revocationProcessing.enabled (not $w.enabled) -}}
+{{- fail "exceptions.revocationProcessing.enabled needs exceptions.webhooks.enabled: revocation processing grants the controller update/patch on complianceexceptions, which only the fail-closed ComplianceException admission webhooks confine to releasing the revocation finalizer. Enable the webhooks first (docs/charts.md, \"Exception admission webhooks\")" -}}
+{{- end -}}
+{{- if eq .Values.tls.mode "secret" -}}
+{{- if and $w.enabled (or (not $w.tls.secretName) (not $w.tls.caBundle)) -}}
+{{- fail "exceptions.webhooks.tls.secretName and exceptions.webhooks.tls.caBundle are required with tls.mode=secret: a kubernetes.io/tls Secret with tls.crt, tls.key and ca.crt for konstapel-webhook.<namespace>.svc, and the PEM CA the API server trusts for it" -}}
+{{- end -}}
+{{- else if or $w.tls.secretName $w.tls.caBundle -}}
+{{- fail "exceptions.webhooks.tls.secretName and exceptions.webhooks.tls.caBundle are for tls.mode=secret: with tls.mode=certManager the chart issues konstapel-webhook-tls and cert-manager injects its CA" -}}
+{{- end -}}
+{{- end }}
+
+{{/* The Secret holding the webhook server's tls.crt, tls.key, and ca.crt. */}}
+{{- define "konstapel.webhookTLSSecret" -}}
+{{- if eq .Values.tls.mode "secret" -}}
+{{ .Values.exceptions.webhooks.tls.secretName }}
+{{- else -}}
+konstapel-webhook-tls
 {{- end -}}
 {{- end }}
 

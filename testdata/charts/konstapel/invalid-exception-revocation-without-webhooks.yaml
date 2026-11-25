@@ -1,4 +1,4 @@
-# expect: cannot be enabled until the chart can deploy the ComplianceException admission webhooks
+# expect: exceptions.revocationProcessing.enabled needs exceptions.webhooks.enabled
 exceptions:
   revocationProcessing:
     enabled: true

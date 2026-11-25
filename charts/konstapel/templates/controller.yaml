@@ -36,6 +36,27 @@ subjects:
   - kind: ServiceAccount
     name: konstapel-controller
     namespace: {{ .Release.Namespace }}
+{{- if .Values.exceptions.revocationProcessing.enabled }}
+---
+# The gated revocation grant (generated-controller-exception-revocation.yaml),
+# bound only with --exception-revocation-processing below and the exception
+# webhooks (validateExceptions refuses it without them). docs/charts.md,
+# "Exception admission webhooks", gives the enable and disable order.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konstapel-controller-exception-revocation
+  labels:
+    {{- include "konstapel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konstapel-controller-exception-revocation
+subjects:
+  - kind: ServiceAccount
+    name: konstapel-controller
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -139,6 +160,14 @@ spec:
             {{- else }}
             - --protected-package-readers=none
             {{- end }}
+            {{- if .Values.exceptions.webhooks.enabled }}
+            # Every replica serves the ComplianceException webhooks.
+            - --webhook-cert-dir=/etc/konstapel/webhook-tls
+            - --webhook-port=9443
+            {{- if .Values.exceptions.revocationProcessing.enabled }}
+            - --exception-revocation-processing
+            {{- end }}
+            {{- end }}
             {{- if include "konstapel.bundlesEnabled" . }}
             - --bundle-sources-configmap={{ .Values.bundles.sourcesConfigMap }}
             - --bundle-cache-dir=/var/lib/konstapel/bundles
@@ -160,6 +189,10 @@ spec:
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: 8443
+            {{- end }}
+            {{- if .Values.exceptions.webhooks.enabled }}
+            - name: webhook
+              containerPort: 9443
             {{- end }}
           startupProbe:
             httpGet:
@@ -200,6 +233,11 @@ spec:
               mountPath: /etc/konstapel/metrics-tls
               readOnly: true
             {{- end }}
+            {{- if .Values.exceptions.webhooks.enabled }}
+            - name: webhook-tls
+              mountPath: /etc/konstapel/webhook-tls
+              readOnly: true
+            {{- end }}
       volumes:
         # Per-pod bounded working storage. Durable state lives in Kubernetes
         # and the evidence destination; a successor recovers from those.
@@ -223,6 +261,14 @@ spec:
         - name: metrics-tls
           secret:
             secretName: {{ include "konstapel.metricsTLSSecret" . }}
+        {{- end }}
+        {{- if .Values.exceptions.webhooks.enabled }}
+        # The webhook certificate, verified at start and re-read while
+        # serving; readiness fails while it is invalid or expired, so the
+        # replica leaves konstapel-webhook.
+        - name: webhook-tls
+          secret:
+            secretName: {{ include "konstapel.webhookTLSSecret" . }}
         {{- end }}
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
 ---
