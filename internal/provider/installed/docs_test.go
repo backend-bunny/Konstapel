@@ -143,7 +143,9 @@ func TestDocumentedTestsExist(t *testing.T) {
 	// with the storage backend.
 	captures, _ := filepath.Glob(filepath.Join(root, "internal/collector/*_test.go"))
 	storage, _ := filepath.Glob(filepath.Join(root, "internal/s3store/*_test.go"))
-	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart, captures, storage) {
+	// Run content replay through the complete bundle stack.
+	stack, _ := filepath.Glob(filepath.Join(root, "internal/bundle/stack/*_test.go"))
+	for _, f := range slices.Concat(files, more, host, capabilities, flags, chart, captures, storage, stack) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
