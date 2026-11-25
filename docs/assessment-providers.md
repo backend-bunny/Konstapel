@@ -17,7 +17,10 @@ bounds every collection with host-owned deadlines, cancellation and
 resource limits ([Collection limits](#collection-limits)), which an
 operator can raise or lower with controller flags, and task 2.4
 documents the [capabilities and permissions](#capabilities-and-permissions)
-of each provider. Within the collection limits, nothing in this guide
+of each provider. Task 3.1 adds the provider-discriminated capture
+boundary and its version checks ([Captures](#captures)). The storage
+backend reads every package capture through it, and nothing the controller
+writes changes. Within the collection limits, nothing in this guide
 changes how existing bindings, profiles, delivery, collection, evaluation
 or export behave:
 
@@ -27,8 +30,9 @@ or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- The provider-aware capture boundary, shared evaluation and the full
-  authoring recipe are later tasks of the change.
+- Connecting provider captures to run content and namespace projection,
+  shared evaluation and the full authoring recipe are later tasks of the
+  change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -71,7 +75,7 @@ provider:
 | `checks[].delivery` | `true` when the delivery owner renders engine resources for the kind (enforcement-capable). `false` is reporting-only: no engine policy, scanner job or workload write, and only `Audit`. |
 | `checks[].modes` | Binding modes the kind accepts. `Deny` requires `delivery`. |
 | `checks[].parameters` | `Content`: the bundle declares a schema per check and delivery decides whether it renders parameters. `Descriptor`: a schema in the descriptor. `None`: no parameters. |
-| `capture` | Capture payload versions it `write`s and `read`s. `write` must be in `read`, so readers ship before writers. |
+| `capture` | Capture payload versions it `write`s and `read`s. `write` must be in `read`, so readers ship before writers. A capture document's own format version is a separate number ([Captures](#captures)). |
 | `reads[]` | External evidence-source operations its collection performs: the resource, its `kind` and whether it is `namespaced`, and read-only verbs (`get`, `list`, `watch`). A collection adapter can list only these ([readers](#narrow-readers)). Each read is also an availability prerequisite: served in that shape, and allowed ([Availability](#availability)). |
 | `requires[]` | APIs the evidence source must serve, in the same shape and with read-only discovery verbs, that collection never reads. Discovery checks them. No access is reviewed and no reader is granted. |
 | `testOnly` | A synthetic provider. Never in the production registry, and never a registry default. |
@@ -134,7 +138,8 @@ Notes on the Kyverno entry:
 
 - `capture.read` covers the prototype's single-policy capture (1) and the
   controller's CaptureV2 (2), exactly the versions `collector.CaptureVersion`
-  accepts. The controller writes 2.
+  accepts. The controller writes 2. The capture envelope (document
+  version 3) is not a Kyverno payload version: it can hold payload 2.
 - `reads` lists only the evidence source. The host owns namespace and
   workload listing for the expected inventory. ValidatingPolicy writes
   belong to delivery (`capability.Delivery`), not to evidence collection.
@@ -185,7 +190,7 @@ no new API reason:
 | Reason | Meaning | Binding reason |
 | --- | --- | --- |
 | `UnknownProvider` | No installed provider has that name. | `ContentUnavailable` (content `Incompatible`, as today) |
-| `IncompatibleVersion` | The provider is installed at another contract version, or cannot read the capture version. | `ContentUnavailable` |
+| `IncompatibleVersion` | The provider is installed at another contract version, cannot read the capture version, or does not evaluate with the recorded evaluator version. | `ContentUnavailable` |
 | `UnsupportedCheck` | No installed provider evaluates the check kind. | `UnsupportedScope` (as for an unsupported policy type today) |
 | `MixedProviders` | The checks span providers, or belong to another provider. | `InvalidConfiguration` |
 | `UnsupportedMode` | The kind does not accept the mode (`Deny` for reporting-only). | `InvalidConfiguration` |
@@ -226,7 +231,9 @@ A selection that names a provider this build does not contain:
 ```
 
 `Registry.CheckCapture(contract, version)` answers whether a retained capture
-can be read. It never falls back to another provider or version.
+can be read, and `Registry.CheckEvaluator(contract, version)` whether it can
+be evaluated with the evaluator it records. Neither falls back to another
+provider or version. The capture boundary uses both ([Captures](#captures)).
 
 ## Inventory and collection
 
@@ -446,8 +453,10 @@ What the bounds do not cover:
   own pager. Collection never reads the informer cache.
 - The reason in a run's package. The package records the missing
   observations, not the limitation text, which current status shows.
-  Recording collection limitations in a capture belongs to the capture
-  boundary (task 3.1).
+  The capture boundary (task 3.1) does not record limitations either.
+  The v2 capture's `collectionErrors` field, which the controller leaves
+  empty, is the candidate place. The owner has not yet decided which task
+  records them.
 
 ### Configuring the limits
 
@@ -754,6 +763,185 @@ Not yet connected:
   (`konstapel_capability_condition`). Another installed provider would need
   its own metric label before it ships.
 
+## Captures
+
+A capture is the frozen evidence of one run, `capture.json` in a package
+(role `capture`). Its top-level `version` is the document format. Three
+compatibility dimensions are separate from it, and from the C2P protocol
+version of the pinned plugin:
+
+- the provider contract (`name/vN`)
+- the provider's payload version (the descriptor's `capture.read`)
+- the evaluator version (the descriptor's `evaluatorVersion`)
+
+| `version` | Document | Provider, payload, evaluator |
+| --- | --- | --- |
+| 1 | The prototype's single-policy `assessment.Capture` | Implied: `konstapel-kyverno/v1`, payload 1, evaluator 1 |
+| 2 | The controller's `collector.CaptureV2` | Implied: `konstapel-kyverno/v1`, payload 2, evaluator 1 |
+| 3 | The envelope `collector.CaptureEnvelope` | Recorded in the envelope |
+
+Evaluator 1 is the 0.3.0 Kyverno semantics: `assessment.Reconcile` for
+payload 1 and `CaptureV2.Evaluate` for payload 2. Versions 1 and 2 predate
+provider discrimination, so their identity is implied by the version and
+never read from the document.
+
+The envelope names its provider, payload and evaluator, and carries the
+provider's payload:
+
+```json
+{
+  "version": 3,
+  "provider": "konstapel-kyverno/v1",
+  "payloadVersion": 2,
+  "evaluatorVersion": 1,
+  "payload": {"version": 2, "cluster": "...", "expected": ["..."]}
+}
+```
+
+Every field is required, and no other field is accepted, so a field added
+later needs a new version instead of being ignored. A Kyverno envelope holds
+payload 2 only: a complete CaptureV2 document, decoded strictly and
+validated with `CaptureV2.Validate`. Kyverno payload 1 exists only as a
+version 1 document. Another provider's payload is that provider's to decode
+and validate. The reporting adapter, for example, decodes its payload
+strictly and checks the payload's own version.
+
+### Reading a capture
+
+`collector.ReadCapture(raw, registry)` is the boundary. It returns the
+header and the payload as read, or an error that wraps
+`collector.ErrUnsupportedCapture`. A rejection by the registry also carries
+its [selection reason](#selection). It rejects:
+
+- a document without a version, or with a version other than 1, 2 or 3
+- a version 1 or 2 document with an envelope field (`provider`,
+  `payloadVersion`, `evaluatorVersion` or `payload`). Older readers would
+  ignore the field and read the document as Kyverno's
+- an envelope with a missing or unknown field, an empty provider (never
+  the registry default), a version below 1, or a payload that is not a
+  JSON object
+- a provider that is not installed, or a payload version it does not read
+- a Kyverno envelope payload that is not exactly a valid CaptureV2
+
+`ReadCapture` does not decode a legacy document. `CaptureDocument.V2()`
+decodes it exactly as every earlier reader did, with `encoding/json`, which
+ignores unknown fields. Retained captures therefore keep both their bytes
+and their interpretation.
+
+`ReadCapture` does not check the evaluator.
+`CaptureDocument.CheckEvaluator(registry)` does, and a reader that
+evaluates, replays or vouches for a retained capture calls it as well. A
+capture recorded under an evaluator this build does not have is refused. It
+is never evaluated with this build's semantics.
+
+With the production registry, the saved legacy captures and a Kyverno
+envelope of the saved CaptureV2 read as (`TestDocumentedExamples`):
+
+<!-- verified: capture-headers -->
+```json
+[
+  {
+    "capture": "testdata/capture.json",
+    "header": {"version": 1, "provider": "konstapel-kyverno/v1", "payloadVersion": 1, "evaluatorVersion": 1}
+  },
+  {
+    "capture": "testdata/assessments/kyverno-1.19.2-background/capture.json",
+    "header": {"version": 2, "provider": "konstapel-kyverno/v1", "payloadVersion": 2, "evaluatorVersion": 1}
+  },
+  {
+    "capture": "Kyverno envelope of testdata/assessments/kyverno-1.19.2-background/capture.json",
+    "header": {"version": 3, "provider": "konstapel-kyverno/v1", "payloadVersion": 2, "evaluatorVersion": 1}
+  }
+]
+```
+
+These are refused:
+
+<!-- verified: capture-rejections -->
+```json
+[
+  {
+    "capture": "version 4",
+    "error": "unsupported capture: capture version 4 is not supported (this build reads 1, 2 and 3)"
+  },
+  {
+    "capture": "version 2 with an evaluatorVersion",
+    "error": "unsupported capture: a version 2 capture has no provider, payload or evaluator fields; a provider-discriminated capture is version 3"
+  },
+  {
+    "capture": "envelope of konstapel-reporttest/v1",
+    "error": "unsupported capture: capture version 3 (konstapel-reporttest/v1 payload 1, evaluator 1): UnknownProvider: provider konstapel-reporttest/v1 is not installed (installed: konstapel-kyverno/v1)"
+  },
+  {
+    "capture": "envelope of Kyverno payload 3",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 3, evaluator 1): IncompatibleVersion: konstapel-kyverno/v1 reads capture versions [1 2], not 3"
+  },
+  {
+    "capture": "envelope of Kyverno evaluator 2",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 2, evaluator 2): IncompatibleVersion: konstapel-kyverno/v1 evaluates with evaluator version 1, not 2"
+  }
+]
+```
+
+The guarantees and their tests:
+
+- The saved captures are pinned by digest and never rewritten. Through the
+  boundary, the saved CaptureV2 decodes and evaluates exactly as on the
+  direct path: 30 expected, 28 attributable, 2 missing, 24 pass and 4
+  fail (`TestLegacyCapturesReadUnchanged`). Legacy decoding is not
+  tightened (`TestLegacyDecodingIsNotTightened`), and the production
+  registry reads and evaluates both captures
+  (`TestProductionRegistryReadsLegacyCaptures`).
+- A Kyverno envelope reads and evaluates like the document it holds
+  (`TestKyvernoEnvelopeReadsLikeTheLegacyDocument`).
+- Every rejection above, and more, is an explicit error that returns no
+  capture (`TestCaptureBoundaryRejectsWhatItDoesNotSupport`,
+  `TestProductionRegistryRejectsUnsupportedCaptures`).
+- Another provider's payload is returned as written, is never read as a
+  CaptureV2, and evaluates to its conformance golden
+  (`TestOtherProvidersPayloadsStayTheirs`,
+  `TestReportingCaptureCrossesTheBoundary`).
+- An evaluator that is not installed is refused
+  (`TestEvaluatorCompatibility`, `TestCheckEvaluator`).
+
+### Readers of captures
+
+| Reader | Reads |
+| --- | --- |
+| Storage backend validation before archiving (`s3store.ValidatePackage`) | Through `ReadCapture` and `CheckEvaluator` with the production registry. Only Kyverno captures have package verification, so another installed provider's capture is refused, not archived unverified. A version 1 capture is accepted as before: only in a binding-scope package, without engine-policy verification. Payload 2, legacy or envelope, gets engine-policy verification and, in a namespace package, projection checks. |
+| Engine-policy verification (`collector.VerifyPackage`) | Kyverno payload 2, legacy or envelope. Anything else is an explicit error. It used to decode any capture as a CaptureV2. |
+| Controller staging (`capture.json` and `closed.json` of a run in progress) | Unchanged: CaptureV2 only. `CaptureV2.Validate` refuses any other version. Staging is an `emptyDir`, so with the chart a staged capture never outlives the controller version that wrote it. |
+| Prototype `konstapel convert` and the C2P plugin | Unchanged: version 1 only. `assessment.Reconcile` refuses any other version. |
+
+`TestStorageValidationOfCapturePackages` validates binding and namespace
+packages: legacy ones unchanged, with their bytes kept; Kyverno envelope
+ones with the same descriptor meaning; and refuses unknown providers,
+payloads, evaluators and versions.
+`TestPackageVerificationReadsBothForms` checks that an envelope's payload
+is verified against the packaged content like a legacy capture, and
+`TestPackageCaptureRefusesProvidersWithoutVerification` covers an
+installed provider without package verification.
+
+### Readers before writers
+
+- **This build writes nothing new.** The controller still writes version 2
+  (`kyverno.Descriptor().capture.write`). No production code writes an
+  envelope. A rollback from this build to an earlier release therefore
+  reads everything this build wrote.
+- **The envelope is read here and written nowhere.** A later release may
+  write it only after a release with these readers has shipped. A rollback
+  from that release to one with these readers keeps its packages readable.
+  The earlier releases (up to 0.3.0) refuse version 3 explicitly:
+  `CaptureVersion`, `CaptureV2.Validate` and `assessment.Reconcile` are
+  their readers, unchanged since 0.1.0. Such a release refuses to validate
+  or evaluate an envelope package. It never reads one as an empty Kyverno
+  capture (`TestReadersBeforeWriters`).
+- **Version 2 never grows envelope fields.** An earlier reader ignores an
+  appended `evaluatorVersion`, and would read the capture as evaluator 1
+  whatever it says (`TestReadersBeforeWriters`). So version 2 captures
+  record their evaluator only implicitly. A capture records
+  `evaluatorVersion` explicitly once a release writes the envelope.
+
 ## Conformance
 
 `internal/provider/conformance` is the shared harness. It imports no
@@ -852,11 +1040,14 @@ compatibility evidence.
 These are versioned contracts:
 
 - the bundle descriptor's `compatibility.provider` value
-- the capture versions recorded in packages
+- the capture versions recorded in packages: the document versions 1, 2
+  and 3, the identity that versions 1 and 2 imply, the envelope's fields,
+  and each provider's payload versions
 - the conformance case format `konstapel.provider-conformance/v1`
 
 The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `Sources`, `SourceReader`, `Limits`, `Collect`, `LimitError`,
+`collector.ReadCapture`, `CaptureDocument`, `CaptureReaders`,
 `conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change. The

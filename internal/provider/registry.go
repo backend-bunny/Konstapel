@@ -118,6 +118,24 @@ func (r *Registry) CheckCapture(contract string, version int) error {
 	return nil
 }
 
+// CheckEvaluator reports whether the installed provider for contract
+// evaluates with the given evaluator version. The evaluator is a separate
+// compatibility dimension from the payload: a capture this build can read
+// may record evaluation semantics it does not implement. It never falls back
+// to another provider or evaluator, so a capture recorded under another
+// evaluator is never evaluated with this build's semantics.
+func (r *Registry) CheckEvaluator(contract string, version int) error {
+	d, serr := r.Lookup(contract)
+	if serr != nil {
+		return serr
+	}
+	if d.EvaluatorVersion != version {
+		return &SelectionError{Reason: ReasonIncompatibleVersion,
+			Message: fmt.Sprintf("%s evaluates with evaluator version %d, not %d", d.Contract(), d.EvaluatorVersion, version)}
+	}
+	return nil
+}
+
 func (r *Registry) lookupContract(contract string) (Descriptor, bool) {
 	name, version, err := ParseContract(contract)
 	if err != nil {

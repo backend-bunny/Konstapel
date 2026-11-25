@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -194,6 +195,30 @@ func TestCheckCapture(t *testing.T) {
 	}{{"engine/v1", 3}, {"posture/v3", 2}, {"engine/v2", 2}, {"unknown/v1", 1}} {
 		if err := r.CheckCapture(bad.contract, bad.version); err == nil {
 			t.Errorf("%s capture %d accepted", bad.contract, bad.version)
+		}
+	}
+}
+
+func TestCheckEvaluator(t *testing.T) {
+	r := registry(t)
+	if err := r.CheckEvaluator("engine/v1", 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []struct {
+		contract string
+		version  int
+		reason   provider.SelectionReason
+	}{
+		{"engine/v1", 2, provider.ReasonIncompatibleVersion},
+		{"engine/v1", 0, provider.ReasonIncompatibleVersion},
+		{"engine/v2", 1, provider.ReasonIncompatibleVersion},
+		{"unknown/v1", 1, provider.ReasonUnknownProvider},
+		{"./engine", 1, provider.ReasonInvalidSelection},
+	} {
+		err := r.CheckEvaluator(bad.contract, bad.version)
+		var serr *provider.SelectionError
+		if !errors.As(err, &serr) || serr.Reason != bad.reason {
+			t.Errorf("%s evaluator %d: %v, want %s", bad.contract, bad.version, err, bad.reason)
 		}
 	}
 }
