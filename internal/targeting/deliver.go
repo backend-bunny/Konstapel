@@ -1,10 +1,12 @@
 package targeting
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +36,136 @@ func KyvernoReady(o *unstructured.Unstructured) bool {
 	return ready["RBACPermissionsGranted"] && ready["WebhookConfigured"]
 }
 
+// KyvernoReadinessConditions are the condition types KyvernoReady requires.
+// Only these are inspected for diagnostics.
+var KyvernoReadinessConditions = []string{"RBACPermissionsGranted", "WebhookConfigured"}
+
+// ReadinessState classifies an expected readiness condition that is not True.
+type ReadinessState string
+
+const (
+	// ReadinessFalse: the engine reports the condition False.
+	ReadinessFalse ReadinessState = "False"
+	// ReadinessUnknown: the engine reports the condition Unknown, or the
+	// policy is not ready although no expected condition says why.
+	ReadinessUnknown ReadinessState = "Unknown"
+	// ReadinessMissing: the engine has not reported the condition.
+	ReadinessMissing ReadinessState = "Missing"
+	// ReadinessMalformed: the condition, or the list holding it, cannot be
+	// read. It is treated as unknown, never as ready.
+	ReadinessMalformed ReadinessState = "Malformed"
+)
+
+// Byte bounds for engine-supplied readiness text carried in a DeliveryResult.
+// Engine status is untrusted input of any size; the controller applies the
+// display budget.
+const (
+	maxReadinessReason  = 256
+	maxReadinessMessage = 1024
+)
+
+// ReadinessDetail explains why one current, owned policy is not ready: one
+// expected condition that does not report True. Reason and Message are the
+// engine's, truncated to a byte bound and otherwise unsanitized. Condition is
+// empty when the policy is not ready but every expected condition is True
+// (a stricter ReadyFunc).
+type ReadinessDetail struct {
+	// Policy is the engine policy name.
+	Policy    string
+	Condition string
+	State     ReadinessState
+	Reason    string
+	Message   string
+}
+
+// KyvernoReadiness reports the expected readiness conditions of o that do not
+// report True, in KyvernoReadinessConditions order. It is empty exactly when
+// KyvernoReady(o) is true. It never fails: missing or unreadable status is
+// reported as Missing or Malformed. It is diagnostic only; readiness
+// decisions use the ReadyFunc.
+func KyvernoReadiness(o *unstructured.Unstructured) []ReadinessDetail {
+	raw, found, err := unstructured.NestedFieldNoCopy(o.Object, "status", "conditionStatus", "conditions")
+	conditions, isList := raw.([]any)
+	listMalformed := err != nil || (found && raw != nil && !isList)
+	unreadable := false
+	for _, c := range conditions {
+		m, ok := c.(map[string]any)
+		if _, typed := m["type"].(string); !ok || !typed {
+			unreadable = true
+		}
+	}
+	var out []ReadinessDetail
+	for _, want := range KyvernoReadinessConditions {
+		d := ReadinessDetail{Policy: o.GetName(), Condition: want, State: ReadinessMissing}
+		if listMalformed || unreadable {
+			d.State = ReadinessMalformed
+		}
+		ready, seen := false, false
+		for _, c := range conditions {
+			m, _ := c.(map[string]any)
+			if t, _ := m["type"].(string); t != want {
+				continue
+			}
+			status, _ := m["status"].(string)
+			if status == "True" {
+				ready = true
+				break
+			}
+			// The first False wins over Unknown, which wins over an
+			// unreadable entry; within a rank, the first entry.
+			next := ReadinessMalformed
+			switch status {
+			case "False":
+				next = ReadinessFalse
+			case "Unknown":
+				next = ReadinessUnknown
+			}
+			if !seen || stateRank(next) < stateRank(d.State) {
+				reason, _ := m["reason"].(string)
+				message, _ := m["message"].(string)
+				d.State, d.Reason, d.Message = next, clipUTF8(reason, maxReadinessReason), clipUTF8(message, maxReadinessMessage)
+				seen = true
+			}
+		}
+		if !ready {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func stateRank(s ReadinessState) int {
+	switch s {
+	case ReadinessFalse:
+		return 0
+	case ReadinessUnknown:
+		return 1
+	}
+	return 2
+}
+
+// clipUTF8 bounds s to max bytes without splitting a valid rune.
+func clipUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && cut > max-utf8.UTFMax && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// readinessDetails explains why the ReadyFunc rejected o. A policy that
+// KyvernoReady would accept still gets an Unknown detail without a
+// condition, so every NotReady policy is attributed.
+func readinessDetails(o *unstructured.Unstructured) []ReadinessDetail {
+	if ds := KyvernoReadiness(o); len(ds) > 0 {
+		return ds
+	}
+	return []ReadinessDetail{{Policy: o.GetName(), State: ReadinessUnknown}}
+}
+
 // Delivery writes one binding's engine policies and retires superseded ones.
 type Delivery struct {
 	Client client.Client
@@ -57,6 +189,10 @@ type DeliveryResult struct {
 	Current []string
 	// NotReady lists current policies the engine has not accepted yet.
 	NotReady []string
+	// Readiness explains each NotReady policy: at least one detail per
+	// policy, sorted by policy then condition. It is diagnostic only and
+	// never changes which policies are ready, retained or removed.
+	Readiness []ReadinessDetail
 	// Retained lists superseded or held owned policies that are still
 	// enforcing, because their replacement is not ready or their policy
 	// failed to resolve.
@@ -113,6 +249,7 @@ func (d *Delivery) Sync(ctx context.Context, bindingUID types.UID, desired []*un
 		res.Current = append(res.Current, name)
 		if !ready(current) {
 			res.NotReady = append(res.NotReady, name)
+			res.Readiness = append(res.Readiness, readinessDetails(current)...)
 			replacementReady[hash] = false
 		}
 	}
@@ -150,6 +287,9 @@ func (d *Delivery) Sync(ctx context.Context, bindingUID types.UID, desired []*un
 	for _, l := range [][]string{res.Current, res.NotReady, res.Retained, res.Removed, res.Conflicts} {
 		slices.Sort(l)
 	}
+	slices.SortStableFunc(res.Readiness, func(a, b ReadinessDetail) int {
+		return cmp.Or(cmp.Compare(a.Policy, b.Policy), cmp.Compare(a.Condition, b.Condition))
+	})
 	return res, nil
 }
 

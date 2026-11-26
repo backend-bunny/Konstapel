@@ -9,9 +9,9 @@ or mark the issue fixed merely because these planning artifacts are merged.
 
 ## 1. Readiness diagnostics
 
-- [ ] 1.1 Carry bounded typed Kyverno readiness details through DeliveryResult into EngineReady without changing readiness/retirement decisions; test False, Unknown, missing/malformed conditions and retained revisions.
+- [x] 1.1 Carry bounded typed Kyverno readiness details through DeliveryResult into EngineReady without changing readiness/retirement decisions; test False, Unknown, missing/malformed conditions and retained revisions.
   <!-- agent: tier=deep risk=medium -->
-- [ ] 1.2 Add deterministic formatting, deduplication, sanitization and truncation with inspection fallback; test many policies, oversized messages and control characters, and document the displayed diagnostic.
+- [x] 1.2 Add deterministic formatting, deduplication, sanitization and truncation with inspection fallback; test many policies, oversized messages and control characters, and document the displayed diagnostic.
   <!-- agent: tier=standard risk=medium -->
 
 ## 2. Production prerequisite guidance

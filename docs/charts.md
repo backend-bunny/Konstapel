@@ -213,8 +213,11 @@ order:
 3. **Are the policies ready?** `EngineReady=True` (`Ready`) means every
    desired policy is applied at the current revision and Kyverno reports it
    ready. `ReplacementPending` means the engine has not accepted the policies
-   yet. During an engine outage, already applied policies stay in place and
-   keep enforcing.
+   yet. Its message names the failing Kyverno readiness condition for each
+   policy, for example `RBACPermissionsGranted=False` (see
+   [readiness diagnostics](integration/targeting-api.md#readiness-diagnostics)).
+   During an engine outage, already applied policies stay in place and keep
+   enforcing.
 4. **Is the evidence complete?** That's `status.assessment.current`.
    `policy reports unavailable: <reason>` means no evidence can be attributed:
    completeness is never `Complete`, and scheduled snapshots stop until

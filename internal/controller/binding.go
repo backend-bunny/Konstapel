@@ -162,7 +162,7 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 		status.ConfigurationRevision = revisionSummary(br.Contributions)
-		engine.Status, engine.Reason, engine.Message, requeue = engineCondition(sync, len(desired), len(br.Errors)+len(renderErrs) > 0 || contentErr != nil, br.TargetCount)
+		engine.Status, engine.Reason, engine.Message, requeue = engineCondition(sync, b.UID, len(desired), len(br.Errors)+len(renderErrs) > 0 || contentErr != nil, br.TargetCount)
 		switch {
 		case contentErr != nil:
 			// The content resolved for the snapshot but not when it was
@@ -399,7 +399,9 @@ func (r *BindingReconciler) ownedPolicies(ctx context.Context, uid types.UID) ([
 // engineCondition maps a delivery outcome to EngineReady. Ready means every
 // desired policy is applied at the current revision and accepted by the
 // engine, and nothing stale is being kept. It never asserts compliance.
-func engineCondition(s targeting.DeliveryResult, desired int, unresolved bool, targets int) (metav1.ConditionStatus, string, string, time.Duration) {
+// The message is diagnostic only: status, reason and requeue depend on the
+// policy name lists, never on the readiness details.
+func engineCondition(s targeting.DeliveryResult, binding types.UID, desired int, unresolved bool, targets int) (metav1.ConditionStatus, string, string, time.Duration) {
 	switch {
 	case len(s.Conflicts) > 0:
 		return metav1.ConditionFalse, v1alpha1.ReasonOwnershipConflict, truncate("unmanaged resources hold desired names: " + strings.Join(s.Conflicts, ", ")), ConflictRequeue
@@ -408,7 +410,7 @@ func engineCondition(s targeting.DeliveryResult, desired int, unresolved bool, t
 	case unresolved:
 		return metav1.ConditionFalse, v1alpha1.ReasonStaleRevision, "configuration did not resolve; no current policies applied", 0
 	case len(s.NotReady) > 0 || len(s.Retained) > 0:
-		return metav1.ConditionFalse, v1alpha1.ReasonReplacementPending, truncate(fmt.Sprintf("waiting for engine readiness: %s; retained until ready: %s", strings.Join(s.NotReady, ", "), strings.Join(s.Retained, ", "))), TransitionRequeue
+		return metav1.ConditionFalse, v1alpha1.ReasonReplacementPending, pendingMessage(s, binding), TransitionRequeue
 	case desired == 0:
 		return metav1.ConditionFalse, ReasonNoContributions, "no policies to deliver", 0
 	default:
