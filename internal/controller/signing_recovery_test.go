@@ -24,6 +24,8 @@ import (
 type recoveryEnv struct {
 	*signEnv
 	rec *SigningRecoveryReconciler
+	// failed is the run's retained SigningFailed status before any request.
+	failed *v1alpha1.AssessmentRunStatus
 }
 
 func newRecoveryEnv(t *testing.T) *recoveryEnv {
@@ -35,7 +37,8 @@ func newRecoveryEnv(t *testing.T) *recoveryEnv {
 	if !retainedSigningFailure(e.run_()) {
 		t.Fatalf("fixture is not a retained SigningFailed run: %s", js(e.run_().Status))
 	}
-	return &recoveryEnv{signEnv: e, rec: &SigningRecoveryReconciler{Client: e.c, Reader: e.c, Runtime: e.rr.Runtime, Now: func() time.Time { return e.now }}}
+	return &recoveryEnv{signEnv: e, rec: &SigningRecoveryReconciler{Client: e.c, Reader: e.c, Runtime: e.rr.Runtime, Now: func() time.Time { return e.now }},
+		failed: e.run_().Status.DeepCopy()}
 }
 
 // absentKeyFingerprint is the key a request confirms by default: the
@@ -313,7 +316,7 @@ func TestSigningRecoveryConflict(t *testing.T) {
 // (AlreadyRecovered, TestSigningRecoveryAlreadyRecovered).
 func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 	e := newRecoveryEnv(t)
-	accepted := func(name string) {
+	accepted := func(name string, attempt bool) {
 		t.Helper()
 		writes, before := storageWrites(e.store()), e.run_()
 		esr := e.reconcile(name)
@@ -328,6 +331,9 @@ func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 		if storageWrites(e.store()) != writes || !holdsClaim(claimOf(after), esr) || js(unclaimed) != js(before.Status) {
 			t.Fatalf("%s: eligibility wrote storage, or the run changed other than by the claim", name)
 		}
+		if !attempt {
+			return
+		}
 		again := e.reconcile(name).Status
 		if again.Phase != v1alpha1.SigningRequestRunning || !again.AcceptedAt.Equal(st.AcceptedAt) || js(again.Run) != js(st.Run) || js(again.RequestedBy) != js(st.RequestedBy) ||
 			js(e.run_()) != js(after) || storageWrites(e.store()) != writes {
@@ -336,7 +342,7 @@ func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 	}
 	e.request("eligible", e.name, e.uid())
 	unclaimed := js(e.run_().Status)
-	accepted("eligible")
+	accepted("eligible", true)
 	// Eligibility is re-checked while the request is not terminal; the
 	// holder's terminal outcome releases its claim, leaving the run's status
 	// exactly as before it, and is never evaluated again.
@@ -374,10 +380,18 @@ func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 		r.Status.SigningIntent.Key = &v1alpha1.SigningKey{Fingerprint: fp, Algorithm: pub.Algorithm, PublicKey: string(pub.PEM), PinnedAt: metav1.NewTime(e.now)}
 	})
 	e.request("adopt", e.name, e.uid())
-	accepted("adopt")
-	el, err := e.rec.eligibility(ctx, e.reconcile("adopt"))
+	accepted("adopt", false)
+	el, err := e.rec.eligibility(ctx, e.esr("adopt"))
 	if err != nil || el.reason != "" || el.committed == nil || el.committed.Signature == nil || el.committed.Signature.KeyFingerprint != fp {
 		t.Fatalf("adoption eligibility: %+v %v", el, err)
+	}
+	// The attempt adopts it unchanged, with its own (later) expiry, and
+	// records it without a storage write (task 2.6).
+	writes = storageWrites(e.store())
+	e.reconcile("adopt")
+	e.wantRecovered("adopt", v1alpha1.RecoveryRecovered, "adopt")
+	if pub := e.run_().Status.Publication; storageWrites(e.store()) != writes || !pub.ExpiresAt.Time.Equal(*el.committed.ExpiresAt) || !pub.PublishedAt.Time.Equal(*el.committed.PublishedAt) {
+		t.Fatalf("adoption wrote storage or changed the commit: %s", js(pub))
 	}
 
 	// Already recovered: not a failure, whatever the run's phase.
