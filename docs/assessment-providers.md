@@ -1228,8 +1228,12 @@ Kyverno package. `TestHarnessHasNoKyvernoDependencies` checks this with
   existing `EvidenceSummary` and `OutcomeCounts`.
 
 The harness rejects unknown case versions and unknown fields. A provider
-supplies an `Adapter` (`Inventory`, `Evaluate`, `WithoutEvidence`). Besides
-the golden comparison, every case must satisfy these rules:
+supplies a `conformance.Provider`: its `Adapter` (`Inventory`, `Evaluate`,
+`WithoutEvidence`, `MaxEvidenceAge`), its `Lifecycle` (`Cluster`, `Collect`,
+`Retain`, `Replay`) and its `Projector` (`Namespaces`, `Extract`,
+`Validate`). `conformance.Run` requires all three, so no provider passes on
+evaluation alone. Besides the golden comparison, every case must satisfy
+these rules:
 
 - The expected inventory comes from the frozen scope alone. It is unchanged
   when all evidence is removed. Without evidence, every observation is
@@ -1238,18 +1242,61 @@ the golden comparison, every case must satisfy these rules:
   invented or duplicated.
 - Only `Attributable` evidence has a raw outcome, a normalized outcome
   (`pass`, `fail`, `error`, `skip`, `unknown`) and an evaluation time no
-  later than the evaluation time. `Missing`, `Rejected` and `Unresolved`
-  carry no outcome.
+  later than the evaluation time and no older than the input's
+  evidence-age limit. `Missing`, `Rejected` and `Unresolved` carry no
+  outcome.
+- Evaluated again once all of it is older than the evidence-age limit,
+  attributable evidence is stale: `Rejected`, never still attributable from
+  the same source time and never `Missing`.
 - A raw outcome always normalizes the same way. Raw values without a summary
   field, such as a warning, count once as `unknown`, and the raw value is
   kept. `NotApplicable` is never a pass.
 - Evaluation is deterministic for the same input and time.
 
-`TestHarnessCatchesSemanticRegressions` mutates a working adapter in
-specific ways. Each mutation must fail the harness: missing evidence that
-passes, an inventory derived from evidence, a warning counted as a pass, an
-outcome on rejected evidence, a report update time used as freshness,
-duplicate credit, inconsistent normalization, nondeterminism, and others.
+`CheckLifecycle` drives the provider through the host's own paths for the
+same case. The Kyverno and reporting suites use `provider.Collect` over
+their collection adapters with the default limits, `collector.ReadCapture`,
+the capture's content role and `RunContent.Resolve`:
+
+- Collected from a cluster serving the case's evidence, the evidence
+  evaluates exactly as the case's own, and collection writes nothing.
+- A collection canceled before it starts or at its first request returns
+  only the cancellation: no result and no limitation.
+- A source whose every request fails is a limitation, and nothing is
+  attributable.
+- After the source objects are removed, collection finds no evidence and
+  evaluates as the case without evidence.
+- The retained capture, replayed after that removal and without a
+  cluster, evaluates exactly as the collection it retained.
+- Replayed with the run's content unavailable, it fails as unavailable
+  content (`conformance.ErrContentUnavailable` wrapping the
+  `ContentUnavailable` failure) and returns nothing.
+
+`CheckProjection` projects the case to each namespace instance of its frozen
+scope through `CaptureDocument.ProjectNamespace` and checks it with
+`ValidateNamespace`. Each extract passes the shared check for its namespace
+and is refused for every other one. No two namespaces disclose the same
+expected observation. Projection never changes an observation's result. A
+scope without a namespace instance is refused.
+
+Each violation is a `conformance.Violation` whose `Kind` names the broken
+rule. `conformance.RunMutations` applies the harness's catalog of
+deliberate regressions to every case that can expose them. The suite must
+report each regression's own kind, and some case must expose every
+regression. The catalog covers evaluation (missing evidence that passes, an
+inventory derived from evidence, a warning counted as a pass, an outcome on
+rejected evidence, a report update time used as freshness, an ignored
+evaluation time, duplicate credit, inconsistent normalization,
+nondeterminism and others), lifecycle (a collection that ignores
+cancellation, writes, drops evidence, reuses the input's evidence or hides a
+failed source, a retention that drops evidence, a replay that substitutes
+unavailable content) and projection (an extract that discloses the whole
+payload or drops evidence, a projected unknown scope).
+`TestKyvernoConformanceCatchesRegressions` and
+`TestReportingConformanceCatchesRegressions` run it for both providers.
+`TestMutationsCoverEveryRule` checks that every rule has a regression,
+except a malformed case, which `TestHarnessRejectsMalformedCases` covers by
+kind, an adapter error and an invalid summary.
 
 Cases live under `testdata/providers/conformance/v1/<provider>/`:
 
@@ -1259,6 +1306,9 @@ Cases live under `testdata/providers/conformance/v1/<provider>/`:
 - `konstapel-kyverno/synthetic-unknowns`: synthetic reports over that frozen
   scope, with a warn, conflicting results, untimed and future results, and a
   skip.
+- `konstapel-kyverno/windows-not-applicable`: the same saved evidence with
+  one workload declaring Windows in its frozen scope. Its six Linux checks
+  keep their raw results and are not applicable.
 - `konstapel-reporttest/*`: the synthetic reporting shape described below.
 
 `TestKyvernoHarnessSummaryMatchesCollector` checks that the harness summary
@@ -1424,6 +1474,23 @@ guards keep it out of production builds:
   (`testing.Testing()`). `TestLinkingIntoABinaryPanics` builds such a binary
   and checks the panic.
 
+The shipped artifacts are checked too, for the provider's package paths
+and identities (its contract name, source group and check kind):
+
+- `TestShippedBinariesCarryNoTestOnlyProvider` builds both binaries as
+  `scripts/build.sh` does and scans them. A binary that links `reporttest`
+  must show the markers, so the scan is real.
+- `TestImagePayloadCarriesNoTestOnlyProvider` scans the rest of the image
+  payload: the content tree, the notices, and the script that writes the
+  C2P plugin manifest for the installed Kyverno provider.
+- `TestShippedBundlesNameNoTestOnlyProvider` builds every bundle under
+  `bundles/` as it is published. Each one must name an installed production
+  provider, and no file in it may carry the markers.
+- `TestChartsShipNoTestOnlyProvider` renders both charts, with the defaults
+  and with every documented values example, and scans the output.
+- `task image:test` scans every Konstapel file of the built image, including
+  the plugin manifest.
+
 Build tags were not used: the cases must run in the plain `go test ./...`
 behind `task check`.
 
@@ -1449,7 +1516,8 @@ The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `ValidateProjectedEvaluation`, `projection.Scope`, `Disclosure`, `Check`,
 `Extractor`, `collector.Snapshot`, `ReadSnapshot`, `SnapshotProvider`,
 `c2p.Provider`,
-`conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
+`conformance.Adapter`, `Lifecycle`, `Projector`, `Provider`, `Violation`,
+`RunMutations`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change. The
 collection limits are host constants, not a configuration contract.

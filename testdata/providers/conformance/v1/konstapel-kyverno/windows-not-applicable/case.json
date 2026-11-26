@@ -1,0 +1,10 @@
+{
+  "version": "konstapel.provider-conformance/v1",
+  "provider": "konstapel-kyverno/v1",
+  "description": "The saved live Kyverno 1.19.2 background evidence with one workload (hz-bg-compliant) declaring Windows in the frozen scope: its Linux checks keep their raw results and are NotApplicable, never a pass. Derived from testdata/assessments/kyverno-1.19.2-background/capture.json; not producer evidence for Windows.",
+  "evaluationTime": "2026-11-06T21:27:29Z",
+  "input": {
+    "capture": "testdata/providers/conformance/v1/konstapel-kyverno/windows-not-applicable/capture.json",
+    "maxEvidenceAge": "2h"
+  }
+}
