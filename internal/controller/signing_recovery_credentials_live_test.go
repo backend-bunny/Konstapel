@@ -18,9 +18,8 @@ package controller
 //     exact authenticated identity (the ServiceAccount's object UID); with
 //     it, a forged requester is replaced by the authenticated one for
 //     ServiceAccounts, the certificate user and the cluster administrator;
-//     a credential without a UID that claims one is denied (the mutation
-//     sets no UID, so the forged one remains and fails validation); the
-//     controller copies only the recorded requester into status;
+//     a forged UID is removed for credentials without one; the controller
+//     copies only the recorded requester into status;
 //   - spec edits: the recoverer, the reader and the controller are denied
 //     by RBAC, and the cluster administrator by the CRD's immutability rule,
 //     through update, merge patch and JSON patch;
@@ -358,7 +357,11 @@ func TestLiveSigningRecoveryCredentials(t *testing.T) {
 		{"esrc-forged-sa", recoverer, &v1alpha1.Requester{Username: other, UID: "uid-" + other}},
 		{"esrc-forged-sa-name", recoverer, &v1alpha1.Requester{Username: other}},
 		{"esrc-forged-human", human, &v1alpha1.Requester{Username: other}},
+		// Credentials without a UID: the forged UID is removed too.
+		{"esrc-forged-human-uid", human, &v1alpha1.Requester{Username: other, UID: "uid-" + other}},
+		{"esrc-forged-human-own-uid", human, &v1alpha1.Requester{Username: human.user.Username, UID: "uid-" + human.user.Username}},
 		{"esrc-forged-admin", admin, &v1alpha1.Requester{Username: other}},
+		{"esrc-forged-admin-uid", admin, &v1alpha1.Requester{Username: other, UID: "uid-" + other}},
 		{"esrc-unattributed-admin", admin, nil},
 	} {
 		r := forgedRequest(c.name, c.forged)
@@ -375,13 +378,6 @@ func TestLiveSigningRecoveryCredentials(t *testing.T) {
 		}
 		attribution[c.name] = map[string]any{"creator": c.id.key, "forged": c.forged, "stored": got.Spec.RequestedBy, "statusOnCreate": "dropped"}
 	}
-	// A credential without a UID that claims one: the mutation sets the
-	// name only, and the validation rejects the remaining forged UID. This
-	// fails closed; nothing is stored under a forged identity.
-	deny("certificate user claims another user's UID", human.c.Create(l.ctx, forgedRequest("esrc-forged-human-uid", &v1alpha1.Requester{Username: other, UID: "uid-" + other}), client.DryRunAll),
-		apierrors.IsForbidden, forgedMsg)
-	deny("cluster administrator claims another user's UID", admin.c.Create(l.ctx, forgedRequest("esrc-forged-admin-uid", &v1alpha1.Requester{Username: other, UID: "uid-" + other}), client.DryRunAll),
-		apierrors.IsForbidden, forgedMsg)
 	l.record("attribution", map[string]any{"requests": attribution})
 
 	// Spec edits after creation: RBAC denies the recovery roles and the

@@ -166,7 +166,8 @@ change labels and annotations.
 The `konstapel-evidence-attachment-registrant` admission policies
 (`config/admission/evidence-attachment-registrant.yaml`) set
 `spec.registeredBy` from the API server's authenticated user (username and
-UID) on create. A value that names someone else is overwritten, and the
+UID) on create. A submitted value is replaced as a whole, so another
+user's name or a UID the caller doesn't have never survives, and the
 validating policy fails closed if the stored value doesn't match the caller.
 Combined with spec immutability, nobody can later rewrite the registrant.
 The record's `metadata.creationTimestamp` is the API server's submission time.

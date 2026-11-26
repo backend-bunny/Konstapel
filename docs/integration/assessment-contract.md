@@ -119,10 +119,10 @@ together with read permission on the object. They are not CRD subresources.
 
 `config/admission/` contains in-tree admission policies (no webhook):
 
-- `assessment-requester.yaml`: a MutatingAdmissionPolicy sets
-  `spec.requester` from `request.userInfo` on create. A ValidatingAdmissionPolicy
-  then rejects a request whose requester does not match the authenticated user.
-  Both fail closed.
+- `assessment-requester.yaml`: a MutatingAdmissionPolicy replaces
+  `spec.requester` as a whole with `request.userInfo` on create. A
+  ValidatingAdmissionPolicy then rejects a request whose requester does not
+  match the authenticated user. Both fail closed.
 - `assessment-run-scope.yaml`: rejects `Namespace`-scope runs and
   `Scheduled`/`Request` triggers from any identity other than the controller
   service account. The policy reads that identity from the
