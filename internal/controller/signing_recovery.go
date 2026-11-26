@@ -27,7 +27,8 @@ import (
 // storage checks under the destination fence. A terminal request is never
 // re-evaluated. An eligible request then takes the run's recovery claim or
 // waits for it (task 2.3, signing_recovery_claim.go). The holder then runs
-// the recovery attempt under the same destination fence (task 2.4,
+// the recovery attempt under the same destination fence until its claim's
+// deadline and records the recovered publication (tasks 2.4 to 2.6,
 // signing_recovery_attempt.go).
 
 // recoveryEligibility is the outcome of evaluating a request against its
@@ -115,6 +116,11 @@ func (r *SigningRecoveryReconciler) Reconcile(ctx context.Context, req reconcile
 			return reconcile.Result{}, err
 		}
 		held = nil
+	}
+	if held != nil && r.pastDeadline(held) {
+		// The holder's bounded attempt is over (task 2.5); a run that
+		// records its recovery ended above, from the recovered run.
+		return reconcile.Result{}, r.deadlineExceeded(ctx, esr, run, held)
 	}
 	// Storage eligibility, the claim, and the attempt are one unit of fenced
 	// work of the pinned destination, as "run <name> signature recovery".

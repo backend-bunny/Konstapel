@@ -16,21 +16,31 @@ package controller
 //   - a holder deleted while holding the claim, and a holder that ended
 //     terminally, are replaced by exactly one waiting request;
 //   - nothing is written to storage while the key is absent.
-// Then the attempt (2.4):
+// Then the attempt (2.4), its bound (2.5), and its recorded success (2.6):
 //   - the recorded Secret holding another key ends the holder KeyMismatch,
 //     and a request without expectedKeyFingerprint ends
 //     KeyConfirmationRequired without reading a signing Secret; neither pins;
 //   - with the confirmed key installed and the destination rotated to
 //     another Secret, overlapping reconcilers pin the confirmed key once,
 //     sign, and store one signature while the commit is refused;
-//   - with the key Secret deleted, a successor commits the stored signature
-//     without reading a signing Secret, and after a lost commit response the
-//     registered reconciler adopts the commit without publishing again;
+//   - with every commit still refused, the holder ends SigningFailed at its
+//     claim's deadline; the run is its retained failure (with the pin), the
+//     destination still counts one retained package with its expiry, and
+//     nothing is downloadable;
+//   - with the key Secret deleted, the next holder commits the stored
+//     signature without reading a signing Secret; after a lost commit
+//     response its next attempt adopts the commit without publishing again
+//     and records the recovered publication on the run, and the controller
+//     stops before the request's status write;
+//   - past the attempt deadline, the registered reconciler repairs that
+//     request (Recovered) from the recovered run, every other request ends
+//     AlreadyRecovered, and nothing is published again;
 //   - storage holds exactly one signature version and one commit version,
 //     signed under the pinned key, with the run's recorded retention bounded
-//     by its recorded expiry.
-// Recording the recovered publication (2.6), the attempt deadline (2.5), and
-// the live faults (5.2) build on this. Run through scripts/targeting-live.sh
+//     by its recorded expiry; the run is Completed with that publication and
+//     its evidence unchanged, and the unchanged download routes serve the
+//     pair, which verifies under the pinned key.
+// The live faults (5.2) build on this. Run through scripts/targeting-live.sh
 // (recovery group).
 
 import (
@@ -168,6 +178,10 @@ func TestLiveSigningRecoveryClaim(t *testing.T) {
 		t.Fatalf("fixture: want an unpinned Required intent and no recovery state: %s", toJSON(run.Status))
 	}
 	l.record("signing-failed", map[string]any{"run": run.Name, "failure": run.Status.Publication.Failure.Reason, "expiresAt": run.Status.Publication.ExpiresAt})
+	// Each recovery attempt is bounded by PublishTimeout from its claim
+	// (2.5): long enough for every step below, short enough to wait out.
+	rt.PublishTimeout = 60 * time.Second
+	ConfigureAssessments(rt)
 
 	newRequestKey := func(name, fp string) *v1alpha1.EvidenceSigningRequest {
 		t.Helper()

@@ -149,9 +149,9 @@ func (e *recoveryEnv) wantCommitted(fp string) publication.Status {
 	if _, err := evidencesign.Verify(bundle, d, pub); err != nil {
 		e.t.Fatalf("the committed signature does not verify under the pinned key: %v", err)
 	}
-	recorded := run.Status.Publication.ExpiresAt.Time
-	if r := st.Retention; r == nil || r.Duration != string(run.Status.Retention) || r.NotAfter == nil || !r.NotAfter.Equal(recorded) || !st.ExpiresAt.Equal(recorded) {
-		e.t.Fatalf("want the recorded retention %s bounded by the recorded expiry %s: %s expires %s", run.Status.Retention, recorded, js(st.Retention), st.ExpiresAt)
+	recorded := e.failed.Publication.ExpiresAt.Time
+	if r := st.Retention; r == nil || r.Duration != string(e.failed.Retention) || r.NotAfter == nil || !r.NotAfter.Equal(recorded) || !st.ExpiresAt.Equal(recorded) {
+		e.t.Fatalf("want the recorded retention %s bounded by the recorded expiry %s: %s expires %s", e.failed.Retention, recorded, js(st.Retention), st.ExpiresAt)
 	}
 	return st
 }
@@ -213,7 +213,7 @@ func TestSigningRecoveryUnpinnedKeyConfirmation(t *testing.T) {
 	e.requestKey("confirmed", e.name, e.uid(), fp)
 	e.reconcile("confirmed")
 	e.reconcile("confirmed")
-	e.wantRunning("confirmed", v1alpha1.RecoveryCommitting, "is committed as")
+	e.wantRecovered("confirmed", v1alpha1.RecoveryRecovered, "confirmed")
 	st := e.wantCommitted(fp)
 	if !st.PublishedAt.Equal(e.now.UTC().Truncate(time.Second)) {
 		t.Fatalf("publishedAt %s is not the late commit time %s", st.PublishedAt, e.now)
@@ -226,19 +226,17 @@ func TestSigningRecoveryUnpinnedKeyConfirmation(t *testing.T) {
 	if e.store().Calls(fake.OpStoreSignature) != 1 {
 		t.Fatalf("signature stored %d times", e.store().Calls(fake.OpStoreSignature))
 	}
-	// The pin is the only change to the run besides the claim (recording the
-	// recovered publication is task 2.6).
-	cmp := run.Status.DeepCopy()
-	cmp.SigningIntent.Key, cmp.SigningRecovery = nil, nil
-	if js(cmp) != pre {
-		t.Fatalf("the attempt changed more than the pin and the claim:\n%s\n%s", pre, js(cmp))
-	}
-	// Later attempts adopt the commit without a storage write.
+	// Besides the pin, only the recovered publication changed the run
+	// (wantRecovered); a later reconcile of the ended request and a later
+	// request write no storage and leave the run as recovered.
 	writes, again := storageWrites(e.store()), js(e.esr("confirmed").Status)
 	e.now = e.now.Add(time.Minute)
 	e.reconcile("confirmed")
+	e.request("later", e.name, e.uid())
+	e.reconcile("later")
+	e.wantSucceeded("later", v1alpha1.RecoveryAlreadyRecovered)
 	if storageWrites(e.store()) != writes || js(e.esr("confirmed").Status) != again || js(e.run_()) != js(run) {
-		t.Fatal("a later attempt wrote storage, the run, or the request")
+		t.Fatal("a later reconcile wrote storage, the run, or the ended request")
 	}
 }
 
@@ -274,7 +272,7 @@ func TestSigningRecoveryStoredSignatureNeedsNoKey(t *testing.T) {
 	if got := reads.all(); len(got) != 0 {
 		t.Fatalf("the stored-signature path read Secrets: %v", got)
 	}
-	e.wantRunning("holder", v1alpha1.RecoveryCommitting, "is committed as")
+	e.wantRecovered("holder", v1alpha1.RecoveryRecovered, "holder")
 	e.wantCommitted(fp)
 	again, _, _ := e.store().ReadSignature(context.Background(), e.ref())
 	if string(again) != string(stored) || e.store().Calls(fake.OpStoreSignature) != 1 {
@@ -320,7 +318,7 @@ func TestSigningRecoveryPinnedKeyMismatch(t *testing.T) {
 	e.request("restored", e.name, e.uid())
 	e.reconcile("restored")
 	e.reconcile("restored")
-	e.wantRunning("restored", v1alpha1.RecoveryCommitting, "is committed as")
+	e.wantRecovered("restored", v1alpha1.RecoveryRecovered, "restored")
 	e.wantCommitted(fp)
 	if js(e.run_().Status.SigningIntent) != pinned {
 		t.Fatal("the recovery changed the pinned intent")
@@ -368,8 +366,8 @@ func TestSigningRecoveryInvalidStoredSignature(t *testing.T) {
 }
 
 // A commit whose response was lost is adopted unchanged by the next
-// attempt: no second commit and no Publish, the original publication time
-// kept, and no key read.
+// attempt within the deadline: no second commit and no Publish, the
+// original publication time kept, and no key read.
 func TestSigningRecoveryLostCommitAdopts(t *testing.T) {
 	e := newRecoveryEnv(t)
 	_, fp := e.installKey("pw-b")
@@ -382,10 +380,13 @@ func TestSigningRecoveryLostCommitAdopts(t *testing.T) {
 
 	reads := e.recordSecretReads()
 	e.successor()
-	e.now = e.now.Add(time.Hour)
+	e.now = e.now.Add(time.Minute)
 	writes, publishes := storageWrites(e.store()), e.store().Calls(fake.OpPublish)
 	e.reconcile("holder")
-	e.wantRunning("holder", v1alpha1.RecoveryCommitting, "published "+first.PublishedAt.UTC().Format(time.RFC3339))
+	e.wantRecovered("holder", v1alpha1.RecoveryRecovered, "holder")
+	if pub := e.run_().Status.Publication; !pub.PublishedAt.Time.Equal(*first.PublishedAt) {
+		t.Fatalf("the recorded publication is not the adopted commit's: %s", js(pub))
+	}
 	if got := e.wantCommitted(fp); !got.PublishedAt.Equal(*first.PublishedAt) || !got.ExpiresAt.Equal(*first.ExpiresAt) {
 		t.Fatalf("the adopted commit changed: %s -> %s", js(first), js(got))
 	}
@@ -431,19 +432,22 @@ func TestSigningRecoveryConcurrentRequestsConverge(t *testing.T) {
 			e.reconcile(n)
 		}
 	}
-	holder := claimOf(e.run_())
-	if holder == nil {
-		t.Fatal("no request holds the run")
+	// Exactly one request recovered the run; every other ended
+	// AlreadyRecovered from the recovered run, all referencing the one commit.
+	sr := e.run_().Status.SigningRecovery
+	if sr == nil || sr.Recovered == nil || sr.Active != nil {
+		t.Fatalf("the run records no single recovery: %s", js(sr))
 	}
+	holder := sr.Recovered.Name
 	for _, n := range names {
-		if n == holder.Name {
-			e.wantRunning(n, v1alpha1.RecoveryCommitting, "is committed as")
+		if n == holder {
+			e.wantRecovered(n, v1alpha1.RecoveryRecovered, holder)
 		} else {
-			e.wantWaiting(n, holder.Name)
+			e.wantSucceeded(n, v1alpha1.RecoveryAlreadyRecovered)
 		}
 	}
 	e.wantCommitted(fp)
-	t.Logf("holder %s; signature stores %d, publishes %d, one commit", holder.Name, e.store().Calls(fake.OpStoreSignature), e.store().Calls(fake.OpPublish))
+	t.Logf("holder %s; signature stores %d, publishes %d, one commit", holder, e.store().Calls(fake.OpStoreSignature), e.store().Calls(fake.OpPublish))
 }
 
 // A holder deleted after storing its signature but before its commit, and a
@@ -468,7 +472,7 @@ func TestSigningRecoveryHolderDeletedAfterSigning(t *testing.T) {
 	e.reconcile("waiter")
 	e.wantHolder("waiter")
 	e.reconcile("waiter")
-	e.wantRunning("waiter", v1alpha1.RecoveryCommitting, "is committed as")
+	e.wantRecovered("waiter", v1alpha1.RecoveryRecovered, "waiter")
 	e.wantCommitted(fp)
 	if got := reads.all(); len(got) != 0 || e.store().Calls(fake.OpStoreSignature) != 1 {
 		t.Fatalf("the successor read Secrets %v or signed again (%d stores)", got, e.store().Calls(fake.OpStoreSignature))
