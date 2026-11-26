@@ -24,12 +24,14 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/provider/conformance"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
 	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
+	"github.com/backend-bunny/Konstapel/internal/provider/reporttest"
 )
 
 var verifiedBlock = regexp.MustCompile("(?s)<!-- verified: ([a-z-]+) -->\n```json\n(.*?)\n```")
 
 // documentedExamples computes every example docs/assessment-providers.md
-// shows, from the installed registry and the Kyverno collection adapter.
+// shows, from the installed registry, the Kyverno collection adapter and
+// the test-only reporting provider of the worked authoring recipe.
 func documentedExamples(t *testing.T) map[string]any {
 	r := installed.Registry()
 	_, rejected := r.Select(provider.Selection{Provider: "konstapel-kyverno/v1", Mode: v1alpha1.ModeDeny, Checks: []provider.CheckSelection{
@@ -41,6 +43,7 @@ func documentedExamples(t *testing.T) map[string]any {
 	captures, rejectedCaptures := captureExamples(t)
 	return map[string]any{
 		"kyverno-descriptor":             kyverno.Descriptor(),
+		"reporttest-descriptor":          reporttest.Descriptor(),
 		"installed-contracts":            r.Contracts(),
 		"rejected-selection":             rejected,
 		"unknown-provider":               unknown,

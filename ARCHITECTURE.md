@@ -76,6 +76,15 @@ flowchart TD
 These are logical responsibilities, not separate services. Provider integration
 reuses the controller manager, scheduling, and publication pipeline.
 
+Installed providers are in-tree code registered by descriptor. Kyverno is the
+only installed provider. The
+[assessment provider guide](docs/assessment-providers.md) describes the
+descriptor, registry, collection, capture, projection and conformance seams,
+the [provider-authoring recipe](docs/assessment-providers.md#authoring-a-provider),
+and which parts are versioned package contracts and which are internal Go
+interfaces. Separately installed provider services are planned in the
+`add-external-assessment-providers` change and do not exist yet.
+
 ## C2P-Go v2 integration
 
 The dependency is

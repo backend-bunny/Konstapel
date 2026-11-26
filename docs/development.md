@@ -72,6 +72,12 @@ skipped; CI requires it. Initial tool/module installation
 and the checksum-verified chart download need network access. The pinned Devbox
 Kyverno CLI replaces the previous manual release-archive download.
 
+To author or change an assessment provider, follow the
+[provider-authoring recipe](assessment-providers.md#authoring-a-provider). Its
+registration, conformance-fixture and replay checks are package-level
+`go test` runs through `devbox run --`, all included in `task test`; there is
+no separate task.
+
 To preview a compliance configuration change against a cluster, build the
 binary (`task build`) and run `bin/konstapel preview` directly; there is no
 Task wrapper. See the [local and CI examples](policy-preview.md#local-and-ci-use),
