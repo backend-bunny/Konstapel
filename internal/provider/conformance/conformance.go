@@ -14,9 +14,13 @@
 // input alone and is unchanged when all evidence is removed, which leaves
 // every observation Missing (or Unresolved for scope it cannot attribute);
 // every expected observation is evaluated exactly once; only attributable
-// evidence carries an outcome; unknown evidence is never a pass; a raw outcome always
+// evidence carries an outcome, within the evidence-age limit, and is stale
+// once older; unknown evidence is never a pass; a raw outcome always
 // normalizes the same way; and evaluation is deterministic for an explicit
-// evaluation time.
+// evaluation time. CheckLifecycle and CheckProjection (suite.go) cover a
+// provider's collection, retention, replay and namespace projection for
+// the same cases, and RunMutations (mutations.go) proves that deliberate
+// regressions fail for their own Kind.
 //
 // This package is test infrastructure. It is never linked into a shipped
 // binary (internal/provider/installed tests the boundary).
@@ -141,6 +145,9 @@ type Adapter interface {
 	// WithoutEvidence returns the input with every piece of source evidence
 	// removed and its frozen scope unchanged.
 	WithoutEvidence(input json.RawMessage) (json.RawMessage, error)
+	// MaxEvidenceAge is the input's evidence-age limit: attributable
+	// evidence is at most this old at the evaluation time.
+	MaxEvidenceAge(input json.RawMessage) (time.Duration, error)
 }
 
 // Load reads a case directory. A missing expected.json is returned as a
@@ -165,105 +172,156 @@ func Load(dir string) (Case, *Expected, error) {
 }
 
 // Check runs the case through the adapter, enforces the shared invariants,
-// and returns the result in golden form with every violation found.
+// and returns the result in golden form with every violation found. Each
+// violation is a *Violation whose Kind names the rule it breaks.
 func Check(a Adapter, c Case) (Expected, []error) {
 	var errs []error
-	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	fail := func(k Kind, format string, args ...any) { errs = append(errs, violation(k, format, args...)) }
 	got := Expected{Version: CaseVersion, Provider: c.Provider}
 	switch {
 	case c.Version != CaseVersion:
-		fail("case version %q is not %q", c.Version, CaseVersion)
+		fail(KindCase, "case version %q is not %q", c.Version, CaseVersion)
 		return got, errs
 	case c.Provider != a.Contract():
-		fail("case is for %s, adapter implements %s", c.Provider, a.Contract())
+		fail(KindCase, "case is for %s, adapter implements %s", c.Provider, a.Contract())
 		return got, errs
 	case c.EvaluationTime.IsZero():
-		fail("case has no explicit evaluationTime")
+		fail(KindCase, "case has no explicit evaluationTime")
 		return got, errs
 	case len(bytes.TrimSpace(c.Input)) == 0:
-		fail("case has no input")
+		fail(KindCase, "case has no input")
 		return got, errs
 	}
 
 	inv, err := a.Inventory(c.Input)
 	if err != nil {
-		fail("inventory: %v", err)
+		fail(KindInventory, "inventory: %v", err)
 		return got, errs
 	}
 	inv = sortedExpectations(inv)
 	keys := map[Expectation]bool{}
 	for _, e := range inv {
 		if e.Subject == "" || e.Check == "" {
-			fail("inventory entry %+v lacks a subject or check", e)
+			fail(KindInventory, "inventory entry %+v lacks a subject or check", e)
 		}
 		if keys[e] {
-			fail("inventory repeats %s / %s", e.Subject, e.Check)
+			fail(KindInventory, "inventory repeats %s / %s", e.Subject, e.Check)
 		}
 		keys[e] = true
 	}
 	got.Inventory = inv
 
+	age, err := a.MaxEvidenceAge(c.Input)
+	if err != nil || age <= 0 {
+		fail(KindCase, "the input has no positive evidence-age limit (%v)", err)
+		return got, errs
+	}
 	ev, err := a.Evaluate(c.Input, c.EvaluationTime)
 	if err != nil {
-		fail("evaluate: %v", err)
+		fail(KindEvaluate, "evaluate: %v", err)
 		return got, errs
 	}
 	again, err := a.Evaluate(c.Input, c.EvaluationTime)
 	if err != nil || !sameJSON(normalize(ev), normalize(again)) {
-		fail("evaluation is not deterministic for the same input and time (%v)", err)
+		fail(KindNondeterministic, "evaluation is not deterministic for the same input and time (%v)", err)
 	}
 	ev = normalize(ev)
-	errs = append(errs, observationErrors(keys, ev, c.EvaluationTime)...)
+	errs = append(errs, observationErrors(keys, ev, c.EvaluationTime, age)...)
 	got.Observations = ev.Observations
 	got.Evidence, got.Outcomes = Summarize(ev)
 	if err := got.Evidence.Validate(); err != nil {
-		fail("summary: %v", err)
+		fail(KindSummary, "summary: %v", err)
 	}
+	errs = append(errs, staleErrors(a, c, keys, ev, age)...)
 
 	// Independence: removing all evidence keeps the inventory and leaves
 	// every observation explicitly missing, never passing.
 	bare, err := a.WithoutEvidence(c.Input)
 	if err != nil {
-		fail("without evidence: %v", err)
+		fail(KindEvaluate, "without evidence: %v", err)
 		return got, errs
 	}
 	bareInv, err := a.Inventory(bare)
 	if err != nil || !sameJSON(sortedExpectations(bareInv), inv) {
-		fail("inventory changes when evidence is removed (%v): expected subjects must not come from evidence", err)
+		fail(KindIndependence, "inventory changes when evidence is removed (%v): expected subjects must not come from evidence", err)
 	}
 	bareEv, err := a.Evaluate(bare, c.EvaluationTime)
 	if err != nil {
-		fail("evaluate without evidence: %v", err)
+		fail(KindEvaluate, "evaluate without evidence: %v", err)
 		return got, errs
 	}
 	bareEv = normalize(bareEv)
-	errs = append(errs, observationErrors(keys, bareEv, c.EvaluationTime)...)
-	// Unresolved stays possible: an unattributable identity or a scope
-	// change is a property of the frozen scope, not of evidence.
-	for _, o := range bareEv.Observations {
-		if o.State != Missing && o.State != Unresolved {
-			fail("without evidence %s / %s is %s, want Missing (or Unresolved for an unattributable scope)", o.Subject, o.Check, o.State)
+	errs = append(errs, observationErrors(keys, bareEv, c.EvaluationTime, age)...)
+	errs = append(errs, missingErrors("without evidence", inv, bareEv)...)
+	return got, errs
+}
+
+// staleErrors evaluates the case again once all of its attributable
+// evidence is older than the evidence-age limit. Evidence that was
+// attributable must then be stale: Rejected (or attributable from newer
+// evidence the earlier time did not admit), never still attributable from
+// the same source time and never Missing, since it still exists.
+func staleErrors(a Adapter, c Case, keys map[Expectation]bool, ev Evaluation, age time.Duration) []error {
+	before := map[Expectation]Observation{}
+	for _, o := range ev.Observations {
+		if o.State == Attributable && o.Evaluated != nil {
+			before[Expectation{Subject: o.Subject, Check: o.Check}] = o
 		}
 	}
-	bareSum, bareOut := Summarize(bareEv)
-	if bareOut != (publication.OutcomeCounts{}) {
-		fail("without evidence the outcomes are %+v, want none", bareOut)
+	if len(before) == 0 {
+		return nil
 	}
-	if len(inv) > 0 && bareSum.Completeness != publication.Incomplete {
-		fail("without evidence completeness is %s, want Incomplete", bareSum.Completeness)
+	later := c.EvaluationTime.Add(age + time.Second)
+	aged, err := a.Evaluate(c.Input, later)
+	if err != nil {
+		return []error{violation(KindEvaluate, "evaluate at %s: %v", later.Format(time.RFC3339), err)}
 	}
-	return got, errs
+	aged = normalize(aged)
+	errs := observationErrors(keys, aged, later, age)
+	for _, o := range aged.Observations {
+		was, ok := before[Expectation{Subject: o.Subject, Check: o.Check}]
+		switch {
+		case !ok:
+		case o.State == Missing:
+			errs = append(errs, violation(KindStaleEvidence, "%s / %s: stale evidence became Missing; evidence that exists but is too old is Rejected", o.Subject, o.Check))
+		case o.State == Attributable && o.Evaluated != nil && o.Evaluated.Equal(*was.Evaluated):
+			errs = append(errs, violation(KindStaleEvidence, "%s / %s: evidence evaluated at %s is still attributable %s later", o.Subject, o.Check, was.Evaluated.Format(time.RFC3339), age+time.Second))
+		}
+	}
+	return errs
+}
+
+// missingErrors checks an evaluation that has no source evidence: every
+// expected observation is Missing (or Unresolved for scope it cannot
+// attribute), nothing has an outcome, and anything expected is Incomplete.
+func missingErrors(what string, inv []Expectation, ev Evaluation) []error {
+	var errs []error
+	// Unresolved stays possible: an unattributable identity or a scope
+	// change is a property of the frozen scope, not of evidence.
+	for _, o := range ev.Observations {
+		if o.State != Missing && o.State != Unresolved {
+			errs = append(errs, violation(KindMissingEvidence, "%s %s / %s is %s, want Missing (or Unresolved for an unattributable scope)", what, o.Subject, o.Check, o.State))
+		}
+	}
+	sum, out := Summarize(ev)
+	if out != (publication.OutcomeCounts{}) {
+		errs = append(errs, violation(KindMissingEvidence, "%s the outcomes are %+v, want none", what, out))
+	}
+	if len(inv) > 0 && sum.Completeness != publication.Incomplete {
+		errs = append(errs, violation(KindMissingEvidence, "%s completeness is %s, want Incomplete", what, sum.Completeness))
+	}
+	return errs
 }
 
 // Verify is Check plus an exact comparison with the golden result.
 func Verify(a Adapter, c Case, want Expected) []error {
 	got, errs := Check(a, c)
 	if want.Version != CaseVersion {
-		errs = append(errs, fmt.Errorf("expected result version %q is not %q", want.Version, CaseVersion))
+		errs = append(errs, violation(KindCase, "expected result version %q is not %q", want.Version, CaseVersion))
 	}
 	if !sameJSON(got, want) {
 		g, _ := json.MarshalIndent(got, "", "  ")
-		errs = append(errs, fmt.Errorf("result differs from %s:\n%s", ExpectedFile, g))
+		errs = append(errs, violation(KindGolden, "result differs from %s:\n%s", ExpectedFile, g))
 	}
 	return errs
 }
@@ -324,46 +382,49 @@ func Summarize(ev Evaluation) (publication.EvidenceSummary, publication.OutcomeC
 	return e, o
 }
 
-func observationErrors(inventory map[Expectation]bool, ev Evaluation, at time.Time) []error {
+func observationErrors(inventory map[Expectation]bool, ev Evaluation, at time.Time, age time.Duration) []error {
 	var errs []error
-	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	fail := func(k Kind, format string, args ...any) { errs = append(errs, violation(k, format, args...)) }
 	seen := map[Expectation]bool{}
 	normalized := map[string]Outcome{}
 	for _, o := range ev.Observations {
 		k := Expectation{Subject: o.Subject, Check: o.Check}
 		switch {
 		case !inventory[k]:
-			fail("observation %s / %s is not in the expected inventory", o.Subject, o.Check)
+			fail(KindUnexpected, "observation %s / %s is not in the expected inventory", o.Subject, o.Check)
 		case seen[k]:
-			fail("observation %s / %s is evaluated twice", o.Subject, o.Check)
+			fail(KindDuplicate, "observation %s / %s is evaluated twice", o.Subject, o.Check)
 		}
 		seen[k] = true
 		switch o.State {
 		case Attributable:
 			if o.Raw == "" {
-				fail("%s / %s: attributable evidence without its raw outcome", o.Subject, o.Check)
+				fail(KindRawOutcome, "%s / %s: attributable evidence without its raw outcome", o.Subject, o.Check)
 			}
 			if !slices.Contains([]Outcome{Pass, Fail, Error, Skip, Unknown}, o.Outcome) {
-				fail("%s / %s: normalized outcome %q is not pass, fail, error, skip or unknown", o.Subject, o.Check, o.Outcome)
+				fail(KindNormalizedOutcome, "%s / %s: normalized outcome %q is not pass, fail, error, skip or unknown", o.Subject, o.Check, o.Outcome)
 			}
 			if prev, ok := normalized[o.Raw]; ok && prev != o.Outcome {
-				fail("raw outcome %q normalizes to both %s and %s", o.Raw, prev, o.Outcome)
+				fail(KindNormalization, "raw outcome %q normalizes to both %s and %s", o.Raw, prev, o.Outcome)
 			}
 			normalized[o.Raw] = o.Outcome
-			if o.Evaluated == nil || o.Evaluated.After(at) {
-				fail("%s / %s: attributable evidence needs a source evaluation time not after %s", o.Subject, o.Check, at.Format(time.RFC3339))
+			switch {
+			case o.Evaluated == nil || o.Evaluated.After(at):
+				fail(KindSourceTime, "%s / %s: attributable evidence needs a source evaluation time not after %s", o.Subject, o.Check, at.Format(time.RFC3339))
+			case at.Sub(*o.Evaluated) > age:
+				fail(KindStaleEvidence, "%s / %s: attributable evidence evaluated at %s is older than %s at %s", o.Subject, o.Check, o.Evaluated.Format(time.RFC3339), age, at.Format(time.RFC3339))
 			}
 		case Missing, Rejected, Unresolved:
 			if o.Raw != "" || o.Outcome != "" || o.NotApplicable || o.Evaluated != nil {
-				fail("%s / %s: %s evidence carries an outcome; unknown evidence never establishes one", o.Subject, o.Check, o.State)
+				fail(KindOutcomeWithoutEvidence, "%s / %s: %s evidence carries an outcome; unknown evidence never establishes one", o.Subject, o.Check, o.State)
 			}
 		default:
-			fail("%s / %s: state %q is not Attributable, Missing, Rejected or Unresolved", o.Subject, o.Check, o.State)
+			fail(KindState, "%s / %s: state %q is not Attributable, Missing, Rejected or Unresolved", o.Subject, o.Check, o.State)
 		}
 	}
 	for k := range inventory {
 		if !seen[k] {
-			fail("expected observation %s / %s was dropped; missing evidence must stay expected", k.Subject, k.Check)
+			fail(KindDropped, "expected observation %s / %s was dropped; missing evidence must stay expected", k.Subject, k.Check)
 		}
 	}
 	slices.SortFunc(errs, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })

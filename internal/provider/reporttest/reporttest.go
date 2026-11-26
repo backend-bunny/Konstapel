@@ -274,6 +274,12 @@ func Evaluate(in Input, at time.Time) (conformance.Evaluation, error) {
 	return ev, nil
 }
 
+// MaxEvidenceAge implements conformance.Adapter.
+func (Adapter) MaxEvidenceAge(raw json.RawMessage) (time.Duration, error) {
+	_, age, err := decode(raw)
+	return age, err
+}
+
 // WithoutEvidence implements conformance.Adapter.
 func (Adapter) WithoutEvidence(raw json.RawMessage) (json.RawMessage, error) {
 	in, _, err := decode(raw)
