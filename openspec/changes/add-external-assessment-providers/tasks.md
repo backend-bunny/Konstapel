@@ -20,7 +20,7 @@ Each group includes its tests and documentation; final tasks prove integration.
 
 ## 2. Administrator registration and selection
 
-- [ ] 2.1 Add AssessmentProvider API, generated CRD and non-aggregated RBAC with endpoint/identity/compatibility validation; test namespace-user denials, invalid references, built-in collisions and controller-only status.
+- [x] 2.1 Add AssessmentProvider API, generated CRD and non-aggregated RBAC with endpoint/identity/compatibility validation; test namespace-user denials, invalid references, built-in collisions and controller-only status.
   <!-- agent: tier=deep risk=high -->
 - [ ] 2.2 Integrate registered-provider selection, frozen registration identity and capability Conditions with the shared host; test unknown/incompatible selection, disabled new starts, changed registrations and healthy-provider independence.
   <!-- agent: tier=deep risk=high -->
