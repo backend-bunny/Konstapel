@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "example-reporting-provider values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "worker", "evaluator", "tls", "ports"],
+  "$defs": {
+    "dnsName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$"
+    },
+    "namespace": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "secretName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$"
+    },
+    "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {"type": "object", "additionalProperties": {"type": ["string", "number"]}},
+        "limits": {"type": "object", "additionalProperties": {"type": ["string", "number"]}}
+      }
+    }
+  },
+  "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {
+          "description": "Repository without a tag or digest.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*$"
+        },
+        "digest": {
+          "description": "Required image digest, reported as the release digest. Tags are not accepted.",
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64})?$"
+        },
+        "pullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]}
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedHosts", "hostNamespaces"],
+      "properties": {
+        "authorizedHosts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/dnsName"}},
+        "hostNamespaces": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/namespace"}},
+        "clientName": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/dnsName"}]},
+        "resources": {"$ref": "#/$defs/resources"}
+      }
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedHosts", "hostNamespaces"],
+      "properties": {
+        "serverName": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/dnsName"}]},
+        "authorizedHosts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/dnsName"}},
+        "hostNamespaces": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/namespace"}},
+        "replicaCount": {"type": "integer", "minimum": 1, "maximum": 10},
+        "resources": {"$ref": "#/$defs/resources"}
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workerSecretName": {"$ref": "#/$defs/secretName"},
+        "workerClientSecretName": {"$ref": "#/$defs/secretName"},
+        "evaluatorSecretName": {"$ref": "#/$defs/secretName"}
+      }
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "health"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/port"},
+        "health": {"$ref": "#/$defs/port"}
+      }
+    }
+  }
+}

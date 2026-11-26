@@ -1540,8 +1540,10 @@ protocol: every provider here is Go code compiled into the repository. The
 remote protocol is described in the
 [external provider protocol reference](integration/external-provider-protocol.md),
 and the [reporting quickstart](integration/external-provider-quickstart.md)
-runs a synthetic provider from an independent module. External providers
-cannot be registered yet.
+runs a synthetic provider from an independent module, which the
+[reference provider chart](integration/external-provider-chart.md) installs
+as a source worker and a credential-free evaluator. No assessment run uses
+an external provider yet.
 
 ### 1. Declare the descriptor
 

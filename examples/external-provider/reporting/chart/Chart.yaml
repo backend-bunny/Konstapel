@@ -1,0 +1,20 @@
+apiVersion: v2
+name: example-reporting-provider
+description: >-
+  Reference chart for the synthetic example-reporting external assessment
+  provider: a source worker and a credential-free evaluator with separate
+  identities. Test/demo only and not supported; it registers nothing.
+type: application
+# The example releases independently of Konstapel's charts; neither the
+# runtime nor the CRD chart depends on it, and release packaging never
+# includes it.
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.36.0-0"
+home: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/external-provider-chart.md
+sources:
+  - https://github.com/backend-bunny/Konstapel/tree/main/examples/external-provider/reporting
+annotations:
+  # The protocol it serves, and that it is a reference fixture.
+  compliance.erenius.io/provider-protocol: konstapel.provider.v1
+  compliance.erenius.io/support: test-demo-only

@@ -12,10 +12,14 @@ assessment. The runtime chart can enable the controller's client, which
 probes registrations
 ([External assessment providers](../charts.md#external-assessment-providers)
 covers TLS, roles and platform installation), but no assessment run uses an
-external provider yet. Run integration, a provider Helm chart, and the full
-authoring guide with conformance, packaging and replay are later tasks of
+external provider yet. The same code also runs in a cluster as a source
+worker and a credential-free evaluator, installed by the
+[reference provider chart](external-provider-chart.md). Run integration and
+the full authoring guide with conformance, packaging and replay are later
+tasks of
 [`add-external-assessment-providers`](../../openspec/changes/add-external-assessment-providers/tasks.md).
-The example provider is not supported and reads no real evidence source.
+The example provider is not supported. This walkthrough reads no real
+evidence source; in the chart, the worker reads Namespace labels.
 
 `task test` runs every command on this page
 (`scripts/examples/external-provider.sh`). The script fails if this page
@@ -32,7 +36,9 @@ is its own Go module (`example.com/konstapel-reporting`), with its own
 | `provider/` | The provider. `Description()` is its `Describe` response: `example-reporting/v1`, protocol revision 1, evaluator 1, payload 1, capabilities Collect and Evaluate, check kind `reporting.example.test/v1/RequiredLabel`, and a 256-byte chunk limit, so even a small payload travels in several chunks. `Provider` implements the kit's `Collector`, `Results` and `Evaluator` over a fixed in-memory source. `Serve` runs the protocol port over mutual TLS, with probes on a separate port. |
 | `host/` | A stand-in for the Konstapel host. Through `providerkit.Client` it runs Describe, then Collect, then ReadResult, then Acknowledge, then Evaluate, giving each call its own deadline. |
 | `certs/` | Throwaway CA, server and host certificates generated at run time. |
-| `cmd/quickstart-certs`, `cmd/reporting-provider`, `cmd/reporting-host` | The three commands used below. |
+| `cmd/quickstart-certs`, `cmd/reporting-provider`, `cmd/reporting-host` | The three commands used below. `reporting-provider` runs the combined process by default; `-role worker` and `-role evaluator` are the [reference chart](external-provider-chart.md)'s two deployments. |
+| `provider/kubernetes.go`, `provider/roles.go` | The worker's Kubernetes Namespace source and the worker/evaluator split: `Forward` sends each evaluation to the evaluator. |
+| `chart/`, `image/` | The [reference provider chart](external-provider-chart.md) and the melange/apko recipe of its image. |
 | `imports_test.go` | Fails if the module depends, directly or transitively, on any Konstapel package other than `pkg/providerapi/v1` and `pkg/providerkit`, in particular anything under `internal/` or `api/`. |
 | `host/host_test.go` | Runs the same assessment in process, and checks that a wrong server name, an unauthorized host identity, a call without a deadline and an incompatible evaluator version are refused. |
 

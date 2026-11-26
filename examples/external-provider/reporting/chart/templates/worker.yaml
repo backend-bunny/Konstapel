@@ -1,0 +1,79 @@
+# The source worker: the registered endpoint. It reads the source with its
+# own ServiceAccount and forwards every evaluation to the evaluator.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "reporting.worker" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # Staged results live in this one Pod's memory.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "reporting.selector" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "reporting.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "reporting.worker" . }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      securityContext:
+        {{- include "reporting.podSecurity" . | nindent 8 }}
+      containers:
+        - name: provider
+          image: {{ include "reporting.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -role=worker
+            - -source=kubernetes
+            - -implementation={{ .Values.image.digest }}
+            - -listen=:{{ .Values.ports.protocol }}
+            - -health-listen=:{{ .Values.ports.health }}
+            - -tls-dir=/etc/example-reporting/tls
+            - -authorized-hosts={{ join "," .Values.worker.authorizedHosts }}
+            - -evaluator-addr={{ include "reporting.evaluator" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}
+            - -evaluator-server-name={{ include "reporting.evaluatorServerName" . }}
+            - -evaluator-tls-dir=/etc/example-reporting/evaluator-client-tls
+          ports:
+            - {name: protocol, containerPort: {{ .Values.ports.protocol }}, protocol: TCP}
+            - {name: health, containerPort: {{ .Values.ports.health }}, protocol: TCP}
+          {{- include "reporting.probes" . | nindent 10 }}
+          securityContext:
+            {{- include "reporting.containerSecurity" . | nindent 12 }}
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - {name: tls, mountPath: /etc/example-reporting/tls, readOnly: true}
+            - {name: evaluator-client-tls, mountPath: /etc/example-reporting/evaluator-client-tls, readOnly: true}
+      # Whole-Secret volumes (never subPath), so the kubelet updates rotated
+      # material in place.
+      volumes:
+        - name: tls
+          secret: {secretName: {{ include "reporting.workerSecret" . }}, defaultMode: 0440}
+        - name: evaluator-client-tls
+          secret: {secretName: {{ include "reporting.workerClientSecret" . }}, defaultMode: 0440}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "reporting.worker" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "reporting.selector" (dict "root" . "component" "worker") | nindent 4 }}
+  ports:
+    - {name: protocol, port: {{ .Values.ports.protocol }}, targetPort: protocol, protocol: TCP}

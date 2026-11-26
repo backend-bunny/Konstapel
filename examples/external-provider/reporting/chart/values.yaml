@@ -1,0 +1,79 @@
+# Values of the example reporting provider's reference chart
+# (docs/integration/external-provider-chart.md). values.schema.json rejects
+# anything else. The chart installs a source worker and an evaluator under
+# separate ServiceAccounts. It renders no AssessmentProvider: registering a
+# provider is the Konstapel administrator's step, and no default Konstapel
+# chart, registry or bundle refers to this one.
+
+image:
+  # The provider image's repository, without a tag. Both deployments run it.
+  repository: localhost/konstapel-example-reporting
+  # Required: the verified image digest (sha256:<64 lowercase hex>). The
+  # image is pinned by it, and both deployments report it as their
+  # implementation: it is the releaseDigest the registration names. Tags
+  # are never accepted.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# The source worker: the endpoint you register. It reads Namespaces from the
+# Kubernetes API with its own ServiceAccount (get on namespaces, nothing
+# else), stages results in memory and forwards every evaluation, unchanged,
+# to the evaluator. One replica: staged results live in its memory, so a
+# second replica would be asked for results it never staged.
+worker:
+  # Required: the host identities (exact DNS SANs of client certificates)
+  # allowed to call, such as the identity of the Konstapel controller's
+  # externalProviders.clientCertSecretName certificate.
+  authorizedHosts: []
+  # Namespaces whose Pods may reach the protocol port (NetworkPolicy): the
+  # Konstapel controller's.
+  hostNamespaces:
+    - konstapel-system
+  # The DNS SAN of the worker's evaluator-client certificate, the one client
+  # the evaluator authorizes. Empty: <fullname>-worker.<namespace>.svc.
+  clientName: ""
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+# The evaluator: Evaluate only. It has no source, no RBAC and no Kubernetes
+# API token, and its NetworkPolicy denies it all egress. By default only the
+# worker reaches it.
+evaluator:
+  # The DNS SAN of the evaluator's serving certificate, which the worker
+  # requires. Empty: <fullname>-evaluator.<namespace>.svc.
+  serverName: ""
+  # Extra host identities allowed to call the evaluator directly, with
+  # hostNamespaces their namespaces: only for an Evaluate-only registration
+  # of the evaluator Service (replay without the worker). Empty by default.
+  authorizedHosts: []
+  hostNamespaces: []
+  replicaCount: 1
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+# kubernetes.io/tls Secrets in the release namespace, each with tls.crt,
+# tls.key and ca.crt, which you create and rotate (for example with
+# cert-manager). The chart mounts them read-only and never renders them; a
+# rotation is used without a restart. Empty uses the default in brackets.
+tls:
+  # [<fullname>-worker-tls] The worker's serving certificate (server
+  # authentication) for the serverName you register; its ca.crt verifies
+  # the host client certificates.
+  workerSecretName: ""
+  # [<fullname>-worker-client-tls] The worker's client certificate (client
+  # authentication) naming worker.clientName; its ca.crt verifies the
+  # evaluator's serving certificate.
+  workerClientSecretName: ""
+  # [<fullname>-evaluator-tls] The evaluator's serving certificate (server
+  # authentication) naming evaluator.serverName; its ca.crt verifies the
+  # worker's client certificate (and any evaluator.authorizedHosts).
+  evaluatorSecretName: ""
+
+ports:
+  # The mutual TLS protocol port of both Services.
+  protocol: 8443
+  # Plain-HTTP /healthz and /readyz for the kubelet, never in a Service:
+  # the protocol port admits only authenticated calls with a deadline.
+  health: 8081
