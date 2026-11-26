@@ -67,6 +67,26 @@ class SigningAcceptanceTests(unittest.TestCase):
         self.assertIn("l.signedHandover(", text)
 
 
+class SigningRecoveryAcceptanceTests(unittest.TestCase):
+    """add-evidence-signing-recovery 5.1: live recovery of a SigningFailed run
+    after its key Secret is restored, verified offline with the pinned Cosign,
+    runs in the mandatory storage group on the test S3 service."""
+
+    REQUIRED = {
+        "TestLiveSigningRecoveryWorkflow": "storage",
+    }
+
+    def test_recovery_cases_are_in_required_groups(self):
+        for test, group in self.REQUIRED.items():
+            with self.subTest(test=test):
+                self.assertIn(test, acceptance.GROUPS[group]["goTests"])
+
+    def test_the_workflow_verifies_offline_with_cosign(self):
+        text = (HERE.parents[1] / "internal/controller/signing_recovery_workflow_live_test.go").read_text()
+        self.assertIn("verifyOfflinePair(", text)
+        self.assertIn("pinnedCosign(", text)
+
+
 class AttachmentAcceptanceTests(unittest.TestCase):
     """add-supporting-evidence-attachments: the attachment API, storage,
     authenticated transfer and lifecycle cases run in groups CI always

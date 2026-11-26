@@ -194,43 +194,9 @@ func TestLiveSignedPublicationWorkflow(t *testing.T) {
 	hc := ts.Client()
 	opTok := l.token("wf-team", operator.Name, downloadAudience)
 
-	// verifyOffline downloads both artifacts from url (archive) and its
-	// signature companion, keeps them as evidence, and runs the documented
-	// Cosign verification with the trusted key; every other key fails.
 	verifyOffline := func(label, url, tok, trusted string, untrusted ...string) publication.Descriptor {
 		t.Helper()
-		dir := filepath.Join(evidence, label)
-		_ = os.MkdirAll(dir, 0o755)
-		ac, archive := fetch(t, hc, url, tok)
-		sc, bundle := fetch(t, hc, strings.Replace(url, "/download", "/signature", 1), tok)
-		if ac != http.StatusOK || sc != http.StatusOK {
-			t.Fatalf("%s: archive %d, signature %d %s", label, ac, sc, bundle)
-		}
-		_ = os.WriteFile(filepath.Join(dir, "package.tar.gz"), archive, 0o644)
-		_ = os.WriteFile(filepath.Join(dir, "package.sigstore.json"), bundle, 0o644)
-		cosign := func(key string) (string, error) {
-			cmd := exec.CommandContext(l.ctx, "cosign", "verify-blob", "--key", filepath.Join(evidence, key), "--bundle", "package.sigstore.json", "--insecure-ignore-tlog=true", "package.tar.gz")
-			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "HOME="+dir)
-			out, err := cmd.CombinedOutput()
-			return string(out), err
-		}
-		out, err := cosign(trusted)
-		_ = os.WriteFile(filepath.Join(dir, "cosign-"+trusted+".log"), []byte(out), 0o644)
-		if err != nil || !strings.Contains(out, "Verified OK") {
-			t.Fatalf("%s: offline verification with %s failed: %v\n%s", label, trusted, err, out)
-		}
-		for _, k := range untrusted {
-			if out, err := cosign(k); err == nil || strings.Contains(out, "Verified OK") {
-				t.Fatalf("%s: verified with the untrusted %s", label, k)
-			}
-		}
-		x := t.TempDir()
-		untar(t, archive, x)
-		d, err := publication.LoadDescriptor(x)
-		if err != nil || publication.VerifyDir(x, d) != nil {
-			t.Fatalf("%s: package: %v", label, err)
-		}
+		d, _, _ := verifyOfflinePair(t, l, hc, evidence, label, url, tok, trusted, untrusted...)
 		return d
 	}
 	runURL := func(r *v1alpha1.AssessmentRun) string {
@@ -423,4 +389,46 @@ func TestLiveSignedPublicationWorkflow(t *testing.T) {
 		l.eventually("orphaned package not served", func() (bool, string) { code, _ = fetch(t, hc, u, opTok); return code == http.StatusGone, "" })
 	}
 	l.record("orphaned", map[string]any{"inventory": header.Name, "signingRecorded": true, "archive": 410, "signature": 410})
+}
+
+// verifyOfflinePair downloads the archive at url and its signature companion
+// with tok, keeps both as evidence under evidence/label, and runs the
+// documented Cosign verification with the trusted public key file in
+// evidence. It fails unless that key verifies and every untrusted key is
+// rejected; Cosign's output for each key is kept. It returns the verified
+// package's descriptor, the archive, and the signature bundle.
+func verifyOfflinePair(t *testing.T, l *live, hc *http.Client, evidence, label, url, tok, trusted string, untrusted ...string) (publication.Descriptor, []byte, []byte) {
+	t.Helper()
+	dir := filepath.Join(evidence, label)
+	_ = os.MkdirAll(dir, 0o755)
+	ac, archive := fetch(t, hc, url, tok)
+	sc, bundle := fetch(t, hc, strings.Replace(url, "/download", "/signature", 1), tok)
+	if ac != http.StatusOK || sc != http.StatusOK {
+		t.Fatalf("%s: archive %d, signature %d %s", label, ac, sc, bundle)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "package.tar.gz"), archive, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "package.sigstore.json"), bundle, 0o644)
+	cosign := func(key string) (string, error) {
+		cmd := exec.CommandContext(l.ctx, "cosign", "verify-blob", "--key", filepath.Join(evidence, key), "--bundle", "package.sigstore.json", "--insecure-ignore-tlog=true", "package.tar.gz")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "HOME="+dir)
+		out, err := cmd.CombinedOutput()
+		_ = os.WriteFile(filepath.Join(dir, "cosign-"+key+".log"), out, 0o644)
+		return string(out), err
+	}
+	if out, err := cosign(trusted); err != nil || !strings.Contains(out, "Verified OK") {
+		t.Fatalf("%s: offline verification with %s failed: %v\n%s", label, trusted, err, out)
+	}
+	for _, k := range untrusted {
+		if out, err := cosign(k); err == nil || strings.Contains(out, "Verified OK") {
+			t.Fatalf("%s: verified with the untrusted %s", label, k)
+		}
+	}
+	x := t.TempDir()
+	untar(t, archive, x)
+	d, err := publication.LoadDescriptor(x)
+	if err != nil || publication.VerifyDir(x, d) != nil {
+		t.Fatalf("%s: package: %v", label, err)
+	}
+	return d, archive, bundle
 }
