@@ -68,8 +68,15 @@ and it cannot use `konstapel` or a `konstapel-*` name: those are reserved for
 compiled-in providers, so a registration never shadows one. Only the
 non-aggregated `konstapel-assessment-provider-admin` ClusterRole writes
 registrations, `konstapel-assessment-provider-viewer` reads them, and only
-the controller writes their status. The controller does not select
-registered providers yet.
+the controller writes their status. A controller started with
+`--external-provider-client-cert-dir` probes each registration over mutual
+TLS and reports its `Available`, `Compatible` and `Ready` conditions.
+Selection resolves a built-in name only to the built-in provider. For any
+other contract it selects exactly one enabled, `Ready` registration and
+freezes its identity. Disabled, ambiguous and unavailable registrations are
+rejected explicitly
+([registration, selection and status](integration/external-provider-protocol.md#registration-selection-and-status)).
+External providers are off by default, and no assessment uses one yet.
 
 Verified bundle content can only name a provider contract
 (`compatibility.provider` in `bundle.json`, for example

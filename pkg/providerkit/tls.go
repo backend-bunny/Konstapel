@@ -44,6 +44,41 @@ type TLSFiles struct {
 	Trust string
 }
 
+// TLSMaterial is one side's PEM material as one load returns it: the
+// certificate chain, leaf first, its private key, and the trust bundle the
+// peer's certificate must chain to. Each part is at most 1 MiB.
+type TLSMaterial struct {
+	Certificate []byte
+	Key         []byte
+	Trust       []byte
+}
+
+// TLSSource supplies one side's material each time a MutualTLS loads it: on
+// construction and on every Reload, including Watch's. TLSFiles is the
+// mounted-files source. A side whose material does not all come from
+// mounted files, such as a host that reads a provider's trust bundle
+// through the Kubernetes API, implements its own source.
+//
+// Material from any source passes exactly the checks of TLSFiles, and a
+// rejected or failed load keeps the last valid material in use. An error
+// is reported by Reload and Ready and must not contain key material.
+type TLSSource interface {
+	LoadTLS() (TLSMaterial, error)
+}
+
+// LoadTLS reads the three files, each at most 1 MiB.
+func (f TLSFiles) LoadTLS() (TLSMaterial, error) {
+	var raw [3][]byte
+	for i, path := range []string{f.Certificate, f.Key, f.Trust} {
+		data, err := readBounded(path)
+		if err != nil {
+			return TLSMaterial{}, err
+		}
+		raw[i] = data
+	}
+	return TLSMaterial{Certificate: raw[0], Key: raw[1], Trust: raw[2]}, nil
+}
+
 // SecretFiles are tls.crt, tls.key and ca.crt in dir: a mounted
 // kubernetes.io/tls Secret such as cert-manager writes. Its ca.crt is the
 // trust for the peer only when one issuer signs both sides; otherwise name
@@ -88,18 +123,18 @@ func (r role) ownUsage() x509.ExtKeyUsage {
 // address it connects to; a server authorizes the host identities its
 // deployment configures.
 //
-// The material is reloaded from its files by Reload or Watch without a
-// restart. Changed files are used only after they pass the checks of the
-// initial load; until then the last valid material stays in use and Ready
+// The material is reloaded from its files, or its TLSSource, by Reload or
+// Watch without a restart. Changed material is used only after it passes
+// the checks of the initial load; until then the last valid material stays in use and Ready
 // reports the problem, with no insecure fallback. New connections use the
 // current material. An established connection whose peer the current
 // material no longer authorizes, after a trust rotation or once a
 // certificate of its chain expires, is closed at once; its calls fail and
 // the client reconnects with the current material.
 type MutualTLS struct {
-	role  role
-	files TLSFiles
-	peers []string
+	role   role
+	source TLSSource
+	peers  []string
 
 	reload sync.Mutex // serializes Reload
 	mu     sync.Mutex
@@ -124,25 +159,35 @@ func NewClientTLS(files TLSFiles, serverName string) (*MutualTLS, error) {
 	return newMutualTLS(roleClient, files, []string{serverName})
 }
 
+// NewClientTLSFrom is NewClientTLS with the material loaded from src, for
+// a host whose trust bundle is not a mounted file. It fails when the
+// material is invalid; every load is checked as NewClientTLS checks files.
+func NewClientTLSFrom(src TLSSource, serverName string) (*MutualTLS, error) {
+	if src == nil {
+		return nil, errors.New("providerkit: mutual TLS needs a material source")
+	}
+	return newMutualTLS(roleClient, src, []string{serverName})
+}
+
 var dnsNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$`)
 
-func newMutualTLS(r role, files TLSFiles, peers []string) (*MutualTLS, error) {
+func newMutualTLS(r role, src TLSSource, peers []string) (*MutualTLS, error) {
 	for i, name := range peers {
 		if len(name) > 253 || !dnsNamePattern.MatchString(name) || slices.Contains(peers[:i], name) {
 			return nil, fmt.Errorf("providerkit: peer name %q must be a unique lowercase DNS name without a wildcard", name)
 		}
 	}
-	if files.Certificate == "" || files.Key == "" || files.Trust == "" {
+	if f, ok := src.(TLSFiles); ok && (f.Certificate == "" || f.Key == "" || f.Trust == "") {
 		return nil, errors.New("providerkit: mutual TLS needs a certificate, its key and a trust bundle")
 	}
-	m := &MutualTLS{role: r, files: files, peers: slices.Clone(peers), conns: map[*peerConn]struct{}{}}
+	m := &MutualTLS{role: r, source: src, peers: slices.Clone(peers), conns: map[*peerConn]struct{}{}}
 	if err := m.Reload(); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-// material is one verified load of the files.
+// material is one verified load of the files or source.
 type material struct {
 	raw   [3][]byte
 	cert  tls.Certificate
@@ -155,7 +200,7 @@ func (m *MutualTLS) current() *material {
 	return m.cur
 }
 
-// Reload re-reads the files. Changed material replaces the current
+// Reload re-reads the files or source. Changed material replaces the current
 // material only when it is valid, and then closes every connection whose
 // peer it no longer authorizes; otherwise the error is kept for Ready and
 // returned.
@@ -169,7 +214,7 @@ func (m *MutualTLS) Reload() error {
 	)
 	// The files are read one at a time, so a Secret update landing between
 	// reads can pair an old certificate with a new key: read once more
-	// before reporting a failure.
+	// before reporting a failure. A source is given the same second read.
 	for range 2 {
 		var raw [3][]byte
 		if raw, err = m.read(); err != nil {
@@ -236,14 +281,19 @@ func (m *MutualTLS) Ready() error {
 	return validNow(m.cur.cert.Leaf, time.Now(), "certificate")
 }
 
+// read loads the material and bounds each part. The parts are copied, so a
+// source that reuses its buffers cannot change verified material.
 func (m *MutualTLS) read() ([3][]byte, error) {
-	var raw [3][]byte
-	for i, path := range []string{m.files.Certificate, m.files.Key, m.files.Trust} {
-		data, err := readBounded(path)
-		if err != nil {
-			return raw, err
+	mat, err := m.source.LoadTLS()
+	if err != nil {
+		return [3][]byte{}, err
+	}
+	raw := [3][]byte{mat.Certificate, mat.Key, mat.Trust}
+	for i, what := range []string{"certificate", "key", "trust bundle"} {
+		if len(raw[i]) > maxTLSFileBytes {
+			return [3][]byte{}, fmt.Errorf("%s is larger than %d bytes", what, maxTLSFileBytes)
 		}
-		raw[i] = data
+		raw[i] = bytes.Clone(raw[i])
 	}
 	return raw, nil
 }
@@ -264,7 +314,7 @@ func readBounded(path string) ([]byte, error) {
 	return data, nil
 }
 
-// verify checks a read of the files: a certificate chain and its matching
+// verify checks a read of the files or source: a certificate chain and its matching
 // key, a leaf valid now with the usage of this side's role, and a trust
 // bundle of certificates only. Errors never include file contents.
 func (m *MutualTLS) verify(raw [3][]byte, now time.Time) (*material, error) {

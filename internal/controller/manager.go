@@ -176,6 +176,11 @@ type Options struct {
 	// provider.Limits.ValidateConfiguration. The deadline is never set
 	// here: it is each binding's collection timeout.
 	CollectionLimits provider.Limits
+	// ExternalProviders configures registered external assessment
+	// providers (--external-provider-client-cert-dir). The zero value is
+	// disabled: registrations are neither watched nor contacted and only
+	// built-in providers are selectable.
+	ExternalProviders ExternalProviders
 }
 
 // Scheme returns the scheme the manager uses.
@@ -208,6 +213,9 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 		if err := opts.CollectionLimits.ValidateConfiguration(); err != nil {
 			return nil, fmt.Errorf("collection limits: %w", err)
 		}
+	}
+	if err := opts.ExternalProviders.Validate(); err != nil {
+		return nil, err
 	}
 	if opts.ExceptionRevocation && opts.WebhookCertDir == "" {
 		// The webhooks this manager serves are what confine the
@@ -405,6 +413,11 @@ func NewManager(cfg *rest.Config, opts Options) (manager.Manager, error) {
 	attachmentStore := attachmentStorage(mgr, currentRuntime(), br.Cluster)
 	if err := setupAssessments(mgr, opts.Content, engine, reports, watches, assessmentEvents, br.Cluster, opts.EnginePoll, observeRun, attachmentStore, opts.CollectionLimits); err != nil {
 		return nil, err
+	}
+	if opts.ExternalProviders.Enabled() {
+		if err := setupExternalProviders(mgr, opts.ExternalProviders, installed.Registry(), currentRuntime().ControllerNamespace); err != nil {
+			return nil, err
+		}
 	}
 	if err := setupExceptions(mgr, opts.SnapshotNamespace, opts.ExceptionRevocation); err != nil {
 		return nil, err
