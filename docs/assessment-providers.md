@@ -61,7 +61,9 @@ platform administrators, with a cluster-scoped `AssessmentProvider`
 A registration names a Kubernetes Service, the provider's TLS server name and
 trust roots in the controller namespace, the expected provider name and
 release digest, the protocol, contract, evaluator and payload versions, and
-the capabilities it allows. It carries no URL, command, image or credential,
+the capabilities it allows. The provider name, release digest and versions
+are immutable: a new release is registered as a new `AssessmentProvider`.
+It carries no URL, command, image or credential,
 and it cannot use `konstapel` or a `konstapel-*` name: those are reserved for
 compiled-in providers, so a registration never shadows one. Only the
 non-aggregated `konstapel-assessment-provider-admin` ClusterRole writes

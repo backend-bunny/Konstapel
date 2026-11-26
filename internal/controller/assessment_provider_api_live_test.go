@@ -193,8 +193,8 @@ func TestLiveAssessmentProviderAPI(t *testing.T) {
 	}
 	l.record("registration", map[string]any{"spec": stored.Spec, "statusOnCreate": "dropped"})
 
-	// Immutable identity and compatibility, even for a cluster
-	// administrator; compatible changes are accepted from the provider admin.
+	// Immutable identity, release and compatibility, even for a cluster
+	// administrator; endpoint changes are accepted from the provider admin.
 	for name, edit := range map[string]func(*v1alpha1.AssessmentProvider){
 		"provider name":     func(p *v1alpha1.AssessmentProvider) { p.Spec.Provider.Name = "apr-other" },
 		"contract version":  func(p *v1alpha1.AssessmentProvider) { p.Spec.Compatibility.ContractVersion = 2 },
@@ -205,13 +205,16 @@ func TestLiveAssessmentProviderAPI(t *testing.T) {
 		edit(p)
 		deny("cluster administrator changes the "+name, l.c.Update(l.ctx, p, client.DryRunAll), apierrors.IsInvalid, "provider.name and compatibility are immutable")
 	}
+	newRelease := stored.DeepCopy()
+	newRelease.Spec.Provider.ReleaseDigest = digest2
+	deny("cluster administrator changes the release digest", l.c.Update(l.ctx, newRelease, client.DryRunAll), apierrors.IsInvalid,
+		"provider.releaseDigest is immutable; register a new release as a new AssessmentProvider")
 	changed := stored.DeepCopy()
-	changed.Spec.Provider.ReleaseDigest = digest2
 	changed.Spec.Endpoint.ServerTrust.Name = "apr-reporting-ca-2026"
 	changed.Spec.Capabilities = append(changed.Spec.Capabilities, v1alpha1.ProviderCapabilityScan)
 	changed.Spec.NewRequests = v1alpha1.ProviderNewRequestsDisabled
 	if err := adminC.Update(l.ctx, changed); err != nil {
-		t.Fatalf("provider admin cannot record a compatible upgrade, trust rotation and drain: %v", err)
+		t.Fatalf("provider admin cannot record a trust rotation, a new capability and a drain: %v", err)
 	}
 	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(stored), stored); err != nil {
 		t.Fatal(err)
@@ -331,7 +334,7 @@ func TestLiveAssessmentProviderAPI(t *testing.T) {
 	if err := l.c.Get(l.ctx, client.ObjectKeyFromObject(stored), stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status.Identity == nil || stored.Status.Identity.ReleaseDigest != digest2 || stored.Status.ObservedGeneration != stored.Generation {
+	if stored.Status.Identity == nil || stored.Status.Identity.ReleaseDigest != digest1 || stored.Status.ObservedGeneration != stored.Generation {
 		t.Fatalf("controller status not stored: %s", toJSON(stored.Status))
 	}
 	// Status written through the main resource is ignored.

@@ -203,10 +203,10 @@ func TestAssessmentProviderCarriesNoURLsOrCredentials(t *testing.T) {
 	}
 }
 
-// The provider name and every compatibility dimension are immutable, even
-// for an administrator: an incompatible release is a new registration. The
-// endpoint, trust, release digest, capabilities and newRequests can change
-// (an approved compatible upgrade, a trust rotation, a drain).
+// The provider name, the release digest and every compatibility dimension
+// are immutable, even for an administrator: a new release is a new
+// registration. The endpoint, trust, capabilities and newRequests can change
+// (a moved Service, a trust rotation, a drain).
 func TestAssessmentProviderUpdateValidation(t *testing.T) {
 	v := crdtest.Load(t, "../../config/crd/bases")["AssessmentProvider"]
 	const immutable = "provider.name and compatibility are immutable; register an incompatible release as a new AssessmentProvider"
@@ -226,15 +226,30 @@ func TestAssessmentProviderUpdateValidation(t *testing.T) {
 			}
 		})
 	}
+	const release = "provider.releaseDigest is immutable; register a new release as a new AssessmentProvider"
 	for name, patch := range map[string]string{
-		"compatible upgrade": `{"spec":{"provider":{"releaseDigest":"sha256:` + strings.Repeat("b", 64) + `"}}}`,
-		"trust rotation":     `{"spec":{"endpoint":{"serverTrust":{"name":"example-reporting-ca-2026","key":"roots.pem"}}}}`,
-		"server name":        `{"spec":{"endpoint":{"serverName":"reporting.example-provider.svc.cluster.local"}}}`,
-		"moved service":      `{"spec":{"endpoint":{"service":{"namespace":"providers","name":"reporting","port":9443}}}}`,
-		"scan allowed":       `{"spec":{"capabilities":["Collect","Scan","Evaluate"]}}`,
-		"collect revoked":    `{"spec":{"capabilities":["Evaluate"]}}`,
-		"drained":            `{"spec":{"newRequests":"Disabled"}}`,
-		"labels":             `{"metadata":{"labels":{"owner":"platform"}}}`,
+		"new release":           `{"spec":{"provider":{"releaseDigest":"sha256:` + strings.Repeat("b", 64) + `"}}}`,
+		"new release and moved": `{"spec":{"provider":{"releaseDigest":"sha256:` + strings.Repeat("c", 64) + `"},"endpoint":{"service":{"name":"reporting-v2"}}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			old := assessmentProvider(t)
+			o := copyObj(old)
+			mergePatch(t, o, patch)
+			errs := v.ValidateUpdate(o, old)
+			if len(errs) == 0 || !strings.Contains(errs.ToAggregate().Error(), release) {
+				t.Fatalf("want %q, got %v", release, errs.ToAggregate())
+			}
+		})
+	}
+	for name, patch := range map[string]string{
+		"unchanged release": `{"spec":{"provider":{"releaseDigest":"sha256:` + sha + `"}}}`,
+		"trust rotation":    `{"spec":{"endpoint":{"serverTrust":{"name":"example-reporting-ca-2026","key":"roots.pem"}}}}`,
+		"server name":       `{"spec":{"endpoint":{"serverName":"reporting.example-provider.svc.cluster.local"}}}`,
+		"moved service":     `{"spec":{"endpoint":{"service":{"namespace":"providers","name":"reporting","port":9443}}}}`,
+		"scan allowed":      `{"spec":{"capabilities":["Collect","Scan","Evaluate"]}}`,
+		"collect revoked":   `{"spec":{"capabilities":["Evaluate"]}}`,
+		"drained":           `{"spec":{"newRequests":"Disabled"}}`,
+		"labels":            `{"metadata":{"labels":{"owner":"platform"}}}`,
 	} {
 		old := assessmentProvider(t)
 		o := copyObj(old)

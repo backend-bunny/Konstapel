@@ -141,8 +141,9 @@ type ExpectedProvider struct {
 	// releaseDigest ("sha256:" and 64 lowercase hex digits) identifies the
 	// provider release the platform verified and installed, as the endpoint
 	// reports it (its implementation). It is a content digest, never a
-	// tag. Changing it records an approved compatible upgrade: new work
-	// freezes the new digest, while operations already frozen keep theirs.
+	// tag. Immutable: a new release, compatible or not, is registered as a
+	// new AssessmentProvider, so every operation's frozen registration
+	// names exactly one release.
 	// +required
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
@@ -179,10 +180,11 @@ type ProviderCompatibility struct {
 }
 
 // AssessmentProviderSpec is the administrator's registration. The provider
-// name and compatibility are immutable; the endpoint, trust, release digest,
+// name, release digest and compatibility are immutable; the endpoint, trust,
 // capabilities and newRequests can change, and each change is a new
 // configuration revision (metadata.generation) that only new work uses.
 // +kubebuilder:validation:XValidation:rule="self.provider.name == oldSelf.provider.name && self.compatibility == oldSelf.compatibility",message="provider.name and compatibility are immutable; register an incompatible release as a new AssessmentProvider"
+// +kubebuilder:validation:XValidation:rule="self.provider.releaseDigest == oldSelf.provider.releaseDigest",message="provider.releaseDigest is immutable; register a new release as a new AssessmentProvider"
 type AssessmentProviderSpec struct {
 	// provider is the identity the endpoint must report.
 	// +required
