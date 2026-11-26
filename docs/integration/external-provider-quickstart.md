@@ -7,9 +7,9 @@ stand-in host over mutual TLS. The wire contract is described in the
 [protocol reference](external-provider-protocol.md).
 
 **Scope.** This is a local demonstration of the protocol. The controller
-cannot register or select an external provider yet, so this quickstart does
-not install anything in a cluster, register a provider or run a real
-assessment. Provider registration, Helm installation, and the full authoring
+cannot select an external provider yet, so this quickstart does not install
+anything in a cluster, register a provider or run a real assessment. Using a
+registration, Helm installation, and the full authoring
 guide with conformance, packaging and replay are later tasks of
 [`add-external-assessment-providers`](../../openspec/changes/add-external-assessment-providers/tasks.md).
 The example provider is not supported and reads no real evidence source.
