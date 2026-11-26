@@ -40,8 +40,10 @@ or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- The full authoring recipe is a later task of the change.
 
+Task 4.4 adds the [worked authoring recipe](#authoring-a-provider), with
+the commands that check each step, and states which parts are
+[versioned contracts, internal Go interfaces and supported producers](#contracts-interfaces-and-producer-support).
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
 
@@ -1357,11 +1359,7 @@ is all rejected.
 
 The cases run in the normal test entry points (`task test`, `task check`).
 After an intended semantic change, rewrite the golden results and review the
-diff:
-
-```sh
-go test ./internal/provider/kyverno ./internal/provider/reporttest -run Conformance -update
-```
+diff with the fixture commands of the [authoring recipe](#8-run-the-checks).
 
 ## C2P conversion
 
@@ -1498,15 +1496,266 @@ The reporting provider and its fixtures prove plumbing only. They are not a
 model of Trivy or of any real producer, and they are not producer
 compatibility evidence.
 
-## Internal interfaces and versioned contracts
+## Authoring a provider
 
-These are versioned contracts:
+This recipe builds an in-tree provider against the contract above. The
+worked example is the test-only reporting provider
+`internal/provider/reporttest` (`konstapel-reporttest/v1`): every step
+names the file that implements it. Following the recipe gives a provider
+that passes shared conformance in tests. It does not make the provider
+supported or installable; see
+[what a production provider still needs](#what-a-production-provider-still-needs).
 
-- the bundle descriptor's `compatibility.provider` value
+Providers that run as separately installed services, with a versioned
+remote protocol, are planned in the separate
+`add-external-assessment-providers` change. Nothing in this recipe is that
+protocol: every provider here is Go code compiled into the repository.
+
+### 1. Declare the descriptor
+
+Write a `Descriptor()` function returning a `provider.Descriptor`
+([The descriptor](#the-descriptor)). Choose:
+
+- a name and contract version, which bundles will select as
+  `compatibility.provider`
+- one check kind per kind of check definition the provider evaluates. A
+  provider that does not render engine resources sets `delivery: false`
+  and accepts only `Audit`.
+- the parameter contract of each kind
+- the capture payload version it writes and the versions it reads
+- its evaluator version
+- its evidence-source `reads` (read-only verbs only) and any `requires`
+
+The reporting provider (`reporttest.Descriptor` in
+`internal/provider/reporttest/reporttest.go`, its read in `collect.go`):
+
+<!-- verified: reporttest-descriptor -->
+```json
+{
+  "name": "konstapel-reporttest",
+  "version": 1,
+  "evaluatorVersion": 1,
+  "checks": [
+    {
+      "kind": "reporttest.konstapel.io/v1/ImagePosture",
+      "delivery": false,
+      "modes": ["Audit"],
+      "parameters": {
+        "source": "Descriptor",
+        "schema": {"type": "object", "additionalProperties": false, "properties": {"maxEvidenceAge": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"}}}
+      }
+    }
+  ],
+  "capture": {"write": 1, "read": [1]},
+  "reads": [
+    {
+      "group": "reporttest.konstapel.io",
+      "version": "v1",
+      "resource": "postures",
+      "kind": "Posture",
+      "namespaced": false,
+      "verbs": ["get", "list"]
+    }
+  ],
+  "testOnly": true
+}
+```
+
+A provider written only to exercise the contract sets `testOnly` and, like
+`reporttest`, panics in `init` when `testing.Testing()` is false.
+
+### 2. Register it in a test registry
+
+Register the descriptor next to Kyverno's with `provider.New`, which
+rejects every inconsistency listed under [The descriptor](#the-descriptor).
+The reporting provider's conformance suite does this in `testRegistry`
+(`internal/provider/reporttest/conformance_test.go`):
+
+```go
+r, err := provider.New(kyverno.Contract, kyverno.Descriptor(), reporttest.Descriptor())
+```
+
+Use that registry for `Registry.Select`, `collector.ReadCapture`,
+`CheckEvaluator` and `ContentUse` in the provider's tests. Do not add the
+descriptor to `installed.Registry()`: that is the production registry, and
+adding to it is a production-support decision made in the provider's own
+change (step 9). It refuses a `testOnly` descriptor at startup.
+
+### 3. Collect inside the host's scope
+
+Write a collection function that takes the host-frozen `provider.Scope`
+and a `provider.Sources`, asks `Sources.Source` for a reader of each
+declared read, and calls only `SourceReader.List`
+([Narrow readers](#narrow-readers)). The host runs it through
+`provider.Collect(ctx, client, descriptor, scope, limits, adapter)`, which
+applies the [collection limits](#collection-limits) and decides what a
+stopped or canceled collection means. The function:
+
+- never decides what is expected. The host owns scope.
+- returns a failed list as a limitation, never as empty evidence
+- keeps only the evidence that the frozen scope can attribute. A
+  cluster-scoped source is read once and filtered.
+
+Example: `reporttest.Collect` in `internal/provider/reporttest/collect.go`,
+which lists postures once and keeps only those for image digests that a
+frozen subject runs.
+
+### 4. Evaluate purely, at an explicit time
+
+Write an evaluator over the frozen payload and an evaluation time, with no
+clock, cluster or registry access ([Pure evaluators](#pure-evaluators)).
+Keep each producer outcome verbatim as the observation's raw outcome and
+map it to a normalized outcome (`pass`, `fail`, `error`, `skip`,
+`unknown`). Anything unrecognized normalizes to `unknown`, never `pass`.
+Not-applicable evidence keeps its raw value and is never a pass. The
+reporting provider maps `Passed` to `pass`, `Violated` to `fail`, `Errored`
+to `error`, `NotApplicable` to not applicable, and anything else to
+`unknown` (`reporttest.Evaluate` and `normalized` in `reporttest.go`).
+
+Then implement `conformance.Adapter` over the provider's case input:
+`Inventory` from the frozen scope alone, `Evaluate`, `WithoutEvidence` and
+`MaxEvidenceAge` (`reporttest.Adapter`).
+
+### 5. Write a capture payload
+
+The provider owns its payload format and version. It is retained inside
+the capture envelope (document version 3), which records the provider
+contract, payload version and evaluator version ([Captures](#captures)).
+Decode the payload strictly and check its own version. Bump the payload
+version for any format change, and the evaluator version for any change in
+results. Keep every version a retained package records readable
+([Compatibility, retention and rollback](#compatibility-retention-and-rollback)).
+The reporting suite's `Retain` wraps the payload in a
+`collector.CaptureEnvelope`, and its `Replay` reads it back through
+`collector.ReadCapture` and `CheckEvaluator`.
+
+A reporting-only provider's capture reads the run's frozen selection
+(`Selected` content); it never resolves or fetches content itself
+([Run content](#run-content)).
+
+### 6. Project to a namespace
+
+Implement `projection.Extractor` for the payload: `Extract` rebuilds each
+kept item from allowlisted fields for one namespace instance, and
+`Disclosures` reads every item's scope back from the extract
+([Namespace projection](#namespace-projection)). The host's
+`CaptureDocument.ProjectNamespace` and `ValidateNamespace` dispatch to it
+through a `collector.NamespaceExtractors` entry keyed by contract and
+payload version. Example: `reporttest.Extractor` in `project.go`, wired in
+the tests' `extractors`.
+
+### 7. Add conformance cases
+
+Create `testdata/providers/conformance/v1/<name>/<case>/case.json` in the
+`konstapel.provider-conformance/v1` format ([Conformance](#conformance)),
+with the contract, an explicit `evaluationTime` and the provider's input.
+Add a README to the provider's directory saying whether its cases are
+saved real producer output or synthetic, as
+`testdata/providers/conformance/v1/konstapel-reporttest/README.md` does.
+
+In a `_test.go` file, implement `conformance.Lifecycle` (`Cluster`,
+`Collect`, `Retain`, `Replay`) and `conformance.Projector` (`Namespaces`,
+`Extract`, `Validate`) through the host's own paths, then run the suite and
+the regression catalog. The reporting provider's
+`internal/provider/reporttest/conformance_test.go` is the complete example:
+
+```go
+func TestReportingConformance(t *testing.T) {
+	conformance.Run(t, suite{}, cases(t), *update)
+}
+
+func TestReportingConformanceCatchesRegressions(t *testing.T) {
+	conformance.RunMutations(t, suite{}, cases(t))
+}
+```
+
+A new case has no `expected.json`, and the suite fails until one is
+written. Generate it with `-update` (below). A case is written only when
+all its invariants and the lifecycle and projection suites pass. Review
+the generated result by hand before committing it: the golden is the
+provider's claimed interpretation.
+
+### 8. Run the checks
+
+Run every command in the pinned Devbox environment from the repository
+root. The first four run individual Go test packages directly. There is no
+separate Task for them: they all run in `task test`, which `task check`
+runs.
+
+```sh
+# Registration: registry validation, selection, the production registry's
+# closed list, the test-only absence checks and this guide's verified
+# examples.
+devbox run -- go test ./internal/provider ./internal/provider/installed
+
+# Fixtures: the conformance cases and the regression catalog of both
+# providers.
+devbox run -- go test ./internal/provider/kyverno ./internal/provider/reporttest -run Conformance
+
+# Fixture goldens, for a new case or after an intended semantic change.
+devbox run -- go test ./internal/provider/kyverno ./internal/provider/reporttest -run Conformance -update
+git diff -- testdata/providers
+
+# Replay: the capture boundary, C2P dispatch and plugin replay, and package
+# replay after cache eviction.
+devbox run -- go test ./internal/provider/c2p ./internal/provider/reporttest ./internal/bundle/stack \
+  -run 'Replay|Dispatch|PluginBinary|CrossesTheBoundary|AfterEviction'
+
+# Everything CI checks without a cluster.
+devbox run -- task check
+```
+
+With the providers in this repository, the `-update` run writes no change
+to `testdata/providers`. The replay tests reach no cluster or registry:
+`TestPluginBinaryIsLocalAndConvertsLikeTheDispatch` builds the plugin and
+points `KUBECONFIG` and the proxies at a trap, and
+`TestOCIRunConvertsAndReExportsFromPackageAfterEviction` replays with the
+registry down.
+
+### What a production provider still needs
+
+Conformance in tests is necessary, not sufficient. These connections are
+Kyverno-only today, and a real provider adds each in its own change:
+
+- **Registration.** Add the descriptor to `installed.Registry()`. The
+  registry does not yet gate the targeting resolver, so selection by
+  bindings is not connected either.
+- **Permissions.** Add its reads to the controller ClusterRole
+  (`config/rbac/controller/role.yaml`) and the charts.
+  `TestReadersAreNarrowerThanTheControllerRole` then requires every
+  reviewed verb to be granted.
+- **Availability and metrics.** `capability.Providers` already checks any
+  installed descriptor. A provider that delivers engine resources is
+  refused, because only Kyverno has a delivery capability. Metrics need a
+  label for its capability.
+- **Captures and export.** The controller writes only Kyverno capture
+  version 2. Package validation, the storage backend, namespace packages
+  and C2P conversion accept only Kyverno payloads, and production installs
+  no other namespace extractor.
+- **Producer evidence.** Live compatibility tests against the real
+  producer and its saved real output, proving attribution, evaluation
+  time, filtering and missing evidence. Synthetic fixtures never count.
+
+## Contracts, interfaces and producer support
+
+### Versioned contracts
+
+These are recorded in bundles or retained packages, or are fixture formats
+other changes depend on. A change to one needs a new version, and readers
+of every retained version stay installed:
+
+- the bundle descriptor's `compatibility.provider` value (`name/vN`)
 - the capture versions recorded in packages: the document versions 1, 2
   and 3, the identity that versions 1 and 2 imply, the envelope's fields,
-  and each provider's payload versions
+  and each provider's payload versions and evaluator versions
+- the package descriptor, its closed set of file roles and its content
+  record, unchanged by this change
 - the conformance case format `konstapel.provider-conformance/v1`
+- the pinned C2P-Go v2 `Configure`/`Generate`/`GetResults` plugin contract
+  and the `konstapel-provider` plugin manifest, owned upstream and by the
+  build, not by this change
+
+### Internal Go interfaces
 
 The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `Sources`, `SourceReader`, `Limits`, `Collect`, `LimitError`,
@@ -1519,8 +1768,20 @@ The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `conformance.Adapter`, `Lifecycle`, `Projector`, `Provider`, `Violation`,
 `RunMutations`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
-third-party SDK and may change with the remaining groups of the change. The
-collection limits are host constants, not a configuration contract.
+third-party SDK, Go module API or plugin interface, and may change in any
+commit. The descriptor's Go fields and its JSON form in this guide document
+the in-tree contract; they are not a file format anyone loads. The
+collection limits are host configuration
+([Configuring the limits](#configuring-the-limits)), not part of a
+provider's contract.
+
+### Producer support
+
+| Provider | Status | Evidence |
+| --- | --- | --- |
+| `konstapel-kyverno/v1` (Kyverno 1.19.2 ValidatingPolicy and PolicyReport) | Installed and supported: the only provider in the production registry | The saved live Kyverno 1.19.2 reports, the Kyverno conformance cases, and the live acceptance groups |
+| `konstapel-reporttest/v1` | Test-only. Never registered, shipped or selectable | Synthetic fixtures. They prove the shared plumbing only |
+| Trivy, or any other producer | Not supported | None. Each needs its own change with live producer compatibility tests |
 
 ## What this contract does not establish
 
