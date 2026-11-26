@@ -1,0 +1,39 @@
+# External assessment provider registration roles
+# (add-external-assessment-providers 2.1). Bind each with a
+# ClusterRoleBinding to platform subjects only. Neither is aggregated into the
+# built-in admin/edit/view roles, no namespace role (assessment requester,
+# exception editor) receives either, and konstapel-compliance-admin and
+# konstapel-compliance-viewer do not include them: registering a provider is
+# a separate grant. The runtime chart binds neither.
+#
+# Administrators register, change and remove AssessmentProviders. A
+# registration names a Service, a server name, trust roots in the controller
+# namespace and an expected release; it grants the provider nothing and holds
+# no credentials, so neither role reads Secrets or ConfigMaps. Status is
+# controller-owned: there is no status write.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-assessment-provider-admin
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentproviders]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentproviders/status]
+    verbs: [get]
+---
+# Viewers audit registrations and their observed status; they cannot
+# register, change or remove one.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konstapel-assessment-provider-viewer
+  labels:
+    app.kubernetes.io/part-of: konstapel
+rules:
+  - apiGroups: [compliance.erenius.io]
+    resources: [assessmentproviders, assessmentproviders/status]
+    verbs: [get, list, watch]

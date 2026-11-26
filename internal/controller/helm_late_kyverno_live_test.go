@@ -468,6 +468,8 @@ const (
 	lcExceptions = "lc-exceptions"
 	lcRecoverer  = "lc-recoverer"
 	lcRecoveryRd = "lc-recovery-reader"
+	lcProviders  = "lc-provider-admin"
+	lcProviderRd = "lc-provider-viewer"
 	lcNobody     = "lc-nobody"
 	lcController = "system:serviceaccount:konstapel-system:konstapel-controller"
 	lcDownload   = "system:serviceaccount:konstapel-system:konstapel-download"
@@ -748,8 +750,39 @@ spec:
 		},
 		immutable: func(o map[string]any) { lcSet(o, "another justification", "spec", "reason") },
 		refused:   "spec is immutable; create a new EvidenceSigningRequest",
+	}, {
+		resource: "assessmentproviders", creator: lcProviders, readers: []string{lcProviders, lcProviderRd},
+		valid: lcProviderRegistration,
+		expect: []lcField{
+			{[]any{"spec", "newRequests"}, "Enabled"},
+			{[]any{"spec", "endpoint", "serverTrust", "key"}, "ca.crt"},
+		},
+		invalid: []lcInvalid{
+			{"built-in provider name", func(o map[string]any) { lcSet(o, "konstapel-kyverno", "spec", "provider", "name") }, "reserved for built-in providers"},
+			{"trust in another namespace", func(o map[string]any) { lcSet(o, "lc-provider", "spec", "endpoint", "serverTrust", "namespace") }, "references resolve in the controller namespace only"},
+			{"IP server name", func(o map[string]any) { lcSet(o, "10.96.0.12", "spec", "endpoint", "serverName") }, "serverName must be a DNS name"},
+			{"tag as release", func(o map[string]any) { lcSet(o, "latest", "spec", "provider", "releaseDigest") }, "spec.provider.releaseDigest"},
+			{"unknown capability", func(o map[string]any) { lcSet(o, []any{"Remediate"}, "spec", "capabilities") }, "spec.capabilities"},
+		},
+		immutable: func(o map[string]any) { lcSet(o, int64(2), "spec", "compatibility", "evaluatorVersion") },
+		refused:   "provider.name and compatibility are immutable",
 	}}
 }
+
+// lcProviderRegistration is an external provider registration; the
+// provider need not be installed (admission never connects to it).
+const lcProviderRegistration = `
+apiVersion: compliance.erenius.io/v1alpha1
+kind: AssessmentProvider
+metadata: {name: lc-provider}
+spec:
+  provider: {name: lc-reporting, releaseDigest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+  endpoint:
+    service: {namespace: lc-provider, name: lc-reporting, port: 8443}
+    serverName: lc-reporting.lc-provider.svc
+    serverTrust: {name: lc-reporting-ca}
+  compatibility: {protocol: konstapel.provider.v1, contractVersion: 1, evaluatorVersion: 1, payloadVersion: 1}
+  capabilities: [Collect, Evaluate]`
 
 // lcSigningRequest is a recovery request with a forged requester; the run
 // need not exist (admission never looks it up).
@@ -853,7 +886,10 @@ func (l *live) crdContract(ns string) {
 	l.bind(lcExceptions, lcExceptions, role("konstapel-exception-editor"), lcTeam)
 	l.bind(lcRecoverer, lcRecoverer, role("konstapel-evidence-signing-recoverer"), "")
 	l.bind(lcRecoveryRd, lcRecoveryRd, role("konstapel-evidence-signing-recovery-reader"), "")
-	identities := []string{lcAdmin, lcViewer, lcOperator, lcRequester, lcRegistrar, lcReader, lcExceptions, lcRecoverer, lcRecoveryRd, lcNobody, lcController, lcDownload}
+	l.bind(lcProviders, lcProviders, role("konstapel-assessment-provider-admin"), "")
+	l.bind(lcProviderRd, lcProviderRd, role("konstapel-assessment-provider-viewer"), "")
+	identities := []string{lcAdmin, lcViewer, lcOperator, lcRequester, lcRegistrar, lcReader, lcExceptions, lcRecoverer, lcRecoveryRd, lcProviders, lcProviderRd,
+		lcNobody, lcController, lcDownload}
 	clients := map[string]dynamic.Interface{"": admin}
 	for _, id := range identities {
 		clients[id] = l.dynAs(id)
@@ -1032,6 +1068,16 @@ func (l *live) crdContract(ns string) {
 		{lcOperator, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
 		{lcRecoveryRd, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
 		{lcController, "evidencesigningrequests", lcSigningRequest, apierrors.IsForbidden, ""},
+		// Provider registration is a separate grant too: the controller,
+		// the compliance admin, namespace roles and the viewer cannot
+		// register a provider.
+		{lcController, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcAdmin, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcOperator, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcRequester, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcExceptions, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcProviderRd, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
+		{lcNobody, "assessmentproviders", lcProviderRegistration, apierrors.IsForbidden, ""},
 	} {
 		o := lcObject(t, w.doc)
 		o["metadata"].(map[string]any)["name"] = "lc-write"

@@ -52,7 +52,22 @@ No Trivy or other producer is supported. See
 Providers are registered by compiling a descriptor into the binary.
 `internal/provider/installed.Registry()` is the production registry: a fixed
 list that today contains only `kyverno.Descriptor()`. There is no runtime
-registration API, plugin directory, provider CRD or configuration flag.
+registration API, plugin directory or configuration flag for compiled-in
+providers.
+
+Independently installed external providers are registered separately, by
+platform administrators, with a cluster-scoped `AssessmentProvider`
+(`add-external-assessment-providers`; `api/v1alpha1/assessmentprovider_types.go`).
+A registration names a Kubernetes Service, the provider's TLS server name and
+trust roots in the controller namespace, the expected provider name and
+release digest, the protocol, contract, evaluator and payload versions, and
+the capabilities it allows. It carries no URL, command, image or credential,
+and it cannot use `konstapel` or a `konstapel-*` name: those are reserved for
+compiled-in providers, so a registration never shadows one. Only the
+non-aggregated `konstapel-assessment-provider-admin` ClusterRole writes
+registrations, `konstapel-assessment-provider-viewer` reads them, and only
+the controller writes their status. The controller does not select
+registered providers yet.
 
 Verified bundle content can only name a provider contract
 (`compatibility.provider` in `bundle.json`, for example
@@ -657,6 +672,7 @@ every feature of the controller shares them:
 <!-- verified: controller-role-writes -->
 ```json
 [
+  {"resource": "assessmentproviders.compliance.erenius.io/status", "verbs": ["patch", "update"]},
   {"resource": "assessmentrequests.compliance.erenius.io/status", "verbs": ["patch", "update"]},
   {"resource": "assessmentruns.compliance.erenius.io", "verbs": ["create", "patch", "update"]},
   {"resource": "assessmentruns.compliance.erenius.io/status", "verbs": ["patch", "update"]},
@@ -1771,8 +1787,9 @@ of every retained version stay installed:
   transport is mutual TLS 1.3 with configured trust and exact DNS-name peer
   authorization in both directions, material reloaded from mounted files
   without a restart (connections the rotated trust no longer authorizes are
-  closed), required call deadlines and bounded messages and streams. No
-  external provider can be registered or selected yet.
+  closed), required call deadlines and bounded messages and streams. External
+  providers can be registered ([Registration is code, not data](#registration-is-code-not-data))
+  but not yet selected.
 
 ### Internal Go interfaces
 
