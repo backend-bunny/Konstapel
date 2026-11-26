@@ -8,14 +8,16 @@ change. To build a provider that speaks it, follow the
 [reporting quickstart](external-provider-quickstart.md).
 
 **Status.** The protocol definition, the public Go types and the Go
-authoring kit are implemented and tested. The controller cannot use an
-external provider yet. The administrator-owned `AssessmentProvider`
-registration API exists
+authoring kit are implemented and tested. The administrator-owned
+`AssessmentProvider` registration API exists
 ([assessment providers](../assessment-providers.md#registration-is-code-not-data)),
-but selection, remote collection, result capture, evaluation replay and Helm
-distribution of providers are later tasks of the change. Nothing on this page
-installs, registers or selects a provider. Konstapel's only supported provider is still the in-tree Kyverno
-provider ([assessment providers](../assessment-providers.md)).
+and a controller configured for external providers probes registrations and
+selects them ([registration, selection and status](#registration-selection-and-status)).
+No assessment uses an external provider yet: remote collection, result
+capture, evaluation replay and Helm distribution of providers are later
+tasks of the change. Nothing on this page installs a provider. Konstapel's
+only supported provider is still the in-tree Kyverno provider
+([assessment providers](../assessment-providers.md)).
 
 ## Sources of truth
 
@@ -23,7 +25,7 @@ provider ([assessment providers](../assessment-providers.md)).
 | --- | --- |
 | [`proto/konstapel/provider/v1/provider.proto`](../../proto/konstapel/provider/v1/provider.proto) | The language-neutral contract. Generate a client or server for any language from it. Its comments are normative. |
 | [`pkg/providerapi/v1`](../../pkg/providerapi/v1) | Go code generated from the proto (`providerv1`). |
-| [`pkg/providerkit`](../../pkg/providerkit) | The Go authoring kit. `Server` enforces the protocol around a provider's handlers, `Client` is the host side, and `NewServerTLS`/`NewClientTLS`, `ServerOptions`/`DialOptions` and `TransportLimits` configure the transport. |
+| [`pkg/providerkit`](../../pkg/providerkit) | The Go authoring kit. `Server` enforces the protocol around a provider's handlers, `Client` is the host side, and `NewServerTLS`/`NewClientTLS`/`NewClientTLSFrom`, `ServerOptions`/`DialOptions` and `TransportLimits` configure the transport. |
 | [`proto/konstapel/provider/v1/testdata/wire`](../../proto/konstapel/provider/v1/testdata/wire) | Wire fixtures. Each case is one message as protojson and as its binary encoding, plus the outcome a conforming implementation must reach. Use them to test an implementation in another language. |
 
 The tables on this page marked *generated* are produced from the proto
@@ -396,6 +398,15 @@ issuer signs both sides. Otherwise set `TLSFiles.Trust` to the peer's CA
 bundle. The platform issues certificates. No credential is ever carried in
 a message.
 
+A host whose trust bundle is not a mounted file uses
+`providerkit.NewClientTLSFrom(source, serverName)`. A `TLSSource` returns
+the certificate, key and trust bundle as bytes (`TLSMaterial`) at every
+load. `TLSFiles` is itself a source. Material from any source passes exactly
+the checks mounted files pass, including the 1 MiB bound per part, and a
+failed or rejected load keeps the last valid material in use. The Konstapel
+controller uses it to combine its own mounted client certificate with a
+registration's `serverTrust` ConfigMap.
+
 Identity rules:
 
 - A peer is authorized only when its certificate chains to the configured
@@ -418,7 +429,7 @@ Identity rules:
 Rotation behavior:
 
 - `MutualTLS.Reload`, or `Watch` every `DefaultReloadInterval`, re-reads the
-  files. Changed material is used only after it passes the checks of the
+  files or source. Changed material is used only after it passes the checks of the
   initial load. Until then, the last valid material stays in use and
   `MutualTLS.Ready()` reports the problem. There is no insecure fallback.
 - New connections use the current material. An established connection is
@@ -441,13 +452,114 @@ with deadlines, which kubelet probes are not. Serve liveness and readiness
 on a separate port, for example plain HTTP reporting `MutualTLS.Ready()`, as
 the [quickstart](external-provider-quickstart.md) does.
 
+## Registration, selection and status
+
+This section describes how the Konstapel controller uses `AssessmentProvider`
+registrations (`api/v1alpha1/assessmentprovider_types.go`,
+`internal/provider/external`). It is host behavior, not part of the wire
+contract.
+
+External providers are off by default. The controller probes and selects
+registrations only when `--external-provider-client-cert-dir` names a
+directory with `tls.crt` and `tls.key`, the controller's own client
+certificate, as a mounted `kubernetes.io/tls` Secret. The certificate must
+allow client authentication and name the host identity providers authorize.
+Without the flag, the controller neither watches nor contacts registrations,
+and every contract that is not built in is `UnknownProvider`, exactly as
+before. With the flag, invalid credentials fail startup. The core chart does
+not set the flag yet.
+
+### Probing
+
+Every registration is probed when it changes and then every minute. A probe
+reads the `serverTrust` ConfigMap key in the controller namespace and the
+controller's credentials, dials `<service>.<namespace>.svc:<port>`,
+authenticates the server as `serverName` over mutual TLS 1.3 and sends
+`Describe` with a 10 second deadline. Nothing else is sent. The description
+must match the registration in every dimension, and its `implementation`
+must equal `spec.provider.releaseDigest`. A matching `implementation` is the
+endpoint's own claim, not attestation. A rotated trust ConfigMap or client
+certificate is used from the next probe, without a restart. Up to four
+probes run at once, and each probe is bounded, so a slow endpoint never
+delays another registration. A registration that names a built-in provider,
+which the API rejects anyway, is never contacted.
+
+The probe writes `status.observedGeneration`, three conditions and, only
+while the endpoint is compatible, `status.identity`, whose `observedAt` is
+refreshed on every probe. Condition messages name endpoints, server names,
+versions and errors, never certificate contents or keys.
+
+| Condition | `True` when | Reasons when not `True` |
+| --- | --- | --- |
+| `Available` | The Service accepted a connection, the server authenticated as `serverName`, the controller was accepted, and `Describe` answered. | `TrustUnavailable`, `ClientCredentialsUnavailable`, `EndpointUnavailable`, `AuthenticationFailed`; `NotChecked` (`Unknown`) for a built-in name |
+| `Compatible` | The description matches the registration: provider, release, protocol revision, contract, evaluator, payload and allowed capabilities. | `ProviderMismatch`, `ReleaseMismatch`, `UnsupportedProtocolVersion`, `UnsupportedContractVersion`, `UnsupportedEvaluatorVersion`, `UnsupportedPayloadVersion`, `UnsupportedCapability`, `InvalidDescription`, `BuiltInProvider`; `NotChecked` (`Unknown`) while unavailable |
+| `Ready` | New work may select the registration. | `Unavailable`, `Incompatible`, `NewRequestsDisabled`, `AmbiguousRegistration` |
+
+The `True` reasons are `Available`, `Compatible` and `Ready`.
+
+### Selection
+
+New work resolves a provider contract (`name/vN`) in this order. No rule
+falls back to another registration, release, version or provider.
+
+1. An empty contract is the built-in default, and a malformed one is
+   `InvalidSelection`.
+2. A built-in provider name resolves only to the built-in provider. Its
+   other versions are `IncompatibleVersion`. Registrations are not consulted,
+   so a built-in provider is never shadowed.
+3. With external providers off, or with no registration of the name, the
+   contract is `UnknownProvider`. Registrations of the name at other contract
+   versions only are `IncompatibleVersion`.
+4. Registrations with `newRequests: Disabled`, or being deleted, are never
+   selected. If none of the contract's registrations is enabled, the result
+   is `ProviderDisabled`.
+5. More than one enabled registration of the contract is
+   `AmbiguousProvider`, whatever their order, age or health. Each of them
+   reports `Ready=False` with `AmbiguousRegistration`.
+6. The one enabled registration must allow every capability the work needs
+   (`UnsupportedCapability`). Its status must show `Ready=True` for its
+   current generation, with a compatible identity observed serving those
+   capabilities within the last five minutes (`ProviderUnavailable`).
+
+These are `SelectionError` reasons of the shared host
+(`internal/provider`). A binding reports each of the four
+registration-specific reasons as `ContentUnavailable`. One provider's
+registrations never affect the selection of another provider or of a
+built-in one.
+
+A release upgrade is a new registration, because `releaseDigest` is
+immutable. To avoid an ambiguous window, create the new registration with
+`newRequests: Disabled`, wait for `Available` and `Compatible`, then disable
+the old registration and enable the new one. New work selects the new
+release once it is `Ready`.
+
+### Frozen registration identity
+
+A selection freezes the selected registration: its name, UID,
+configuration revision (`metadata.generation`), provider contract, release
+digest, protocol revision, evaluator and payload versions, allowed
+capabilities, and that revision's endpoint (Service, `serverName` and
+`serverTrust` ConfigMap name and key). The record contains no credentials.
+Work frozen to it keeps that configuration:
+
+- A later revision, such as a moved Service, other capabilities or
+  `newRequests: Disabled`, is used only by new work. Disabled lets frozen
+  work drain.
+- The trust ConfigMap's contents are read at every connection, so trust
+  rotation applies to frozen work too. The ConfigMap name and key stay
+  frozen.
+- Frozen work ends with an explicit reason when the registration is deleted
+  (`RegistrationRemoved`) or replaced under the same name
+  (`RegistrationReplaced`), or when an immutable field no longer matches
+  (`RegistrationChanged`, which the API already prevents). It also ends when
+  it needs a capability its revision did not allow (`CapabilityNotFrozen`),
+  or when the endpoint no longer reports the frozen release or compatibility
+  (`ImplementationChanged`). It is never reinterpreted.
+
 ## What is not specified here
 
-- Provider selection, permissions and Helm installation, which are later
-  tasks of the change. The `AssessmentProvider` registration fields
-  (Service, `serverName`, `serverTrust`, expected name and release digest,
-  compatibility, capabilities) are API types in
-  `api/v1alpha1/assessmentprovider_types.go`.
+- Permissions, chart configuration of the controller's client certificate
+  and Helm installation of providers, which are later tasks of the change.
 - Remote collection, capture and replay integration in the controller, scan
   dispatch and the reference scan worker.
 - Any real producer. No external provider is supported yet.

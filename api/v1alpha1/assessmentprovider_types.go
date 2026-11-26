@@ -264,6 +264,93 @@ type ObservedProviderIdentity struct {
 	ObservedAt metav1.Time `json:"observedAt"`
 }
 
+// Condition types reported on AssessmentProvider status
+// (add-external-assessment-providers 2.2). They describe the endpoint's
+// availability and compatibility, never an assessment's findings, and their
+// messages never carry credentials, keys or certificate contents.
+const (
+	// ProviderConditionAvailable is True when the controller reached the
+	// Service, authenticated the provider over mutual TLS with the
+	// registration's server name and trust, and the endpoint described
+	// itself within the probe deadline.
+	ProviderConditionAvailable = "Available"
+	// ProviderConditionCompatible is True when the description matches the
+	// registration in every dimension: provider name, release digest,
+	// protocol, contract, evaluator and payload versions and the allowed
+	// capabilities. It is Unknown while the endpoint is not available.
+	ProviderConditionCompatible = "Compatible"
+	// ProviderConditionReady is True when new work may select the
+	// registration: it is available, compatible, newRequests is Enabled and
+	// no other Enabled registration names the same provider contract.
+	ProviderConditionReady = "Ready"
+)
+
+// Condition reasons reported on AssessmentProvider status. The set is
+// closed: every condition uses one of these.
+const (
+	// ProviderReasonAvailable: the endpoint was authenticated and described.
+	ProviderReasonAvailable = "Available"
+	// ProviderReasonTrustUnavailable: the serverTrust ConfigMap, its key or
+	// its PEM roots are missing or invalid. Nothing is sent.
+	ProviderReasonTrustUnavailable = "TrustUnavailable"
+	// ProviderReasonClientCredentialsUnavailable: the controller's own
+	// client certificate or key is missing, invalid or expired. Nothing is
+	// sent.
+	ProviderReasonClientCredentialsUnavailable = "ClientCredentialsUnavailable"
+	// ProviderReasonEndpointUnavailable: the Service did not accept a
+	// connection or did not answer within the probe deadline.
+	ProviderReasonEndpointUnavailable = "EndpointUnavailable"
+	// ProviderReasonAuthenticationFailed: the endpoint did not complete a
+	// mutually authenticated TLS 1.3 handshake for serverName: an untrusted
+	// or expired certificate, another server name, or a rejected client.
+	ProviderReasonAuthenticationFailed = "AuthenticationFailed"
+	// ProviderReasonInvalidDescription: the endpoint's description violates
+	// the protocol.
+	ProviderReasonInvalidDescription = "InvalidDescription"
+	// ProviderReasonNotChecked: compatibility was not checked because the
+	// endpoint is not available.
+	ProviderReasonNotChecked = "NotChecked"
+	// ProviderReasonCompatible: the description matches the registration.
+	ProviderReasonCompatible = "Compatible"
+	// ProviderReasonProviderMismatch: the endpoint serves another provider.
+	ProviderReasonProviderMismatch = "ProviderMismatch"
+	// ProviderReasonReleaseMismatch: the endpoint reports another
+	// implementation than spec.provider.releaseDigest.
+	ProviderReasonReleaseMismatch = "ReleaseMismatch"
+	// ProviderReasonUnsupportedProtocolVersion: the endpoint does not serve
+	// the protocol revision the controller speaks.
+	ProviderReasonUnsupportedProtocolVersion = "UnsupportedProtocolVersion"
+	// ProviderReasonUnsupportedContractVersion: the endpoint serves another
+	// contract version.
+	ProviderReasonUnsupportedContractVersion = "UnsupportedContractVersion"
+	// ProviderReasonUnsupportedEvaluatorVersion: the endpoint evaluates with
+	// another evaluator version.
+	ProviderReasonUnsupportedEvaluatorVersion = "UnsupportedEvaluatorVersion"
+	// ProviderReasonUnsupportedPayloadVersion: the endpoint does not write
+	// or read the registration's payload version.
+	ProviderReasonUnsupportedPayloadVersion = "UnsupportedPayloadVersion"
+	// ProviderReasonUnsupportedCapability: the endpoint does not serve a
+	// capability the registration allows.
+	ProviderReasonUnsupportedCapability = "UnsupportedCapability"
+	// ProviderReasonBuiltInProvider: the registration names a provider built
+	// into Konstapel. It is never contacted or selected; built-in providers
+	// are never shadowed.
+	ProviderReasonBuiltInProvider = "BuiltInProvider"
+	// ProviderReasonReady: new work may select the registration.
+	ProviderReasonReady = "Ready"
+	// ProviderReasonUnavailable: Ready is False because Available is.
+	ProviderReasonUnavailable = "Unavailable"
+	// ProviderReasonIncompatible: Ready is False because Compatible is.
+	ProviderReasonIncompatible = "Incompatible"
+	// ProviderReasonNewRequestsDisabled: newRequests is Disabled. Work
+	// already frozen to the registration may still drain.
+	ProviderReasonNewRequestsDisabled = "NewRequestsDisabled"
+	// ProviderReasonAmbiguousRegistration: another Enabled registration
+	// names the same provider contract, so neither is selected for new
+	// work until all but one are Disabled.
+	ProviderReasonAmbiguousRegistration = "AmbiguousRegistration"
+)
+
 // AssessmentProviderStatus is written only by the Konstapel controller
 // (RBAC, and the konstapel-assessment-provider-status-writer admission
 // policy). It never holds credentials, keys, certificates or Secret

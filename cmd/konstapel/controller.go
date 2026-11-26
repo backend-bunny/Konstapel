@@ -153,6 +153,7 @@ func runController(args []string) error {
 	webhookPort := fs.Int("webhook-port", 9443, "admission webhook HTTPS port")
 	revocation := fs.Bool("exception-revocation-processing", false, "persist ComplianceException revocation records and release their finalizer; needs --webhook-cert-dir, the exception admission webhooks registered with failurePolicy Fail, and the gated config/rbac/controller/exception-revocation.yaml grant. Off by default")
 	leaderNS := fs.String("leader-election-namespace", os.Getenv("POD_NAMESPACE"), "namespace of the leader-election Lease (defaults to the pod namespace)")
+	externalCerts := fs.String("external-provider-client-cert-dir", "", "directory with tls.crt and tls.key: the controller's client certificate for registered external assessment providers (AssessmentProvider). Setting it probes registrations over mutual TLS and lets new work select them; empty (the default) watches, contacts and selects no external provider")
 	readers := fs.String("protected-package-readers", "", "the download Deployment (in the pod namespace) that must run this controller's image before platform packages carry supporting evidence, or \"none\" without a download service; empty carries none")
 	bundleOpts := addBundleFlags(fs)
 	collection := addCollectionFlags(fs)
@@ -226,6 +227,7 @@ func runController(args []string) error {
 		LocalBundle:             VendoredBundle,
 		Bundles:                 bundles,
 		CollectionLimits:        collectionLimits,
+		ExternalProviders:       controller.ExternalProviders{ClientCertDir: *externalCerts},
 		Observability:           hub,
 	})
 	if err != nil {

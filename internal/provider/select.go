@@ -37,6 +37,24 @@ const (
 	ReasonUnsupportedMode SelectionReason = "UnsupportedMode"
 	// ReasonInvalidParameters: the parameters violate the check's contract.
 	ReasonInvalidParameters SelectionReason = "InvalidParameters"
+
+	// Registered external providers (add-external-assessment-providers
+	// 2.2). Each is a reason new work cannot select a registration; none
+	// falls back to another registration, release or provider.
+
+	// ReasonProviderDisabled: every registration of the contract has
+	// newRequests Disabled. Work already frozen to one may still drain.
+	ReasonProviderDisabled SelectionReason = "ProviderDisabled"
+	// ReasonAmbiguousProvider: more than one Enabled registration names the
+	// contract. Neither is chosen; all but one must be Disabled.
+	ReasonAmbiguousProvider SelectionReason = "AmbiguousProvider"
+	// ReasonUnsupportedCapability: the registration does not allow, or its
+	// endpoint does not serve, a capability the work needs.
+	ReasonUnsupportedCapability SelectionReason = "UnsupportedCapability"
+	// ReasonProviderUnavailable: the registration is not Ready for its
+	// current revision: its endpoint is unavailable, incompatible or not
+	// yet probed, or its status is stale.
+	ReasonProviderUnavailable SelectionReason = "ProviderUnavailable"
 )
 
 // BindingReason maps a selection reason to the existing ComplianceBinding
@@ -44,9 +62,13 @@ const (
 // new API reason: provider contracts are already reported as unavailable
 // (Incompatible) content, unsupported policy types as UnsupportedScope, and
 // configuration the provider cannot honour as InvalidConfiguration.
+//
+// Every reason a registered external provider cannot be selected is the
+// provider contract being unavailable: ContentUnavailable.
 func (r SelectionReason) BindingReason() string {
 	switch r {
-	case ReasonUnknownProvider, ReasonIncompatibleVersion:
+	case ReasonUnknownProvider, ReasonIncompatibleVersion,
+		ReasonProviderDisabled, ReasonAmbiguousProvider, ReasonUnsupportedCapability, ReasonProviderUnavailable:
 		return v1alpha1.ReasonContentUnavailable
 	case ReasonUnsupportedCheck:
 		return v1alpha1.ReasonUnsupportedScope

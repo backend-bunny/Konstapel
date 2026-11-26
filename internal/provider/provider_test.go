@@ -425,6 +425,11 @@ func TestBindingReasonsAreExistingConditionReasons(t *testing.T) {
 		provider.ReasonUnsupportedMode:     v1alpha1.ReasonInvalidConfiguration,
 		provider.ReasonInvalidParameters:   v1alpha1.ReasonInvalidConfiguration,
 		provider.ReasonInvalidSelection:    v1alpha1.ReasonInvalidConfiguration,
+		// Registered external providers that cannot be selected.
+		provider.ReasonProviderDisabled:      v1alpha1.ReasonContentUnavailable,
+		provider.ReasonAmbiguousProvider:     v1alpha1.ReasonContentUnavailable,
+		provider.ReasonUnsupportedCapability: v1alpha1.ReasonContentUnavailable,
+		provider.ReasonProviderUnavailable:   v1alpha1.ReasonContentUnavailable,
 	} {
 		if got := reason.BindingReason(); got != want {
 			t.Errorf("%s maps to %s, want %s", reason, got, want)
