@@ -4,7 +4,8 @@
 # controller image is built (scripts/image/build.sh): it exports this module
 # with the public Konstapel packages it uses, verifies and vendors the Go
 # modules, and runs melange in its sandbox with module network access off.
-# Reference image signing, SBOMs and provenance are task 5.2.
+# scripts/examples/reference-provider-signing.sh signs and attests it in
+# disposable local registries (5.2).
 package:
   name: konstapel-example-reporting
   version: "0.1.0"

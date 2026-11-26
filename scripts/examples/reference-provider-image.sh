@@ -7,11 +7,15 @@
 # network access off, test the package, and assemble a non-root apko image.
 #
 # Usage: reference-provider-image.sh FRESH_OUTPUT_DIRECTORY
-# Writes image.tar (docker archive, tag $REFERENCE_IMAGE:build-amd64), its
-# apko SBOMs and the build-environment log. Test/demo only: nothing is
-# pushed, signed or published (reference signing and provenance are 5.2),
-# and no registration or chart refers to it by default. Needs bubblewrap
-# with unprivileged user namespaces and network access to Wolfi, like
+# Writes image.tar (docker archive, tag $REFERENCE_IMAGE:build-amd64; it
+# also holds the OCI image manifest), the image SBOMs the controller's
+# build makes (apko's SPDX inventory sbom-x86_64.spdx.json and Syft's image
+# scan sbom-complete.spdx.json, which finds the binary's Go modules), the
+# build-environment log and the source commit. Test/demo only: nothing is
+# pushed, signed or published here, and no registration or chart refers to
+# it by default; scripts/examples/reference-provider-signing.sh signs and
+# attests it in disposable local registries (5.2). Needs bubblewrap with
+# unprivileged user namespaces and network access to Wolfi, like
 # task image:build.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -50,6 +54,10 @@ melange test "$module/image/melange.yaml" --arch x86_64 --runner "$MELANGE_RUNNE
     --keyring-append "$tmp/key/melange.rsa.pub" --sbom-path "$out"
 )
 rm -rf "$tmp/key"
+# As for the controller: apko records the APK and its sources, Syft also
+# finds the Go modules embedded in the binary.
+SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=true SYFT_GOLANG_SEARCH_REMOTE_LICENSES=true \
+  syft scan "docker-archive:$out/image.tar" -o spdx-json="$out/sbom-complete.spdx.json"
 git rev-parse HEAD > "$out/commit"
 sha256sum "$out/image.tar" > "$out/build.sha256"
 echo "built $REFERENCE_IMAGE:build-amd64 into $out/image.tar"

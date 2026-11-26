@@ -216,6 +216,11 @@ if includes referenceProviderImage; then
   load_image "$out/reference-provider-image/image.tar" localhost/konstapel-example-reporting "$out/reference-provider-image-load.log"
   export KONSTAPEL_LIVE_REFERENCE_PROVIDER_IMAGE=$loaded
   echo "$KONSTAPEL_LIVE_REFERENCE_PROVIDER_IMAGE" | tee "$out/reference-provider-image-ref.txt"
+  # The same image, unchanged, and a chart pinning it, signed and attested
+  # with disposable keys in disposable local registries, then verified as
+  # the reference chart guide documents (valid and rejected fixtures).
+  stage 'Signing the example reporting provider image and chart in disposable registries and verifying them'
+  scripts/examples/reference-provider-signing.sh "$out/reference-provider-image" "$out/reference-provider-signing" 2>&1 | tee "$out/reference-provider-signing.log"
 fi
 # Targeting delivery: Audit/Deny bindings, relabelling, ready-gated replacement,
 # withdrawal, and non-adoption of a prototype-style unmanaged policy.
