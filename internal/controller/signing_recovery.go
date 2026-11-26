@@ -26,9 +26,9 @@ import (
 // uncached read of the run and its destination, then from read-only
 // storage checks under the destination fence. A terminal request is never
 // re-evaluated. An eligible request then takes the run's recovery claim or
-// waits for it (task 2.3, signing_recovery_claim.go). The recovery attempt
-// itself (tasks 2.4 to 2.6) runs under the claim; until it exists the holder
-// stays Pending/Accepted.
+// waits for it (task 2.3, signing_recovery_claim.go). The holder then runs
+// the recovery attempt under the same destination fence (task 2.4,
+// signing_recovery_attempt.go).
 
 // recoveryEligibility is the outcome of evaluating a request against its
 // run. A terminal reason ends the request; otherwise the run is eligible
@@ -45,6 +45,8 @@ type recoveryEligibility struct {
 	// committed is the matching existing signed commit a recovery adopts
 	// unchanged (a commit whose response was lost before SigningFailed).
 	committed *publication.Status
+	// staged is the durable staging of the intent's archive.
+	staged publication.Staged
 }
 
 func terminal(reason v1alpha1.SigningRecoveryReason, format string, a ...any) recoveryEligibility {
@@ -114,7 +116,16 @@ func (r *SigningRecoveryReconciler) Reconcile(ctx context.Context, req reconcile
 		}
 		held = nil
 	}
-	if el, err = r.storageEligibility(ctx, run); err != nil {
+	// Storage eligibility, the claim, and the attempt are one unit of fenced
+	// work of the pinned destination, as "run <name> signature recovery".
+	fenced, store, done, el, err := r.openStorage(ctx, run)
+	if err != nil {
+		return reconcile.Result{}, err
+	} else if el.reason != "" {
+		return reconcile.Result{}, r.end(ctx, esr, el.reason, el.message)
+	}
+	defer done()
+	if el, err = r.checkStorage(fenced, store, run); err != nil {
 		return reconcile.Result{}, err
 	} else if el.reason != "" {
 		return reconcile.Result{}, r.end(ctx, esr, el.reason, el.message)
@@ -124,9 +135,13 @@ func (r *SigningRecoveryReconciler) Reconcile(ctx context.Context, req reconcile
 			return reconcile.Result{}, err
 		}
 		held = claimOf(run)
+		// The claim is recorded before anything is signed or committed;
+		// the claim's run update and this status update both enqueue the
+		// holder, which then runs the attempt.
+		return reconcile.Result{}, r.pending(ctx, esr, v1alpha1.RecoveryAccepted,
+			fmt.Sprintf("accepted; holds the signing recovery of AssessmentRun %s until %s", run.Name, held.Deadline.UTC().Format(time.RFC3339)))
 	}
-	return reconcile.Result{}, r.pending(ctx, esr, v1alpha1.RecoveryAccepted,
-		fmt.Sprintf("accepted; holds the signing recovery of AssessmentRun %s until %s", run.Name, held.Deadline.UTC().Format(time.RFC3339)))
+	return r.attempt(ctx, fenced, store, esr, run, el)
 }
 
 // eligibility decides whether a request may proceed. It issues no write to
@@ -200,24 +215,44 @@ func (r *SigningRecoveryReconciler) runEligibility(ctx context.Context, esr *v1a
 // destination fence: the staged archive must be the intent's, and an
 // existing commit must be the intent's signed commit of it.
 func (r *SigningRecoveryReconciler) storageEligibility(ctx context.Context, run *v1alpha1.AssessmentRun) (recoveryEligibility, error) {
-	pin, in := run.Status.Destination, run.Status.SigningIntent
+	fenced, store, done, el, err := r.openStorage(ctx, run)
+	if err != nil || el.reason != "" {
+		return el, err
+	}
+	defer done()
+	return r.checkStorage(fenced, store, run)
+}
+
+// openStorage begins fenced work of the run's pinned destination as
+// "run <name> signature recovery" and returns its context and publisher;
+// done must be called when the work ends. After an orphan handoff no work
+// begins (Orphaned), and work in flight is cancelled.
+func (r *SigningRecoveryReconciler) openStorage(ctx context.Context, run *v1alpha1.AssessmentRun) (context.Context, publication.Publisher, func(), recoveryEligibility, error) {
+	pin := run.Status.Destination
 	dp := r.Runtime.Destinations
 	if dp == nil {
-		return recoveryEligibility{}, fmt.Errorf("%w: pinned destinations are not configured", publication.ErrUnavailable)
+		return nil, nil, nil, recoveryEligibility{}, fmt.Errorf("%w: pinned destinations are not configured", publication.ErrUnavailable)
 	}
 	fenced, done, err := dp.Begin(ctx, pin.UID, "run "+run.Name+" signature recovery")
 	if errors.Is(err, publication.ErrOrphaned) {
-		return terminal(v1alpha1.RecoveryOrphaned, "destination %s of AssessmentRun %s is fenced by an orphan handoff", pin.Name, run.Name), nil
+		return nil, nil, nil, terminal(v1alpha1.RecoveryOrphaned, "destination %s of AssessmentRun %s is fenced by an orphan handoff", pin.Name, run.Name), nil
 	} else if err != nil {
-		return recoveryEligibility{}, err
+		return nil, nil, nil, recoveryEligibility{}, err
 	}
-	defer done()
 	store, err := dp.For(fenced, pin)
 	if errors.Is(err, publication.ErrOrphaned) {
-		return terminal(v1alpha1.RecoveryOrphaned, "destination %s of AssessmentRun %s is handed off", pin.Name, run.Name), nil
+		done()
+		return nil, nil, nil, terminal(v1alpha1.RecoveryOrphaned, "destination %s of AssessmentRun %s is handed off", pin.Name, run.Name), nil
 	} else if err != nil {
-		return recoveryEligibility{}, err
+		done()
+		return nil, nil, nil, recoveryEligibility{}, err
 	}
+	return fenced, store, done, recoveryEligibility{}, nil
+}
+
+// checkStorage is storageEligibility within fenced work.
+func (r *SigningRecoveryReconciler) checkStorage(fenced context.Context, store publication.Publisher, run *v1alpha1.AssessmentRun) (recoveryEligibility, error) {
+	pin, in := run.Status.Destination, run.Status.SigningIntent
 	ref := publication.RunRef{ClusterID: scopeCluster(run), BindingUID: bindingUID(run), RunUID: string(run.UID)}
 
 	st, err := store.Inspect(fenced, ref)
@@ -257,7 +292,7 @@ func (r *SigningRecoveryReconciler) storageEligibility(ctx context.Context, run 
 	if staged.PackageSHA256 != in.ArchiveSHA256 || (run.Status.DescriptorSHA256 != "" && staged.DescriptorSHA256 != run.Status.DescriptorSHA256) {
 		return terminal(v1alpha1.RecoveryEvidenceLost, "the staged archive of AssessmentRun %s is %s, not the intent's %s", run.Name, staged.PackageSHA256, in.ArchiveSHA256), nil
 	}
-	return recoveryEligibility{run: run, committed: committed}, nil
+	return recoveryEligibility{run: run, committed: committed, staged: staged}, nil
 }
 
 // commitConflict explains why an existing commit is not the intent's

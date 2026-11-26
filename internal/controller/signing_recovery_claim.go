@@ -151,18 +151,23 @@ func (r *SigningRecoveryReconciler) end(ctx context.Context, esr *v1alpha1.Evide
 	return r.release(ctx, esr)
 }
 
-// pending records a non-terminal Pending reason and message, writing only on
-// a change. The resourceVersion precondition makes a concurrent writer
-// retry from a fresh read.
+// pending records a Pending reason and message, writing only on a change.
 func (r *SigningRecoveryReconciler) pending(ctx context.Context, esr *v1alpha1.EvidenceSigningRequest, reason v1alpha1.SigningRecoveryReason, msg string) error {
+	return r.progress(ctx, esr, v1alpha1.SigningRequestPending, reason, msg)
+}
+
+// progress records a non-terminal phase, reason, and message, writing only
+// on a change. The resourceVersion precondition makes a concurrent writer
+// retry from a fresh read.
+func (r *SigningRecoveryReconciler) progress(ctx context.Context, esr *v1alpha1.EvidenceSigningRequest, phase v1alpha1.SigningRequestPhase, reason v1alpha1.SigningRecoveryReason, msg string) error {
 	st := &esr.Status
 	msg = truncateRecoveryMessage(msg)
-	if st.Phase == v1alpha1.SigningRequestPending && st.Reason == reason && st.Message == msg && st.AcceptedAt != nil {
+	if st.Phase == phase && st.Reason == reason && st.Message == msg && st.AcceptedAt != nil {
 		return nil
 	}
 	now := metav1.NewTime(r.now())
 	r.record(esr, now)
-	st.Phase, st.Reason, st.Message = v1alpha1.SigningRequestPending, reason, msg
+	st.Phase, st.Reason, st.Message = phase, reason, msg
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionSigningRequestComplete, Status: metav1.ConditionFalse,
 		Reason: string(reason), Message: msg, ObservedGeneration: esr.Generation, LastTransitionTime: now})
 	return r.Client.Status().Update(ctx, esr)

@@ -33,6 +33,22 @@ func signingError(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", errSigning, fmt.Sprintf(format, a...))
 }
 
+// signingKeyMismatch marks a key Secret that now holds a key other than
+// the intent's pinned one: a replaced or rotated key, never a substitute.
+// Signature recovery ends KeyMismatch on it; a run retries it like any
+// other signing error.
+type signingKeyMismatch struct{ error }
+
+func (e signingKeyMismatch) Unwrap() error { return e.error }
+
+// storedSignatureInvalid marks a stored signature that does not verify for
+// the archive under the intent's pinned key. The stored bundle is never
+// replaced, so signature recovery ends Conflict on it; a run retries it
+// like any other signing error.
+type storedSignatureInvalid struct{ error }
+
+func (e storedSignatureInvalid) Unwrap() error { return e.error }
+
 // isSigningError reports whether a publication error is a signing failure,
 // including the publisher's commit gate refusing an unsigned commit.
 func isSigningError(err error) bool {
@@ -124,7 +140,7 @@ func (r *AssessmentRunReconciler) loadSigningKey(ctx context.Context, in *v1alph
 		return nil, nil, signingError("signing Secret %s: %v", in.SecretName, err)
 	}
 	if k := in.Key; k != nil && signer.PublicKey().Fingerprint != k.Fingerprint {
-		return nil, nil, signingError("signing Secret %s now holds key %s; this publication's intent requires %s", in.SecretName, signer.PublicKey().Fingerprint, k.Fingerprint)
+		return nil, nil, signingKeyMismatch{signingError("signing Secret %s now holds key %s; this publication's intent requires %s", in.SecretName, signer.PublicKey().Fingerprint, k.Fingerprint)}
 	}
 	return signer, secret, nil
 }
@@ -166,7 +182,7 @@ func (r *AssessmentRunReconciler) signingRequirement(ctx context.Context, run *v
 	switch {
 	case err == nil:
 		if _, verr := evidencesign.Verify(bundle, digest, pub); verr != nil {
-			return nil, signingError("the stored signature does not verify for this archive under %s: %v", pub.Fingerprint, verr)
+			return nil, storedSignatureInvalid{signingError("the stored signature does not verify for this archive under %s: %v", pub.Fingerprint, verr)}
 		}
 		return req, nil
 	case !errors.Is(err, publication.ErrNotFound):
@@ -199,7 +215,7 @@ func (r *AssessmentRunReconciler) signingRequirement(ctx context.Context, run *v
 	// Another attempt may have stored first: its bundle is the one used,
 	// and it must verify under the same pinned key.
 	if _, err := evidencesign.Verify(stored, digest, pub); err != nil {
-		return nil, signingError("the stored signature does not verify for this archive under %s: %v", pub.Fingerprint, err)
+		return nil, storedSignatureInvalid{signingError("the stored signature does not verify for this archive under %s: %v", pub.Fingerprint, err)}
 	}
 	return req, nil
 }

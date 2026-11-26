@@ -38,11 +38,25 @@ func newRecoveryEnv(t *testing.T) *recoveryEnv {
 	return &recoveryEnv{signEnv: e, rec: &SigningRecoveryReconciler{Client: e.c, Reader: e.c, Runtime: e.rr.Runtime, Now: func() time.Time { return e.now }}}
 }
 
-// request creates an EvidenceSigningRequest for run name/uid.
+// absentKeyFingerprint is the key a request confirms by default: the
+// fixture's recorded Secret is never installed, so the holder's attempt
+// retries (Running/Signing) without a storage write or a pin until a test
+// installs a key.
+const absentKeyFingerprint = "sha256:00000000000000000000000000000000000000000000000000000000000000a5"
+
+// request creates an EvidenceSigningRequest for run name/uid confirming
+// absentKeyFingerprint.
 func (e *recoveryEnv) request(name, run, uid string) {
 	e.t.Helper()
+	e.requestKey(name, run, uid, absentKeyFingerprint)
+}
+
+// requestKey creates an EvidenceSigningRequest for run name/uid stating
+// expectedKeyFingerprint fp ("" states none).
+func (e *recoveryEnv) requestKey(name, run, uid, fp string) {
+	e.t.Helper()
 	esr := &v1alpha1.EvidenceSigningRequest{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.EvidenceSigningRequestSpec{
-		Run: v1alpha1.ExactRunReference{Name: run, UID: uid}, Reason: "key restored after the incident",
+		Run: v1alpha1.ExactRunReference{Name: run, UID: uid}, Reason: "key restored after the incident", ExpectedKeyFingerprint: fp,
 		RequestedBy: &v1alpha1.Requester{Username: "platform-admin", UID: "uid-platform-admin"}}}
 	if err := e.c.Create(context.Background(), esr); err != nil {
 		e.t.Fatal(err)
@@ -291,8 +305,11 @@ func TestSigningRecoveryConflict(t *testing.T) {
 
 // An eligible request is accepted once and claims the run (task 2.3);
 // eligibility issues no storage write, and the claim is the only change to
-// the run. This includes a matching signed commit whose response was lost
-// (adopted unchanged by recovery). A run already recovered is not a failure
+// the run. The holder's next reconcile runs the attempt (task 2.4) with the
+// same acceptance and claim; here it writes no storage either (the key
+// Secret is not installed, or the matching commit is adopted). This
+// includes a matching signed commit whose response was lost (adopted
+// unchanged by recovery). A run already recovered is not a failure
 // (AlreadyRecovered, TestSigningRecoveryAlreadyRecovered).
 func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 	e := newRecoveryEnv(t)
@@ -311,8 +328,10 @@ func TestSigningRecoveryEligibleRequestIsAccepted(t *testing.T) {
 		if storageWrites(e.store()) != writes || !holdsClaim(claimOf(after), esr) || js(unclaimed) != js(before.Status) {
 			t.Fatalf("%s: eligibility wrote storage, or the run changed other than by the claim", name)
 		}
-		if again := e.reconcile(name); js(again.Status) != js(st) || js(e.run_()) != js(after) {
-			t.Fatalf("%s: acceptance or claim rewritten:\n%s\n%s", name, js(st), js(again.Status))
+		again := e.reconcile(name).Status
+		if again.Phase != v1alpha1.SigningRequestRunning || !again.AcceptedAt.Equal(st.AcceptedAt) || js(again.Run) != js(st.Run) || js(again.RequestedBy) != js(st.RequestedBy) ||
+			js(e.run_()) != js(after) || storageWrites(e.store()) != writes {
+			t.Fatalf("%s: the attempt rewrote the acceptance or claim, or wrote storage:\n%s\n%s", name, js(st), js(again))
 		}
 	}
 	e.request("eligible", e.name, e.uid())
