@@ -20,7 +20,12 @@ var update = flag.Bool("update", false, "rewrite the exposition and documentatio
 const repoRoot = "../.."
 
 // Allowed label names: the binding name plus fixed enums (design §1).
-var allowedLabels = []string{"binding", "domain", "condition", "status", "capability", "view", "state", "operation", "result"}
+var allowedLabels = []string{"binding", "domain", "condition", "status", "capability", "view", "state", "operation", "result", "phase", "reason"}
+
+// fixedReasons are the only families whose reason label is allowed: it is
+// a fixed status vocabulary (add-evidence-signing-recovery design §9),
+// never an exception reason or error text.
+var fixedReasons = map[string][]string{"konstapel_evidence_signing_recovery_requests": RecoveryReasons}
 
 // Dimensions the contract must never carry: workload/namespace/run identity,
 // free text, storage references, versions, and framework content.
@@ -68,7 +73,8 @@ func TestCatalogLabelsAreBoundedEnums(t *testing.T) {
 				t.Errorf("%s: label %s twice", m.Name, l.Name)
 			}
 			names[l.Name] = true
-			if !slices.Contains(allowedLabels, l.Name) || forbidden.MatchString(l.Name) {
+			fixedReason := l.Name == "reason" && fixedReasons[m.Name] != nil && slices.Equal(l.Values, fixedReasons[m.Name])
+			if !slices.Contains(allowedLabels, l.Name) || (forbidden.MatchString(l.Name) && !fixedReason) {
 				t.Errorf("%s: label %q is not an allowed bounded dimension", m.Name, l.Name)
 			}
 			switch {

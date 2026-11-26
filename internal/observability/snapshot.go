@@ -153,6 +153,45 @@ type StorageSnapshot struct {
 	// OldestCleanupExpiry is the expiry of the oldest package with pending
 	// or blocked cleanup; nil when there is none.
 	OldestCleanupExpiry *time.Time
+	// RecoveryRequests counts EvidenceSigningRequests by their recorded
+	// status phase and reason; a missing pair is zero.
+	RecoveryRequests map[RecoveryState]int
+}
+
+// RecoveryState is an EvidenceSigningRequest's recorded phase and reason.
+type RecoveryState struct {
+	Phase, Reason string
+}
+
+// RecoveryStates lists every reason allowed with its phase, in catalog
+// order: the series of konstapel_evidence_signing_recovery_requests.
+func RecoveryStates() []RecoveryState {
+	var out []RecoveryState
+	for _, p := range RecoveryPhases {
+		for _, r := range recoveryReasonsOf[p] {
+			out = append(out, RecoveryState{Phase: p, Reason: r})
+		}
+	}
+	return out
+}
+
+// recoveryReasonsOf is the reason vocabulary of each phase, as the
+// EvidenceSigningRequest CRD enforces it.
+var recoveryReasonsOf = map[string][]string{
+	"Pending":   {"Accepted", "Waiting"},
+	"Running":   {"Signing", "Committing"},
+	"Succeeded": {"Recovered", "AlreadyRecovered"},
+	"Failed": {"RunNotFound", "RunDeleting", "NotRecoverable", "Expired", "Orphaned", "EvidenceLost",
+		"KeyConfirmationRequired", "KeyMismatch", "SigningFailed", "Conflict"},
+}
+
+func (s RecoveryState) valid() bool {
+	for _, r := range recoveryReasonsOf[s.Phase] {
+		if r == s.Reason {
+			return true
+		}
+	}
+	return false
 }
 
 func validRef(seen map[string]string, uids map[string]bool, r BindingRef) error {
@@ -220,6 +259,14 @@ func (s StorageSnapshot) validate() error {
 	if s.OldestCleanupExpiry != nil && s.CleanupPending+s.CleanupBlocked == 0 {
 		return errors.New("oldest cleanup expiry without pending or blocked cleanup")
 	}
+	for k, n := range s.RecoveryRequests {
+		if !k.valid() {
+			return fmt.Errorf("recovery request state %s/%s is outside the phase's vocabulary", k.Phase, k.Reason)
+		}
+		if n < 0 {
+			return errors.New("negative recovery request count")
+		}
+	}
 	return nil
 }
 
@@ -265,5 +312,6 @@ func (s AssessmentSnapshot) clone() AssessmentSnapshot {
 
 func (s StorageSnapshot) clone() StorageSnapshot {
 	s.OldestCleanupExpiry = clonePtr(s.OldestCleanupExpiry)
+	s.RecoveryRequests = maps.Clone(s.RecoveryRequests)
 	return s
 }

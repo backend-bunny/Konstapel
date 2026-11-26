@@ -182,16 +182,22 @@ values.
 | --- | --- | --- |
 | `targeting` | ComplianceBindings in the manager cache; the capability monitor's cached `PolicyDelivery` and `Assessment` results | A Condition or `targetCount` observed for an older generation is `unknown` or absent. A capability that cannot be checked (`DependencyUnavailable`) is `unknown`. A missing API or denied access is `false`. Policy delivery and assessment reporting are reported separately, so reporting can be unavailable while delivery works. |
 | `assessment` | ComplianceBindings and AssessmentRuns in the manager cache | Current view: `status.assessment.current`, including the owner's `oldestEvaluation` and `nextExpiry`. Latest closed view: the binding object's latest closed full-binding run with its own summary and window. Interval, evidence-age limit and collection timeout are the binding's effective settings; a binding whose settings do not parse is left out. Due time: `schedule.outstandingSince`, or else the first scheduled time after the newest scheduled run (which may already have passed while another run held the slot). It is absent while the binding has never been planned. Overdue means `time() > due + collection timeout + grace`. |
-| `evidence_storage` | AssessmentRun records in the manager cache, including runs whose binding was deleted | See the backlog table below. |
+| `evidence_storage` | AssessmentRun and EvidenceSigningRequest records in the manager cache, including runs whose binding was deleted | See the backlog table below. |
 | `bundle_resolution` | The bundle sources Watcher | Ready while the Watcher's latest Sync read its configuration within two refresh intervals plus one read timeout. A missing or invalid sources ConfigMap is still a successful read; it shows up in profile Conditions, not here. |
 
 | Gauge | Counted runs |
 | --- | --- |
 | `konstapel_publication_pending` | `Publishing` runs whose last attempt did not fail |
 | `konstapel_publication_failed` | `Publishing` runs whose last attempt failed and is retried (`Published=False`, reason `Retrying`, or `SigningPending` while required signing is unmet). This is an actionable failure. A run that exhausted the publish timeout is `Failed` with `PublicationFailed`; that is a historical failure and is not counted. |
-| `konstapel_cleanup_pending` | Committed packages past their recorded expiry whose deletion is not confirmed, including deletions that failed and are retried with backoff |
+| `konstapel_cleanup_pending` | Retained packages past their recorded expiry whose deletion is not confirmed, including deletions that failed and are retried with backoff. A retained package is a committed package or the staged evidence a `SigningFailed` run keeps until its expiry. |
 | `konstapel_cleanup_blocked` | Deletions refused by storage retention (`RetentionBlocked`), which need action |
 | `konstapel_cleanup_oldest_expiry_timestamp_seconds` | Oldest recorded expiry among pending and blocked cleanup |
+| `konstapel_evidence_signing_recovery_requests` | EvidenceSigningRequests by recorded `status.phase` and `status.reason`; every reason allowed with its phase is a series, zero when unused. Requests not yet accepted (no phase) are not counted. |
+
+A `Failed` run with `SigningFailed` is a historical failure, like
+`PublicationFailed`: it is not publication backlog. Its retained evidence is
+cleanup backlog after its expiry. A recovered run becomes a committed package
+with the same expiry in one record update, so it is counted once.
 
 Deleted and operator-owned (orphaned) packages are not backlog. A delete
 request reduces the backlog only after the run records the confirmed
@@ -413,4 +419,5 @@ The whole test takes about 30 minutes; the `monitoring` job about 35.
 | `konstapel_cleanup_pending` | gauge |  | Retained packages past expiry whose deletion is not yet confirmed. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 | `konstapel_cleanup_blocked` | gauge |  | Retained packages whose deletion is blocked and needs action. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 | `konstapel_cleanup_oldest_expiry_timestamp_seconds` | gauge, seconds |  | Expiry of the oldest package with pending or blocked cleanup. | Only while the storage projection is fresh and ready and cleanup is pending or blocked. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
+| `konstapel_evidence_signing_recovery_requests` | gauge | `phase` (Pending, Running, Succeeded, Failed)<br>`reason` (Accepted, Waiting, Signing, Committing, Recovered, AlreadyRecovered, RunNotFound, RunDeleting, NotRecoverable, Expired, Orphaned, EvidenceLost, KeyConfirmationRequired, KeyMismatch, SigningFailed, Conflict) | EvidenceSigningRequests by recorded status phase and reason, including terminal requests kept as audit records. | Only while the storage projection is fresh and ready, for every reason allowed with its phase (zero when none); requests without a recorded phase are not counted. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 <!-- catalog:end -->

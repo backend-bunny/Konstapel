@@ -110,7 +110,7 @@ func TestStorageFromRuns(t *testing.T) {
 	if s := StorageFrom(runs[5:6], t0.Add(time.Hour)); s.CleanupPending != 1 {
 		t.Errorf("expiry at the projection time: %+v", s)
 	}
-	if s := StorageFrom(nil, t0); s != (StorageSnapshot{}) {
+	if s := StorageFrom(nil, t0); s.PublicationPending+s.PublicationFailed+s.CleanupPending+s.CleanupBlocked != 0 || s.OldestCleanupExpiry != nil || s.RecoveryRequests != nil {
 		t.Errorf("no records: %+v", s)
 	}
 }

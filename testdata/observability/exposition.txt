@@ -93,6 +93,72 @@ konstapel_cleanup_oldest_expiry_timestamp_seconds 0
 # HELP konstapel_cleanup_pending Retained packages past expiry whose deletion is not yet confirmed.
 # TYPE konstapel_cleanup_pending gauge
 konstapel_cleanup_pending 0
+# HELP konstapel_evidence_signing_recovery_requests EvidenceSigningRequests by recorded status phase and reason, including terminal requests kept as audit records.
+# TYPE konstapel_evidence_signing_recovery_requests gauge
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Accepted"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="AlreadyRecovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Committing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Conflict"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="EvidenceLost"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Expired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="KeyConfirmationRequired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="KeyMismatch"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="NotRecoverable"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Orphaned"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Recovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="RunDeleting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="RunNotFound"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Signing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="SigningFailed"} 0
+konstapel_evidence_signing_recovery_requests{phase="Failed",reason="Waiting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Accepted"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="AlreadyRecovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Committing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Conflict"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="EvidenceLost"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Expired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="KeyConfirmationRequired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="KeyMismatch"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="NotRecoverable"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Orphaned"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Recovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="RunDeleting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="RunNotFound"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Signing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="SigningFailed"} 0
+konstapel_evidence_signing_recovery_requests{phase="Pending",reason="Waiting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Accepted"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="AlreadyRecovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Committing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Conflict"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="EvidenceLost"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Expired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="KeyConfirmationRequired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="KeyMismatch"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="NotRecoverable"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Orphaned"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Recovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="RunDeleting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="RunNotFound"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Signing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="SigningFailed"} 0
+konstapel_evidence_signing_recovery_requests{phase="Running",reason="Waiting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Accepted"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="AlreadyRecovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Committing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Conflict"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="EvidenceLost"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Expired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="KeyConfirmationRequired"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="KeyMismatch"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="NotRecoverable"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Orphaned"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Recovered"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="RunDeleting"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="RunNotFound"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Signing"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="SigningFailed"} 0
+konstapel_evidence_signing_recovery_requests{phase="Succeeded",reason="Waiting"} 0
 # HELP konstapel_observation_enabled 1 when the observation domain's feature is enabled and expected to report, 0 when disabled.
 # TYPE konstapel_observation_enabled gauge
 konstapel_observation_enabled{domain="assessment"} 0

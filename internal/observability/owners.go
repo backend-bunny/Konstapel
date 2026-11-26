@@ -63,11 +63,18 @@ func TargetingFrom(bindings []v1alpha1.ComplianceBinding, capabilities map[Capab
 //     and is being retried (actionable), including required signing that
 //     is not yet met. A run whose publication finally
 //     failed is a historical failure and is not counted;
-//   - cleanup pending: committed packages past their recorded expiry whose
+//   - cleanup pending: retained packages past their recorded expiry whose
 //     deletion is not yet confirmed, including failed deletions that are
 //     retried with backoff;
 //   - cleanup blocked: deletions refused by storage retention (object lock),
 //     which need action.
+//
+// A retained package is a committed package or the staged evidence a
+// SigningFailed run keeps until its expiry. Signing recovery turns such a
+// run into a committed one with the same expiry, so a recovered run moves
+// from the retained failure to the committed package and is counted once.
+// A signing failure, like any finally failed publication, is historical
+// and never publication backlog.
 //
 // Deleted and operator-owned (orphaned) packages are not backlog. The
 // records outlive their bindings, so the backlog does too.
@@ -90,7 +97,7 @@ func StorageFrom(runs []v1alpha1.AssessmentRun, now time.Time) StorageSnapshot {
 			continue
 		}
 		p := r.Status.Publication
-		if r.Status.Phase != v1alpha1.RunCompleted || p == nil {
+		if p == nil || (r.Status.Phase != v1alpha1.RunCompleted && !retainedSigningFailure(r)) {
 			continue
 		}
 		switch {
@@ -105,6 +112,30 @@ func StorageFrom(runs []v1alpha1.AssessmentRun, now time.Time) StorageSnapshot {
 		}
 	}
 	return s
+}
+
+// retainedSigningFailure reports whether a Failed run keeps staged evidence
+// after a signing failure: no commit and failure reason SigningFailed. It
+// is the controller's retainedSigningFailure.
+func retainedSigningFailure(r *v1alpha1.AssessmentRun) bool {
+	p := r.Status.Publication
+	return r.Status.Phase == v1alpha1.RunFailed && p != nil && p.Commit == nil && p.Failure != nil && p.Failure.Reason == v1alpha1.ReasonSigningFailed
+}
+
+// RecoveryRequestsFrom counts EvidenceSigningRequests by recorded status
+// phase and reason. Requests are kept as audit records, so terminal ones
+// stay counted until they are deleted. A request the controller has not
+// accepted yet records no phase and is not counted; neither is a pair
+// outside the fixed vocabulary, which the CRD rejects.
+func RecoveryRequestsFrom(reqs []v1alpha1.EvidenceSigningRequest) map[RecoveryState]int {
+	out := map[RecoveryState]int{}
+	for i := range reqs {
+		st := RecoveryState{Phase: string(reqs[i].Status.Phase), Reason: string(reqs[i].Status.Reason)}
+		if st.valid() {
+			out[st]++
+		}
+	}
+	return out
 }
 
 // AssessmentSettings are a binding's effective assessment configuration.

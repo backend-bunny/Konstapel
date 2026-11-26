@@ -85,6 +85,13 @@ var (
 	CheckStates     = []string{"pass", "fail", "error", "skip", "accepted_risk", "out_of_scope", "unknown", "missing", "rejected", "unresolved"}
 	operationValues = []string{"bundle_resolution", "evidence_publication", "evidence_cleanup"}
 	resultValues    = []string{"success", "failure"}
+	// RecoveryPhases and RecoveryReasons are the EvidenceSigningRequest
+	// status vocabularies (v1alpha1.SigningRecoveryReasons), used as label
+	// values unchanged. Only a reason allowed with its phase is emitted.
+	RecoveryPhases  = []string{"Pending", "Running", "Succeeded", "Failed"}
+	RecoveryReasons = []string{"Accepted", "Waiting", "Signing", "Committing", "Recovered", "AlreadyRecovered",
+		"RunNotFound", "RunDeleting", "NotRecoverable", "Expired", "Orphaned", "EvidenceLost",
+		"KeyConfirmationRequired", "KeyMismatch", "SigningFailed", "Conflict"}
 )
 
 var (
@@ -96,6 +103,8 @@ var (
 	view       = Label{Name: "view", Values: viewValues}
 	operation  = Label{Name: "operation", Values: operationValues}
 	result     = Label{Name: "result", Values: resultValues}
+	phase      = Label{Name: "phase", Values: RecoveryPhases}
+	reason     = Label{Name: "reason", Values: RecoveryReasons}
 )
 
 const (
@@ -188,6 +197,9 @@ var Catalog = []Metric{
 	{Name: "konstapel_cleanup_oldest_expiry_timestamp_seconds", Type: Gauge, Unit: "seconds", Domain: DomainEvidenceStorage,
 		Help:         "Expiry of the oldest package with pending or blocked cleanup.",
 		Availability: "Only while the storage projection is fresh and ready and cleanup is pending or blocked.", Reset: stateGauge},
+	{Name: "konstapel_evidence_signing_recovery_requests", Type: Gauge, Labels: []Label{phase, reason}, Domain: DomainEvidenceStorage,
+		Help:         "EvidenceSigningRequests by recorded status phase and reason, including terminal requests kept as audit records.",
+		Availability: "Only while the storage projection is fresh and ready, for every reason allowed with its phase (zero when none); requests without a recorded phase are not counted.", Reset: stateGauge},
 }
 
 // DurationBuckets are the operation-duration histogram buckets, in seconds,
