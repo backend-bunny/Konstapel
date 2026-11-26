@@ -233,15 +233,19 @@ type OperationState int32
 
 const (
 	OperationState_OPERATION_STATE_UNSPECIFIED OperationState = 0
-	OperationState_OPERATION_STATE_PENDING     OperationState = 1
-	OperationState_OPERATION_STATE_RUNNING     OperationState = 2
+	// Recorded under its key; work has not started yet.
+	OperationState_OPERATION_STATE_PENDING OperationState = 1
+	// Work is running in the current attempt.
+	OperationState_OPERATION_STATE_RUNNING OperationState = 2
 	// Completed with a result. Completion does not imply complete evidence:
 	// the result's limitations say what was not assessed.
 	OperationState_OPERATION_STATE_SUCCEEDED OperationState = 3
 	// Failed without a result. An execution error, never a finding.
-	OperationState_OPERATION_STATE_FAILED    OperationState = 4
+	OperationState_OPERATION_STATE_FAILED OperationState = 4
+	// Cancellation was requested and work may still be stopping.
 	OperationState_OPERATION_STATE_CANCELING OperationState = 5
-	OperationState_OPERATION_STATE_CANCELED  OperationState = 6
+	// Cancellation completed without a result.
+	OperationState_OPERATION_STATE_CANCELED OperationState = 6
 	// The provider cannot establish whether work still runs. It stays
 	// explicit; the host never starts an untracked replacement.
 	OperationState_OPERATION_STATE_UNCERTAIN OperationState = 7
@@ -302,7 +306,9 @@ func (OperationState) EnumDescriptor() ([]byte, []int) {
 type EvidenceState int32
 
 const (
-	EvidenceState_EVIDENCE_STATE_UNSPECIFIED  EvidenceState = 0
+	EvidenceState_EVIDENCE_STATE_UNSPECIFIED EvidenceState = 0
+	// Usable evidence attributed to the observation: raw, outcome and
+	// evaluated are set.
 	EvidenceState_EVIDENCE_STATE_ATTRIBUTABLE EvidenceState = 1
 	// No evidence for the observation.
 	EvidenceState_EVIDENCE_STATE_MISSING EvidenceState = 2

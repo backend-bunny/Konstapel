@@ -1509,7 +1509,12 @@ supported or installable; see
 Providers that run as separately installed services, with a versioned
 remote protocol, are planned in the separate
 `add-external-assessment-providers` change. Nothing in this recipe is that
-protocol: every provider here is Go code compiled into the repository.
+protocol: every provider here is Go code compiled into the repository. The
+remote protocol is described in the
+[external provider protocol reference](integration/external-provider-protocol.md),
+and the [reporting quickstart](integration/external-provider-quickstart.md)
+runs a synthetic provider from an independent module. External providers
+cannot be registered yet.
 
 ### 1. Declare the descriptor
 
@@ -1755,7 +1760,8 @@ of every retained version stay installed:
   and the `konstapel-provider` plugin manifest, owned upstream and by the
   build, not by this change
 - the external provider protocol `konstapel.provider.v1`
-  ([`provider.proto`](../proto/konstapel/provider/v1/provider.proto), from
+  ([`provider.proto`](../proto/konstapel/provider/v1/provider.proto),
+  [protocol reference](integration/external-provider-protocol.md), from
   [`add-external-assessment-providers`](../openspec/changes/add-external-assessment-providers/proposal.md))
   and its wire fixtures. Its provider contract, payload and evaluator
   versions are this guide's descriptor version, `capture` versions and

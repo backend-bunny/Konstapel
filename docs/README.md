@@ -43,6 +43,12 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
   test-only provider boundary and the
   [provider-authoring recipe](assessment-providers.md#authoring-a-provider)
   with its Devbox commands. Kyverno is the only supported provider.
+- [External provider protocol](integration/external-provider-protocol.md):
+  the `konstapel.provider.v1` reference (RPCs, versions, errors, limits,
+  result transfer, transport and identity), and the
+  [reporting quickstart](integration/external-provider-quickstart.md) run
+  from an independent module. Registration of external providers is not
+  implemented yet.
 - [Images](images.md): melange/apko, SBOMs, license notices, signing, and verification.
 - [Releases](releases.md): release-please, required acceptance, and publication.
 - [v0.3.0 readiness](release-readiness.md): what release 0.3.0 ships, the test

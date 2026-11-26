@@ -299,14 +299,18 @@ message ScanKey {
 // OperationState is a scan operation's lifecycle state.
 enum OperationState {
   OPERATION_STATE_UNSPECIFIED = 0;
+  // Recorded under its key; work has not started yet.
   OPERATION_STATE_PENDING = 1;
+  // Work is running in the current attempt.
   OPERATION_STATE_RUNNING = 2;
   // Completed with a result. Completion does not imply complete evidence:
   // the result's limitations say what was not assessed.
   OPERATION_STATE_SUCCEEDED = 3;
   // Failed without a result. An execution error, never a finding.
   OPERATION_STATE_FAILED = 4;
+  // Cancellation was requested and work may still be stopping.
   OPERATION_STATE_CANCELING = 5;
+  // Cancellation completed without a result.
   OPERATION_STATE_CANCELED = 6;
   // The provider cannot establish whether work still runs. It stays
   // explicit; the host never starts an untracked replacement.
@@ -445,6 +449,8 @@ message EvaluateRequest {
 // EvidenceState is an expected observation's evidence state.
 enum EvidenceState {
   EVIDENCE_STATE_UNSPECIFIED = 0;
+  // Usable evidence attributed to the observation: raw, outcome and
+  // evaluated are set.
   EVIDENCE_STATE_ATTRIBUTABLE = 1;
   // No evidence for the observation.
   EVIDENCE_STATE_MISSING = 2;

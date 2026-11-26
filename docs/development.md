@@ -45,7 +45,7 @@ the configuration. `devbox install` installs the existing locked environment.
 | Task | Behavior |
 | --- | --- |
 | `task build` | Build the runner and C2P provider, including the provider manifest. |
-| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, plus CI decision and shell logging regression tests, and evaluate the documented Prometheus queries and the Helm-rendered starter alerts (`promtool check rules`, `promtool test rules`) with the digest-pinned promtool image (`scripts/promtool.sh`). |
+| `task test` | Run Go tests, including the real provider handshake and saved-evidence checks, the independent external-provider example module (tidiness, `gofmt`, `go vet`, its tests and the documented [quickstart](integration/external-provider-quickstart.md) commands, through `scripts/examples/external-provider.sh`), plus CI decision and shell logging regression tests, and evaluate the documented Prometheus queries and the Helm-rendered starter alerts (`promtool check rules`, `promtool test rules`) with the digest-pinned promtool image (`scripts/promtool.sh`). |
 | `task lint` | Check Go formatting, `go vet`, generated API files, Helm chart metadata, versions and values-schema fixtures (`scripts/charts/check.sh`), and shell syntax. |
 | `task content:check` | Verify vendored policy, OSCAL, and schema checksums. |
 | `task policies:test` | Run the vendored Kyverno CLI fixtures and the CLI checks of rendered targeting policies. |
@@ -70,7 +70,13 @@ and `protoc-gen-go-grpc`; `task lint` fails when it is stale, and
 under `proto/konstapel/provider/v1/testdata/wire/cases`, record its binary
 encoding with
 `devbox run -- go test ./pkg/providerkit -run TestWireFixtures -update-wire`,
-which never rewrites an existing encoding.
+which never rewrites an existing encoding. The generated tables of the
+[protocol reference](integration/external-provider-protocol.md) are checked
+by `TestProtocolReference`; after a deliberate protocol change, rewrite them
+with `devbox run -- go test ./pkg/providerkit -run TestProtocolReference -update-protocol-doc`.
+The example module `examples/external-provider/reporting` has its own
+`go.mod`; when a dependency bump in the root `go.mod` makes it stale, run
+`go mod tidy` in that directory.
 
 `task check` needs no cluster. Its only Docker use is the pinned promtool image
 (`KONSTAPEL_PROMTOOL_IMAGE` in `scripts/runtime.env`, Renovate-tracked and
