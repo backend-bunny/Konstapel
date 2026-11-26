@@ -106,7 +106,10 @@ type ProviderEndpoint struct {
 	// controller authorizes, whatever address it connects to. Common
 	// names, URIs, IP addresses and wildcard names in the certificate never
 	// match it. It is explicit, never derived from the Service, and a
-	// lowercase DNS name without a wildcard, trailing dot or IP address.
+	// lowercase RFC 1123 DNS name without a wildcard, trailing dot or IP
+	// address. A URI (for example SPIFFE) server identity, if one is ever
+	// supported, will be a separate optional field; serverName stays a DNS
+	// name.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
