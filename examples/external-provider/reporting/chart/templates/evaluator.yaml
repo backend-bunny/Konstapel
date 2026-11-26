@@ -1,0 +1,67 @@
+# The evaluator: Evaluate only, with no source, no RBAC, no Kubernetes API
+# token and (networkpolicy.yaml) no egress.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "reporting.evaluator" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: evaluator
+spec:
+  replicas: {{ .Values.evaluator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "reporting.selector" (dict "root" . "component" "evaluator") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "reporting.labels" . | nindent 8 }}
+        app.kubernetes.io/component: evaluator
+    spec:
+      serviceAccountName: {{ include "reporting.evaluator" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "reporting.podSecurity" . | nindent 8 }}
+      containers:
+        - name: provider
+          image: {{ include "reporting.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -role=evaluator
+            - -implementation={{ .Values.image.digest }}
+            - -listen=:{{ .Values.ports.protocol }}
+            - -health-listen=:{{ .Values.ports.health }}
+            - -tls-dir=/etc/example-reporting/tls
+            - -authorized-hosts={{ join "," (prepend .Values.evaluator.authorizedHosts (include "reporting.workerClientName" .)) }}
+          ports:
+            - {name: protocol, containerPort: {{ .Values.ports.protocol }}, protocol: TCP}
+            - {name: health, containerPort: {{ .Values.ports.health }}, protocol: TCP}
+          {{- include "reporting.probes" . | nindent 10 }}
+          securityContext:
+            {{- include "reporting.containerSecurity" . | nindent 12 }}
+          {{- with .Values.evaluator.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - {name: tls, mountPath: /etc/example-reporting/tls, readOnly: true}
+      volumes:
+        - name: tls
+          secret: {secretName: {{ include "reporting.evaluatorSecret" . }}, defaultMode: 0440}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "reporting.evaluator" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: evaluator
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "reporting.selector" (dict "root" . "component" "evaluator") | nindent 4 }}
+  ports:
+    - {name: protocol, port: {{ .Values.ports.protocol }}, targetPort: protocol, protocol: TCP}

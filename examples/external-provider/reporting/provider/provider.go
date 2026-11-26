@@ -1,13 +1,19 @@
 // Package provider is a tiny synthetic reporting provider built only on the
-// public Konstapel provider kit. It collects existing "evidence" from an
-// in-memory source (namespace labels), stages each result until the host
-// acknowledges it, and evaluates one check kind, RequiredLabel, over a frozen
-// payload.
+// public Konstapel provider kit. It collects existing "evidence" (namespace
+// labels) from a source, stages each result until the host acknowledges it,
+// and evaluates one check kind, RequiredLabel, over a frozen payload.
 //
-// It is a demonstration of the protocol, not a supported provider: the
-// source is a fixed map, and staging lives in memory, so a restart loses
-// unacknowledged results. A real provider persists staged results until
-// acknowledgement or the end of the handoff window.
+// The quickstart runs it as one process over a fixed in-memory source. The
+// reference chart (chart/, see docs/integration/external-provider-chart.md)
+// runs the same code as two deployments with separate identities: a source
+// worker that reads Namespaces from the Kubernetes API and forwards each
+// evaluation unchanged, and a credential-free evaluator that only evaluates
+// (Roles).
+//
+// It is a demonstration of the protocol, not a supported provider: staging
+// lives in memory, so a restart loses unacknowledged results. A real
+// provider persists staged results until acknowledgement or the end of the
+// handoff window.
 package provider
 
 import (
@@ -36,6 +42,10 @@ const (
 	CheckKind = "reporting.example.test/v1/RequiredLabel"
 	// Handoff is how long a staged result waits for acknowledgement.
 	Handoff = 10 * time.Minute
+	// QuickstartImplementation is the implementation the quickstart's
+	// combined process reports. A deployed provider reports its release
+	// digest instead, the one its registration expects.
+	QuickstartImplementation = "example-reporting quickstart (unversioned local build)"
 )
 
 // Namespace is one namespace of the synthetic source.
@@ -44,29 +54,62 @@ type Namespace struct {
 	Labels map[string]string
 }
 
+// NamespaceSource is where Collect reads namespaces: the quickstart's
+// Synthetic map or the Kubernetes API (Kubernetes). Namespace reports
+// found=false for a namespace the source does not have; any other failure
+// is an error, never an absent namespace. String names the source in
+// limitations.
+type NamespaceSource interface {
+	Namespace(ctx context.Context, name string) (ns Namespace, found bool, err error)
+	String() string
+}
+
+// Synthetic is a fixed in-memory source.
+type Synthetic map[string]Namespace
+
+// Namespace looks name up in the map.
+func (s Synthetic) Namespace(_ context.Context, name string) (Namespace, bool, error) {
+	ns, ok := s[name]
+	return ns, ok, nil
+}
+
+func (Synthetic) String() string { return "the synthetic source" }
+
 // Source is the synthetic evidence source the quickstart reads: two
 // namespaces, one labeled with an owner and one without.
-func Source() map[string]Namespace {
-	return map[string]Namespace{
+func Source() Synthetic {
+	return Synthetic{
 		"team-a": {UID: "6f1c7a52-0000-4000-8000-00000000000a", Labels: map[string]string{"owner": "alice"}},
 		"team-b": {UID: "6f1c7a52-0000-4000-8000-00000000000b", Labels: map[string]string{}},
 	}
 }
 
-// Description is the provider's Describe response.
+// Description is the Describe response of the quickstart's combined
+// process.
 func Description() *providerv1.DescribeResponse {
+	return Describe(RoleCombined, QuickstartImplementation)
+}
+
+// Describe is the Describe response of a process serving role, reporting
+// implementation. The worker and the evaluator describe the same provider,
+// contract, versions, limits and release; only their capabilities differ.
+func Describe(role Role, implementation string) *providerv1.DescribeResponse {
+	capabilities := []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE}
+	if role == RoleEvaluator {
+		capabilities = []providerv1.Capability{providerv1.Capability_CAPABILITY_EVALUATE}
+	}
 	return &providerv1.DescribeResponse{
 		Provider:         &providerv1.ProviderContract{Name: Name, Version: ContractVersion},
 		ProtocolVersions: []uint32{providerkit.ProtocolVersion},
 		EvaluatorVersion: EvaluatorVersion,
 		Payload:          &providerv1.PayloadCompatibility{Write: PayloadVersion, Read: []uint32{PayloadVersion}},
-		Capabilities:     []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE},
+		Capabilities:     capabilities,
 		Checks:           []*providerv1.CheckKind{{Kind: CheckKind}},
 		// Stricter than the kit defaults, so even this small payload
 		// travels in several chunks. The host applies the stricter of its
 		// own bounds and these.
 		Limits:         &providerv1.Limits{MaxResultBytes: 1 << 20, MaxChunkBytes: 256, MaxObservations: 1000},
-		Implementation: "example-reporting quickstart (unversioned local build)",
+		Implementation: implementation,
 	}
 }
 
@@ -88,9 +131,10 @@ type staged struct {
 	data []byte
 }
 
-// Provider implements the kit's Collector, Results and Evaluator.
+// Provider implements the kit's Collector and Results over a source, and,
+// in the quickstart's combined process, Evaluator.
 type Provider struct {
-	source map[string]Namespace
+	source NamespaceSource
 	now    func() time.Time
 
 	mu     sync.Mutex
@@ -98,30 +142,34 @@ type Provider struct {
 }
 
 // New returns a provider reading source.
-func New(source map[string]Namespace) *Provider {
+func New(source NamespaceSource) *Provider {
 	return &Provider{source: source, now: time.Now, staged: map[string]staged{}}
 }
 
-// Handlers are the provider's kit handlers.
+// Handlers are the combined process's kit handlers: collection and
+// evaluation in one process.
 func (p *Provider) Handlers() providerkit.Handlers {
-	return providerkit.Handlers{Collector: p, Results: p, Evaluator: p}
+	return providerkit.Handlers{Collector: p, Results: p, Evaluator: Evaluator{}}
 }
 
 // Collect reads the source for the frozen scope. Only namespaces whose name
 // and UID both match the scope are returned; every other scope namespace is
-// a limitation, never an empty pass.
-func (p *Provider) Collect(_ context.Context, req *providerv1.CollectRequest) (*providerv1.ResultReference, error) {
+// a limitation, never an empty pass. A source that cannot be read fails the
+// collection: nothing is staged.
+func (p *Provider) Collect(ctx context.Context, req *providerv1.CollectRequest) (*providerv1.ResultReference, error) {
 	now := p.now().UTC().Truncate(time.Second)
 	out := payload{Cluster: req.GetScope().GetCluster(), Namespaces: []payloadNamespace{}}
 	var limitations []string
 	for _, ns := range req.GetScope().GetNamespaces() {
-		src, ok := p.source[ns.GetName()]
+		src, ok, err := p.source.Namespace(ctx, ns.GetName())
 		switch {
+		case err != nil:
+			return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_UNAVAILABLE, "read namespace %s: %v", ns.GetName(), err)
 		case !ok:
-			limitations = append(limitations, "namespace "+ns.GetName()+" is not in the synthetic source")
+			limitations = append(limitations, "namespace "+ns.GetName()+" is not in "+p.source.String())
 			continue
 		case src.UID != ns.GetUid():
-			limitations = append(limitations, "namespace "+ns.GetName()+" has another uid in the synthetic source")
+			limitations = append(limitations, "namespace "+ns.GetName()+" has another uid in "+p.source.String())
 			continue
 		}
 		out.Namespaces = append(out.Namespaces, payloadNamespace{Name: ns.GetName(), UID: src.UID, Labels: src.Labels, Observed: now})
@@ -179,9 +227,14 @@ func (p *Provider) Staged() int {
 	return len(p.staged)
 }
 
+// Evaluator is the provider's evaluation: a pure function of the start
+// message and the payload. It holds no source, so the evaluator process
+// has nothing to read but its input.
+type Evaluator struct{}
+
 // Evaluate evaluates every RequiredLabel check for every scope namespace,
 // reading only the start and the payload.
-func (p *Provider) Evaluate(_ context.Context, start *providerv1.EvaluateStart, data []byte) (*providerkit.Evaluation, error) {
+func (Evaluator) Evaluate(_ context.Context, start *providerv1.EvaluateStart, data []byte) (*providerkit.Evaluation, error) {
 	var in payload
 	if err := json.Unmarshal(data, &in); err != nil {
 		return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_INVALID_REQUEST, "payload is not version %d: %v", PayloadVersion, err)

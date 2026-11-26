@@ -33,7 +33,7 @@ jobs:
         run: |
           bash scripts/ci/acceptance-scope.sh >> "$GITHUB_OUTPUT"
           echo "groups=$(jq -c 'keys' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
-          echo "image-groups=$(jq -c '[to_entries[] | select(.value.image == true) | .key]' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
+          echo "image-groups=$(jq -c '[to_entries[] | select(.value.image == true or .value.referenceProviderImage == true) | .key]' scripts/acceptance-groups.json)" >> "$GITHUB_OUTPUT"
           # Each group's timeoutMinutes bounds its run; the job adds 20 minutes
           # for setup (image build), post-timeout diagnostics and teardown, and
           # the evidence upload. scripts/ci/test_acceptance.py checks both.
@@ -78,7 +78,7 @@ jobs:
       - uses: ./.github/actions/setup-tools
         with:
           user-namespaces: ${{ matrix.group == 'admission' }}
-          # Groups marked "image" in acceptance-groups.json build the controller image they install.
+          # Groups marked "image" or "referenceProviderImage" in acceptance-groups.json build the image they install.
           image: ${{ contains(fromJSON(needs.acceptance-scope.outputs.image-groups), matrix.group) }}
       - name: Run acceptance
         env:

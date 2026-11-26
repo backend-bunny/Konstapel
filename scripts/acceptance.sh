@@ -105,6 +105,31 @@ if [[ -n $deadline ]]; then
   ) &
   watchdog=$!
 fi
+# load_image ARCHIVE REPOSITORY LOG loads ARCHIVE (tag REPOSITORY:build-amd64)
+# into every disposable node and sets loaded=REPOSITORY@<manifest digest>.
+# The node records a digest only for kind's import alias; the image is named
+# by that digest under its real repository so a chart's repository@digest
+# reference resolves locally (pullPolicy Never).
+load_image() {
+  local archive=$1 repository=$2 log=$3 node="$KONSTAPEL_CLUSTER_NAME-control-plane" imported= attempt each
+  kind load image-archive "$archive" --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee "$log"
+  # containerd can register an archive import a moment after kind returns:
+  # wait for it, and load once more if it never appears.
+  for attempt in $(seq 1 30); do
+    if imported=$(docker exec "$node" crictl inspecti -o json "$repository:build-amd64" 2>/dev/null | jq -er '.status.repoDigests[0]'); then
+      break
+    fi
+    if (( attempt == 15 )); then
+      kind load image-archive "$archive" --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee -a "$log"
+    fi
+    sleep 2
+  done
+  [[ -n $imported ]] || { echo "the loaded image $repository never appeared on $node" | tee -a "$log"; exit 1; }
+  loaded=$repository@${imported##*@}
+  for each in $(kind get nodes --name "$KONSTAPEL_CLUSTER_NAME"); do
+    docker exec "$each" ctr -n k8s.io images tag "$repository:build-amd64" "$loaded" 2>&1 | tee -a "$log"
+  done
+}
 # The version matrix exists even when the cluster never comes up.
 scripts/acceptance-evidence.sh versions "$out" "$group" 2>&1 | tee "$out/versions.log" ||
   stage 'Recording the version matrix failed; see versions.log'
@@ -178,30 +203,19 @@ elif includes image; then
   # loaded into the disposable node and referenced by its digest.
   stage 'Building the controller image and loading it into the disposable cluster'
   scripts/image/build.sh 2>&1 | tee "$out/image-build.log"
-  kind load image-archive out/image/image.tar --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee "$out/image-load.log"
-  # The node records a digest only for kind's import alias; name the image by
-  # that manifest digest under its real repository so the chart's
-  # repository@digest reference resolves locally (pullPolicy Never).
-  node="$KONSTAPEL_CLUSTER_NAME-control-plane"
-  # containerd can register an archive import a moment after kind returns:
-  # wait for it, and load once more if it never appears.
-  imported=
-  for attempt in $(seq 1 30); do
-    if imported=$(docker exec "$node" crictl inspecti -o json ghcr.io/backend-bunny/konstapel:build-amd64 2>/dev/null | jq -er '.status.repoDigests[0]'); then
-      break
-    fi
-    if (( attempt == 15 )); then
-      kind load image-archive out/image/image.tar --name "$KONSTAPEL_CLUSTER_NAME" 2>&1 | tee -a "$out/image-load.log"
-    fi
-    sleep 2
-  done
-  [[ -n $imported ]] || { echo "the loaded controller image never appeared on $node" | tee -a "$out/image-load.log"; exit 1; }
-  KONSTAPEL_LIVE_IMAGE=ghcr.io/backend-bunny/konstapel@${imported##*@}
-  for each in $(kind get nodes --name "$KONSTAPEL_CLUSTER_NAME"); do
-    docker exec "$each" ctr -n k8s.io images tag ghcr.io/backend-bunny/konstapel:build-amd64 "$KONSTAPEL_LIVE_IMAGE" 2>&1 | tee -a "$out/image-load.log"
-  done
+  load_image out/image/image.tar ghcr.io/backend-bunny/konstapel "$out/image-load.log"
+  KONSTAPEL_LIVE_IMAGE=$loaded
   export KONSTAPEL_LIVE_IMAGE
   echo "$KONSTAPEL_LIVE_IMAGE" | tee "$out/image-ref.txt"
+fi
+if includes referenceProviderImage; then
+  # The example reporting provider's reference chart runs its image built
+  # from this checkout (test/demo only, never published), by digest.
+  stage 'Building the example reporting provider image and loading it into the disposable cluster'
+  scripts/examples/reference-provider-image.sh "$out/reference-provider-image" 2>&1 | tee "$out/reference-provider-image.log"
+  load_image "$out/reference-provider-image/image.tar" localhost/konstapel-example-reporting "$out/reference-provider-image-load.log"
+  export KONSTAPEL_LIVE_REFERENCE_PROVIDER_IMAGE=$loaded
+  echo "$KONSTAPEL_LIVE_REFERENCE_PROVIDER_IMAGE" | tee "$out/reference-provider-image-ref.txt"
 fi
 # Targeting delivery: Audit/Deny bindings, relabelling, ready-gated replacement,
 # withdrawal, and non-adoption of a prototype-style unmanaged policy.

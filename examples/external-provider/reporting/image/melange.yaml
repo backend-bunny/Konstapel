@@ -1,0 +1,59 @@
+# The example reporting provider's image (add-external-assessment-providers
+# 5.1): a test/demo artifact, never published and never registered by
+# default. scripts/examples/reference-provider-image.sh builds it the way the
+# controller image is built (scripts/image/build.sh): it exports this module
+# with the public Konstapel packages it uses, verifies and vendors the Go
+# modules, and runs melange in its sandbox with module network access off.
+# Reference image signing, SBOMs and provenance are task 5.2.
+package:
+  name: konstapel-example-reporting
+  version: "0.1.0"
+  epoch: 0
+  description: "Synthetic example-reporting external assessment provider (test/demo only)"
+  copyright:
+    - license: Apache-2.0
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+  environment:
+    CGO_ENABLED: "0"
+    GOFLAGS: "-mod=vendor -trimpath -buildvcs=false"
+    GOTOOLCHAIN: local
+    GOPROXY: "off"
+    GOSUMDB: "off"
+    GOCACHE: /var/cache/melange/go-build
+
+pipeline:
+  - name: Build the provider
+    runs: |
+      set -eu
+      mkdir -p "${{targets.destdir}}/usr/bin" "${{targets.destdir}}/usr/share/doc/konstapel-example-reporting"
+      go build -o "${{targets.destdir}}/usr/bin/reporting-provider" ./cmd/reporting-provider
+      cp LICENSE NOTICE "${{targets.destdir}}/usr/share/doc/konstapel-example-reporting/"
+      go version > "${{targets.destdir}}/usr/share/doc/konstapel-example-reporting/go-version.txt"
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+        - binutils
+  pipeline:
+    - runs: |
+        set -eu
+        if readelf -l /usr/bin/reporting-provider | grep -q 'Requesting program interpreter'; then
+          echo "reporting-provider is dynamically linked" >&2
+          exit 1
+        fi
+        # The evaluator role refuses to start without a release digest.
+        if reporting-provider -role evaluator -tls-dir /nonexistent 2>/tmp/err; then
+          echo "the evaluator started without -implementation" >&2
+          exit 1
+        fi
+        grep -q 'needs -implementation' /tmp/err

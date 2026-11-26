@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,9 +34,17 @@ var testOnlyMarkers = []string{
 	reporttest.CheckKind,
 }
 
+// referenceMarkers identify the example reporting provider of
+// examples/external-provider/reporting (add-external-assessment-providers
+// 5.1): its provider name, which its check group, image and chart names
+// contain, its check group and its module path. It is a test/demo artifact
+// like the test-only provider: nothing Konstapel ships names it, so no
+// default installation registers or selects it.
+var referenceMarkers = []string{"example-reporting", "reporting.example.test", "example.com/konstapel-reporting"}
+
 func markersIn(b []byte) []string {
 	var found []string
-	for _, m := range testOnlyMarkers {
+	for _, m := range append(slices.Clone(testOnlyMarkers), referenceMarkers...) {
 		if bytes.Contains(b, []byte(m)) {
 			found = append(found, m)
 		}
@@ -170,5 +179,21 @@ func TestShippedBundlesNameNoTestOnlyProvider(t *testing.T) {
 	}
 	if found := markersIn(sources); len(found) > 0 {
 		t.Errorf("bundles/official-sources.yaml carries test-only markers %v", found)
+	}
+}
+
+// The example reporting provider is not compiled in: its contract resolves
+// to no installed provider, so only an administrator's AssessmentProvider
+// registration could ever select it, and no shipped artifact carries one
+// (the scans above and internal/charttest TestChartsRegisterNoReferenceProvider).
+func TestReferenceProviderIsNotInstalled(t *testing.T) {
+	r := installed.Registry()
+	if d, err := r.Lookup("example-reporting/v1"); err == nil {
+		t.Fatalf("example-reporting/v1 resolves to installed provider %+v", d)
+	}
+	for _, d := range r.Descriptors() {
+		if found := markersIn([]byte(d.Name + " " + d.Contract())); len(found) > 0 {
+			t.Errorf("installed provider %s carries markers %v", d.Name, found)
+		}
 	}
 }

@@ -37,7 +37,7 @@ func serveWith(t *testing.T, o certs.Options) (string, string, *provider.Provide
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- provider.Serve(ctx, p, provider.Config{Listener: lis, TLS: providerkit.SecretFiles(filepath.Join(dir, "server")),
+		done <- provider.Serve(ctx, provider.CombinedService(p), provider.Config{Listener: lis, TLS: providerkit.SecretFiles(filepath.Join(dir, "server")),
 			AuthorizedHosts: []string{certs.HostName}, Log: t.Logf})
 	}()
 	t.Cleanup(func() {

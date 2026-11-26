@@ -25,8 +25,11 @@ assert any(p['name'] == 'github.com/oscal-compass/compliance-to-policy-go/v2' fo
 # (add-assessment-provider-contract 4.3): no Konstapel file in the image,
 # binaries, plugin manifest or content, carries their package paths or
 # identities (internal/provider/installed checks the same markers before
-# the image is built).
-markers = [b'internal/provider/reporttest', b'internal/provider/conformance', b'konstapel-reporttest', b'reporttest.konstapel.io']
+# the image is built). Neither does the example reporting provider
+# (examples/external-provider/reporting, add-external-assessment-providers
+# 5.1), which only its own reference image and chart carry.
+markers = [b'internal/provider/reporttest', b'internal/provider/conformance', b'konstapel-reporttest', b'reporttest.konstapel.io',
+           b'example-reporting', b'reporting.example.test', b'example.com/konstapel-reporting']
 payload = dict(image_files('out/image/image.tar', lambda p: p.startswith('usr/share/konstapel/')))
 for name in ('usr/share/konstapel/bin/konstapel', 'usr/share/konstapel/bin/konstapel-provider', 'usr/share/konstapel/bin/c2p-konstapel-kyverno-manifest.json'):
     assert name in payload, f'{name} missing from image'

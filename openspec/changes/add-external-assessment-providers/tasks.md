@@ -51,7 +51,7 @@ Each group includes its tests and documentation; final tasks prove integration.
 
 ## 5. Independent distribution and compatibility
 
-- [ ] 5.1 Provide reference provider charts with dedicated identities, source-worker/evaluator separation and digest-pinned images; verify rendered permissions and live denied source access from the evaluator, TLS rotation and default absence from production registration.
+- [x] 5.1 Provide reference provider charts with dedicated identities, source-worker/evaluator separation and digest-pinned images; verify rendered permissions and live denied source access from the evaluator, TLS rotation and default absence from production registration.
   <!-- agent: tier=deep risk=high -->
 - [ ] 5.2 Add reference OCI image/chart signing, SBOM/provenance and verification instructions using existing build conventions; test valid and mismatched digest/publisher fixtures without publishing production artifacts.
   <!-- agent: tier=deep risk=high -->

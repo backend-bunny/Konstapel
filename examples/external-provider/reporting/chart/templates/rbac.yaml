@@ -1,0 +1,30 @@
+# The worker's source access, and the only permission the chart grants:
+# get on Namespaces (no list, watch or write, no other resource). The
+# evaluator is bound to nothing.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "reporting.worker" . }}-{{ .Release.Namespace }}-source
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "reporting.worker" . }}-{{ .Release.Namespace }}-source
+  labels:
+    {{- include "reporting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "reporting.worker" . }}-{{ .Release.Namespace }}-source
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "reporting.worker" . }}
+    namespace: {{ .Release.Namespace }}

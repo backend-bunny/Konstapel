@@ -47,7 +47,9 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
   the `konstapel.provider.v1` reference (RPCs, versions, errors, limits,
   result transfer, transport and identity), and the
   [reporting quickstart](integration/external-provider-quickstart.md) run
-  from an independent module. Registrations are probed only with the chart's
+  from an independent module, and its
+  [reference provider chart](integration/external-provider-chart.md)
+  (test/demo). Registrations are probed only with the chart's
   [external provider client](charts.md#external-assessment-providers), and
   no assessment run uses an external provider yet.
 - [Images](images.md): melange/apko, SBOMs, license notices, signing, and verification.

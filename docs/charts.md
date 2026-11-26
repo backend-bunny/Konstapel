@@ -1282,7 +1282,11 @@ No other object changes. In particular:
 
 - **No provider is installed.** The chart renders no provider Deployment,
   Service, image or chart, and the controller does not download or start
-  one.
+  one. Providers have their own charts; the
+  [reference provider chart](integration/external-provider-chart.md) of the
+  example reporting provider shows the shape (separate source-worker and
+  evaluator identities, mutual TLS from rotated Secrets, a digest-pinned
+  image) and is a test/demo artifact that no Konstapel chart refers to.
 - **No registration role is bound.** The chart ships
   `konstapel-assessment-provider-admin` and
   `konstapel-assessment-provider-viewer` but binds neither.

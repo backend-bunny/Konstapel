@@ -127,6 +127,16 @@
       "TestLiveHelmFailoverTraffic"
     ]
   },
+  "providers": {
+    "core": false,
+    "exceptionAdmission": false,
+    "referenceProviderImage": true,
+    "release": false,
+    "timeoutMinutes": 25,
+    "goTests": [
+      "TestLiveReferenceProviderChart"
+    ]
+  },
   "bundles": {
     "core": false,
     "exceptionAdmission": false,

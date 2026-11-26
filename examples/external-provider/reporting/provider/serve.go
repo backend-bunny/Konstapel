@@ -32,10 +32,13 @@ type Config struct {
 	Reload time.Duration
 	// Log receives one line per event.
 	Log func(format string, args ...any)
+	// Ready, when set, is checked by /readyz after the serving material:
+	// the worker reports its evaluator client's TLS material there.
+	Ready func() error
 }
 
-// Serve runs the provider until ctx ends.
-func Serve(ctx context.Context, p *Provider, c Config) error {
+// Serve runs s until ctx ends.
+func Serve(ctx context.Context, s Service, c Config) error {
 	if c.Log == nil {
 		c.Log = func(string, ...any) {}
 	}
@@ -43,7 +46,7 @@ func Serve(ctx context.Context, p *Provider, c Config) error {
 	if err != nil {
 		return err
 	}
-	srv, err := providerkit.NewServer(Description(), p.Handlers())
+	srv, err := providerkit.NewServer(s.Description, s.Handlers)
 	if err != nil {
 		return err
 	}
@@ -65,7 +68,11 @@ func Serve(ctx context.Context, p *Provider, c Config) error {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
 		mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-			if err := mtls.Ready(); err != nil {
+			err := mtls.Ready()
+			if err == nil && c.Ready != nil {
+				err = c.Ready()
+			}
+			if err != nil {
 				http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
 				return
 			}
@@ -78,6 +85,9 @@ func Serve(ctx context.Context, p *Provider, c Config) error {
 	}
 	go func() { errs <- g.Serve(c.Listener) }()
 	c.Log("serving %s/v%d on %s for %v", Name, ContractVersion, c.Listener.Addr(), c.AuthorizedHosts)
+	if s.Description.GetImplementation() != QuickstartImplementation {
+		c.Log("capabilities %v, implementation %s", s.Description.GetCapabilities(), s.Description.GetImplementation())
+	}
 
 	select {
 	case <-ctx.Done():
