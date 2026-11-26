@@ -50,6 +50,7 @@
       "TestLiveDestinationSigning",
       "TestLiveSignedEvidenceDownload",
       "TestLiveSignedPublicationWorkflow",
+      "TestLiveSigningRecoveryWorkflow",
       "TestLiveAttachmentStorage",
       "TestLiveAttachmentTransfer",
       "TestLiveAttachmentLifecycle",
