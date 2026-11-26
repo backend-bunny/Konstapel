@@ -106,6 +106,29 @@ class AttachmentAcceptanceTests(unittest.TestCase):
                 self.assertIn(test, acceptance.GROUPS[group]["goTests"])
 
 
+class SigningRecoveryFaultTests(unittest.TestCase):
+    """add-evidence-signing-recovery 5.2: the live recovery fault cases run in
+    the mandatory recovery group on the test S3 service, each with its fault
+    injected at a fixed point and its end state asserted."""
+
+    TEST = "TestLiveSigningRecoveryFaults"
+    SOURCE = HERE.parents[1] / "internal/controller/signing_recovery_faults_live_test.go"
+
+    def test_the_fault_cases_are_in_the_recovery_group(self):
+        self.assertIn(self.TEST, acceptance.GROUPS["recovery"]["goTests"])
+
+    def test_every_fault_case_and_its_outcome_is_exercised(self):
+        text = self.SOURCE.read_text()
+        for outcome in ("RecoveryKeyMismatch", "RecoveryExpired", "RecoveryEvidenceLost", "RecoveryOrphaned",
+                        "RecoveryRecovered", "RecoveryAlreadyRecovered"):
+            with self.subTest(outcome=outcome):
+                self.assertIn("v1alpha1." + outcome, text)
+        for fault in ("liveStopAfterRunWrite{", "liveStopBeforeSuccess{", "newBarrier(", "DeletionOrphan",
+                      "the commit response was lost", "the leader stopped after storing the signature"):
+            with self.subTest(fault=fault):
+                self.assertIn(fault, text)
+
+
 class ReleaseGroupTests(unittest.TestCase):
     """Release acceptance (scripts/charts/acceptance.sh) runs exactly the
     groups marked "release": true against the frozen chart archives and the

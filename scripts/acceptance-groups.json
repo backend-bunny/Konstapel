@@ -100,7 +100,7 @@
     "core": false,
     "exceptionAdmission": false,
     "release": false,
-    "timeoutMinutes": 35,
+    "timeoutMinutes": 45,
     "goTests": [
       "TestLiveTargetingFailures",
       "TestLiveAssessmentFaults",
@@ -109,7 +109,8 @@
       "TestLiveLeaderHandoverLoss",
       "TestLiveSupportingEvidenceRecovery",
       "TestLivePublicationFaults",
-      "TestLiveSigningRecoveryClaim"
+      "TestLiveSigningRecoveryClaim",
+      "TestLiveSigningRecoveryFaults"
     ]
   },
   "availability": {
