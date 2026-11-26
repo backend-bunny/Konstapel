@@ -279,7 +279,12 @@ passing, so selector inclusion is also checked in Go.
   `Conflicts` and left unchanged. Labels alone do not confer ownership.
 - **Readiness.** A policy is ready when Kyverno reports
   `RBACPermissionsGranted` and `WebhookConfigured`. `NotReady` lists desired
-  policies that are not ready yet.
+  policies that are not ready yet. `Readiness` explains each of them: one
+  entry per expected condition that isn't `True`, with Kyverno's reason and
+  message (byte-bounded, otherwise as reported). A condition Kyverno hasn't
+  reported is `Missing`; one that can't be read is `Malformed`. Both count as
+  not ready. These details are diagnostic only: they never change which
+  policies are ready, retained or removed.
 - **Replacement.** When a revision changes, the new policy is created next to
   the old one. The old one stays in `Retained` until every desired instance of
   that logical policy is ready, and only then is it deleted. During the overlap
@@ -475,7 +480,7 @@ shows with the collector:
 | `EngineReady` reason | Meaning |
 | --- | --- |
 | `Ready` | Every desired policy exists at the current revision and Kyverno reports it ready. The message says this is not a compliance result. |
-| `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. Retried every 5 seconds. |
+| `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. The message names the failing Kyverno readiness conditions per policy (see [Readiness diagnostics](#readiness-diagnostics)). Retried every 5 seconds. |
 | `StaleRevision` | Configuration did not resolve (see `Resolved`). The last applied policies, if any, stay in force and are named in the message. |
 | `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched; the binding re-checks every minute and delivers once the name is free. |
 | `EngineAPINotServed` | `policies.kyverno.io/v1` is not served. Nothing is changed. |
@@ -490,6 +495,44 @@ currently matches, while the policies stay installed for namespaces created
 later. `status.configurationRevision` is the revision when there is one
 contribution, otherwise a digest of all contribution revisions. Messages are
 capped at 1024 bytes.
+
+### Readiness diagnostics
+
+A `ReplacementPending` message starts with the Kyverno readiness conditions
+that block the binding, then lists the retained revisions:
+
+```text
+waiting for engine readiness: RBACPermissionsGranted=False RBACNotGranted: "<Kyverno message>" on konstapel-disallow-privileged-containers-0123456789abcdef; retained until ready: konstapel-disallow-privileged-containers-fedcba9876543210
+```
+
+- Each entry is `CONDITION=STATUS [REASON]: "MESSAGE" on POLICY`, where
+  `POLICY` is the `ValidatingPolicy` name. A condition Kyverno hasn't
+  reported shows as `=Unknown (condition missing)`, an unreadable one as
+  `=Unknown (condition malformed)`. Neither is ever shown as ready.
+- Policies that report the same condition, reason and message share one
+  entry: `on POLICY1, POLICY2 and N more`.
+- Entries are sorted by policy and then condition, so an unchanged engine
+  state never rewrites status.
+- Kyverno's text is made safe for display. Control and formatting
+  characters (line breaks, the escape character, bidirectional overrides) and
+  whitespace runs become one space, invalid UTF-8 becomes U+FFFD, and
+  double quotes become single quotes. Reasons are cut to 64 bytes and
+  messages to 200 bytes, ending in `...`.
+- When entries don't fit the 1024-byte message, the message says
+  `N more diagnostics not shown`. Whenever anything is cut or left out, the
+  message adds, before the retained list, a command that shows every
+  condition in full:
+
+  ```sh
+  kubectl get validatingpolicies -l compliance.erenius.io/binding-uid=<binding UID> -o yaml
+  ```
+
+  The retained list is capped at about 200 bytes; a cut list ends with
+  `and N more`.
+
+The message describes engine acceptance only. It's never a compliance
+result, and `Resolved=True` alongside it doesn't mean enforcement or
+evidence is in place. Messages never become metric labels.
 
 Profile status has one `Resolved` condition: `ContentUnavailable`,
 `UnknownPolicy`, `UnsupportedScope`, or `Resolved`.
@@ -523,9 +566,14 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
   `UnknownPolicy`, `UnsupportedScope`, `InvalidConfiguration` or
   `InvalidSelector`. Fix the profile or binding; the previous enforcement stays
   in force meanwhile.
-- `EngineReady=False, ReplacementPending` for a long time: check Kyverno's
-  conditions on the new policy (`RBACPermissionsGranted`, `WebhookConfigured`)
-  and the Kyverno admission controller logs.
+- `EngineReady=False, ReplacementPending` for a long time: the message
+  names the failing Kyverno condition and policy (see
+  [Readiness diagnostics](#readiness-diagnostics)). For example,
+  `RBACPermissionsGranted=False` with missing `pods/ephemeralcontainers`
+  verbs means Kyverno's own service accounts lack permissions that the
+  Kyverno operator has to grant. Konstapel never grants them. Use the
+  inspection command in the message for full conditions, and check the
+  Kyverno admission controller logs.
 - `OwnershipConflict`: the named resource was not created by this binding.
   Remove or rename it deliberately; Konstapel never adopts it.
 - `EngineAPINotServed`, `EngineResourceMissing`, `EngineResourceUnsupported`:
