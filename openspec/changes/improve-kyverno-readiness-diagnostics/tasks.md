@@ -18,7 +18,7 @@ or mark the issue fixed merely because these planning artifacts are merged.
 
 - [x] 2.1 Verify the supported Kyverno permission matrix by removing grants in a disposable fixture, including admission/reporting and Audit/Deny ephemeral updates; retain actual required verbs and reasons without expanding Konstapel RBAC.
   <!-- agent: tier=deep risk=high -->
-- [ ] 2.2 Add the operator-applied least-privilege RBAC example and link installation/bundle Audit guidance; verify aggregation labels, installation-specific identities and documented auth-can-i commands against the pinned chart.
+- [x] 2.2 Add the operator-applied least-privilege RBAC example and link installation/bundle Audit guidance; verify aggregation labels, installation-specific identities and documented auth-can-i commands against the pinned chart.
   <!-- agent: tier=standard risk=medium -->
 
 ## 3. Live recovery and handoff

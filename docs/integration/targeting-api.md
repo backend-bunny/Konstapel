@@ -575,7 +575,9 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
   inspection command in the message for full conditions, and check the
   Kyverno admission controller logs. The
   [verified permission matrix](kyverno-permission-matrix.json) records which
-  grants the delivered policies need on the pinned Kyverno release and why.
+  grants the delivered policies need on the pinned Kyverno release and why;
+  [Kyverno permissions for official bundles](kyverno-rbac.md) has the
+  operator-applied example and the commands to verify it.
 - `OwnershipConflict`: the named resource was not created by this binding.
   Remove or rename it deliberately; Konstapel never adopts it.
 - `EngineAPINotServed`, `EngineResourceMissing`, `EngineResourceUnsupported`:

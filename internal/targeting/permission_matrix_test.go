@@ -216,3 +216,93 @@ func TestAcceptanceFixtureGrantsRequiredPermissions(t *testing.T) {
 		}
 	}
 }
+
+// The operator-applied example (docs/examples/kyverno) must grant exactly the
+// matrix's required set, through the verified aggregation labels, and nothing
+// for controllers the matrix found need no grant. The guide must name the
+// identities the matrix verified.
+func TestKyvernoRBACExampleMatchesMatrix(t *testing.T) {
+	m := loadPermissionMatrix(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs/examples/kyverno/reports-controller-ephemeralcontainers.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type rule struct {
+		APIGroups     []string `json:"apiGroups"`
+		Resources     []string `json:"resources"`
+		ResourceNames []string `json:"resourceNames"`
+		Verbs         []string `json:"verbs"`
+	}
+	type role struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name   string            `json:"name"`
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+		Rules           []rule          `json:"rules"`
+		AggregationRule json.RawMessage `json:"aggregationRule"`
+	}
+	type grantKey struct{ label, group, resource, verb string }
+	got := map[grantKey]bool{}
+	for _, doc := range strings.Split(string(raw), "\n---\n") {
+		var r role
+		if err := yaml.Unmarshal([]byte(doc), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r.Kind != "ClusterRole" || r.AggregationRule != nil {
+			t.Fatalf("example may contain only aggregated-into ClusterRoles, got %s %s", r.Kind, r.Metadata.Name)
+		}
+		var labels []string
+		for k, v := range r.Metadata.Labels {
+			if strings.HasPrefix(k, "rbac.kyverno.io/aggregate-to") {
+				if v != "true" {
+					t.Errorf("%s: %s=%q, want \"true\"", r.Metadata.Name, k, v)
+				}
+				labels = append(labels, k)
+			}
+		}
+		if len(labels) != 1 {
+			t.Fatalf("%s: want exactly one Kyverno aggregation label, got %v", r.Metadata.Name, labels)
+		}
+		for _, ru := range r.Rules {
+			if len(ru.ResourceNames) != 0 {
+				t.Errorf("%s: unexpected resourceNames %v", r.Metadata.Name, ru.ResourceNames)
+			}
+			for _, g := range ru.APIGroups {
+				for _, res := range ru.Resources {
+					for _, v := range ru.Verbs {
+						got[grantKey{labels[0], g, res, v}] = true
+					}
+				}
+			}
+		}
+	}
+	want := map[grantKey]bool{}
+	for _, g := range m.Required {
+		for _, v := range g.Verbs {
+			want[grantKey{g.AggregationLabel, g.APIGroup, g.Resource, v}] = true
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("example grants %+v, which the matrix does not require", k)
+		}
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("example lacks required grant %+v", k)
+		}
+	}
+
+	guide, err := os.ReadFile(filepath.Join(repoRoot, "docs/integration/kyverno-rbac.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range m.Required {
+		for _, s := range []string{g.ServiceAccount, g.AggregationLabel, g.Resource, m.KyvernoChart} {
+			if !strings.Contains(string(guide), s) {
+				t.Errorf("docs/integration/kyverno-rbac.md does not mention %q", s)
+			}
+		}
+	}
+}
