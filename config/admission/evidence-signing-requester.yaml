@@ -1,8 +1,8 @@
 # Records the authenticated requester of every EvidenceSigningRequest
-# (add-evidence-signing-recovery 1.2). The mutation overwrites any
-# user-supplied spec.requestedBy; the validation fails closed if the stored
-# value does not match the API server's user info, including when the
-# mutation did not run. The spec is immutable after creation (CRD rule), so
+# (add-evidence-signing-recovery 1.2). The mutation replaces any
+# user-supplied spec.requestedBy as a whole, including a uid the requester
+# does not have; the validation fails closed if the stored value does not
+# match the API server's user info, including when the mutation did not run. The spec is immutable after creation (CRD rule), so
 # the requester cannot be rewritten later. Only holders of
 # konstapel-evidence-signing-recoverer can create requests (RBAC).
 apiVersion: admissionregistration.k8s.io/v1
@@ -21,13 +21,16 @@ spec:
         operations: [CREATE]
         resources: [evidencesigningrequests]
   mutations:
-    - patchType: ApplyConfiguration
-      applyConfiguration:
+    # A JSON Patch replaces the field as a whole: an apply configuration
+    # would merge into the submitted value and keep a forged uid when the
+    # user has none (for example an X.509 client certificate).
+    - patchType: JSONPatch
+      jsonPatch:
         expression: >-
-          Object{spec: Object.spec{requestedBy: Object.spec.requestedBy{
+          [JSONPatch{op: "add", path: "/spec/requestedBy", value: Object.spec.requestedBy{
             username: request.userInfo.username,
             ?uid: request.userInfo.?uid
-          }}}
+          }}]
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicyBinding
