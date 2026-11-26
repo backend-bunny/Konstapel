@@ -59,7 +59,7 @@ Do not treat its fixtures as live producer compatibility evidence.
 
 - [x] 4.1 Route current Kyverno evaluation and the test-only reporting shape through pure evaluators with explicit time inputs; test freshness boundaries, ambiguous provenance, duplicate associations, applicability and raw warning-to-unknown summary mapping without creating new outcome API fields or risk acceptance.
   <!-- agent: tier=deep risk=medium reason="Shared deterministic evaluation and outcome semantics" -->
-- [ ] 4.2 Connect existing continuous export and Configure/Generate/GetResults dispatch to the same evaluator semantics and frozen inputs; verify normalized result equivalence, schema-valid OSCAL or explicit diagnostics, local-only Generate behavior and no live cluster/registry access during replay.
+- [x] 4.2 Connect existing continuous export and Configure/Generate/GetResults dispatch to the same evaluator semantics and frozen inputs; verify normalized result equivalence, schema-valid OSCAL or explicit diagnostics, local-only Generate behavior and no live cluster/registry access during replay.
   <!-- agent: tier=deep risk=high reason="C2P compatibility and trustworthy offline export" -->
 - [ ] 4.3 Exercise the reusable conformance harness against Kyverno and the test-only reporting adapter, including canceled collection, missing/stale evidence, unavailable content, replay after source removal and deliberate bad-result/projection mutations; verify the test-only adapter is absent from production registry, manifests, image and bundles.
   <!-- agent: tier=deep risk=high reason="Conformance isolation and meaningful negative coverage" -->
