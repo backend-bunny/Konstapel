@@ -107,6 +107,10 @@ func NewServer(desc *providerv1.DescribeResponse, h Handlers) (*Server, error) {
 	return &Server{desc: d, limits: NegotiateLimits(nil, d.GetLimits()), h: h}, nil
 }
 
+// Limits are the server's bounds, the TransportLimits.Protocol of its
+// transport.
+func (s *Server) Limits() *providerv1.Limits { return proto.CloneOf(s.limits) }
+
 func (s *Server) require(capabilities ...providerv1.Capability) error {
 	for _, c := range capabilities {
 		if slices.Contains(s.desc.GetCapabilities(), c) {
@@ -406,7 +410,7 @@ func (s *Server) receiveEvaluation(stream grpc.BidiStreamingServer[providerv1.Ev
 		if errors.Is(err, io.EOF) {
 			return nil, nil, invalidRequest("evaluation stream is empty")
 		}
-		return nil, nil, err
+		return nil, nil, streamError(stream.Context(), err)
 	}
 	start := first.GetStart()
 	if err := s.CheckEvaluateStart(start); err != nil {
@@ -421,7 +425,7 @@ func (s *Server) receiveEvaluation(stream grpc.BidiStreamingServer[providerv1.Ev
 			break
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, streamError(stream.Context(), err)
 		}
 		chunk, ok := msg.GetPart().(*providerv1.EvaluateRequest_PayloadChunk)
 		switch {
@@ -441,6 +445,15 @@ func (s *Server) receiveEvaluation(stream grpc.BidiStreamingServer[providerv1.Ev
 		return nil, nil, invalidRequest("payload must be one JSON object")
 	}
 	return start, payload, nil
+}
+
+// streamError is a receive error: the call's own end (the host's
+// deadline or cancellation) when the call ended, otherwise err.
+func streamError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 // sendObservations sends observations in batches whose encoding stays
