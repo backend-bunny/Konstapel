@@ -1,0 +1,382 @@
+{
+  "task": "improve-kyverno-readiness-diagnostics 2.1",
+  "observed": "2026-11-26",
+  "command": "flock /tmp/konstapel-live-cluster.lock devbox run -- scripts/kyverno-permission-matrix.sh OUTPUT",
+  "kyvernoChart": "3.9.2",
+  "kyvernoVersion": "v1.19.2",
+  "kubernetesVersion": "v1.37.0",
+  "nodeImage": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5",
+  "policies": [
+    "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+    "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+    "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+    "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+    "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml"
+  ],
+  "renderedAs": "Each policy twice, as kpm-audit-* (validationActions [Audit]) and kpm-deny-* ([Deny]), with background evaluation enabled and a namespace selector, the overrides internal/targeting/render.go applies.",
+  "matchedSubresources": [
+    "pods/ephemeralcontainers"
+  ],
+  "required": [
+    {
+      "controller": "reports-controller",
+      "serviceAccount": "kyverno-reports-controller",
+      "aggregationLabel": "rbac.kyverno.io/aggregate-to-reports-controller",
+      "apiGroup": "",
+      "resource": "pods/ephemeralcontainers",
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "modes": [
+        "Audit",
+        "Deny"
+      ],
+      "reason": "Kyverno's policy status check (it runs in the admission controller) submits a SubjectAccessReview for get, list and watch as the reports-controller service account on every resource a policy matches when background evaluation is enabled, and Konstapel always enables it. Without the grant, or with any one verb missing, every delivered policy reports RBACPermissionsGranted=False naming the missing verbs, in Audit and Deny alike, so the binding stays EngineReady=False ReplacementPending. The grant satisfies that check, not an API call: the reports controller makes no request on the subresource and logged no Forbidden error without it, and the API serves only get, patch and update on pods/ephemeralcontainers."
+    }
+  ],
+  "chartProvided": [
+    {
+      "controller": "reports-controller",
+      "serviceAccount": "kyverno-reports-controller",
+      "binding": "ClusterRoleBinding kyverno:reports-controller:view -> ClusterRole view",
+      "resources": [
+        "pods",
+        "replicationcontrollers",
+        "deployments",
+        "daemonsets",
+        "statefulsets",
+        "replicasets",
+        "jobs",
+        "cronjobs"
+      ],
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "reason": "The Kyverno chart creates this binding by default. Removing it made RBACPermissionsGranted False for every matched resource, the reports controller logged Forbidden errors and no PolicyReport results appeared for the Audit update: it is needed for both the readiness check and background scanning. Operators keep it; they do not add it."
+    }
+  ],
+  "notRequired": [
+    {
+      "controller": "admission-controller",
+      "serviceAccount": "kyverno-admission-controller",
+      "aggregationLabel": "rbac.kyverno.io/aggregate-to-admission-controller",
+      "apiGroup": "",
+      "resource": "pods/ephemeralcontainers",
+      "verbs": [
+        "get",
+        "list",
+        "watch",
+        "update"
+      ],
+      "modes": [
+        "Audit",
+        "Deny"
+      ],
+      "reason": "The upstream fixture grants these, but readiness never checks the admission-controller account and admission needs none of them. With no admission grant on the subresource, and even with the admission controller's view binding removed, Deny still rejected privileged ephemeral-container updates and privileged Pods and admitted a compliant ephemeral container; Audit admitted the update and the admission controller still wrote admission EphemeralReports with its fail results. Kyverno gets the object from the admission request."
+    }
+  ],
+  "observations": {
+    "modes": "Audit and Deny need the same grants: the readiness check ignores validationActions.",
+    "enforcementWhileNotReady": "RBACPermissionsGranted=False doesn't stop Kyverno. WebhookConfigured stayed True, Deny kept rejecting and Audit kept reporting in every scenario. The condition blocks Konstapel's EngineReady; it is not a sign that enforcement stopped.",
+    "readinessRefresh": "Kyverno does not re-evaluate readiness when RBAC changes. After a grant was removed or added, the conditions stayed stale for the full 60 seconds until a no-op policy update (an annotation) made Kyverno recompute them; refreshedWithoutPolicyEvent is false in every scenario whose outcome changed. Kyverno's 15-minute informer resync does not help: its policy-status handlers ignore updates with an unchanged resourceVersion, and in resyncRepair a reports grant applied without any policy event left every policy RBACPermissionsGranted=False for the whole 1200-second poll. Recovery therefore needs a change to the ValidatingPolicy object (a Kyverno restart was not tested). Konstapel's delivery leaves an unchanged policy untouched (internal/targeting/deliver.go), so ordinary reconciliation does not produce that change.",
+    "subresourceVerbs": "API discovery on the pinned cluster serves pods/ephemeralcontainers with verbs get, patch and update (kubectl get --raw /api/v1). RBAC still accepts list and watch rules for it, and the readiness check requires them.",
+    "admissionReports": "In Audit, the admission controller wrote EphemeralReports labelled audit.kyverno.io/source=admission with fail results for the ephemeral-container update in every scenario. Kyverno labels those results process=background scan; the aggregated PolicyReport keeps one result per policy, so it cannot show which path produced it."
+  },
+  "scenarios": [
+    {
+      "scenario": "upstream-fixture",
+      "admissionGrant": "upstream fixture",
+      "reportsGrant": "upstream fixture",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "True"
+      ],
+      "rbacMessages": [
+        "Policy is ready for reporting."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": true,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "none",
+      "admissionGrant": "none",
+      "reportsGrant": "none",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: get /v1, Resource=pods/ephemeralcontainers: ; list /v1, Resource=pods/ephemeralcontainers: ; watch /v1, Resource=pods/ephemeralcontainers: ."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "reports-read-only",
+      "admissionGrant": "none",
+      "reportsGrant": "get list watch",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "True"
+      ],
+      "rbacMessages": [
+        "Policy is ready for reporting."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "reports-without-get",
+      "admissionGrant": "none",
+      "reportsGrant": "list watch",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: get /v1, Resource=pods/ephemeralcontainers: ."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "reports-without-list",
+      "admissionGrant": "none",
+      "reportsGrant": "get watch",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: list /v1, Resource=pods/ephemeralcontainers: ."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "reports-without-watch",
+      "admissionGrant": "none",
+      "reportsGrant": "get list",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: watch /v1, Resource=pods/ephemeralcontainers: ."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "admission-only",
+      "admissionGrant": "get list watch update",
+      "reportsGrant": "none",
+      "viewBindingRemoved": null,
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: get /v1, Resource=pods/ephemeralcontainers: ; list /v1, Resource=pods/ephemeralcontainers: ; watch /v1, Resource=pods/ephemeralcontainers: ."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "reports-read-admission-no-view",
+      "admissionGrant": "none",
+      "reportsGrant": "get list watch",
+      "viewBindingRemoved": "admission",
+      "rbacPermissionsGranted": [
+        "True"
+      ],
+      "rbacMessages": [
+        "Policy is ready for reporting."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 5
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 0
+      }
+    },
+    {
+      "scenario": "fixture-reports-no-view",
+      "admissionGrant": "upstream fixture",
+      "reportsGrant": "upstream fixture",
+      "viewBindingRemoved": "reports",
+      "rbacPermissionsGranted": [
+        "False"
+      ],
+      "rbacMessages": [
+        "Policy is not ready for reporting, missing permissions: get /v1, Resource=pods: ; list /v1, Resource=pods: ; watch /v1, Resource=pods: ; get /v1, Resource=replicationcontrollers: ; list /v1, Resource=replicationcontrollers: ; watch /v1, Res..."
+      ],
+      "webhookConfigured": [
+        "True"
+      ],
+      "refreshedWithoutPolicyEvent": false,
+      "deny": {
+        "ephemeralPrivileged": "denied",
+        "ephemeralCompliant": "admitted",
+        "podCreatePrivileged": "denied"
+      },
+      "audit": {
+        "ephemeralUpdate": "admitted",
+        "admissionReportFailPolicies": 5,
+        "policyReportFailPolicies": 0
+      },
+      "forbiddenLogLines": {
+        "admission": 0,
+        "reports": 236
+      }
+    }
+  ],
+  "resyncRepair": {
+    "scenario": "resync-repair",
+    "grants": {
+      "admission": "-",
+      "reports": "get list watch"
+    },
+    "pollLimitSeconds": 1200,
+    "before": [
+      "False"
+    ],
+    "after": [
+      "False"
+    ],
+    "unpromptedRecoverySeconds": null
+  },
+  "limitations": [
+    "Verified only for Kyverno chart 3.9.2 (Kyverno v1.19.2) on a single-node kind cluster with the chart's default RBAC; rerun the probe after a Kyverno upgrade.",
+    "Policies were applied directly, not through a ComplianceBinding: the probe measures Kyverno, and the binding diagnostic for these conditions is covered by task 1.1/1.2 tests and acceptance task 3.1.",
+    "Only the delivered ValidatingPolicies were tested; other Kyverno policy types or matched subresources need their own run.",
+    "Sanitized raw evidence (scenario results, Kyverno logs) is retained outside the repository; the kubeconfig and Helm manifest are not kept."
+  ]
+}
