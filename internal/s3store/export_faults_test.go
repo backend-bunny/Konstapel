@@ -7,7 +7,7 @@ import "testing"
 // test, and returns its destination.
 func ServeFakeS3(t *testing.T, versioning string) Destination {
 	f := newFake()
-	f.versioning = versioning
+	f.Versioning = versioning
 	_, d := f.serve(t)
 	return d
 }

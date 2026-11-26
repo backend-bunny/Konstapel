@@ -17,17 +17,17 @@ import (
 )
 
 func (f *fakeS3) put(key string, body string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.seq++
-	f.objects[key] = append(f.objects[key], fakeVersion{id: "x" + key, body: []byte(body), at: time.Now()})
+	f.Lock()
+	defer f.Unlock()
+	f.Seq++
+	f.Objects[key] = append(f.Objects[key], fakeVersion{ID: "x" + key, Body: []byte(body), At: time.Now()})
 }
 
 func (f *fakeS3) keys(prefix string) []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Lock()
+	defer f.Unlock()
 	var out []string
-	for k, vs := range f.objects {
+	for k, vs := range f.Objects {
 		if strings.HasPrefix(k, prefix) && len(vs) > 0 {
 			out = append(out, k)
 		}
@@ -42,7 +42,7 @@ func (f *fakeS3) keys(prefix string) []string {
 func TestCleanupAttemptsKeepsCommittedAndUnowned(t *testing.T) {
 	for _, mode := range []string{"", "Enabled"} {
 		f := newFake()
-		f.versioning = mode
+		f.Versioning = mode
 		p := newPublisher(t, f, time.Now)
 		ctx := context.Background()
 		dir := fullPackage(t)
@@ -66,7 +66,7 @@ func TestCleanupAttemptsKeepsCommittedAndUnowned(t *testing.T) {
 		otherPrefix := p.runPrefix(other)
 		f.put(otherPrefix+"attempts/a/"+intentFile, `{"run":`+statusJSONRun(other)+`}`)
 		f.put("unrelated/object", "x")
-		f.uploads = map[string]string{"u1": prefix + "attempts/interrupted/big", "u2": otherPrefix + "attempts/a/big"}
+		f.Uploads = map[string]string{"u1": prefix + "attempts/interrupted/big", "u2": otherPrefix + "attempts/a/big"}
 
 		if err := p.CleanupAttempts(ctx, testRun); err != nil {
 			t.Fatal(mode, err)
@@ -82,8 +82,8 @@ func TestCleanupAttemptsKeepsCommittedAndUnowned(t *testing.T) {
 				t.Fatalf("%s %s removed: %s", mode, kept, left)
 			}
 		}
-		if _, ok := f.uploads["u1"]; ok || len(f.uploads) != 1 {
-			t.Fatalf("%s multipart uploads: %v", mode, f.uploads)
+		if _, ok := f.Uploads["u1"]; ok || len(f.Uploads) != 1 {
+			t.Fatalf("%s multipart uploads: %v", mode, f.Uploads)
 		}
 		if got, err := p.Inspect(ctx, testRun); err != nil || got.Phase != publication.PhaseCommitted {
 			t.Fatalf("%s commit damaged: %+v %v", mode, got, err)
@@ -144,9 +144,9 @@ func TestOpenServesOnlyCommittedUnexpiredArchives(t *testing.T) {
 	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != r.PackageSHA256 || st.PackageSHA256 != r.PackageSHA256 || st.PublicationID != r.PublicationID {
 		t.Fatal("opened bytes or status differ from the commit")
 	}
-	f.mu.Lock()
-	delete(f.objects, r.Commit.ArchiveKey)
-	f.mu.Unlock()
+	f.Lock()
+	delete(f.Objects, r.Commit.ArchiveKey)
+	f.Unlock()
 	if _, _, err := p.Open(ctx, testRun); !errors.Is(err, publication.ErrUnavailable) {
 		t.Fatalf("missing archive: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestOpenServesOnlyCommittedUnexpiredArchives(t *testing.T) {
 func TestDeleteAfterExpiryIsScopedAndTruthful(t *testing.T) {
 	for _, mode := range []string{"", "Enabled", "Suspended"} {
 		f := newFake()
-		f.versioning = mode
+		f.Versioning = mode
 		clock := time.Now()
 		p := newPublisher(t, f, func() time.Time { return clock })
 		ctx := context.Background()
@@ -185,7 +185,7 @@ func TestDeleteAfterExpiryIsScopedAndTruthful(t *testing.T) {
 			t.Fatalf("%s deleted before expiry: %v", mode, err)
 		}
 		clock = short.ExpiresAt.Add(time.Second)
-		f.denyDelete = true
+		f.DenyDelete = true
 		cl, err := p.Delete(ctx, testRun)
 		if !errors.Is(err, publication.ErrRetentionBlocked) || cl.State != publication.CleanupRetentionBlocked {
 			t.Fatalf("%s refused deletion reported as %+v %v", mode, cl, err)
@@ -193,7 +193,7 @@ func TestDeleteAfterExpiryIsScopedAndTruthful(t *testing.T) {
 		if _, err := p.read(ctx, short.Commit.ManifestKey, ""); err != nil {
 			t.Fatalf("%s commit lost after a refused deletion: %v", mode, err)
 		}
-		f.denyDelete = false
+		f.DenyDelete = false
 		if cl, err := p.Delete(ctx, testRun); err != nil || cl.State != publication.CleanupDeleted {
 			t.Fatalf("%s deletion: %+v %v", mode, cl, err)
 		}
@@ -235,17 +235,17 @@ func TestInspectReportsEarlyLossAndCorruption(t *testing.T) {
 	if st, err := p.Inspect(ctx, testRun); err != nil || st.Availability != publication.AvailabilityAvailable || st.Failure != nil {
 		t.Fatalf("intact: %+v %v", st, err)
 	}
-	f.mu.Lock()
-	vs := f.objects[r.Commit.ArchiveKey]
+	f.Lock()
+	vs := f.Objects[r.Commit.ArchiveKey]
 	saved := vs[len(vs)-1]
-	vs[len(vs)-1].body = saved.body[:len(saved.body)-1]
-	f.mu.Unlock()
+	vs[len(vs)-1].Body = saved.Body[:len(saved.Body)-1]
+	f.Unlock()
 	if st, err := p.Inspect(ctx, testRun); err != nil || st.Availability != publication.AvailabilityUnavailable || st.Failure.Reason != publication.FailureIntegrityFailed {
 		t.Fatalf("truncated archive: %+v %v", st, err)
 	}
-	f.mu.Lock()
-	delete(f.objects, r.Commit.ArchiveKey)
-	f.mu.Unlock()
+	f.Lock()
+	delete(f.Objects, r.Commit.ArchiveKey)
+	f.Unlock()
 	st, err := p.Inspect(ctx, testRun)
 	if err != nil || st.Availability != publication.AvailabilityUnavailable || st.Failure.Reason != publication.FailureObjectMissing || st.Phase != publication.PhaseCommitted {
 		t.Fatalf("missing archive: %+v %v", st, err)

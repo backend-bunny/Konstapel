@@ -96,7 +96,7 @@ func TestRecoveredCommitKeepsRecordedExpiry(t *testing.T) {
 // by retention, whatever the reader's clock says.
 func TestCommitLandingAfterNotAfterIsExpired(t *testing.T) {
 	f := newFake()
-	f.skew = 2 * time.Minute
+	f.Skew = 2 * time.Minute
 	p := newPublisher(t, f, time.Now)
 	ctx := context.Background()
 	s, sg := signedStage(t, p)
@@ -157,7 +157,7 @@ func TestNotAfterGuardsWriteNothing(t *testing.T) {
 // record is never rewritten and no bound is added.
 func TestAdoptedCommitKeepsItsOwnExpiry(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	p := newPublisher(t, f, time.Now)
 	ctx := context.Background()
 	s, sg := signedStage(t, p)
