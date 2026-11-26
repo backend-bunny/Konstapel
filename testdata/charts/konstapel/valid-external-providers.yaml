@@ -1,0 +1,4 @@
+# expect: ok
+externalProviders:
+  enabled: true
+  clientCertSecretName: konstapel-external-provider-client-tls

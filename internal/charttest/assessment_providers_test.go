@@ -25,6 +25,7 @@ func TestRuntimeChartAssessmentProviderRegistration(t *testing.T) {
 		"exception revocation":   {"exceptions.webhooks.enabled=true", "exceptions.revocationProcessing.enabled=true"},
 		"operator TLS, webhooks": {"tls.mode=secret", "tls.secret.name=konstapel-tls", "exceptions.webhooks.enabled=true", "exceptions.webhooks.tls.secretName=konstapel-webhook-tls", "exceptions.webhooks.tls.caBundle=" + fixtureCA},
 		"no download service":    {"download.enabled=false"},
+		"external providers":     {"externalProviders.enabled=true", "externalProviders.clientCertSecretName=" + clientCertSecret},
 	} {
 		t.Run(name, func(t *testing.T) {
 			docs, out, err := render(t, controllerNS, append([]string{"image.digest=" + digest}, set...)...)

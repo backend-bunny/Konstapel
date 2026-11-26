@@ -44,6 +44,7 @@ app.kubernetes.io/component: controller
 {{- include "konstapel.validateBundles" . -}}
 {{- include "konstapel.validateMetrics" . -}}
 {{- include "konstapel.validateExceptions" . -}}
+{{- include "konstapel.validateExternalProviders" . -}}
 {{- end }}
 
 {{/*
@@ -308,4 +309,19 @@ integration"). Both need metrics.enabled and, when enabled, their own API.
 {{/* The scope's label names, for aggregation (by) and joins (on). */}}
 {{- define "konstapel.metricsScopeLabels" -}}
 {{- keys (include "konstapel.metricsScopeMatchers" . | fromJson) | sortAlpha | join ", " -}}
+{{- end }}
+
+{{/*
+The external assessment provider client (docs/charts.md, "External
+assessment providers"). The Secret is mounted, never read through the API:
+enabling it grants the controller nothing.
+*/}}
+{{- define "konstapel.validateExternalProviders" -}}
+{{- $e := .Values.externalProviders | default dict -}}
+{{- if and $e.enabled (not $e.clientCertSecretName) -}}
+{{- fail "externalProviders.clientCertSecretName is required with externalProviders.enabled: a kubernetes.io/tls Secret (tls.crt, tls.key) in the release namespace holding the controller's client certificate for external providers" -}}
+{{- end -}}
+{{- if and (not $e.enabled) $e.clientCertSecretName -}}
+{{- fail "externalProviders.clientCertSecretName is used only with externalProviders.enabled: set externalProviders.enabled, or leave it empty" -}}
+{{- end -}}
 {{- end }}

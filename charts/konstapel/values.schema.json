@@ -295,6 +295,34 @@
         }
       }
     },
+    "externalProviders": {
+      "description": "The controller's mutual TLS client for registered external assessment providers (AssessmentProvider). Off by default; installs no provider and grants nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "clientCertSecretName"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Mount clientCertSecretName and pass --external-provider-client-cert-dir.",
+          "type": "boolean"
+        },
+        "clientCertSecretName": {
+          "description": "With enabled only: the kubernetes.io/tls Secret (tls.crt, tls.key) in the release namespace holding the controller's client certificate.",
+          "type": "string",
+          "anyOf": [
+            {
+              "maxLength": 0
+            },
+            {
+              "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+              "maxLength": 253
+            }
+          ]
+        }
+      }
+    },
     "download": {
       "type": "object",
       "additionalProperties": false,

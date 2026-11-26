@@ -24,7 +24,7 @@ Each group includes its tests and documentation; final tasks prove integration.
   <!-- agent: tier=deep risk=high -->
 - [x] 2.2 Integrate registered-provider selection, frozen registration identity and capability Conditions with the shared host; test unknown/incompatible selection, disabled new starts, changed registrations and healthy-provider independence.
   <!-- agent: tier=deep risk=high -->
-- [ ] 2.3 Add core chart registration-client configuration and document TLS, permissions and platform installation; verify default charts retain built-in behavior without installing external providers or granting source permissions.
+- [x] 2.3 Add core chart registration-client configuration and document TLS, permissions and platform installation; verify default charts retain built-in behavior without installing external providers or granting source permissions.
   <!-- agent: tier=standard risk=medium -->
 
 ## 3. Remote evidence and replay

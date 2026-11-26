@@ -66,6 +66,13 @@ func TestDocumentedExamples(t *testing.T) {
 				t.Errorf("bundles not enabled: %v", args)
 			}
 		},
+		"external-providers.yaml": func(t *testing.T, docs []map[string]any) {
+			pod, c := controllerContainer(t, docs)
+			if !slices.Contains(c["args"].([]any), any(clientCertFlag)) ||
+				!slices.ContainsFunc(pod["volumes"].([]any), func(v any) bool { return at(v, "secret", "secretName") == clientCertSecret }) {
+				t.Errorf("client certificate not wired: %v %v", c["args"], pod["volumes"])
+			}
+		},
 		"exception-webhooks.yaml": func(t *testing.T, docs []map[string]any) {
 			m, v := webhookConfigs(t, docs)
 			if m == nil || v == nil || find(docs, "Service", "konstapel-webhook") == nil || find(docs, "Certificate", "konstapel-webhook") == nil {

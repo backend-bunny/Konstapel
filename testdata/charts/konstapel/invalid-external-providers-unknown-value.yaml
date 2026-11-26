@@ -1,0 +1,5 @@
+# expect: additional properties 'trustConfigMap' not allowed
+externalProviders:
+  enabled: true
+  clientCertSecretName: konstapel-external-provider-client-tls
+  trustConfigMap: provider-roots

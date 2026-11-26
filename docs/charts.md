@@ -39,6 +39,7 @@ and doesn't need the charts.
 | Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
 | Exception admission (`ComplianceException` webhooks: authenticated acceptance and revocation records) | yes, with `exceptions.webhooks.enabled` (off by default) | a TLS certificate (either TLS mode); every exception create and update then fails closed unless a ready controller replica admits it. See [Exception admission webhooks](#exception-admission-webhooks). It grants nothing: native Kyverno exceptions stay off, behind their own upstream gate |
 | Exception revocation processing (revocation records, finalizer release) | yes, with `exceptions.revocationProcessing.enabled` (off by default) | `exceptions.webhooks.enabled`, which confines the controller's exception writes; the render refuses it alone. See [Exception revocation processing](#exception-revocation-processing) |
+| External assessment provider client (`AssessmentProvider` probing and status) | yes, with `externalProviders.enabled` (off by default) | a client certificate Secret, trust ConfigMaps and providers, all installed by you; registration roles bound by you. No run uses an external provider yet. See [External assessment providers](#external-assessment-providers) |
 | Native Kyverno exception grants (`PolicyException`) | **no** | add-self-service-policy-exceptions, waiting for an upstream Kyverno release. Neither switch above enables them. |
 
 ## Chart input contract
@@ -63,6 +64,7 @@ release can't substitute a fixture or a guess for it.
 | Lease and replica lifecycle | Lease `konstapel-controller-leader-election` with validated 15s/10s/2s timings (`--leader-election-*`), see [Controller availability](integration/availability.md); shutdown budgets `--shutdown-timeout` (45s) and download `--shutdown-drain` (20s) within 60s grace, with readiness failing while draining; per-replica serving readiness independent of leadership | add-controller-high-availability | resolved |
 | TLS for services | cert-manager Certificates/Issuers (default) or an operator-managed Secret, reloaded in place on rotation | this change (group 3) | resolved for the download server, metrics and the exception webhooks (cert-manager `inject-ca-from`, or the operator's `caBundle`); the runtime reloads webhook TLS (leaf and CA rotation tested) |
 | OCI policy bundles | `konstapel controller` `--bundle-sources-configmap` (off when empty), `--bundle-cache-dir`, `--bundle-cache-capacity`, `--bundle-refresh-interval` and `POD_NAMESPACE`; the operator-created sources ConfigMap and the Secrets/ConfigMaps it references, read by name in the controller namespace ([Controller wiring](policy-bundles.md#controller-wiring), [RBAC and informers](policy-bundles.md#rbac-and-informers)) | add-policy-bundle-distribution | resolved; values `bundles.*`, off by default |
+| External provider client | `konstapel controller` `--external-provider-client-cert-dir` (off when empty; `tls.crt`/`tls.key` checked at startup and re-read per probe); probe interval, timeout and status age are Go defaults without flags; registrations and their `serverTrust` ConfigMaps read with the existing controller grants ([registration, selection and status](integration/external-provider-protocol.md#registration-selection-and-status)) | add-external-assessment-providers | resolved; values `externalProviders.*`, off by default |
 | Capability monitor | Kyverno API discovery and authorization checks on the manager boundary | this change (group 4) on the targeting manager | resolved for delivery and assessments; the exceptions gate is pending |
 
 ## CRD chart
@@ -356,6 +358,12 @@ renders:
   `/var/lib/konstapel/bundles`, and a `konstapel-controller-bundles` Role and
   RoleBinding; see [OCI policy bundles](#oci-policy-bundles). With it empty
   (the default) the render is unchanged.
+- **External provider client** (off by default). With
+  `externalProviders.enabled`, the controller also gets
+  `--external-provider-client-cert-dir` and a read-only mount of
+  `externalProviders.clientCertSecretName`, and nothing else; see
+  [External assessment providers](#external-assessment-providers). Disabled
+  (the default), the render is unchanged.
 - **PodDisruptionBudget.** `minAvailable: 1` with the same selector, only when
   `replicaCount > 1`. Development values (`replicaCount: 1`) omit it.
 - **RBAC.** The ServiceAccount; ClusterRoleBindings to `konstapel-controller`
@@ -393,6 +401,8 @@ renders:
   `bundles.sourcesConfigMap`; a `bundles.cache.sizeLimit` that isn't larger
   than `bundles.cache.capacity`; a `bundles.refreshInterval` above `5m`; the
   sources ConfigMap listed among `bundles.referencedConfigMaps`.
+- `externalProviders.enabled` without `externalProviders.clientCertSecretName`,
+  or the name without `enabled`.
 
 **Download server and TLS.** With `download.enabled` (the default), the chart
 also renders the evidence download server:
@@ -600,6 +610,10 @@ with all of these grants. The bindings are:
 | RoleBinding `konstapel-controller` | Role `konstapel-controller` | `konstapel-system` | the same markers (`namespace=konstapel-system`) |
 | RoleBinding `konstapel-controller-bundles` (only with `bundles.sourcesConfigMap`) | Role `konstapel-controller-bundles` | `konstapel-system` | `templates/bundles.yaml` |
 | ClusterRoleBinding `konstapel-controller-metrics-auth` (only with `metrics.enabled`) | ClusterRole `konstapel-controller-metrics-auth` | cluster | `templates/metrics.yaml` |
+
+`externalProviders.enabled` adds no binding: its client certificate is a
+mounted Secret, and the registrations and `serverTrust` ConfigMaps it reads
+are covered by the grants below.
 
 Neither ClusterRole grants Secrets or ConfigMaps, so all such access is in
 `konstapel-system`. The effective Secret and ConfigMap access, and the
@@ -1243,6 +1257,169 @@ rotated or revoked referenced object is noticed. `TestLiveHelmBundles`
 installs these values against a disposable TLS registry (see
 [Policy bundles](policy-bundles.md#helm-installation-and-live-acceptance)).
 
+### External assessment providers
+
+`AssessmentProvider` registrations
+([registration, selection and status](integration/external-provider-protocol.md#registration-selection-and-status))
+need the controller's mutual TLS client. The chart wires that client only
+with `externalProviders.enabled` (off by default). Content and assessment
+runs cannot use an external provider yet: with the client enabled, the
+controller probes registrations and reports their conditions, and nothing
+else uses them (`add-external-assessment-providers` group 3).
+
+With `externalProviders.enabled: false` (the default), the render is
+byte-identical to a chart without this section. The controller has no
+`--external-provider-client-cert-dir`, so it neither watches nor contacts
+registrations, and every provider contract that is not built in resolves to
+`UnknownProvider`. Enabling it adds exactly three things to the controller
+Deployment (`docs/examples/charts/external-providers.yaml`):
+
+- the flag `--external-provider-client-cert-dir=/etc/konstapel/external-provider-client-tls`;
+- a read-only mount at that path;
+- a `secret` volume of `externalProviders.clientCertSecretName`.
+
+No other object changes. In particular:
+
+- **No provider is installed.** The chart renders no provider Deployment,
+  Service, image or chart, and the controller does not download or start
+  one.
+- **No registration role is bound.** The chart ships
+  `konstapel-assessment-provider-admin` and
+  `konstapel-assessment-provider-viewer` but binds neither.
+- **The controller gains no grants.** The Secret is mounted by the kubelet,
+  not read through the API. The controller's existing grants already cover
+  registrations (read, plus status writes) and the `serverTrust` ConfigMaps it
+  reads by name in `konstapel-system`
+  ([Controller ServiceAccount boundary](#controller-serviceaccount-boundary)).
+  No provider's source permissions are copied to the controller.
+
+The render refuses `enabled` without `clientCertSecretName`, and
+`clientCertSecretName` without `enabled`. The schema rejects names that are
+not DNS subdomain names.
+
+**TLS setup.** Each side authenticates the other over TLS 1.3. A peer
+matches only through an exact DNS subject alternative name. Wildcards,
+common names, URIs and IP addresses never match
+([transport and identity](integration/external-provider-protocol.md#transport-and-identity)).
+The platform issues every certificate. You need three pieces:
+
+1. **The controller's client certificate.** A `kubernetes.io/tls` Secret in
+   `konstapel-system` with `tls.crt` and `tls.key`. Its extended key usage
+   must be client authentication, or it must have none. Its DNS SAN is the
+   controller identity that providers authorize. Pick a stable name, such as
+   `konstapel-controller.konstapel-system.svc`. It is an identity, not an
+   address the provider dials. A cert-manager Certificate from a
+   platform-owned issuer is one way to produce it:
+
+   ```yaml
+   apiVersion: cert-manager.io/v1
+   kind: Certificate
+   metadata:
+     name: konstapel-external-provider-client
+     namespace: konstapel-system
+   spec:
+     secretName: konstapel-external-provider-client-tls
+     dnsNames: [konstapel-controller.konstapel-system.svc]
+     usages: [client auth, digital signature]
+     issuerRef: {name: platform-ca, kind: ClusterIssuer}
+   ```
+
+   The chart's own `konstapel-ca` Issuer is internal to the release, so don't
+   make providers trust it. The controller checks the certificate at startup
+   and refuses to start if it is missing, invalid or expired. Without the
+   Secret, the pod does not start. The certificate is re-read on every probe
+   and connection, so a rotation needs no restart. Until rotated material
+   passes the same checks, the last valid material stays in use.
+2. **The provider's server trust.** A ConfigMap in `konstapel-system` that
+   holds the PEM roots of the provider's serving-certificate issuer, under
+   `ca.crt` or the key the registration names. Reference it as the
+   registration's `spec.endpoint.serverTrust`. These roots alone verify the
+   provider, and system roots are never used. It is read on every
+   connection, so you can rotate it in place.
+3. **The provider's serving certificate.** Its extended key usage must be
+   server authentication, or it must have none. Its DNS SAN must equal the
+   registration's `spec.endpoint.serverName` exactly. The controller dials
+   `<service>.<namespace>.svc:<port>` from `spec.endpoint.service`, but it
+   authenticates only `serverName`. The provider trusts the issuer of
+   step 1 and authorizes its DNS name. How the provider is configured is up
+   to its own chart.
+
+A registration whose trust is wrong reports `Available=False` with reason
+`TrustUnavailable` or `AuthenticationFailed`. One with an unusable client
+certificate reports `ClientCredentialsUnavailable`. In each case nothing is
+sent.
+
+**Who to bind.** Bind each role yourself with a ClusterRoleBinding, to
+platform subjects only:
+
+- `konstapel-assessment-provider-admin` for administrators who create,
+  change and delete registrations;
+- `konstapel-assessment-provider-viewer` for auditors.
+
+Neither role is aggregated into `admin`, `edit` or `view`, or into
+`konstapel-compliance-admin` and `konstapel-compliance-viewer`. Neither
+reads Secrets or ConfigMaps. Only the controller writes status. Whoever
+creates the trust ConfigMaps in `konstapel-system` needs that permission
+separately.
+
+```sh
+kubectl create clusterrolebinding platform-assessment-provider-admins \
+  --clusterrole=konstapel-assessment-provider-admin --group=platform-admins
+```
+
+**Platform installation boundary.** A provider is a separate workload, and
+platform operators install it with its own Helm chart. That chart deploys
+the provider's Service, its TLS configuration, its own ServiceAccount and
+its scoped source permissions. Install signed images and charts pinned by
+digest, and verify their signatures and provenance before installing, as
+for Konstapel's own artifacts ([images](images.md)). Konstapel is not Helm,
+a container runtime or a plugin downloader. It only dials the registered
+Service. A registration's `releaseDigest` must match what the endpoint
+reports, but that is the endpoint's own claim and not attestation.
+Verifying the deployment is the installation boundary.
+
+**Enabling.**
+
+1. Create the client Secret (step 1) and install the provider.
+2. Upgrade with `-f docs/examples/charts/external-providers.yaml`, or set
+   `externalProviders.enabled=true` and `externalProviders.clientCertSecretName`.
+3. Create the trust ConfigMap and the registration. Wait for `Available`,
+   `Compatible` and `Ready`.
+
+**Upgrading a provider release.** `releaseDigest` is immutable, so a new
+release is a new registration. Don't enable it next to the old one: two
+enabled registrations of a contract are `AmbiguousProvider`. Use this
+sequence instead:
+
+1. Create the new registration with `newRequests: Disabled`.
+2. Wait for `Available=True` and `Compatible=True`.
+3. Set `newRequests: Disabled` on the old registration, then
+   `newRequests: Enabled` on the new one.
+
+New work selects the new release once it is `Ready`. Drain old work before
+you remove the old provider chart.
+
+**Disabling.** Upgrade with `externalProviders.enabled=false`. The
+controller stops probing, and non-built-in contracts resolve to
+`UnknownProvider`. Registration status is no longer updated. Registrations,
+trust ConfigMaps, the client Secret and the provider workloads stay until
+you remove them.
+
+**Probe timing is not configurable.** Each registration is probed when it
+changes and then every minute, with a 10 second deadline. New work relies
+only on a compatible observation less than five minutes old. These are the
+controller's Go defaults (`internal/controller`, `ExternalProviders`).
+The design asks for no tuning, so they have no flags or chart values.
+
+Checks: `TestRuntimeChartExternalProvidersOffByDefault` and
+`TestRuntimeChartExternalProvidersEnabled` (`internal/charttest`) compare
+the renders document by document, RBAC included, with and without bundles,
+metrics, operator TLS and webhooks.
+`TestRuntimeChartAssessmentProviderRegistration` asserts in every
+configuration, the enabled client included, that no binding reaches a
+registration role. The `testdata/charts/konstapel/*external-providers*`
+fixtures cover the render refusals.
+
 ## Uninstalling the runtime chart
 
 `helm uninstall konstapel -n konstapel-system` removes the controller, the
@@ -1330,9 +1507,13 @@ retention.
   - `cache.capacity` (1Gi) and `cache.sizeLimit` (1536Mi, must be larger): the per-pod content cache and its `emptyDir`.
   - `refreshInterval` (30s, at most 5m): re-read interval for referenced objects.
   - `referencedSecrets`, `referencedConfigMaps`: the names `sources.yaml` references; the controller may `get` only these. Set only with `sourcesConfigMap`.
+- **`externalProviders`:** the controller's client for registered external assessment providers, off by default ([External assessment providers](#external-assessment-providers)). It installs no provider, binds no registration role and grants nothing.
+  - `enabled` (false): mount the client certificate and pass `--external-provider-client-cert-dir`.
+  - `clientCertSecretName`: required with `enabled`, rejected without it; a `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) in `konstapel-system` that you create and rotate.
 
 There are no values for evidence locations, credentials (only the names of
-bundle credential Secrets), Kyverno or cert-manager installation, or native
+bundle credential Secrets and the external provider client Secret), external
+provider installation or registration, provider probe timing, Kyverno or cert-manager installation, or native
 exception enablement.
 
 The CRD chart accepts no values. Its definitions are generated, and retention
