@@ -101,11 +101,15 @@ The prototype exercises policy generation and result conversion with Kyverno
 1.19.2, using a pinned core and a focused provider for modern policies and reports.
 Upstream also documents an Open Cluster Management integration.
 
-The planned Trivy provider uses the pinned v2 Configure/Generate/GetResults
-interface. Generate produces a local evaluation plan; it creates no Kubernetes
-objects. GetResults evaluates a scoped frozen capture using the same evaluator
-as current controller status. Kubernetes access remains in the collector, so
-offline replay requires neither a running cluster nor an image registry.
+The planned Trivy provider reuses the shared provider seams
+([assessment providers](docs/assessment-providers.md)): the installed registry,
+host-scoped bounded collection, the capture envelope, a pure evaluator and the
+one C2P conversion that continuous export and the existing `konstapel-provider`
+plugin dispatch to. It adds no second plugin executable. GetResults converts a
+scoped frozen snapshot evaluated by the same evaluator as current controller
+status; Generate creates no Kubernetes objects. Kubernetes access remains in the
+collector, so offline replay requires neither a running cluster nor an image
+registry.
 
 ## Provider capabilities and scope
 
@@ -151,7 +155,9 @@ incomplete or unknown; missing scanner/database provenance stays explicit.
 Operator versions and configuration must pass compatibility tests before support
 is claimed.
 
-Eligible findings reuse authenticated self-service risk acceptance with reason,
+The initial read-only slice makes Trivy checks exception-ineligible. As a
+governance follow-up, eligible findings reuse authenticated self-service risk
+acceptance with reason,
 bounded expiry, explicit renewal/revocation, and central Forbidden/SelfService
 rules. The immutable target includes namespace identity, exact image digest,
 vulnerability ID, and affected package. It applies to matching workloads in that
@@ -199,7 +205,9 @@ Trivy's first implementation step is a focused compatibility investigation of
 digest correlation, source scan times, filtering, and provenance. Deterministic
 fixtures and real-operator acceptance must establish those semantics. Its isolated
 CI acceptance group will run alongside existing groups and verify collection,
-exceptions, export, and offline replay.
+export, and offline replay; support is claimed only for the operator versions it
+pins. The initial slice is read-only and exception-ineligible; exact-finding
+vulnerability exceptions are a governance follow-up.
 
 ## Upstream references
 
