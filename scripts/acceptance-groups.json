@@ -18,6 +18,7 @@
       "TestLiveHardeningBackground",
       "TestLiveEvidenceAttachmentAPI",
       "TestLiveEvidenceSigningRequestAPI",
+      "TestLiveAssessmentProviderAPI",
       "TestLivePolicyPreviewObservation"
     ]
   },

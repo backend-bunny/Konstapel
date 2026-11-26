@@ -43,6 +43,7 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
+  - assessmentproviders
   - assessmentrequests
   - compliancebindings
   - complianceexceptions
@@ -55,6 +56,7 @@ rules:
 - apiGroups:
   - compliance.erenius.io
   resources:
+  - assessmentproviders/status
   - assessmentrequests/status
   - assessmentruns/status
   - compliancebindings/status

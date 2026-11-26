@@ -1,0 +1,433 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+    controller-gen.kubebuilder.io/version: v0.23.0
+  labels:
+    app.kubernetes.io/name: konstapel-crds
+    app.kubernetes.io/part-of: konstapel
+  name: assessmentproviders.compliance.erenius.io
+spec:
+  group: compliance.erenius.io
+  names:
+    kind: AssessmentProvider
+    listKind: AssessmentProviderList
+    plural: assessmentproviders
+    shortNames:
+    - aprovider
+    singular: assessmentprovider
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.provider.name
+      name: Provider
+      type: string
+    - jsonPath: .spec.compatibility.contractVersion
+      name: Contract
+      type: integer
+    - jsonPath: .spec.endpoint.service.name
+      name: Service
+      type: string
+    - jsonPath: .spec.newRequests
+      name: New Requests
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AssessmentProvider is an administrator's registration of one external
+          assessment provider service.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AssessmentProviderSpec is the administrator's registration. The provider
+              name, release digest and compatibility are immutable; the endpoint, trust,
+              capabilities and newRequests can change, and each change is a new
+              configuration revision (metadata.generation) that only new work uses.
+            properties:
+              capabilities:
+                description: |-
+                  capabilities are the operation groups this registration allows, at
+                  least one. Scan is the administrator's authorization for
+                  fresh-evidence requests; without it no scan is ever started.
+                items:
+                  description: |-
+                    AssessmentProviderCapability is one operation group of the
+                    konstapel.provider.v1 protocol that a registration allows. The endpoint
+                    must serve every allowed capability; the controller sends nothing outside
+                    them.
+                  enum:
+                  - Collect
+                  - Scan
+                  - Evaluate
+                  type: string
+                maxItems: 3
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+              compatibility:
+                description: |-
+                  compatibility is the protocol, contract, evaluator and payload the
+                  endpoint must serve. Immutable.
+                properties:
+                  contractVersion:
+                    description: |-
+                      contractVersion is the provider contract version bundles select
+                      ("<name>/v<contractVersion>").
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  evaluatorVersion:
+                    description: evaluatorVersion is the evaluation semantics the
+                      endpoint must have.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  payloadVersion:
+                    description: |-
+                      payloadVersion is the evidence payload version Konstapel stores for
+                      this provider: the endpoint must write it when Collect or Scan is
+                      allowed, and read it.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  protocol:
+                    description: protocol is the wire protocol's major version.
+                    enum:
+                    - konstapel.provider.v1
+                    type: string
+                required:
+                - contractVersion
+                - evaluatorVersion
+                - payloadVersion
+                - protocol
+                type: object
+              endpoint:
+                description: endpoint is the Service, server name and trust of the
+                  provider.
+                properties:
+                  serverName:
+                    description: |-
+                      serverName is the DNS name the provider's serving certificate must
+                      carry as a DNS subject alternative name: the one server name the
+                      controller authorizes, whatever address it connects to. Common
+                      names, URIs, IP addresses and wildcard names in the certificate never
+                      match it. It is explicit, never derived from the Service, and a
+                      lowercase RFC 1123 DNS name without a wildcard, trailing dot or IP
+                      address. A URI (for example SPIFFE) server identity, if one is ever
+                      supported, will be a separate optional field; serverName stays a DNS
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: serverName must be a DNS name, not an IP address
+                      rule: '!self.matches(''^[0-9.]+$'')'
+                  serverTrust:
+                    description: |-
+                      serverTrust names the ConfigMap in the controller namespace whose PEM
+                      roots alone verify the provider's serving certificate; system roots
+                      are never used. Rotatable: replace the roots, or point at another
+                      ConfigMap.
+                    properties:
+                      key:
+                        default: ca.crt
+                        description: key is the ConfigMap data key holding PEM certificates.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      name:
+                        description: name of the object in the controller namespace.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is rejected when set; it exists so that a cross-namespace
+                          reference is an explicit API error rather than a silently dropped field.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: references resolve in the controller namespace only;
+                        namespace must not be set
+                      rule: '!has(self.__namespace__)'
+                  service:
+                    description: service is the Service in front of the provider.
+                    properties:
+                      name:
+                        description: name of the Service (a DNS-1035 label).
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: namespace of the Service (a DNS label).
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      port:
+                        description: port is the Service port serving the protocol.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                    required:
+                    - name
+                    - namespace
+                    - port
+                    type: object
+                required:
+                - serverName
+                - serverTrust
+                - service
+                type: object
+              newRequests:
+                default: Enabled
+                description: |-
+                  newRequests is Enabled (the default) or Disabled. Disabled blocks new
+                  work but lets operations already frozen to the registration finish,
+                  cancel and hand off their results.
+                enum:
+                - Enabled
+                - Disabled
+                type: string
+              provider:
+                description: provider is the identity the endpoint must report.
+                properties:
+                  name:
+                    description: |-
+                      name is the provider identity: the name bundles select as
+                      compatibility.provider "<name>/v<contractVersion>", a lowercase DNS
+                      label. konstapel and konstapel-* are reserved for providers built
+                      into Konstapel, so a registration never shadows one. Immutable.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: provider names konstapel and konstapel-* are reserved
+                        for built-in providers
+                      rule: self != 'konstapel' && !self.startsWith('konstapel-')
+                  releaseDigest:
+                    description: |-
+                      releaseDigest ("sha256:" and 64 lowercase hex digits) identifies the
+                      provider release the platform verified and installed, as the endpoint
+                      reports it (its implementation). It is a content digest, never a
+                      tag. Immutable: a new release, compatible or not, is registered as a
+                      new AssessmentProvider, so every operation's frozen registration
+                      names exactly one release.
+                    maxLength: 71
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                required:
+                - name
+                - releaseDigest
+                type: object
+            required:
+            - capabilities
+            - compatibility
+            - endpoint
+            - provider
+            type: object
+            x-kubernetes-validations:
+            - message: provider.name and compatibility are immutable; register an
+                incompatible release as a new AssessmentProvider
+              rule: self.provider.name == oldSelf.provider.name && self.compatibility
+                == oldSelf.compatibility
+            - message: provider.releaseDigest is immutable; register a new release
+                as a new AssessmentProvider
+              rule: self.provider.releaseDigest == oldSelf.provider.releaseDigest
+          status:
+            description: |-
+              AssessmentProviderStatus is written only by the Konstapel controller
+              (RBAC, and the konstapel-assessment-provider-status-writer admission
+              policy). It never holds credentials, keys, certificates or Secret
+              contents.
+            properties:
+              conditions:
+                description: |-
+                  conditions report the registration's availability and compatibility,
+                  separately from any assessment's findings.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                maxItems: 8
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              identity:
+                description: |-
+                  identity is the observed compatible identity; absent while none has
+                  been observed for observedGeneration.
+                properties:
+                  capabilities:
+                    description: capabilities are the allowed capabilities the endpoint
+                      serves.
+                    items:
+                      description: |-
+                        AssessmentProviderCapability is one operation group of the
+                        konstapel.provider.v1 protocol that a registration allows. The endpoint
+                        must serve every allowed capability; the controller sends nothing outside
+                        them.
+                      enum:
+                      - Collect
+                      - Scan
+                      - Evaluate
+                      type: string
+                    maxItems: 3
+                    type: array
+                    x-kubernetes-list-type: set
+                  contractVersion:
+                    description: |-
+                      contractVersion, evaluatorVersion and payloadVersion are the
+                      compatible versions the endpoint serves.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  evaluatorVersion:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  name:
+                    description: name is the provider identity the endpoint reported.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+                    type: string
+                  observedAt:
+                    description: observedAt is when the controller checked the endpoint.
+                    format: date-time
+                    type: string
+                  payloadVersion:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  protocol:
+                    description: |-
+                      protocol and protocolRevision are the protocol major and the
+                      revision of it the controller speaks to the endpoint.
+                    enum:
+                    - konstapel.provider.v1
+                    type: string
+                  protocolRevision:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  releaseDigest:
+                    description: releaseDigest is the implementation the endpoint
+                      reported.
+                    maxLength: 71
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                required:
+                - contractVersion
+                - evaluatorVersion
+                - name
+                - observedAt
+                - payloadVersion
+                - protocol
+                - protocolRevision
+                - releaseDigest
+                type: object
+              observedGeneration:
+                description: |-
+                  observedGeneration is the registration generation the status
+                  describes.
+                format: int64
+                minimum: 0
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: status.identity must have the registration's provider name and
+            compatibility
+          rule: '!has(self.status) || !has(self.status.identity) || (self.status.identity.name
+            == self.spec.provider.name && self.status.identity.protocol == self.spec.compatibility.protocol
+            && self.status.identity.contractVersion == self.spec.compatibility.contractVersion
+            && self.status.identity.evaluatorVersion == self.spec.compatibility.evaluatorVersion
+            && self.status.identity.payloadVersion == self.spec.compatibility.payloadVersion)'
+    served: true
+    storage: true
+    subresources:
+      status: {}

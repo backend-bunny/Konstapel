@@ -9,11 +9,12 @@ change. To build a provider that speaks it, follow the
 
 **Status.** The protocol definition, the public Go types and the Go
 authoring kit are implemented and tested. The controller cannot use an
-external provider yet: provider registration (an administrator-owned
-`AssessmentProvider` resource), selection, remote collection, result
-capture, evaluation replay and Helm distribution of providers are later
-tasks of the change. Nothing on this page installs, registers or selects a
-provider. Konstapel's only supported provider is still the in-tree Kyverno
+external provider yet. The administrator-owned `AssessmentProvider`
+registration API exists
+([assessment providers](../assessment-providers.md#registration-is-code-not-data)),
+but selection, remote collection, result capture, evaluation replay and Helm
+distribution of providers are later tasks of the change. Nothing on this page
+installs, registers or selects a provider. Konstapel's only supported provider is still the in-tree Kyverno
 provider ([assessment providers](../assessment-providers.md)).
 
 ## Sources of truth
@@ -442,8 +443,11 @@ the [quickstart](external-provider-quickstart.md) does.
 
 ## What is not specified here
 
-- Provider registration (`AssessmentProvider`), selection, permissions and
-  Helm installation, which are later tasks of the change.
+- Provider selection, permissions and Helm installation, which are later
+  tasks of the change. The `AssessmentProvider` registration fields
+  (Service, `serverName`, `serverTrust`, expected name and release digest,
+  compatibility, capabilities) are API types in
+  `api/v1alpha1/assessmentprovider_types.go`.
 - Remote collection, capture and replay integration in the controller, scan
   dispatch and the reference scan worker.
 - Any real producer. No external provider is supported yet.
