@@ -1,0 +1,251 @@
+{
+  "change": "split-hardening-policy-validations",
+  "purpose": "Single-validation revision of the Linux hardening checks: each validation of a multi-validation policy becomes its own policy, so the engine reports every check's outcome independently. Expressions, variables, matching, operations and the Windows guard are unchanged; only the policy boundary moves.",
+  "supersedes": {
+    "bundle": "bundles/konstapel-linux-hardening/definition.json",
+    "version": "0.1.0",
+    "componentDefinition": "content/linux-hardening/component-definition.json",
+    "variants": "content/linux-hardening/variants.json"
+  },
+  "sources": "content/linux-hardening/sources.json",
+  "componentDefinition": "content/linux-hardening/split/component-definition.json",
+  "checksums": {
+    "file": "content/linux-hardening/split/SHA256SUMS",
+    "detail": "Covers the four split variants, this inventory and the revision's component definition. They are deliberately not listed in content/SHA256SUMS: its sha256 is the identity of the vendored bundle (konstapel-vendored), and saved vendored captures replay only against that exact content. Selecting this revision for the vendored or OCI bundle is a separate step."
+  },
+  "provenanceAnnotations": [
+    "compliance.erenius.io/variant-of",
+    "compliance.erenius.io/source-sha256"
+  ],
+  "denominator": {
+    "original": {
+      "policies": 5,
+      "validations": 7
+    },
+    "revision": {
+      "policies": 7,
+      "validations": 7
+    }
+  },
+  "identities": [
+    {
+      "from": {
+        "check": "disallow-privileged-containers",
+        "file": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+        "validation": 0
+      },
+      "to": {
+        "check": "disallow-privileged-containers",
+        "file": "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "disallow-privilege-escalation",
+        "file": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+        "validation": 0
+      },
+      "to": {
+        "check": "disallow-privilege-escalation",
+        "file": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "disallow-capabilities-strict",
+        "file": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+        "validation": 0
+      },
+      "to": {
+        "check": "require-drop-all-capabilities",
+        "file": "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "disallow-capabilities-strict",
+        "file": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+        "validation": 1
+      },
+      "to": {
+        "check": "restrict-added-capabilities",
+        "file": "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "require-run-as-nonroot",
+        "file": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+        "validation": 0
+      },
+      "to": {
+        "check": "require-run-as-nonroot",
+        "file": "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "restrict-seccomp-strict",
+        "file": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+        "validation": 0
+      },
+      "to": {
+        "check": "restrict-pod-seccomp-profile",
+        "file": "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
+        "validation": 0
+      }
+    },
+    {
+      "from": {
+        "check": "restrict-seccomp-strict",
+        "file": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+        "validation": 1
+      },
+      "to": {
+        "check": "require-container-seccomp-profile",
+        "file": "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+        "validation": 0
+      }
+    }
+  ],
+  "variants": [
+    {
+      "check": "require-drop-all-capabilities",
+      "file": "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
+      "sha256": "89daa01e11455552e0a942de7f66c1e6877a4ce5f53b23537648b53891c2202b",
+      "source": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "sourceSha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+      "splitFrom": {
+        "check": "disallow-capabilities-strict",
+        "file": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+        "sha256": "6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+        "validation": 0,
+        "subValidation": "disallow-capabilities-strict.drop-all",
+        "sibling": "restrict-added-capabilities"
+      },
+      "changes": [
+        {
+          "id": "split",
+          "paths": [
+            "metadata.name",
+            "spec.validations"
+          ],
+          "detail": "Renames the policy to its new logical check identity and keeps only validation 0 of disallow-capabilities-strict, byte-for-byte (expression and message); every other spec field, including validationActions, evaluation, matchConstraints and all variables, is the original's. The kept validation is engine index 0."
+        },
+        {
+          "id": "documentation",
+          "paths": [
+            "metadata.annotations.policies.kyverno.io/description",
+            "metadata.annotations.policies.kyverno.io/title"
+          ],
+          "detail": "Title and description describe the single retained validation and name its sibling."
+        }
+      ]
+    },
+    {
+      "check": "restrict-added-capabilities",
+      "file": "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+      "sha256": "dd6f9852125ee225ccf98e65b769633f8ce087ccfabe0f3850b315beb58d9dce",
+      "source": "content/upstream/kyverno/disallow-capabilities-strict/disallow-capabilities-strict.yaml",
+      "sourceSha256": "30d3ffefc63a00badbf7e5805f0c14709ac8c146b11260415b92e768a5fd4830",
+      "splitFrom": {
+        "check": "disallow-capabilities-strict",
+        "file": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+        "sha256": "6c5377845e93f5338b3fa2ffcd0b06248c41ba1da21e66e3b54b739b3328a307",
+        "validation": 1,
+        "subValidation": "disallow-capabilities-strict.add-net-bind-service-only",
+        "sibling": "require-drop-all-capabilities"
+      },
+      "changes": [
+        {
+          "id": "split",
+          "paths": [
+            "metadata.name",
+            "spec.validations"
+          ],
+          "detail": "Renames the policy to its new logical check identity and keeps only validation 1 of disallow-capabilities-strict, byte-for-byte (expression and message); every other spec field, including validationActions, evaluation, matchConstraints and all variables, is the original's. The kept validation is engine index 0."
+        },
+        {
+          "id": "documentation",
+          "paths": [
+            "metadata.annotations.policies.kyverno.io/description",
+            "metadata.annotations.policies.kyverno.io/title"
+          ],
+          "detail": "Title and description describe the single retained validation and name its sibling."
+        }
+      ]
+    },
+    {
+      "check": "restrict-pod-seccomp-profile",
+      "file": "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
+      "sha256": "f27207a966f5ac6513b9489a70effacf130602c9649254167d47454fa5ee09b2",
+      "source": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "sourceSha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+      "splitFrom": {
+        "check": "restrict-seccomp-strict",
+        "file": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+        "sha256": "239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+        "validation": 0,
+        "subValidation": "restrict-seccomp-strict.pod-profile-type",
+        "sibling": "require-container-seccomp-profile"
+      },
+      "changes": [
+        {
+          "id": "split",
+          "paths": [
+            "metadata.name",
+            "spec.validations"
+          ],
+          "detail": "Renames the policy to its new logical check identity and keeps only validation 0 of restrict-seccomp-strict, byte-for-byte (expression and message); every other spec field, including validationActions, evaluation, matchConstraints and all variables, is the original's. The kept validation is engine index 0."
+        },
+        {
+          "id": "documentation",
+          "paths": [
+            "metadata.annotations.policies.kyverno.io/description",
+            "metadata.annotations.policies.kyverno.io/title"
+          ],
+          "detail": "Title and description describe the single retained validation and name its sibling."
+        }
+      ]
+    },
+    {
+      "check": "require-container-seccomp-profile",
+      "file": "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+      "sha256": "8ba26daaf8b4c7a6f74564afb126cc2d8da8fd4896436ed78b6d975ffb690ed8",
+      "source": "content/upstream/kyverno/restrict-seccomp-strict/restrict-seccomp-strict.yaml",
+      "sourceSha256": "fd22b77d67e01e17e4f0083f605736adce25f4a4486e90879a3350a9e918b0ac",
+      "splitFrom": {
+        "check": "restrict-seccomp-strict",
+        "file": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+        "sha256": "239903d91a3d864299ac83f16345ec22e1b45d632a4d8e67b827da1fa7942f96",
+        "validation": 1,
+        "subValidation": "restrict-seccomp-strict.container-profile-type",
+        "sibling": "restrict-pod-seccomp-profile"
+      },
+      "changes": [
+        {
+          "id": "split",
+          "paths": [
+            "metadata.name",
+            "spec.validations"
+          ],
+          "detail": "Renames the policy to its new logical check identity and keeps only validation 1 of restrict-seccomp-strict, byte-for-byte (expression and message); every other spec field, including validationActions, evaluation, matchConstraints and all variables, is the original's. The kept validation is engine index 0."
+        },
+        {
+          "id": "documentation",
+          "paths": [
+            "metadata.annotations.policies.kyverno.io/description",
+            "metadata.annotations.policies.kyverno.io/title"
+          ],
+          "detail": "Title and description describe the single retained validation and name its sibling."
+        }
+      ]
+    }
+  ],
+  "exceptions": "Exception inputs (exceptions.allowedImages, exceptions.allowedValues) are unchanged inside each retained expression. Acceptances recorded against an old policy identity do not transfer to its replacements."
+}

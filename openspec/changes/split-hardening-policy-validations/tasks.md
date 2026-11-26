@@ -9,9 +9,9 @@ or mark the issue fixed merely because these planning artifacts are merged.
 
 ## 1. Single-validation content and mappings
 
-- [ ] 1.1 Create the four named variants retaining exact original CEL, variables, matching and applicability; test expression equivalence for all outcome combinations plus init/ephemeral/template cases and preserve upstream originals.
+- [x] 1.1 Create the four named variants retaining exact original CEL, variables, matching and applicability; test expression equivalence for all outcome combinations plus init/ephemeral/template cases and preserve upstream originals.
   <!-- agent: tier=deep risk=medium -->
-- [ ] 1.2 Update inventories, component definitions and OSCAL/control mappings with old-validation-to-new-ID provenance; validate checksums, license/source records and the unchanged seven-check full-bundle denominator.
+- [x] 1.2 Update inventories, component definitions and OSCAL/control mappings with old-validation-to-new-ID provenance; validate checksums, license/source records and the unchanged seven-check full-bundle denominator.
   <!-- agent: tier=deep risk=medium -->
 - [ ] 1.3 Prepare independently versioned bundle inputs and update active examples/vendored selection coherently; verify old pinned artifacts and saved historical fixtures remain readable and document the identity mapping.
   <!-- agent: tier=standard risk=medium -->
