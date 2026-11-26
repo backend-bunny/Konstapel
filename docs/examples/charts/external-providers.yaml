@@ -1,0 +1,10 @@
+# The controller's client for registered external assessment providers
+# (docs/charts.md, "External assessment providers"). Create the Secret first
+# in konstapel-system: a kubernetes.io/tls Secret with tls.crt and tls.key,
+# such as one a cert-manager Certificate issues, for the client identity
+# your providers authorize. The chart mounts it read-only and passes
+# --external-provider-client-cert-dir; it installs no provider, binds no
+# registration role and grants the controller nothing new.
+externalProviders:
+  enabled: true
+  clientCertSecretName: konstapel-external-provider-client-tls

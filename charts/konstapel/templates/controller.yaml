@@ -174,6 +174,10 @@ spec:
             - --bundle-cache-capacity={{ .Values.bundles.cache.capacity }}
             - --bundle-refresh-interval={{ .Values.bundles.refreshInterval }}
             {{- end }}
+            {{- if .Values.externalProviders.enabled }}
+            # The client certificate for registered external providers.
+            - --external-provider-client-cert-dir=/etc/konstapel/external-provider-client-tls
+            {{- end }}
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -238,6 +242,11 @@ spec:
               mountPath: /etc/konstapel/webhook-tls
               readOnly: true
             {{- end }}
+            {{- if .Values.externalProviders.enabled }}
+            - name: external-provider-client-tls
+              mountPath: /etc/konstapel/external-provider-client-tls
+              readOnly: true
+            {{- end }}
       volumes:
         # Per-pod bounded working storage. Durable state lives in Kubernetes
         # and the evidence destination; a successor recovers from those.
@@ -269,6 +278,15 @@ spec:
         - name: webhook-tls
           secret:
             secretName: {{ include "konstapel.webhookTLSSecret" . }}
+        {{- end }}
+        {{- if .Values.externalProviders.enabled }}
+        # The operator-provided client certificate for external providers,
+        # verified at start (startup fails without it) and re-read on every
+        # probe, so a rotation needs no restart. Mounted, never read through
+        # the API: the controller gains no Secret grant.
+        - name: external-provider-client-tls
+          secret:
+            secretName: {{ .Values.externalProviders.clientCertSecretName }}
         {{- end }}
 {{- if and (gt (int .Values.replicaCount) 1) .Values.podDisruptionBudget.enabled }}
 ---

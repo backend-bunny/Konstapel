@@ -466,8 +466,12 @@ certificate, as a mounted `kubernetes.io/tls` Secret. The certificate must
 allow client authentication and name the host identity providers authorize.
 Without the flag, the controller neither watches nor contacts registrations,
 and every contract that is not built in is `UnknownProvider`, exactly as
-before. With the flag, invalid credentials fail startup. The core chart does
-not set the flag yet.
+before. With the flag, invalid credentials fail startup. The runtime chart sets
+the flag and mounts the Secret only with `externalProviders.enabled`.
+[External assessment providers](../charts.md#external-assessment-providers)
+covers the certificates, trust ConfigMaps, roles to bind and the platform
+installation boundary. The controller never installs or downloads a
+provider. Content and assessment runs do not use registrations yet.
 
 ### Probing
 

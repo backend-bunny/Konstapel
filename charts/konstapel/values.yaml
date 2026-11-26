@@ -85,6 +85,25 @@ bundles:
   referencedSecrets: []
   referencedConfigMaps: []
 
+# The controller's client for registered external assessment providers
+# (AssessmentProvider; docs/charts.md, "External assessment providers").
+# Off by default: the controller then watches, contacts and selects no
+# external provider, and the chart renders exactly what it renders without
+# this section. The chart installs no provider, binds neither
+# konstapel-assessment-provider-* role and grants the controller nothing
+# new: providers run under their own ServiceAccounts and permissions.
+externalProviders:
+  # Mounts clientCertSecretName read-only and passes
+  # --external-provider-client-cert-dir. A missing, invalid or expired
+  # certificate then fails controller startup.
+  enabled: false
+  # With enabled only: a kubernetes.io/tls Secret in the release namespace
+  # (tls.crt, tls.key), such as one cert-manager issues, whose certificate
+  # allows client authentication and names, as a DNS SAN, the identity your
+  # providers authorize. You create and rotate it; the chart never renders
+  # it. A rotation is used from the next probe, without a restart.
+  clientCertSecretName: ""
+
 tls:
   # mode selects who issues the service certificates, exclusively:
   #   certManager (default): a separately installed cert-manager. Optionally

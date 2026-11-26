@@ -76,7 +76,9 @@ other contract it selects exactly one enabled, `Ready` registration and
 freezes its identity. Disabled, ambiguous and unavailable registrations are
 rejected explicitly
 ([registration, selection and status](integration/external-provider-protocol.md#registration-selection-and-status)).
-External providers are off by default, and no assessment uses one yet.
+External providers are off by default, and no assessment uses one yet. The
+runtime chart enables the controller's client with `externalProviders.enabled`
+([External assessment providers](charts.md#external-assessment-providers)).
 
 Verified bundle content can only name a provider contract
 (`compatibility.provider` in `bundle.json`, for example
