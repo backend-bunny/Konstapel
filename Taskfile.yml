@@ -11,11 +11,14 @@ tasks:
     cmd: scripts/build.sh
 
   test:
-    desc: Run Go tests, Prometheus query and alert-rule tests and CI/logging regression tests
+    desc: Run Go tests, the external-provider example and quickstart, Prometheus query and alert-rule tests and CI/logging regression tests
     cmds:
       # The controller package takes about 8 minutes on an idle host, so Go's
       # default 10-minute package timeout fails spuriously on a busy one.
       - go test -mod=readonly -timeout 30m ./...
+      # The independent example module is outside ./...: check, test and run
+      # its documented quickstart commands.
+      - scripts/examples/external-provider.sh
       - python3 -m unittest discover -s scripts/ci -p 'test_*.py'
       # Documented metric queries against Hub-generated series, and the
       # chart's Helm-rendered starter alerts (kept identical to the rendered
