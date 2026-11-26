@@ -1,0 +1,29 @@
+# Operator-applied Kyverno grant for the policies Konstapel's official bundles
+# deliver (docs/integration/kyverno-rbac.md). Apply it as the Kyverno
+# administrator; Konstapel never installs or expands Kyverno's RBAC, and its
+# own ServiceAccount gets nothing from this role.
+#
+# Verified for Kyverno chart 3.9.2 (Kyverno v1.19.2) only
+# (docs/integration/kyverno-permission-matrix.json). Kyverno's policy status
+# check asks whether the reports controller may get, list and watch every
+# resource a policy with background evaluation matches. The delivered
+# policies match pods/ephemeralcontainers, which Kubernetes' view role (bound
+# to the reports controller by the chart) does not cover. Without this grant
+# every delivered policy reports RBACPermissionsGranted=False, in Audit and in
+# Deny mode. The admission controller needs no grant on the subresource.
+#
+# The chart's kyverno:reports-controller ClusterRole aggregates every
+# ClusterRole carrying the label below, so no binding is needed. The chart
+# uses this selector whatever the release name; check it against your
+# installation first. The role name is free; this one is not chart-managed.
+# No update, patch or wildcards: the readiness check asks only for these verbs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:reports-controller:ephemeralcontainers-read
+  labels:
+    rbac.kyverno.io/aggregate-to-reports-controller: "true"
+rules:
+  - apiGroups: [""]
+    resources: [pods/ephemeralcontainers]
+    verbs: [get, list, watch]

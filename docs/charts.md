@@ -189,6 +189,15 @@ re-reconciles every binding for delivery and assessment. This covers an
 engine that is installed, removed, or loses or regains permissions.
 `/healthz` and `/readyz` don't depend on Kyverno.
 
+**Kyverno's own permissions.** The policies of the official bundles need
+one grant on Kyverno's reports controller that the Kyverno chart doesn't
+include: `get`, `list` and `watch` on `pods/ephemeralcontainers`. Without it
+every delivered policy reports `RBACPermissionsGranted=False` and bindings
+stay `ReplacementPending`, in `Audit` as well as `Deny`. Neither Konstapel
+chart grants it: apply the operator example, after checking your
+installation's identities, as described in
+[Kyverno permissions for official bundles](integration/kyverno-rbac.md).
+
 **Tested versions.** The matrix above is tested against Kyverno chart
 `3.9.2` (`scripts/runtime.env`), which serves `policies.kyverno.io/v1` and
 `wgpolicyk8s.io/v1alpha2`. Compatibility comes from these API shapes, not from
@@ -215,7 +224,9 @@ order:
    ready. `ReplacementPending` means the engine has not accepted the policies
    yet. Its message names the failing Kyverno readiness condition for each
    policy, for example `RBACPermissionsGranted=False` (see
-   [readiness diagnostics](integration/targeting-api.md#readiness-diagnostics)).
+   [readiness diagnostics](integration/targeting-api.md#readiness-diagnostics)
+   and, for missing `pods/ephemeralcontainers` verbs,
+   [Kyverno permissions](integration/kyverno-rbac.md)).
    During an engine outage, already applied policies stay in place and keep
    enforcing.
 4. **Is the evidence complete?** That's `status.assessment.current`.

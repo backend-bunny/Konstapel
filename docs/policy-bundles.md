@@ -19,6 +19,12 @@ resolves it centrally and verifies it before use.
 > acceptance of the official and organization matrix is the `bundles`
 > acceptance group ([bundle acceptance](#bundle-acceptance)).
 
+> **Kyverno prerequisite.** On Kyverno chart 3.9.2, both official bundles'
+> policies need a `get`/`list`/`watch` grant on `pods/ephemeralcontainers`
+> for Kyverno's reports controller, in `Audit` as well as `Deny`. Konstapel
+> never grants it; the Kyverno administrator applies it. See
+> [Kyverno permissions for official bundles](integration/kyverno-rbac.md).
+
 ## OCI layout
 
 A bundle is one OCI 1.1 **image manifest** (never an index):

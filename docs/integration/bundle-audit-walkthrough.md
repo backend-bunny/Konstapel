@@ -104,6 +104,14 @@ kubectl get --raw /apis/policies.kyverno.io/v1 | jq -r '.resources[].name' | gre
 validatingpolicies
 ```
 
+`scripts/environment.sh` also applies the upstream Kyverno test fixture that
+grants Kyverno's controllers access to `pods/ephemeralcontainers`. On your own
+Kyverno installation nothing does: Audit is not permission-free, and without
+the reports-controller grant the binding in step 8 stays
+`EngineReady=False` `ReplacementPending`. Apply the least-privilege example
+from [Kyverno permissions for official bundles](kyverno-rbac.md) and verify it
+with the `kubectl auth can-i` commands there before step 8.
+
 ## 3. Build and load the controller image
 
 Build the image from the checkout and load it into the node. kind records a
