@@ -1,0 +1,27 @@
+{
+  "description": "Payload 2 is read but not written: new evidence is only ever written as payload.write.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "payloadVersion": 2,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAioGCMC+oNgG"
+}

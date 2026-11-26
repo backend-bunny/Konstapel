@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate deepcopy code, CRDs, the CRD chart's templates, and RBAC from the
-# Go API types.
+# Go API types, and the external provider protocol's Go code from its protobuf
+# definitions (proto/, published as pkg/providerapi).
 # With --check, fail if the checked-in generated files are out of date.
 set -euo pipefail
 
@@ -12,6 +13,18 @@ generate() {
 	controller-gen object paths=./api/...
 	controller-gen crd paths=./api/... output:crd:artifacts:config="$crd_dir"
 	controller-gen rbac:roleName=konstapel-controller paths=./internal/controller/... output:rbac:artifacts:config="$rbac_dir"
+}
+
+# Generate the Go code of every protocol definition under proto/ into $1, at
+# its go_package path below the module root. Every go_package is below
+# pkg/providerapi, which holds generated code only: regeneration replaces it.
+generate_proto() {
+	local out=$1 module
+	module=$(go list -mod=readonly -m)
+	mkdir -p "$out"
+	find proto -name '*.proto' -print0 | sort -z | xargs -0 protoc -I proto \
+		--go_out="$out" --go_opt=module="$module" \
+		--go-grpc_out="$out" --go-grpc_opt=module="$module"
 }
 
 if [ "${1:-}" = "--check" ]; then
@@ -51,6 +64,11 @@ if [ "${1:-}" = "--check" ]; then
 		echo "Controller RBAC in config/rbac/controller is out of date; run scripts/generate.sh" >&2
 		status=1
 	fi
+	generate_proto "$tmp/proto"
+	if ! diff -r "$tmp/proto/pkg/providerapi" pkg/providerapi; then
+		echo "Generated protocol code in pkg/providerapi is out of date; run scripts/generate.sh" >&2
+		status=1
+	fi
 	exit "$status"
 fi
 
@@ -58,3 +76,5 @@ mkdir -p config/rbac/controller
 generate config/crd/bases config/rbac/controller
 scripts/charts/crds.sh config/crd/bases charts/konstapel-crds/templates
 scripts/charts/runtime.sh charts/konstapel/templates
+rm -rf pkg/providerapi
+generate_proto .

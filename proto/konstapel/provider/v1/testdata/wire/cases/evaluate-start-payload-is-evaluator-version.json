@@ -1,0 +1,43 @@
+{
+  "description": "The evaluator version (5) is not a payload version.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.EvaluateStart",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "evaluatorVersion": 5,
+    "payloadVersion": 5,
+    "payloadSizeBytes": "14",
+    "payloadSha256": "sha256:486a8f07711a55700e1ed31c536217c17f3135cc6340b4830bcb4f87bbc7072a",
+    "evaluationTime": "2026-11-26T12:00:00Z",
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "content": [
+      {
+        "bundle": "example",
+        "manifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "checks": [
+      {
+        "kind": "reporting.example.io/v1/Posture",
+        "name": "posture",
+        "definition": "eyJ2ZXJkaWN0IjoicGFzcyJ9"
+      }
+    ]
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEAUYBSAOKkdzaGEyNTY6NDg2YThmMDc3MTFhNTU3MDBlMWVkMzFjNTM2MjE3YzE3ZjMxMzVjYzYzNDBiNDgzMGJjYjRmODdiYmM3MDcyYTIGCMC+oNgGOiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWRCUgoHZXhhbXBsZRJHc2hhMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTFKPgofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIHcG9zdHVyZRoSeyJ2ZXJkaWN0IjoicGFzcyJ9"
+}

@@ -1,0 +1,15 @@
+{
+  "description": "A missing protocol revision is 0, never revision 1.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.DescribeRequest",
+  "value": {
+    "header": {
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    }
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
+  "wire": "ChcSFQoRZXhhbXBsZS1yZXBvcnRpbmcQAg=="
+}

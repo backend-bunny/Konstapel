@@ -29,7 +29,7 @@ tasks:
     desc: Check Go formatting, vet, generated API files, Helm charts, and shell syntax
     cmds:
       - |
-        unformatted=$(gofmt -l api cmd internal)
+        unformatted=$(gofmt -l api cmd internal pkg)
         if [ -n "$unformatted" ]; then
           printf 'Run gofmt on:\n%s\n' "$unformatted"
           exit 1

@@ -1,0 +1,34 @@
+{
+  "description": "A scan key whose input digest is not its input's.",
+  "provider": "scanning",
+  "message": "konstapel.provider.v1.StartRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-scanning",
+        "version": 2
+      }
+    },
+    "key": {
+      "runUid": "run-uid",
+      "registrationUid": "registration-uid",
+      "registrationRevision": "1",
+      "inputDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "input": "eyJjaGVja3MiOlsicG9zdHVyZSJdfQ==",
+    "payloadVersion": 3,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_DIGEST_MISMATCH",
+  "wire": "ChgIARIUChBleGFtcGxlLXNjYW5uaW5nEAISZgoHcnVuLXVpZBIQcmVnaXN0cmF0aW9uLXVpZBgBIkdzaGEyNTY6MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMhohCgtjbHVzdGVyLXVpZBISCgZ0ZWFtLWESCG5zLWEtdWlkIhZ7ImNoZWNrcyI6WyJwb3N0dXJlIl19KAMyBgjAvqDYBg=="
+}

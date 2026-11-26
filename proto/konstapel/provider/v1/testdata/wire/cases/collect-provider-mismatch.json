@@ -1,0 +1,27 @@
+{
+  "description": "A request for another provider name.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-scanning",
+        "version": 2
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "payloadVersion": 3,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_PROVIDER_MISMATCH",
+  "wire": "ChgIARIUChBleGFtcGxlLXNjYW5uaW5nEAISIQoLY2x1c3Rlci11aWQSEgoGdGVhbS1hEghucy1hLXVpZCADKgYIwL6g2AY="
+}

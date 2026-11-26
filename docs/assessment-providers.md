@@ -1754,6 +1754,15 @@ of every retained version stay installed:
 - the pinned C2P-Go v2 `Configure`/`Generate`/`GetResults` plugin contract
   and the `konstapel-provider` plugin manifest, owned upstream and by the
   build, not by this change
+- the external provider protocol `konstapel.provider.v1`
+  ([`provider.proto`](../proto/konstapel/provider/v1/provider.proto), from
+  [`add-external-assessment-providers`](../openspec/changes/add-external-assessment-providers/proposal.md))
+  and its wire fixtures. Its provider contract, payload and evaluator
+  versions are this guide's descriptor version, `capture` versions and
+  `evaluatorVersion`, not parallel ones; its protocol revision is a fourth,
+  separate dimension. Its public Go types (`pkg/providerapi/v1`) and
+  authoring kit (`pkg/providerkit`) import nothing internal. No external
+  provider can be registered or selected yet.
 
 ### Internal Go interfaces
 

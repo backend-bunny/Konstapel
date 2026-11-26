@@ -1,0 +1,501 @@
+// Konstapel external assessment provider protocol, major version 1.
+//
+// This file is the language-neutral wire contract between Konstapel (the
+// host) and an independently installed assessment provider service
+// (add-external-assessment-providers). Generate a client or server for any
+// language from it; the Go types generated from it are published as
+// github.com/backend-bunny/Konstapel/pkg/providerapi/v1.
+//
+// Compatibility dimensions. Four versions are negotiated separately and
+// none implies another:
+//
+//   1. Protocol version: this wire contract. The major version is the
+//      package name (konstapel.provider.v1); a breaking change is a new
+//      package. RequestHeader.protocol_version is the revision of this
+//      major the caller speaks, and DescribeResponse.protocol_versions are
+//      the revisions the provider serves. This definition is revision 1.
+//   2. Provider contract version: the provider's capability contract,
+//      selected by bundles as "<name>/v<version>" (ProviderContract). It is
+//      the host's provider descriptor version.
+//   3. Payload version: the format of the evidence payload the provider
+//      writes and reads (PayloadCompatibility). The host stores it in a
+//      capture envelope's payloadVersion.
+//   4. Evaluator version: the provider's evaluation semantics
+//      (DescribeResponse.evaluator_version). The host records it in a
+//      capture envelope's evaluatorVersion and replays a capture only with
+//      the same evaluator version.
+//
+// An unsupported version in any dimension is rejected with that
+// dimension's ErrorReason. It is never adapted, defaulted or ignored.
+//
+// Errors. A failed call returns a gRPC status whose details carry exactly
+// one ErrorDetail naming the reason. Clients branch on the ErrorReason,
+// never on the message text.
+//
+// Transport. This file defines messages and the service only. Mutual TLS,
+// peer authorization and transport limits are configured by the host and
+// the provider deployment; no credential is ever carried in a message.
+syntax = "proto3";
+
+package konstapel.provider.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/backend-bunny/Konstapel/pkg/providerapi/v1;providerv1";
+
+// AssessmentProvider is the service every external provider serves. A
+// provider implements Describe and the operations of the capabilities it
+// declares; every other operation fails with
+// ERROR_REASON_UNSUPPORTED_CAPABILITY.
+service AssessmentProvider {
+  // Describe returns the provider's identity, capabilities, versions and
+  // limits. It reads no evidence and has no side effect.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+  // Collect reads existing evidence for a host-frozen scope and stages it
+  // as one immutable result (CAPABILITY_COLLECT). It never mutates an
+  // evidence source and never starts a scan.
+  rpc Collect(CollectRequest) returns (CollectResponse);
+
+  // Start records a scan operation under its idempotency key and starts it
+  // (CAPABILITY_SCAN). Repeating a key with the same input returns the
+  // original operation; the same key with another input is
+  // ERROR_REASON_OPERATION_CONFLICT.
+  rpc Start(StartRequest) returns (StartResponse);
+
+  // Get returns a scan operation's current state (CAPABILITY_SCAN).
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // Cancel requests cancellation of a scan operation (CAPABILITY_SCAN). It
+  // is idempotent and returns the operation's state after the request.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+
+  // ReadResult streams an immutable staged result in bounded chunks,
+  // starting at a byte offset so an interrupted transfer can resume the
+  // same bytes (CAPABILITY_COLLECT or CAPABILITY_SCAN).
+  rpc ReadResult(ReadResultRequest) returns (stream ReadResultResponse);
+
+  // Acknowledge confirms that the host durably captured a result, after
+  // which the provider may release its staging (CAPABILITY_COLLECT or
+  // CAPABILITY_SCAN). The size and digest must match the result.
+  rpc Acknowledge(AcknowledgeRequest) returns (AcknowledgeResponse);
+
+  // Evaluate evaluates a frozen payload at an explicit time
+  // (CAPABILITY_EVALUATE). The caller sends one EvaluateStart, then the
+  // payload in chunks, then closes its stream; the provider then streams
+  // observation batches and ends with one EvaluationSummary. Evaluation
+  // reads no source, clock or registry and starts no scan.
+  rpc Evaluate(stream EvaluateRequest) returns (stream EvaluateResponse);
+}
+
+// Capability is one optional operation group a provider serves.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  // Collect, ReadResult and Acknowledge: read-only collection of existing
+  // evidence.
+  CAPABILITY_COLLECT = 1;
+  // Start, Get, Cancel, ReadResult and Acknowledge: explicitly requested
+  // fresh evidence. A host uses it only when the provider registration
+  // allows it and the frozen request opts in.
+  CAPABILITY_SCAN = 2;
+  // Evaluate: pure evaluation of frozen payloads.
+  CAPABILITY_EVALUATE = 3;
+}
+
+// ErrorReason classifies a failed call. It is carried in ErrorDetail.
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+  // The request's protocol_version is not one the provider serves.
+  ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION = 1;
+  // The request names another provider than the one serving it.
+  ERROR_REASON_PROVIDER_MISMATCH = 2;
+  // The request's provider contract version is not the provider's.
+  ERROR_REASON_UNSUPPORTED_CONTRACT_VERSION = 3;
+  // The payload version is not one the provider writes (Collect, Start) or
+  // reads (Evaluate).
+  ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION = 4;
+  // The evaluator version is not the provider's evaluator version.
+  ERROR_REASON_UNSUPPORTED_EVALUATOR_VERSION = 5;
+  // The provider does not declare the capability the operation needs.
+  ERROR_REASON_UNSUPPORTED_CAPABILITY = 6;
+  // The request is malformed: a missing or invalid field.
+  ERROR_REASON_INVALID_REQUEST = 7;
+  // The request or response would exceed a negotiated limit.
+  ERROR_REASON_LIMIT_EXCEEDED = 8;
+  // A scan key was repeated with a different input digest.
+  ERROR_REASON_OPERATION_CONFLICT = 9;
+  // The operation or result is unknown to the provider.
+  ERROR_REASON_NOT_FOUND = 10;
+  // The result's handoff window ended before it was acknowledged. The
+  // evidence is lost; it is never an empty result.
+  ERROR_REASON_RESULT_EXPIRED = 11;
+  // A size or SHA-256 digest does not match the bytes it describes.
+  ERROR_REASON_DIGEST_MISMATCH = 12;
+  // The provider failed for a reason of its own (source unavailable,
+  // internal error). Availability, not a finding.
+  ERROR_REASON_UNAVAILABLE = 13;
+  // A provider response violates this protocol (detected by the host).
+  ERROR_REASON_INVALID_RESPONSE = 14;
+}
+
+// ErrorDetail is the one detail of every failed call's gRPC status.
+message ErrorDetail {
+  ErrorReason reason = 1;
+}
+
+// ProviderContract is a provider's identity and capability contract
+// version, written "<name>/v<version>" in bundle compatibility.
+message ProviderContract {
+  // name is a lowercase DNS label of at most 63 characters.
+  string name = 1;
+  // version is the contract version, at least 1.
+  uint32 version = 2;
+}
+
+// RequestHeader opens every request. The provider checks it before
+// anything else: protocol revision, then provider name, then contract
+// version.
+message RequestHeader {
+  // protocol_version is the revision of this major version the caller
+  // speaks. This definition is revision 1.
+  uint32 protocol_version = 1;
+  // provider is the contract the caller expects to reach.
+  ProviderContract provider = 2;
+}
+
+message DescribeRequest {
+  RequestHeader header = 1;
+}
+
+// PayloadCompatibility states which payload versions a provider writes and
+// reads. read always includes write: readers ship before writers.
+message PayloadCompatibility {
+  uint32 write = 1;
+  repeated uint32 read = 2;
+}
+
+// CheckKind is one reporting check kind the provider evaluates. External
+// providers deliver no engine resources, so their checks accept only Audit
+// mode.
+message CheckKind {
+  // kind is "<group>/<version>/<Kind>" of the check definition in content.
+  string kind = 1;
+  // parameter_schema is a self-contained JSON Schema (UTF-8 JSON) of an
+  // object, the parameter contract of every check of the kind. Empty means
+  // the kind accepts no parameters.
+  bytes parameter_schema = 2;
+}
+
+// Limits are the bounds a provider applies. Zero means the provider sets no
+// bound stricter than the host's. The host only ever applies the stricter
+// of its own bound and the provider's; an advertised limit never raises a
+// host bound.
+message Limits {
+  // max_result_bytes bounds one staged result and one evaluated payload.
+  uint64 max_result_bytes = 1;
+  // max_chunk_bytes bounds the data of one ReadResultResponse or
+  // EvaluateRequest payload chunk.
+  uint32 max_chunk_bytes = 2;
+  // max_observations bounds the observations one evaluation returns.
+  uint32 max_observations = 3;
+}
+
+message DescribeResponse {
+  // provider is the identity and contract version the provider serves.
+  ProviderContract provider = 1;
+  // protocol_versions are the revisions of this major version it serves.
+  repeated uint32 protocol_versions = 2;
+  // evaluator_version is its evaluation semantics, at least 1.
+  uint32 evaluator_version = 3;
+  // payload is its payload compatibility.
+  PayloadCompatibility payload = 4;
+  // capabilities are the operation groups it serves, at least one.
+  repeated Capability capabilities = 5;
+  // checks are the check kinds it evaluates, at least one.
+  repeated CheckKind checks = 6;
+  // limits are its bounds.
+  Limits limits = 7;
+  // implementation identifies the running build, for example its image
+  // digest. It is a self-reported claim for diagnostics and records, not
+  // attestation: image verification happens at installation.
+  string implementation = 8;
+}
+
+// Namespace is one namespace instance of a host-frozen scope.
+message Namespace {
+  string name = 1;
+  string uid = 2;
+}
+
+// Scope is the host-frozen scope of a collection or scan: the cluster and
+// the namespace instances its expected inventory covers. A provider must
+// return evidence attributable only to this scope; the host rejects or
+// projects anything else before disclosure.
+message Scope {
+  string cluster = 1;
+  repeated Namespace namespaces = 2;
+}
+
+// ResultReference identifies one immutable staged result: a payload of the
+// provider's payload version, UTF-8 JSON encoding one object.
+message ResultReference {
+  // result_id is the provider's opaque identifier of the staged bytes.
+  string result_id = 1;
+  // provider is the contract that wrote the payload.
+  ProviderContract provider = 2;
+  // payload_version is the payload's format version.
+  uint32 payload_version = 3;
+  // size_bytes is the exact payload length.
+  uint64 size_bytes = 4;
+  // sha256 is "sha256:" and the lowercase hex SHA-256 of the payload.
+  string sha256 = 5;
+  // expires_at ends the handoff window: after it, an unacknowledged result
+  // may be released and reading it fails with ERROR_REASON_RESULT_EXPIRED.
+  google.protobuf.Timestamp expires_at = 6;
+  // limitations are what the provider could not collect or assess. A
+  // limitation is never a finding and never a pass.
+  repeated string limitations = 7;
+}
+
+message CollectRequest {
+  RequestHeader header = 1;
+  // scope is the host-frozen scope to collect for.
+  Scope scope = 2;
+  // inventory is optional provider-specific frozen inventory input (UTF-8
+  // JSON object), such as the subjects the host expects. It never selects
+  // credentials, identities, commands or images.
+  bytes inventory = 3;
+  // payload_version is the payload version the host will store; it must be
+  // the provider's payload.write.
+  uint32 payload_version = 4;
+  // deadline is the collection's deadline. The enclosing assessment
+  // deadline is authoritative; a provider never extends it.
+  google.protobuf.Timestamp deadline = 5;
+}
+
+message CollectResponse {
+  ResultReference result = 1;
+}
+
+// ScanKey is the idempotency identity of one logical scan.
+message ScanKey {
+  // run_uid is the assessment run's UID.
+  string run_uid = 1;
+  // registration_uid and registration_revision identify the frozen
+  // provider registration the run uses.
+  string registration_uid = 2;
+  int64 registration_revision = 3;
+  // input_digest is "sha256:" and the lowercase hex SHA-256 of the
+  // StartRequest input.
+  string input_digest = 4;
+}
+
+// OperationState is a scan operation's lifecycle state.
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PENDING = 1;
+  OPERATION_STATE_RUNNING = 2;
+  // Completed with a result. Completion does not imply complete evidence:
+  // the result's limitations say what was not assessed.
+  OPERATION_STATE_SUCCEEDED = 3;
+  // Failed without a result. An execution error, never a finding.
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_CANCELING = 5;
+  OPERATION_STATE_CANCELED = 6;
+  // The provider cannot establish whether work still runs. It stays
+  // explicit; the host never starts an untracked replacement.
+  OPERATION_STATE_UNCERTAIN = 7;
+}
+
+// Operation is a scan operation's durable record.
+message Operation {
+  string operation_id = 1;
+  ScanKey key = 2;
+  OperationState state = 3;
+  // attempt is the current attempt, from 1; max_attempts its bound.
+  uint32 attempt = 4;
+  uint32 max_attempts = 5;
+  // result is set exactly when state is OPERATION_STATE_SUCCEEDED.
+  ResultReference result = 6;
+  // message is a bounded human-readable status, never evidence.
+  string message = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message StartRequest {
+  RequestHeader header = 1;
+  ScanKey key = 2;
+  // scope is the host-frozen scope the scan may assess.
+  Scope scope = 3;
+  // input is the frozen, administrator-approved scan configuration (UTF-8
+  // JSON object). Its digest is key.input_digest. It never selects
+  // credentials, identities, commands or images; the provider rejects any
+  // input it does not own.
+  bytes input = 4;
+  // payload_version is the payload version the host will store; it must be
+  // the provider's payload.write.
+  uint32 payload_version = 5;
+  // deadline is the enclosing assessment's deadline.
+  google.protobuf.Timestamp deadline = 6;
+}
+
+message StartResponse {
+  Operation operation = 1;
+}
+
+message GetRequest {
+  RequestHeader header = 1;
+  string operation_id = 2;
+}
+
+message GetResponse {
+  Operation operation = 1;
+}
+
+message CancelRequest {
+  RequestHeader header = 1;
+  string operation_id = 2;
+}
+
+message CancelResponse {
+  Operation operation = 1;
+}
+
+message ReadResultRequest {
+  RequestHeader header = 1;
+  string result_id = 2;
+  // offset is the first byte to send, to resume an interrupted transfer.
+  uint64 offset = 3;
+}
+
+// ReadResultResponse is one chunk of a result. Chunks are contiguous from
+// the requested offset; the stream ends after the last byte.
+message ReadResultResponse {
+  uint64 offset = 1;
+  bytes data = 2;
+}
+
+message AcknowledgeRequest {
+  RequestHeader header = 1;
+  string result_id = 2;
+  // size_bytes and sha256 are those of the bytes the host captured.
+  uint64 size_bytes = 3;
+  string sha256 = 4;
+}
+
+message AcknowledgeResponse {}
+
+// ContentReference is one bundle of the run's frozen content set,
+// identified by name and manifest digest.
+message ContentReference {
+  string bundle = 1;
+  string manifest_digest = 2;
+}
+
+// CheckDefinition is one check of the exact verified content the run
+// evaluates.
+message CheckDefinition {
+  // kind is one of the provider's check kinds.
+  string kind = 1;
+  // name is the check's identity within the content.
+  string name = 2;
+  // definition is the check definition as verified (UTF-8 JSON).
+  bytes definition = 3;
+  // parameters are the check's parameters (UTF-8 JSON object), empty for
+  // none.
+  bytes parameters = 4;
+}
+
+// EvaluateStart opens an evaluation.
+message EvaluateStart {
+  RequestHeader header = 1;
+  // evaluator_version must be the provider's evaluator version.
+  uint32 evaluator_version = 2;
+  // payload_version must be one the provider reads.
+  uint32 payload_version = 3;
+  // payload_size_bytes and payload_sha256 describe the payload the chunks
+  // carry; the provider verifies both before evaluating.
+  uint64 payload_size_bytes = 4;
+  string payload_sha256 = 5;
+  // evaluation_time is the explicit evaluation boundary.
+  google.protobuf.Timestamp evaluation_time = 6;
+  // scope is the frozen scope the payload was collected for.
+  Scope scope = 7;
+  // content is the run's frozen content set; checks are its checks.
+  repeated ContentReference content = 8;
+  repeated CheckDefinition checks = 9;
+}
+
+message EvaluateRequest {
+  oneof part {
+    // start is the first message, and only the first.
+    EvaluateStart start = 1;
+    // payload_chunk is the next contiguous part of the payload.
+    bytes payload_chunk = 2;
+  }
+}
+
+// EvidenceState is an expected observation's evidence state.
+enum EvidenceState {
+  EVIDENCE_STATE_UNSPECIFIED = 0;
+  EVIDENCE_STATE_ATTRIBUTABLE = 1;
+  // No evidence for the observation.
+  EVIDENCE_STATE_MISSING = 2;
+  // Evidence exists but none is usable (stale, untimed, after the
+  // evaluation time).
+  EVIDENCE_STATE_REJECTED = 3;
+  // Evidence cannot be attributed (ambiguous, conflicting, scope change).
+  EVIDENCE_STATE_UNRESOLVED = 4;
+}
+
+// Outcome is a normalized check outcome.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_PASS = 1;
+  OUTCOME_FAIL = 2;
+  OUTCOME_ERROR = 3;
+  OUTCOME_SKIP = 4;
+  OUTCOME_UNKNOWN = 5;
+}
+
+// Observation is the evaluation of one expected observation.
+message Observation {
+  // subject and check are provider-defined opaque keys; the pair is unique
+  // within an evaluation.
+  string subject = 1;
+  string check = 2;
+  EvidenceState state = 3;
+  // raw is the producer's own outcome, verbatim; outcome is raw
+  // normalized. Both are set only for attributable evidence.
+  string raw = 4;
+  Outcome outcome = 5;
+  // not_applicable marks attributable evidence outside the check's scope.
+  // It never counts as a pass.
+  bool not_applicable = 6;
+  // evaluated is the source evaluation time of attributable evidence.
+  google.protobuf.Timestamp evaluated = 7;
+}
+
+message ObservationBatch {
+  repeated Observation observations = 1;
+}
+
+// EvaluationSummary ends an evaluation.
+message EvaluationSummary {
+  // provider and evaluator_version identify the semantics applied.
+  ProviderContract provider = 1;
+  uint32 evaluator_version = 2;
+  // observation_count is the number of observations sent.
+  uint32 observation_count = 3;
+  // stale_scopes counts scopes whose expected checks are unknown; any
+  // makes the evidence incomplete.
+  uint32 stale_scopes = 4;
+}
+
+message EvaluateResponse {
+  oneof part {
+    ObservationBatch observations = 1;
+    EvaluationSummary summary = 2;
+  }
+}

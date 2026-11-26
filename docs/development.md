@@ -62,6 +62,15 @@ After editing Go types in `api/`, run `devbox run -- scripts/generate.sh` to
 regenerate deepcopy code and CRDs with the pinned `controller-gen`; `task lint`
 fails when they are stale. See the [targeting API guide](integration/targeting-api.md)
 and the [continuous assessment contract](integration/assessment-contract.md).
+The same script regenerates the external provider protocol's Go code
+(`pkg/providerapi`) from `proto/` with the pinned `protoc`, `protoc-gen-go`
+and `protoc-gen-go-grpc`; `task lint` fails when it is stale, and
+`task deps:check` fails when `protoc-gen-go` differs from the
+`google.golang.org/protobuf` version in `go.mod`. After adding a wire fixture
+under `proto/konstapel/provider/v1/testdata/wire/cases`, record its binary
+encoding with
+`devbox run -- go test ./pkg/providerkit -run TestWireFixtures -update-wire`,
+which never rewrites an existing encoding.
 
 `task check` needs no cluster. Its only Docker use is the pinned promtool image
 (`KONSTAPEL_PROMTOOL_IMAGE` in `scripts/runtime.env`, Renovate-tracked and

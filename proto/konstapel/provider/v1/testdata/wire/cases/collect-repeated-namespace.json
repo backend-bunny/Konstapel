@@ -1,0 +1,31 @@
+{
+  "description": "A scope that repeats a namespace name.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        },
+        {
+          "name": "team-a",
+          "uid": "ns-b-uid"
+        }
+      ]
+    },
+    "payloadVersion": 3,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_INVALID_REQUEST",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEjUKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQSEgoGdGVhbS1hEghucy1iLXVpZCADKgYIwL6g2AY="
+}

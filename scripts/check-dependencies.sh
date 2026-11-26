@@ -36,6 +36,15 @@ jq -e --slurpfile config devbox.json '
       and ($lock.packages[$pkg].resolved | type == "string"))
 ' devbox.lock >/dev/null
 
+# Generated protocol code (pkg/providerapi) must come from the protoc-gen-go
+# release of the protobuf runtime go.mod pins.
+expected_protobuf=$(go list -mod=readonly -m -f '{{.Version}}' google.golang.org/protobuf)
+devbox_protoc_gen_go=$(jq -r '.packages[] | select(startswith("protoc-gen-go@")) | ltrimstr("protoc-gen-go@")' devbox.json)
+if [[ v$devbox_protoc_gen_go != "$expected_protobuf" ]]; then
+  echo "protoc-gen-go versions differ: Devbox=$devbox_protoc_gen_go go.mod google.golang.org/protobuf=$expected_protobuf" >&2
+  exit 1
+fi
+
 # The chart supplies the engine version; the CLI must evaluate that same version.
 chart=$(scripts/fetch-chart.sh)
 expected_kyverno=$(jq -r '.packages[] | select(startswith("kyverno@")) | ltrimstr("kyverno@")' devbox.json)
