@@ -1,0 +1,17 @@
+{
+  "description": "A reporting provider has no scan operations.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.GetRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "operationId": "operation-1"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_CAPABILITY",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEgtvcGVyYXRpb24tMQ=="
+}

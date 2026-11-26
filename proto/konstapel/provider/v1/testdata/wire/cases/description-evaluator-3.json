@@ -1,0 +1,38 @@
+{
+  "description": "Evaluator 3 equals the expected payload version but is another evaluator.",
+  "message": "konstapel.provider.v1.DescribeResponse",
+  "value": {
+    "provider": {
+      "name": "example-reporting",
+      "version": 2
+    },
+    "protocolVersions": [
+      1
+    ],
+    "evaluatorVersion": 3,
+    "payload": {
+      "write": 3,
+      "read": [
+        2,
+        3
+      ]
+    },
+    "capabilities": [
+      "CAPABILITY_COLLECT",
+      "CAPABILITY_EVALUATE"
+    ],
+    "checks": [
+      {
+        "kind": "reporting.example.io/v1/Posture",
+        "parameterSchema": "eyJ0eXBlIjoib2JqZWN0In0="
+      }
+    ],
+    "limits": {
+      "maxResultBytes": "1048576",
+      "maxChunkBytes": 65536
+    },
+    "implementation": "registry.example.invalid/example-reporting@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_EVALUATOR_VERSION",
+  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAISAQEYAyIGCAMSAgIDKgIBAzI0Ch9yZXBvcnRpbmcuZXhhbXBsZS5pby92MS9Qb3N0dXJlEhF7InR5cGUiOiJvYmplY3QifToICICAQBCAgARCcnJlZ2lzdHJ5LmV4YW1wbGUuaW52YWxpZC9leGFtcGxlLXJlcG9ydGluZ0BzaGEyNTY6MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMA=="
+}

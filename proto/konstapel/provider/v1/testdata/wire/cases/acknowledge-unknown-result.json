@@ -1,0 +1,19 @@
+{
+  "description": "A result the provider has not staged.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.AcknowledgeRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "resultId": "result-2",
+    "sizeBytes": "14",
+    "sha256": "sha256:486a8f07711a55700e1ed31c536217c17f3135cc6340b4830bcb4f87bbc7072a"
+  },
+  "expect": "ERROR_REASON_NOT_FOUND",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEghyZXN1bHQtMhgOIkdzaGEyNTY6NDg2YThmMDc3MTFhNTU3MDBlMWVkMzFjNTM2MjE3YzE3ZjMxMzVjYzYzNDBiNDgzMGJjYjRmODdiYmM3MDcyYQ=="
+}

@@ -1,0 +1,39 @@
+{
+  "description": "A capability this revision does not define is refused, not ignored.",
+  "message": "konstapel.provider.v1.DescribeResponse",
+  "value": {
+    "provider": {
+      "name": "example-reporting",
+      "version": 2
+    },
+    "protocolVersions": [
+      1
+    ],
+    "evaluatorVersion": 5,
+    "payload": {
+      "write": 3,
+      "read": [
+        2,
+        3
+      ]
+    },
+    "capabilities": [
+      "CAPABILITY_COLLECT",
+      "CAPABILITY_EVALUATE",
+      9
+    ],
+    "checks": [
+      {
+        "kind": "reporting.example.io/v1/Posture",
+        "parameterSchema": "eyJ0eXBlIjoib2JqZWN0In0="
+      }
+    ],
+    "limits": {
+      "maxResultBytes": "1048576",
+      "maxChunkBytes": 65536
+    },
+    "implementation": "registry.example.invalid/example-reporting@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expect": "ERROR_REASON_INVALID_RESPONSE",
+  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAISAQEYBSIGCAMSAgIDKgMBAwkyNAofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIReyJ0eXBlIjoib2JqZWN0In06CAiAgEAQgIAEQnJyZWdpc3RyeS5leGFtcGxlLmludmFsaWQvZXhhbXBsZS1yZXBvcnRpbmdAc2hhMjU2OjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+}

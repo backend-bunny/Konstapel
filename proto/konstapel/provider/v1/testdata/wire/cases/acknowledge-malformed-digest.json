@@ -1,0 +1,19 @@
+{
+  "description": "A digest not of the form sha256:<64 lowercase hex>.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.AcknowledgeRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "resultId": "result-1",
+    "sizeBytes": "14",
+    "sha256": "SHA256:ABC"
+  },
+  "expect": "ERROR_REASON_INVALID_REQUEST",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEghyZXN1bHQtMRgOIgpTSEEyNTY6QUJD"
+}

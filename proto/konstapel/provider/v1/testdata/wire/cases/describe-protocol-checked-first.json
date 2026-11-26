@@ -1,0 +1,16 @@
+{
+  "description": "The protocol revision is checked before the provider identity and contract.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.DescribeRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 2,
+      "provider": {
+        "name": "example-other",
+        "version": 7
+      }
+    }
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
+  "wire": "ChUIAhIRCg1leGFtcGxlLW90aGVyEAc="
+}

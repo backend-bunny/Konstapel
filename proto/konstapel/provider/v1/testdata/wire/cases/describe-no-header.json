@@ -1,0 +1,8 @@
+{
+  "description": "A request without a header is malformed; no version is defaulted.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.DescribeRequest",
+  "value": {},
+  "expect": "ERROR_REASON_INVALID_REQUEST",
+  "wire": ""
+}

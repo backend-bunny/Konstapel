@@ -1,0 +1,16 @@
+{
+  "description": "A request for the served contract at protocol revision 1.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.DescribeRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    }
+  },
+  "expect": "OK",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxAC"
+}

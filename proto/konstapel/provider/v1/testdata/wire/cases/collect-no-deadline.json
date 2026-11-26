@@ -1,0 +1,26 @@
+{
+  "description": "A collection without a deadline.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 2
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "payloadVersion": 3
+  },
+  "expect": "ERROR_REASON_INVALID_REQUEST",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAw=="
+}

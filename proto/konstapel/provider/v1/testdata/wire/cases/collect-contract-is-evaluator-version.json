@@ -1,0 +1,27 @@
+{
+  "description": "The evaluator version (5) is not a contract version.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 5
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "payloadVersion": 3,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_CONTRACT_VERSION",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxAFEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAyoGCMC+oNgG"
+}

@@ -1,0 +1,37 @@
+{
+  "description": "An endpoint that no longer reads the expected payload version.",
+  "message": "konstapel.provider.v1.DescribeResponse",
+  "value": {
+    "provider": {
+      "name": "example-reporting",
+      "version": 2
+    },
+    "protocolVersions": [
+      1
+    ],
+    "evaluatorVersion": 5,
+    "payload": {
+      "write": 4,
+      "read": [
+        4
+      ]
+    },
+    "capabilities": [
+      "CAPABILITY_COLLECT",
+      "CAPABILITY_EVALUATE"
+    ],
+    "checks": [
+      {
+        "kind": "reporting.example.io/v1/Posture",
+        "parameterSchema": "eyJ0eXBlIjoib2JqZWN0In0="
+      }
+    ],
+    "limits": {
+      "maxResultBytes": "1048576",
+      "maxChunkBytes": 65536
+    },
+    "implementation": "registry.example.invalid/example-reporting@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION",
+  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAISAQEYBSIFCAQSAQQqAgEDMjQKH3JlcG9ydGluZy5leGFtcGxlLmlvL3YxL1Bvc3R1cmUSEXsidHlwZSI6Im9iamVjdCJ9OggIgIBAEICABEJycmVnaXN0cnkuZXhhbXBsZS5pbnZhbGlkL2V4YW1wbGUtcmVwb3J0aW5nQHNoYTI1NjowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+}
