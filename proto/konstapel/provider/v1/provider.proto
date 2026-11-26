@@ -32,9 +32,15 @@
 // one ErrorDetail naming the reason. Clients branch on the ErrorReason,
 // never on the message text.
 //
-// Transport. This file defines messages and the service only. Mutual TLS,
-// peer authorization and transport limits are configured by the host and
-// the provider deployment; no credential is ever carried in a message.
+// Transport. Calls run over mutual TLS 1.3 with configured trust and
+// explicit peer names: the host requires the provider's certificate to name
+// the registration's server name, and the provider requires the host's to
+// name a host identity it authorizes, each as a DNS subject alternative
+// name (no wildcard). The host sends no call before the provider is
+// authenticated, and a provider serves no call before the host is. Every
+// call carries a deadline; a provider refuses a call without one with
+// ERROR_REASON_INVALID_REQUEST. Certificates and trust are the platform's;
+// no credential is ever carried in a message.
 syntax = "proto3";
 
 package konstapel.provider.v1;

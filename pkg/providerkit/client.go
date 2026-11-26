@@ -214,6 +214,9 @@ func (c *Client) ResumeResult(ctx context.Context, ref *providerv1.ResultReferen
 	}
 	data := slices.Clone(have)
 	if uint64(len(data)) < size {
+		// A violation returns early: end the stream with it.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		stream, err := c.rpc.ReadResult(ctx, &providerv1.ReadResultRequest{Header: c.want.Header(), ResultId: ref.GetResultId(), Offset: uint64(len(data))})
 		if err != nil {
 			return data, fromStatus(ctx, err)

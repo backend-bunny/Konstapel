@@ -13,7 +13,7 @@ Each group includes its tests and documentation; final tasks prove integration.
 
 - [x] 1.1 Publish versioned protobuf contracts and public Go client/server types for Describe, Collect, Start/Get/Cancel, ReadResult/Acknowledge and Evaluate; verify wire fixtures reject unsupported versions and distinguish capability, payload and evaluator versions.
   <!-- agent: tier=deep risk=medium -->
-- [ ] 1.2 Implement mutual TLS peer authorization, credential rotation and bounded RPC transport; test wrong identities, expired trust, oversized streams, cancellation and no credential/payload transmission before authentication.
+- [x] 1.2 Implement mutual TLS peer authorization, credential rotation and bounded RPC transport; test wrong identities, expired trust, oversized streams, cancellation and no credential/payload transmission before authentication.
   <!-- agent: tier=deep risk=high -->
 - [ ] 1.3 Write the protocol reference and an independent-module reporting quickstart; verify it builds without internal imports and runs the documented client/server commands.
   <!-- agent: tier=standard risk=medium -->

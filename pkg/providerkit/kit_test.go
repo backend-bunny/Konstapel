@@ -22,8 +22,8 @@ import (
 	providerv1 "github.com/backend-bunny/Konstapel/pkg/providerapi/v1"
 )
 
-// These tests run the kit over an in-memory gRPC connection. The transport
-// is insecure only because mutual TLS is the deployment's, not the kit's.
+// These tests run the kit over an in-memory gRPC connection without
+// transport security; transport_test.go runs it over mutual TLS.
 
 var (
 	testScope = &providerv1.Scope{Cluster: "cluster-uid", Namespaces: []*providerv1.Namespace{{Name: "team-a", Uid: "ns-a-uid"}}}

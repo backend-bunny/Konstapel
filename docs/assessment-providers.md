@@ -1761,8 +1761,12 @@ of every retained version stay installed:
   versions are this guide's descriptor version, `capture` versions and
   `evaluatorVersion`, not parallel ones; its protocol revision is a fourth,
   separate dimension. Its public Go types (`pkg/providerapi/v1`) and
-  authoring kit (`pkg/providerkit`) import nothing internal. No external
-  provider can be registered or selected yet.
+  authoring kit (`pkg/providerkit`) import nothing internal. The kit's
+  transport is mutual TLS 1.3 with configured trust and exact DNS-name peer
+  authorization in both directions, material reloaded from mounted files
+  without a restart (connections the rotated trust no longer authorizes are
+  closed), required call deadlines and bounded messages and streams. No
+  external provider can be registered or selected yet.
 
 ### Internal Go interfaces
 
