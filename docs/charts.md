@@ -1376,7 +1376,10 @@ platform operators install it with its own Helm chart. That chart deploys
 the provider's Service, its TLS configuration, its own ServiceAccount and
 its scoped source permissions. Install signed images and charts pinned by
 digest, and verify their signatures and provenance before installing, as
-for Konstapel's own artifacts ([images](images.md)). Konstapel is not Helm,
+for Konstapel's own artifacts ([images](images.md)); the reference
+provider's guide shows the procedure
+([Verify and install](integration/external-provider-chart.md#verify-and-install)).
+Konstapel is not Helm,
 a container runtime or a plugin downloader. It only dials the registered
 Service. A registration's `releaseDigest` must match what the endpoint
 reports, but that is the endpoint's own claim and not attestation.

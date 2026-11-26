@@ -59,6 +59,7 @@ class LoggingTests(unittest.TestCase):
         self.stub("scripts/image/build.sh", "echo image-build")
         (self.repo / "scripts/examples").mkdir()
         self.stub("scripts/examples/reference-provider-image.sh", 'echo "reference-provider-image $1"')
+        self.stub("scripts/examples/reference-provider-signing.sh", 'echo "reference-provider-signing $1 $2"')
         # crictl reports kind's import alias; ctr names the image by digest.
         self.stub("bin/docker", 'if [[ $* == *crictl* ]]; then echo \'{"status":{"repoDigests":["docker.io/library/import@sha256:abc"]}}\'; '
                   'elif [[ $* == *" ctr "* ]]; then echo "tagged ${*: -1}"; '
@@ -145,6 +146,10 @@ class LoggingTests(unittest.TestCase):
                 reference = config.get("referenceProviderImage", False)
                 self.assertEqual("reference-provider-image " + str(out / "reference-provider-image") in result.stdout, reference)
                 self.assertEqual("tagged localhost/konstapel-example-reporting@sha256:abc" in result.stdout, reference)
+                signing = f"reference-provider-signing {out / 'reference-provider-image'} {out / 'reference-provider-signing'}"
+                self.assertEqual(signing in result.stdout, reference)
+                if reference:
+                    self.assertIn(signing, (out / "reference-provider-signing.log").read_text())
                 self.assertEqual(json.loads((out / "acceptance-result.json").read_text()),
                                  {"group": group, "passed": True, "exitCode": 0, "outcome": "passed"})
                 self.assertIn("environment-delete", result.stdout)
