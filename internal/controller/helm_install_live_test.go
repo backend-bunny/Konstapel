@@ -16,6 +16,7 @@ package controller
 // Run through scripts/targeting-live.sh (charts acceptance group).
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -24,6 +25,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"maps"
@@ -50,6 +52,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/backend-bunny/Konstapel/api/v1alpha1"
+	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/publication"
+	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
 
 func TestLiveHelmInstall(t *testing.T) {
@@ -272,6 +277,31 @@ func TestLiveHelmInstall(t *testing.T) {
 		t.Fatalf("downloaded %d bytes with sha256 %s, receipt %s", len(body), sum, run.Status.Publication.PackageSHA256)
 	}
 	l.record("downloaded", map[string]any{"bytes": len(body), "sha256": run.Status.Publication.PackageSHA256, "tls": "operator Secret"})
+	// 4a. The installed image's package keeps its contract after the
+	// provider migration (add-assessment-provider-contract 5.1): it
+	// validates offline (capture read through the provider boundary,
+	// schema-valid OSCAL, policies re-rendered from the packaged content),
+	// and its capture is still the legacy version 2 Kyverno document that
+	// earlier releases read, never the read-only envelope.
+	pkg := t.TempDir()
+	if err := publication.Extract(bytes.NewReader(body), pkg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3store.ValidatePackage(pkg); err != nil {
+		t.Fatalf("the installed controller's package does not validate offline: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(pkg, "capture.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var head struct {
+		Version  int             `json:"version"`
+		Provider json.RawMessage `json:"provider"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil || head.Version != collector.CaptureV2Version || head.Provider != nil {
+		t.Fatalf("the installed controller wrote capture version %d (provider %s), not the legacy version %d document: %v", head.Version, head.Provider, collector.CaptureV2Version, err)
+	}
+	l.record("package-contract", map[string]any{"validated": true, "captureVersion": head.Version})
 
 	// 4b. Rotating the operator's Secret to a new CA and leaf is served by
 	// every download replica without a restart; an invalid rotation takes
