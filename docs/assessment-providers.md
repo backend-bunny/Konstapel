@@ -26,7 +26,10 @@ Kyverno capture's applied content through it, with unchanged results.
 Task 3.3 adds the shared namespace projection check and provider-specific
 extraction ([Namespace projection](#namespace-projection)). Every namespace
 package's capture and evaluation pass that check before export, summaries
-and archiving.
+and archiving. Task 4.1 routes evaluation through
+[pure evaluators](#pure-evaluators), and task 4.2 connects continuous
+export and the C2P plugin to one conversion of the frozen snapshot
+([C2P conversion](#c2p-conversion)), with unchanged packages.
 Within the collection limits, nothing in this guide
 changes how existing bindings, profiles, delivery, collection, evaluation
 or export behave:
@@ -37,8 +40,7 @@ or export behave:
 - The registry encodes those decisions, and tests keep the two in
   agreement.
 - The registry does not yet gate the resolver.
-- Shared evaluation and the full authoring recipe are later tasks of the
-  change.
+- The full authoring recipe is a later task of the change.
 
 No Trivy or other producer is supported. See
 [What this contract does not establish](#what-this-contract-does-not-establish).
@@ -919,7 +921,8 @@ The guarantees and their tests:
 | Storage backend validation before archiving (`s3store.ValidatePackage`) | Through `ReadCapture` and `CheckEvaluator` with the production registry. Only Kyverno captures have package verification, so another installed provider's capture is refused, not archived unverified. A version 1 capture is accepted as before: only in a binding-scope package, without engine-policy verification. Payload 2, legacy or envelope, gets engine-policy verification and, in a namespace package, projection checks. |
 | Engine-policy verification (`collector.VerifyPackage`) | Kyverno payload 2, legacy or envelope. Anything else is an explicit error. It used to decode any capture as a CaptureV2. |
 | Controller staging (`capture.json` and `closed.json` of a run in progress) | Unchanged: CaptureV2 only. `CaptureV2.Validate` refuses any other version. Staging is an `emptyDir`, so with the chart a staged capture never outlives the controller version that wrote it. |
-| Prototype `konstapel convert` and the C2P plugin | Unchanged: version 1 only. `assessment.Reconcile` refuses any other version. |
+| Prototype `konstapel convert` | Version 1 only. It refuses any other version before converting, and `assessment.Reconcile` refuses it too. |
+| C2P plugin (`konstapel-provider`) | Through `ReadCapture` and `CheckEvaluator` with the production registry ([C2P conversion](#c2p-conversion)). Version 1 goes to the prototype provider. Kyverno payload 2, legacy or envelope, is converted with the package's `evaluation.json`. Anything else is an explicit error. |
 
 `TestStorageValidationOfCapturePackages` validates binding and namespace
 packages: legacy ones unchanged, with their bytes kept; Kyverno envelope
@@ -978,9 +981,10 @@ is its own `content/` tree. The tests are `TestResolve*`,
 
 No wire format changes. The controller still writes CaptureV2 and the same
 content record, and the descriptor's `revisions.content` is unchanged. A
-reporting-only capture is not exported or collected yet: OSCAL conversion
-of other providers is task 4.2, and the registry does not gate the
-targeting resolver.
+reporting-only capture is not exported or collected yet. No provider other
+than Kyverno has a C2P conversion, so the plugin refuses such a capture
+explicitly ([C2P conversion](#c2p-conversion)). The registry does not gate
+the targeting resolver.
 
 ## Namespace projection
 
@@ -1108,7 +1112,7 @@ for signing destinations, are in
 
 | Retained form | Written by | This build | 0.3.0 and earlier |
 | --- | --- | --- | --- |
-| Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package | Read by the prototype and the C2P plugin |
+| Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package. The C2P plugin converts it with the prototype provider | Read by the prototype and the C2P plugin |
 | Capture version 2 | The controller, in every release including this one | Read with evaluator 1, unchanged | Read |
 | Capture version 3 (envelope) | Nothing yet | Read: in production, Kyverno payload 2 only | Refused explicitly |
 | Descriptor, file roles and content record | Unchanged since 0.3.0 | Read | 0.3.0 reads them. 0.2.0 refuses the `coverage-summary`, `coverage-summary-text` and `supporting-*` roles 0.3.0 added as unknown roles |
@@ -1309,6 +1313,91 @@ diff:
 go test ./internal/provider/kyverno ./internal/provider/reporttest -run Conformance -update
 ```
 
+## C2P conversion
+
+Continuous export and the C2P plugin share one conversion. The pinned C2P-Go
+v2 `Configure`/`Generate`/`GetResults` contract and plugin packaging are
+unchanged: same plugin ID, manifest options and build. The conversion's input
+is a frozen snapshot (`collector.Snapshot`). It is a closed capture plus the
+evaluation `kyverno.Evaluate` made of it at the closure boundary. The
+controller freezes both before export. A package retains them as
+`capture.json` and `evaluation.json`.
+
+- **Continuous export.** `collector.Export` dispatches each part of the
+  package through the C2P framework (`actions.AggregateResults`) to the
+  in-tree `collector.SnapshotProvider`. Each part is one applied bundle's
+  share of the snapshot, or the whole snapshot for a vendored run. Before
+  writing anything, `Export` checks that the evaluation belongs to its
+  capture (`Snapshot.Validate`): one observation per expected observation
+  and no other, only reports the capture holds, and a summary that counts
+  exactly its observations. A failed check returns an error and writes no
+  package. A failure in the conversion makes the package a typed
+  Diagnostic, with no OSCAL. The conversion also fails when a result names
+  a check that is not in the mapping's policy, or when the framework
+  skips the provider.
+- **The plugin.** `konstapel-provider` serves `c2p.Provider`. `Configure`
+  reads the configured capture through the capture boundary with the
+  production registry and checks the recorded evaluator. It then selects
+  one of three paths:
+  - No capture (`generate`, `deliver`, `acceptance`), or a version 1
+    capture, goes to the prototype `assessment.Provider`, unchanged.
+  - Kyverno payload 2, legacy or envelope, goes to `SnapshotProvider`. It
+    reads the `evaluation.json` beside the capture, decodes it strictly
+    and validates it as `Export` does (`collector.ReadSnapshot`).
+  - Any other capture is an `ErrUnsupportedCapture` that names the
+    capture. This includes another installed provider's capture, an
+    evaluator that is not installed and an unknown version. No OSCAL is
+    guessed, and nothing is read as Kyverno's.
+
+  A failed `Configure` leaves the plugin unconfigured. It never keeps an
+  earlier configuration.
+- **Generate.** The prototype renders the vendored policy into the output
+  directory from local files. A frozen snapshot refuses `Generate`,
+  because its engine policies were applied before its capture froze.
+  Generation never delivers anything; only `konstapel deliver` and
+  `acceptance` reach a cluster, through their own client.
+- **Local only.** Every path reads local files only. It uses no cluster,
+  registry, content cache, scanner or clock. Conversion reads the frozen
+  evaluation and does not re-evaluate, so the replay's wall clock changes
+  nothing.
+
+The package does not record the host's continuity boundaries or the
+binding's maximum evidence age. Exact re-evaluation of a retained capture
+is therefore possible only when its boundaries did not matter. This is why
+conversion reads the frozen evaluation and checks that it is consistent
+with the capture, instead of re-evaluating.
+
+The tests:
+
+- `TestDispatchedConversionEqualsTheDirectOne` checks that dispatch adds
+  nothing to the direct conversion. It covers failures, warnings,
+  missing, rejected and zero-target evidence and stale scopes.
+- `TestExportRefusesAnEvaluationThatIsNotOfItsCapture`,
+  `TestSnapshotProviderConvertsOnlyForItsChecks` and
+  `TestConvertRefusesASkippedProvider` cover the refusals above.
+- `TestDispatchConvertsTheExportedSnapshot` checks that the plugin's
+  dispatch, given a package's files, converts exactly what export
+  converted. The normalized subjects of the package's
+  `assessment-results.json` match those results, and an envelope converts
+  identically.
+- `TestReplayKeepsTheRetainedInterpretation` re-evaluates the retained
+  capture at its closure and gets the retained evaluation. A later time
+  changes freshness, but not the conversion.
+- `TestDispatchKeepsThePrototype` and `TestDispatchRefusesWhatItCannotConvert`
+  cover the other two dispatch paths.
+- `TestPluginBinaryIsLocalAndConvertsLikeTheDispatch` builds the plugin
+  binary and runs `Configure`, `GetResults` and `Generate` through gRPC.
+  `KUBECONFIG` and the HTTP proxies point at a trap that must stay
+  unused. `TestConversionPathImportsNoClusterOrRegistryClient` checks that
+  the conversion files import no network, Kubernetes or registry client.
+- `TestOCIRunConvertsAndReExportsFromPackageAfterEviction` replays a
+  published OCI run after cache eviction with the registry down. The
+  plugin's dispatch converts it, and a fresh export from the packaged
+  content gives the same normalized assessment plan and results. Nothing
+  is fetched.
+- `TestConvertRefusesAContinuousCapture` checks that `konstapel convert`
+  refuses a continuous capture before converting.
+
 ## Test-only boundary
 
 `internal/provider/reporttest` (`konstapel-reporttest/v1`) is a synthetic
@@ -1358,7 +1447,8 @@ The Go types (`provider.Descriptor`, `Registry`, `Selection`, `Scope`,
 `ContentRoles`, `ContentUse`, `RunContent.Resolve`, `PackageContent`,
 `NamespaceExtractors`, `ProjectNamespace`, `ValidateNamespace`,
 `ValidateProjectedEvaluation`, `projection.Scope`, `Disclosure`, `Check`,
-`Extractor`,
+`Extractor`, `collector.Snapshot`, `ReadSnapshot`, `SnapshotProvider`,
+`c2p.Provider`,
 `conformance.Adapter`, `RecordingClient`, `PagingClient`, and the provider
 adapters) are internal to this repository. They are not a stable
 third-party SDK and may change with the remaining groups of the change. The

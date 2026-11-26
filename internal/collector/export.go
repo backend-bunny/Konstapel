@@ -95,6 +95,10 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	case req.Capture.Projection != nil:
 		return publication.Descriptor{}, errors.New("a namespace projection cannot be exported as a binding package")
 	}
+	// The package converts exactly the frozen evaluation of its capture.
+	if err := (Snapshot{Capture: req.Capture, Evaluation: req.Evaluation}).Validate(); err != nil {
+		return publication.Descriptor{}, fmt.Errorf("evaluation: %w", err)
+	}
 	for name, v := range map[string]any{"capture.json": req.Capture, "evaluation.json": req.Evaluation} {
 		if err := assessment.Write(filepath.Join(req.Out, name), v); err != nil {
 			return publication.Descriptor{}, err
@@ -396,7 +400,13 @@ func (p *oscalPart) export(ctx context.Context, req ExportRequest) error {
 	}
 	p.plan = plan
 
-	results, attributableFail := pvpResults(p.capture, req.Evaluation)
+	// The part's results come from the same C2P dispatch the plugin
+	// serves, over the part of the frozen snapshot applied from it.
+	results, err := convert(ctx, input, Snapshot{Capture: req.Capture, Evaluation: req.Evaluation}.part(p.capture))
+	if err != nil {
+		return fmt.Errorf("conversion: %w", err)
+	}
+	attributableFail := attributableFailure(results)
 	ar, err := actions.Report(ctx, input, "assessment-plan.json", *plan, results)
 	if err != nil {
 		return fmt.Errorf("report: %w", err)

@@ -133,6 +133,11 @@ func run(args []string) error {
 		if err = assessment.Read(*capture, &c); err != nil {
 			return err
 		}
+		// The prototype package is derived from a prototype capture only;
+		// a continuous package's capture is never re-exported as one.
+		if c.Version != 1 {
+			return fmt.Errorf("convert re-exports prototype (version 1) captures only; a version %d capture is converted from its package", c.Version)
+		}
 		results, err := actions.AggregateResults(ctx, input, providers)
 		if err != nil {
 			return err
