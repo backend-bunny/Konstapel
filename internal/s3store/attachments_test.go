@@ -65,7 +65,7 @@ func TestAttachmentCommitFreezesExpiry(t *testing.T) {
 	for _, mode := range []string{"", "Enabled"} {
 		t.Run("versioning="+mode, func(t *testing.T) {
 			f := newFake()
-			f.versioning = mode
+			f.Versioning = mode
 			a, _ := attachmentStore(t, f)
 			ctx := context.Background()
 			body := []byte("%PDF-1.7 datacenter audit")
@@ -127,7 +127,7 @@ func TestAttachmentStageRejectsMismatchedBytes(t *testing.T) {
 
 func TestAttachmentStageDetectsCorruptStorage(t *testing.T) {
 	f := newFake()
-	f.corrupt = true
+	f.Corrupt = true
 	a, _ := attachmentStore(t, f)
 	body := []byte("bytes the service truncates")
 	_, err := a.Stage(context.Background(), attachments.StageRequest{Ref: attRef, Document: doc(body), Uploader: alice, Body: bytes.NewReader(body)})
@@ -165,7 +165,7 @@ func TestAttachmentConflictingCommitPreservesOriginal(t *testing.T) {
 
 func TestAttachmentConcurrentWritersConverge(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	a, _ := attachmentStore(t, f)
 	body := []byte("shared facility evidence")
 	const writers = 4
@@ -198,9 +198,9 @@ func TestAttachmentConcurrentWritersConverge(t *testing.T) {
 			t.Fatalf("writer %d got %+v, writer 0 %+v", i, receipts[i], receipts[0])
 		}
 	}
-	f.mu.Lock()
-	versions := len(f.objects[receipts[0].ManifestKey])
-	f.mu.Unlock()
+	f.Lock()
+	versions := len(f.Objects[receipts[0].ManifestKey])
+	f.Unlock()
 	if versions != 1 {
 		t.Fatalf("%d commit versions, want exactly one", versions)
 	}
@@ -223,7 +223,7 @@ func TestAttachmentConcurrentWritersConverge(t *testing.T) {
 
 func TestAttachmentLostCommitResponseAndRestart(t *testing.T) {
 	f := newFake()
-	f.loseCommits = true
+	f.LoseCommits = true
 	a, _ := attachmentStore(t, f)
 	ctx := context.Background()
 	body := []byte("committed while the response was lost")
@@ -239,7 +239,7 @@ func TestAttachmentLostCommitResponseAndRestart(t *testing.T) {
 	}
 	// Staged but uncommitted before a restart: the new process commits it
 	// without another upload.
-	f.loseCommits = false
+	f.LoseCommits = false
 	stage(t, a, otherRef, body, bob)
 	before := len(f.keys(""))
 	got, err := restarted.Commit(ctx, commitReq(otherRef, body, specA, time.Now().Add(time.Hour), time.Hour))
@@ -272,8 +272,8 @@ func TestAttachmentRecordsFailClosed(t *testing.T) {
 
 func TestAttachmentCleanupIsOwnedAndBounded(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
-	f.uploads = map[string]string{}
+	f.Versioning = "Enabled"
+	f.Uploads = map[string]string{}
 	a, now := attachmentStore(t, f)
 	ctx := context.Background()
 	body := []byte("document")
@@ -286,9 +286,9 @@ func TestAttachmentCleanupIsOwnedAndBounded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	f.mu.Lock()
-	f.uploads["mine"], f.uploads["theirs"] = prefix+"attempts/x/document", AttachmentPrefix(a.Dest, otherRef)+"attempts/y/document"
-	f.mu.Unlock()
+	f.Lock()
+	f.Uploads["mine"], f.Uploads["theirs"] = prefix+"attempts/x/document", AttachmentPrefix(a.Dest, otherRef)+"attempts/y/document"
+	f.Unlock()
 	// Young attempts are kept.
 	if err := a.CleanupAttempts(ctx, attRef, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
@@ -311,10 +311,10 @@ func TestAttachmentCleanupIsOwnedAndBounded(t *testing.T) {
 	if len(f.keys(AttachmentPrefix(a.Dest, otherRef))) != 3 {
 		t.Fatal("another attachment's attempt was touched")
 	}
-	f.mu.Lock()
-	_, mine := f.uploads["mine"]
-	_, theirs := f.uploads["theirs"]
-	f.mu.Unlock()
+	f.Lock()
+	_, mine := f.Uploads["mine"]
+	_, theirs := f.Uploads["theirs"]
+	f.Unlock()
 	if mine || !theirs {
 		t.Fatalf("multipart cleanup: mine=%v theirs=%v", mine, theirs)
 	}
@@ -330,7 +330,7 @@ func TestAttachmentCleanupIsOwnedAndBounded(t *testing.T) {
 
 func TestAttachmentDeleteWaitsForExpiryAndKeepsUnrelated(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	a, now := attachmentStore(t, f)
 	ctx := context.Background()
 	body := []byte("annual audit")
@@ -359,14 +359,14 @@ func TestAttachmentDeleteWaitsForExpiryAndKeepsUnrelated(t *testing.T) {
 	if _, err := a.Open(ctx, r); !errors.Is(err, attachments.ErrNotFound) {
 		t.Fatalf("expired source opened: %v", err)
 	}
-	f.denyDelete = true
+	f.DenyDelete = true
 	if c, err := a.Delete(ctx, r, *now); !errors.Is(err, attachments.ErrRetentionBlocked) || c.State != attachments.CleanupRetentionBlocked {
 		t.Fatalf("blocked deletion: %+v %v", c, err)
 	}
 	if _, err := a.Committed(ctx, attRef); err != nil {
 		t.Fatalf("a failed deletion lost the commitment: %v", err)
 	}
-	f.denyDelete = false
+	f.DenyDelete = false
 	if c, err := a.Delete(ctx, r, *now); err != nil || c.State != attachments.CleanupDeleted {
 		t.Fatalf("deletion: %+v %v", c, err)
 	}
@@ -476,7 +476,7 @@ func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
 	for _, mode := range []string{"", "Enabled", "Suspended"} {
 		t.Run("versioning="+mode, func(t *testing.T) {
 			f := newFake()
-			f.versioning = mode
+			f.Versioning = mode
 			a, now := attachmentStore(t, f)
 			ctx := context.Background()
 			body := []byte("annual audit, committed")
@@ -511,12 +511,12 @@ func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
 			*now = r.ExpiresAt
 			// An object lock on the losing upload's document refuses deletion
 			// part-way: its ownership records and the commit are kept.
-			f.denyDeleteKey = func(k string) bool { return k == loserDir+attachmentDocumentFile }
+			f.DenyDeleteKey = func(k string) bool { return k == loserDir+attachmentDocumentFile }
 			if c, err := a.Delete(ctx, r, *now); !errors.Is(err, attachments.ErrRetentionBlocked) || c.State != attachments.CleanupRetentionBlocked {
 				t.Fatalf("locked document: %+v %v", c, err)
 			}
 			for _, k := range []string{loserDir + intentFile, loserDir + attachmentAttemptFile} {
-				if len(f.objects[k]) == 0 {
+				if len(f.Objects[k]) == 0 {
 					t.Fatalf("ownership record %s removed before the bytes it owns", k)
 				}
 			}
@@ -524,13 +524,13 @@ func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
 				t.Fatalf("a refused deletion lost the commitment: %v", err)
 			}
 			// The lock is lifted: the retry removes every owned object.
-			f.denyDeleteKey = nil
+			f.DenyDeleteKey = nil
 			if c, err := a.Delete(ctx, r, *now); err != nil || c.State != attachments.CleanupDeleted {
 				t.Fatalf("retry: %+v %v", c, err)
 			}
-			for k, versions := range f.objects {
+			for k, versions := range f.Objects {
 				if _, keep := unrelated[k]; keep {
-					if got := versions[len(versions)-1]; got.deleted || string(got.body) != unrelated[k] {
+					if got := versions[len(versions)-1]; got.Deleted || string(got.Body) != unrelated[k] {
 						t.Fatalf("unrelated object %s changed", k)
 					}
 					continue
@@ -539,8 +539,8 @@ func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
 					t.Fatalf("owned object %s (%d versions) remains", k, len(versions))
 				}
 			}
-			if len(f.objects) != len(unrelated) {
-				t.Fatalf("objects left: %d, want %d unrelated", len(f.objects), len(unrelated))
+			if len(f.Objects) != len(unrelated) {
+				t.Fatalf("objects left: %d, want %d unrelated", len(f.Objects), len(unrelated))
 			}
 		})
 	}
@@ -550,7 +550,7 @@ func TestAttachmentCleanupFailsSafeAndRecovers(t *testing.T) {
 // the same order: a refused document keeps its attempt owned and cleanable.
 func TestAttachmentUncommittedCleanupFailsSafeAndRecovers(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	a, now := attachmentStore(t, f)
 	ctx := context.Background()
 	s1 := stage(t, a, attRef, []byte("abandoned upload one"), alice)
@@ -558,7 +558,7 @@ func TestAttachmentUncommittedCleanupFailsSafeAndRecovers(t *testing.T) {
 	prefix := AttachmentPrefix(a.Dest, attRef)
 	dir1 := prefix + "attempts/" + s1.AttemptID + "/"
 	dir2 := AttachmentPrefix(a.Dest, otherRef) + "attempts/" + s2.AttemptID + "/"
-	f.denyDeleteKey = func(k string) bool { return strings.HasSuffix(k, "/"+attachmentDocumentFile) }
+	f.DenyDeleteKey = func(k string) bool { return strings.HasSuffix(k, "/"+attachmentDocumentFile) }
 	if c, err := a.DeleteUncommitted(ctx, attRef); !errors.Is(err, attachments.ErrRetentionBlocked) || c.State != attachments.CleanupRetentionBlocked {
 		t.Fatalf("locked withdrawal: %+v %v", c, err)
 	}
@@ -566,11 +566,11 @@ func TestAttachmentUncommittedCleanupFailsSafeAndRecovers(t *testing.T) {
 		t.Fatal("a refused attempt cleanup reported success")
 	}
 	for _, k := range []string{dir1 + intentFile, dir1 + attachmentAttemptFile, dir2 + intentFile, dir2 + attachmentAttemptFile} {
-		if len(f.objects[k]) == 0 {
+		if len(f.Objects[k]) == 0 {
 			t.Fatalf("ownership record %s removed before its document", k)
 		}
 	}
-	f.denyDeleteKey = nil
+	f.DenyDeleteKey = nil
 	if c, err := a.DeleteUncommitted(ctx, attRef); err != nil || c.State != attachments.CleanupDeleted {
 		t.Fatalf("retried withdrawal: %+v %v", c, err)
 	}

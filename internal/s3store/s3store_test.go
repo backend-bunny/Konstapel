@@ -17,19 +17,19 @@ import (
 func TestProbeReadyOnCompatibleService(t *testing.T) {
 	for _, mode := range []string{"", "Enabled", "Suspended"} {
 		f := newFake()
-		f.versioning = mode
-		f.objects["konstapel/unrelated/keep"] = []fakeVersion{{id: "null", body: []byte("x"), at: time.Now()}}
+		f.Versioning = mode
+		f.Objects["konstapel/unrelated/keep"] = []fakeVersion{{ID: "null", Body: []byte("x"), At: time.Now()}}
 		r, err := probeFake(t, f)
 		if err != nil || !r.Ready || r.Checksum != ChecksumServer || !r.ConditionalCreate {
 			t.Fatalf("mode %q: %+v %v", mode, r, err)
 		}
 		// Probe cleanup removed everything it wrote and nothing else.
-		for k := range f.objects {
+		for k := range f.Objects {
 			if k != "konstapel/unrelated/keep" {
 				t.Errorf("mode %q: probe left %s behind", mode, k)
 			}
 		}
-		if _, kept := f.objects["konstapel/unrelated/keep"]; !kept {
+		if _, kept := f.Objects["konstapel/unrelated/keep"]; !kept {
 			t.Errorf("mode %q: probe deleted an unrelated object", mode)
 		}
 	}
@@ -41,10 +41,10 @@ func TestProbeDetectsMissingSemantics(t *testing.T) {
 		ready  bool
 		want   string
 	}{
-		"readback when the service keeps no checksums": {func(f *fakeS3) { f.checksums = false }, true, ""},
-		"If-None-Match ignored":                        {func(f *fakeS3) { f.conditional = false }, false, "If-None-Match"},
-		"clock skew":                                   {func(f *fakeS3) { f.skew = time.Hour }, false, "clock"},
-		"versioned without version IDs":                {func(f *fakeS3) { f.versioning = "Enabled"; f.versionIDs = false }, false, "version ID"},
+		"readback when the service keeps no checksums": {func(f *fakeS3) { f.Checksums = false }, true, ""},
+		"If-None-Match ignored":                        {func(f *fakeS3) { f.Conditional = false }, false, "If-None-Match"},
+		"clock skew":                                   {func(f *fakeS3) { f.Skew = time.Hour }, false, "clock"},
+		"versioned without version IDs":                {func(f *fakeS3) { f.Versioning = "Enabled"; f.VersionIDs = false }, false, "version ID"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFake()
@@ -62,7 +62,7 @@ func TestProbeDetectsMissingSemantics(t *testing.T) {
 		})
 	}
 	f := newFake()
-	f.bucket = "other"
+	f.Bucket = "other"
 	if _, err := probeFake(t, f); err == nil || !strings.Contains(err.Error(), "not reachable") {
 		t.Fatalf("missing bucket not reported: %v", err)
 	}

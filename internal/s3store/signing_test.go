@@ -75,7 +75,7 @@ func signStaged(t *testing.T, s *evidencesign.SecretSigner, st publication.Stage
 func TestSignedCommitGate(t *testing.T) {
 	for _, mode := range []string{"", "Enabled"} {
 		f := newFake()
-		f.versioning = mode
+		f.Versioning = mode
 		p := newPublisher(t, f, time.Now)
 		ctx := context.Background()
 		s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
@@ -331,7 +331,7 @@ func TestSignatureObjectLifecycle(t *testing.T) {
 		t.Run("versioning="+mode, func(t *testing.T) {
 			ctx := context.Background()
 			f := newFake()
-			f.versioning = mode
+			f.Versioning = mode
 			now := time.Now()
 			p := newPublisher(t, f, func() time.Time { return now })
 			s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
@@ -419,7 +419,7 @@ func TestSignatureObjectLifecycle(t *testing.T) {
 func TestCleanupAttemptsRemovesUncommittedSignature(t *testing.T) {
 	ctx := context.Background()
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	p := newPublisher(t, f, time.Now)
 	s, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
 	if err != nil {

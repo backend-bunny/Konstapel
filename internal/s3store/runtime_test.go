@@ -28,7 +28,7 @@ func TestNewPublisherReadsControllerSecretAndRotates(t *testing.T) {
 	if _, err := p.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.accessKeys[len(f.accessKeys)-1]; got != "AKIAONE" {
+	if got := f.AccessKeys[len(f.AccessKeys)-1]; got != "AKIAONE" {
 		t.Fatalf("signed with %q", got)
 	}
 
@@ -56,7 +56,7 @@ func TestNewPublisherMissingSecretIsNotReady(t *testing.T) {
 	if _, err := p.Ready(context.Background()); !errors.Is(err, publication.ErrUnavailable) {
 		t.Fatalf("missing Secret reported ready: %v", err)
 	}
-	if len(f.accessKeys) != 0 {
+	if len(f.AccessKeys) != 0 {
 		t.Fatal("requests were sent without credentials")
 	}
 }

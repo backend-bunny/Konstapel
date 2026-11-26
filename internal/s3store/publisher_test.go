@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -96,7 +95,7 @@ func TestValidatePackageRejectsUnsafePackages(t *testing.T) {
 func TestStagePublishAndRecover(t *testing.T) {
 	for _, mode := range []string{"", "Enabled"} {
 		f := newFake()
-		f.versioning = mode
+		f.Versioning = mode
 		p := newPublisher(t, f, time.Now)
 		ctx := context.Background()
 		dir := fullPackage(t)
@@ -139,7 +138,7 @@ func TestStagePublishAndRecover(t *testing.T) {
 
 func TestConcurrentAttemptsCommitOnce(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	p := newPublisher(t, f, time.Now)
 	ctx := context.Background()
 	dir := fullPackage(t)
@@ -156,7 +155,7 @@ func TestConcurrentAttemptsCommitOnce(t *testing.T) {
 	if err1 != nil || err2 != nil || !reflect.DeepEqual(r1, r2) {
 		t.Fatalf("attempts did not reconcile: %v %v", err1, err2)
 	}
-	if n := len(f.objects[r1.Commit.ManifestKey]); n != 1 {
+	if n := len(f.Objects[r1.Commit.ManifestKey]); n != 1 {
 		t.Fatalf("commit written %d times", n)
 	}
 }
@@ -191,7 +190,7 @@ func TestConflictingContentNeverOverwrites(t *testing.T) {
 
 func TestCorruptUploadNeverPublishes(t *testing.T) {
 	f := newFake()
-	f.corrupt = true
+	f.Corrupt = true
 	p := newPublisher(t, f, time.Now)
 	if _, err := p.Stage(context.Background(), publication.StageRequest{Run: testRun, Dir: fullPackage(t)}); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("truncated upload accepted: %v", err)
@@ -203,11 +202,11 @@ func TestCorruptUploadNeverPublishes(t *testing.T) {
 
 func TestExpiryAndDeletion(t *testing.T) {
 	f := newFake()
-	f.versioning = "Enabled"
+	f.Versioning = "Enabled"
 	clock := time.Now()
 	p := newPublisher(t, f, func() time.Time { return clock })
 	ctx := context.Background()
-	f.objects["konstapel/unrelated"] = []fakeVersion{{id: "v0", body: []byte("keep"), at: clock}}
+	f.Objects["konstapel/unrelated"] = []fakeVersion{{ID: "v0", Body: []byte("keep"), At: clock}}
 	s, _ := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: fullPackage(t)})
 	r, err := p.Publish(ctx, publication.PublishRequest{Staged: s, Retention: retention("1h")})
 	if err != nil {
@@ -224,12 +223,12 @@ func TestExpiryAndDeletion(t *testing.T) {
 	if err != nil || c.State != publication.CleanupDeleted {
 		t.Fatalf("%+v %v", c, err)
 	}
-	for k := range f.objects {
+	for k := range f.Objects {
 		if k != "konstapel/unrelated" {
 			t.Errorf("owned object %s survived deletion", k)
 		}
 	}
-	if _, kept := f.objects["konstapel/unrelated"]; !kept {
+	if _, kept := f.Objects["konstapel/unrelated"]; !kept {
 		t.Fatal("deletion touched an unrelated object")
 	}
 }
@@ -239,7 +238,7 @@ func TestReadyRequiresCompatibleBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newFake()
-	f.conditional = false
+	f.Conditional = false
 	if _, err := newPublisher(t, f, time.Now).Ready(context.Background()); !errors.Is(err, publication.ErrUnavailable) || !strings.Contains(err.Error(), "If-None-Match") {
 		t.Fatalf("incompatible backend reported ready: %v", err)
 	}
@@ -276,7 +275,7 @@ func TestLoadCredentialsFromControllerSecret(t *testing.T) {
 // fails visibly, and trusting it requires its CA in caBundle.
 func TestTLSTrustIsExplicit(t *testing.T) {
 	f := newFake()
-	srv := httptest.NewTLSServer(http.HandlerFunc(f.handle))
+	srv := httptest.NewTLSServer(f.Server)
 	defer srv.Close()
 	d := Destination{ID: "tls", Endpoint: srv.URL, Bucket: "evidence", Region: "us-east-1", Addressing: AddressingPath, CredentialSecret: &SecretRef{Name: "s3"}}
 	creds := &StaticCredentials{AccessKeyID: "AKIAFAKE", SecretAccessKey: "fake-secret"}
@@ -301,11 +300,11 @@ func TestTLSTrustIsExplicit(t *testing.T) {
 }
 
 func (f *fakeS3) archives() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Lock()
+	defer f.Unlock()
 	n := 0
-	for k, v := range f.objects {
-		if strings.Contains(k, "/attempts/") && strings.HasSuffix(k, "/package.tar.gz") && !v[len(v)-1].deleted {
+	for k, v := range f.Objects {
+		if strings.Contains(k, "/attempts/") && strings.HasSuffix(k, "/package.tar.gz") && !v[len(v)-1].Deleted {
 			n++
 		}
 	}
@@ -354,14 +353,14 @@ func TestCorruptPriorAttemptIsReuploaded(t *testing.T) {
 	if _, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
-	f.mu.Lock()
-	for k, v := range f.objects {
+	f.Lock()
+	for k, v := range f.Objects {
 		if strings.HasSuffix(k, "/package.tar.gz") {
 			last := &v[len(v)-1]
-			last.body, last.checksum = last.body[:len(last.body)/2], ""
+			last.Body, last.Checksum = last.Body[:len(last.Body)/2], ""
 		}
 	}
-	f.mu.Unlock()
+	f.Unlock()
 	if _, err := p.Stage(ctx, publication.StageRequest{Run: testRun, Dir: dir}); err != nil || f.archives() != 2 {
 		t.Fatalf("corrupt attempt reused: %v archives %d", err, f.archives())
 	}
