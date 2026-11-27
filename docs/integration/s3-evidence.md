@@ -531,7 +531,13 @@ workload identities:
      overwrites.
 3. **The receipt** takes `publishedAt` from the commit object's server
    `LastModified`, and computes `expiresAt` from the retention recorded in the
-   commit. A retry's clock or a later retention value never changes them.
+   commit. A retry's clock or a later retention value never changes them. A
+   signed commit made by [signing recovery](evidence-signing.md#recovery-expiry)
+   also records `retention.notAfter`, the expiry recorded at the signing
+   failure. Its `expiresAt` is then `notAfter`, which must not be after
+   `publishedAt` + retention, so a late commit never extends retention. Every
+   other commit omits it, and an unsigned commit with it is an unsupported
+   record.
 4. **Recover** returns the newest staged attempt whose archive still verifies,
    or `ErrCaptureLost`. **Inspect** reports `Uploading` before the commit,
    then `Committed`, then `Expired`.

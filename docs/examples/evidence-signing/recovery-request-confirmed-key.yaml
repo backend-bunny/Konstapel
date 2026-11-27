@@ -1,0 +1,14 @@
+# Recover a retained SigningFailed run whose signing intent never pinned a
+# key (docs/integration/evidence-signing.md#signing-recovery).
+# expectedKeyFingerprint confirms the key now in the intent's recorded Secret;
+# without it the request ends KeyConfirmationRequired before any Secret read.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceSigningRequest
+metadata:
+  name: recover-nightly-team-a-1
+spec:
+  run:
+    name: nightly-team-a-1
+    uid: 11111111-2222-4333-8444-555555555555
+  reason: Key Secret was missing at preparation; installed konstapel-evidence-signing-2026-11 (CHG-1301).
+  expectedKeyFingerprint: sha256:3f9a0c7e5b21d84c6e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f

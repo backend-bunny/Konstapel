@@ -35,6 +35,7 @@ and doesn't need the charts.
 | Evidence publishing to S3 | yes | an `EvidenceDestination` and its credential Secret, created by you; the chart has no storage values |
 | Evidence downloads | yes, with `download.enabled` (default) | a TLS certificate (either TLS mode) and published runs |
 | Evidence signing | yes; no chart values | `spec.signing` on an `EvidenceDestination` and its key Secret, created by you; it runs in the installed controller and download server with their existing permissions ([evidence signing](integration/evidence-signing.md#status-observability-and-deployment)) |
+| Evidence signing recovery (`EvidenceSigningRequest`) | yes: CRD, roles, requester and status-writer admission, controller reconciler; no chart values | platform subjects bound to `konstapel-evidence-signing-recoverer` (with `konstapel-assessment-operator`) or `konstapel-evidence-signing-recovery-reader` ([signing recovery](integration/evidence-signing.md#signing-recovery)) |
 | Supporting-evidence attachments (`EvidenceAttachment`) | API, roles, registrant admission, association validation, destination pinning, recorded commitments and retention-gated cleanup; uploads and downloads on the download service (`download.enabled`) with its limits and source retention as `download.attachments` values; platform packages carry supporting evidence only while every download replica runs the controller's image ([Protected-package readers](#protected-package-readers)) | platform subjects bound to the `konstapel-evidence-attachment-*` roles and a default `EvidenceDestination` ([supporting evidence](supporting-evidence.md)) |
 | Authenticated controller metrics | yes, with `metrics.enabled` (off by default) | a TLS certificate (either TLS mode) and a monitoring ServiceAccount allowed through `metrics.readers`; see [Controller metrics](#controller-metrics). Optional ServiceMonitor and PrometheusRule (each off by default, needing the Operator's CRDs): [Monitoring integration](#monitoring-integration) |
 | Exception admission (`ComplianceException` webhooks: authenticated acceptance and revocation records) | yes, with `exceptions.webhooks.enabled` (off by default) | a TLS certificate (either TLS mode); every exception create and update then fails closed unless a ready controller replica admits it. See [Exception admission webhooks](#exception-admission-webhooks). It grants nothing: native Kyverno exceptions stay off, behind their own upstream gate |
@@ -381,7 +382,8 @@ renders:
   - the generated controller roles (`config/rbac/controller/role.yaml`);
   - the role catalog (`config/rbac/*.yaml`: compliance admin and viewer,
     assessment operator and requester, exception editor, evidence download,
-    evidence attachment registrar, uploader, reader and downloader);
+    evidence attachment registrar, uploader, reader and downloader, evidence
+    signing recoverer and recovery reader);
   - the admission policies (`config/admission/*.yaml`, with their parameter
     ConfigMap).
 
@@ -624,7 +626,7 @@ implemented feature behind each grant:
 
 | Grant (in `konstapel-system`) | Feature and object | Why not narrower |
 | --- | --- | --- |
-| Secret `get`, any name | EvidenceDestination `spec.s3.credentialSecret` (S3 static credentials, read uncached on each client build, `internal/s3store.LoadCredentials`); EvidenceDestination `spec.signing.secretRef` (evidence signing key pair, read uncached by the destination reconciler, [evidence signing](integration/evidence-signing.md#who-can-read-signing-keys)) | The name is chosen in the CR, so it cannot be a static `resourceNames` entry. |
+| Secret `get`, any name | EvidenceDestination `spec.s3.credentialSecret` (S3 static credentials, read uncached on each client build, `internal/s3store.LoadCredentials`); EvidenceDestination `spec.signing.secretRef` (evidence signing key pair, read uncached by the destination reconciler, [evidence signing](integration/evidence-signing.md#who-can-read-signing-keys)); a run's `status.signingIntent.secretName` (the same key pair, read by publication and by [signing recovery](integration/evidence-signing.md#signing-recovery)) | The name is chosen in the CR, so it cannot be a static `resourceNames` entry. |
 | ConfigMap `get`, any name | Central default destination (`konstapel-evidence-destination`, fixed); EvidenceDestination `spec.s3.caTrust` (user-named); preserved legacy configuration (`spec.legacy`, user-named); exception acceptance snapshots and orphan-inventory chunks and headers (names derived from exception UIDs and revisions, and destination UIDs) read back by name | Same: user-chosen or runtime-derived names. All reads are uncached `get`s through the manager's API reader. |
 | ConfigMap `create` | Exception acceptance snapshots and orphan-inventory chunks (immutable; never updated or deleted) | The API server cannot restrict `create` by name. |
 | Bundles Role: ConfigMap `get`/`list`/`watch` on `bundles.sourcesConfigMap`; `get` on each `bundles.referencedConfigMaps` and `bundles.referencedSecrets` entry | [OCI policy bundles](#oci-policy-bundles) | Already by name. |

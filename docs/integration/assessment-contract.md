@@ -100,7 +100,10 @@ when the package carries that exact report and is never changed afterwards
 | `konstapel-controller-assessments` | ClusterRoleBinding to the controller service account (the one configured for admission) | Create and manage runs; the only writer of request and run status; read bindings, profiles, namespaces |
 
 None of these roles aggregates into the built-in `admin`, `edit`, or `view`
-roles. Teams have no access to `AssessmentRun` objects.
+roles. Teams have no access to `AssessmentRun` objects. Recovering a run that
+ended `SigningFailed` needs the separate
+`konstapel-evidence-signing-recoverer` role
+([signing recovery](evidence-signing.md#signing-recovery)).
 
 ### Download authorization attributes
 
