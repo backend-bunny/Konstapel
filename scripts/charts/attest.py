@@ -18,8 +18,15 @@ subject is bound to its source commit, image digest, archive checksum and
 the release acceptance that tested them. sign refuses an acceptance record
 that the publisher would refuse.
 
+A signature counts only if `cosign verify` succeeds under TRUST and its
+verified payloads include a `cosign sign` signature for exactly that
+digest (scripts/image/verify-signature-payload.sh). Cosign v3 also accepts
+attestations as signatures, so a subject with only a chart-inputs
+attestation is neither skipped by sign nor accepted by verify.
+
 verify checks, for both charts:
-  - a signature on the OCI subject (repository@digest) under TRUST;
+  - a signature on the OCI subject (repository@digest) under TRUST, by
+    `cosign verify` and the signature payload check;
   - a chart-inputs attestation under TRUST whose in-toto subject is that
     digest and whose predicate names the release's source commit, tag,
     image digest and that chart's archive checksum, and whose acceptance
@@ -45,6 +52,8 @@ import evidence  # noqa: E402
 
 CHART_INPUTS = "https://github.com/backend-bunny/Konstapel/chart-inputs/v1"
 CHARTS = ("konstapel-crds", "konstapel")
+# The one signature payload filter, shared with the image publication.
+PAYLOAD_CHECK = Path(__file__).resolve().parents[1] / "image/verify-signature-payload.sh"
 
 
 class Failed(Exception):
@@ -119,6 +128,22 @@ def check_predicate(release: dict, name: str, statement: dict) -> None:
         raise Failed(f"{name}: attested acceptance: {e}")
 
 
+def signature_failure(args, trust_args, ref):
+    """None if REF carries a `cosign sign` signature under trust_args, else
+    why not: `cosign verify` failed, or what it verified were attestations
+    or payloads for another subject."""
+    p = cosign(args, "verify", *trust_args, ref, check=False)
+    if p.returncode != 0:
+        return f"cosign verify {ref}: {(p.stderr or p.stdout).strip()[-400:]}"
+    with tempfile.TemporaryDirectory() as tmp:
+        payloads = Path(tmp) / "signature.json"
+        payloads.write_text(p.stdout)
+        c = subprocess.run(["bash", str(PAYLOAD_CHECK), str(payloads), ref], capture_output=True, text=True)
+    if c.returncode != 0:
+        return f"signature payload {ref}: {(c.stderr or c.stdout).strip()[-400:]}"
+    return None
+
+
 def verified_attestation(args, release, name) -> bool:
     p = cosign(args, "verify-attestation", "--type", CHART_INPUTS, *trust(args), subject(release["charts"][name]), check=False)
     if p.returncode != 0:
@@ -146,7 +171,7 @@ def sign(args) -> None:
     predicate.write_text(json.dumps({"publication": publication, "acceptance": acceptance}, sort_keys=True))
     for name in CHARTS:
         ref = subject(release["charts"][name])
-        if cosign(args, "verify", *(trust(args) if args.key else trust_for_check(args)), ref, check=False).returncode == 0:
+        if signature_failure(args, trust(args) if args.key else trust_for_check(args), ref) is None:
             print(f"signature present: {ref}")
         else:
             cosign(args, "sign", "--yes", *trust(args, signing=True), ref)
@@ -174,7 +199,9 @@ def verify(args) -> dict:
         if c["archiveSha256"] != publication["charts"][name]["sha256"]:
             raise Failed(f"{name}: release archive {c['archiveSha256']} is not the frozen {publication['charts'][name]['sha256']}")
         ref = subject(c)
-        cosign(args, "verify", *trust(args), ref)
+        failure = signature_failure(args, trust(args), ref)
+        if failure:
+            raise Failed(failure)
         if not verified_attestation(args, release, name):
             raise Failed(f"{name}: no chart-inputs attestation under the trusted identity matches the release")
         pulled = Path(tempfile.mkdtemp())

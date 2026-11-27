@@ -423,6 +423,41 @@ class AttestTests(PublishTests):
         code, err = self.attest("verify", release="swapped.json")
         self.assertNotEqual(code, 0)
 
+    def attest_only(self):
+        """Attach the genuine chart-inputs attestation under the release key
+        to both subjects without signing them."""
+        predicate = self.dir / "chart-inputs.json"
+        predicate.write_text(json.dumps({"publication": self.frozen, "acceptance": acceptance_for(self.frozen)}, sort_keys=True))
+        for c in self.result()["charts"].values():
+            subprocess.run(["cosign", "attest", "--yes", "--allow-http-registry", "--type", attest.CHART_INPUTS, "--predicate", str(predicate),
+                            "--key", str(self.keys / "release.key"), "--use-signing-config=false", "--tlog-upload=false", attest.subject(c)],
+                           check=True, capture_output=True, env=dict(os.environ, COSIGN_PASSWORD=""))
+
+    def plain_cosign_verify(self, ref):
+        return subprocess.run(["cosign", "verify", "--allow-http-registry", "--key", str(self.keys / "release.pub"),
+                               "--insecure-ignore-tlog=true", ref], capture_output=True, text=True)
+
+    def test_attestation_only_chart_is_rejected_at_the_payload_check(self):
+        self.attest_only()
+        for c in self.result()["charts"].values():
+            # Pins Cosign v3's behaviour: plain `cosign verify` accepts a
+            # subject that carries only an attestation.
+            p = self.plain_cosign_verify(attest.subject(c))
+            self.assertEqual(p.returncode, 0, p.stderr)
+        code, err = self.attest("verify")
+        self.assertNotEqual(code, 0, "an attestation-only chart verified")
+        self.assertIn("signature payload", err)
+        self.assertIn("no cosign image signature", err)
+
+    def test_signing_does_not_skip_an_attestation_only_chart(self):
+        self.attest_only()
+        writes = len(self.registry.manifest_writes())
+        code, err = self.attest("sign")
+        self.assertEqual(code, 0, err)
+        self.assertGreater(len(self.registry.manifest_writes()), writes, "an attestation-only subject was taken as signed")
+        code, err = self.attest("verify")
+        self.assertEqual(code, 0, err)
+
     def test_signing_resumes_without_duplicating(self):
         self.assertEqual(self.attest("sign")[0], 0)
         writes = len(self.registry.manifest_writes())

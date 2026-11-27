@@ -1,10 +1,12 @@
 """Tests for scripts/image/verify-signature-payload.sh, the controller image's
-signature payload check, and for the places that must use or quote it. The
+signature payload check, and for the places that must use or quote it: every
+`cosign verify` of an image or chart in workflows and scripts. The
 payloads have the shape `cosign verify` (pinned Cosign v3.1.3) prints; the
 live behaviour is pinned by the signing fixture
 (scripts/examples/reference-provider-signing.sh, acceptance group
 `providers`). Needs jq; no network, registry or Cosign."""
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -24,6 +26,31 @@ SIGN = "https://sigstore.dev/cosign/sign/v1"
 spec = importlib.util.spec_from_file_location("image_summary", ROOT / "scripts/image/summary.py")
 summary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(summary)
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+notes = load("chart_release_notes", ROOT / "scripts/charts/release-notes.py")
+attest = load("chart_attest", ROOT / "scripts/charts/attest.py")
+# `cosign verify` itself, not verify-attestation or verify-blob.
+VERIFY = re.compile(r"cosign verify(?![-\w])")
+# ... run as a shell command (or quoted as one), not mentioned in prose.
+VERIFY_COMMAND = re.compile(r"""(?:^|[;&|(]|\$\()\s*(?:devbox run -- )?['"]?cosign verify(?![-\w])""")
+
+
+def unquote(line):
+    """A command quoted in a shell array of documented lines, as written."""
+    line = line.strip()
+    if len(line) > 1 and line[0] == line[-1] and line[0] in "'\"":
+        line = line[1:-1]
+        if line and line[0] != "'":
+            line = line.replace('\\"', '"').replace("\\$", "$")
+    return line
 
 
 def payload(kind, digest=DIGEST):
@@ -107,26 +134,100 @@ class UsageTests(unittest.TestCase):
     def test_job_summary_uses_the_same_filter(self):
         self.assertEqual(summary.SIGNATURE_FILTER, script_filter())
 
-    def test_every_controller_image_verify_is_followed_by_the_check(self):
-        # Each `cosign verify` of the controller image in the publication
-        # workflows is followed directly by the payload check of the file it
-        # wrote, for the same reference.
+    def test_chart_release_notes_use_the_same_filter(self):
+        self.assertEqual(notes.SIGNATURE_FILTER, script_filter())
+
+    def test_every_workflow_verify_is_followed_by_the_check(self):
+        # Each `cosign verify` in a workflow (only the controller image's today;
+        # the charts' run in scripts/charts/attest.py) is followed directly by
+        # the payload check of the file it wrote, for the same reference.
         found = 0
-        for workflow in ("publish.yml", "charts.yml"):
-            lines = (ROOT / ".github/workflows" / workflow).read_text().splitlines()
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            lines = workflow.read_text().splitlines()
             for i, line in enumerate(lines):
-                m = re.search(r'cosign verify (?:--\S+ \S+ )*"(\$IMAGE@\$\w+)" > (\S+)$', line)
-                if not m:
+                if not VERIFY.search(line):
                     continue
                 found += 1
+                m = re.search(r'cosign verify (?:--\S+ \S+ )*"(\$IMAGE@\$\w+)" > (\S+)$', line)
+                self.assertTrue(m, f"{workflow.name}:{i + 1}: unrecognised cosign verify: {line.strip()}")
                 ref, out = m.groups()
                 self.assertEqual(lines[i + 1].strip(),
                                  f'devbox run -- bash scripts/image/verify-signature-payload.sh {out} "{ref}"',
-                                 f"{workflow}:{i + 2}")
-            self.assertNotRegex("\n".join(lines), r'cosign verify [^\n]*"\$IMAGE@[^\n]*> /dev/null',
-                                f"{workflow} discards a controller image's verified payloads")
+                                 f"{workflow.name}:{i + 2}")
         self.assertEqual(found, 3)
 
+    def test_every_shell_script_verify_is_followed_by_the_check(self):
+        # In scripts, the next command after each `cosign verify` (step
+        # markers aside) checks the payloads it wrote: by the script, or by
+        # the same filter quoted verbatim (unescaped from a quoted string).
+        found = 0
+        for script in sorted((ROOT / "scripts").rglob("*.sh")):
+            if script == SCRIPT:
+                continue
+            lines = script.read_text().splitlines()
+            for i, line in enumerate(lines):
+                if not VERIFY_COMMAND.search(line):
+                    continue
+                found += 1
+                where = f"{script.relative_to(ROOT)}:{i + 1}"
+                m = re.search(r"> (\S+?)['\"]?$", line)
+                self.assertTrue(m, f"{where}: cosign verify output is not kept for the payload check")
+                out = m.group(1)
+                quoted = line.strip()[0] in "'\""
+                rest = [unquote(l) if quoted else l.strip() for l in lines[i + 1:] if not l.strip().startswith(("step ", "#"))]
+                self.assertTrue(rest, where)
+                check = rest[0]
+                self.assertTrue(
+                    re.fullmatch(r'"\$root/scripts/image/verify-signature-payload\.sh" ' + re.escape(out) + r" .+", check)
+                    or re.fullmatch(r'jq -e --arg digest "\$\{\w+#\*@\}" ' + re.escape(f"'{script_filter()}' {out}"), check),
+                    f"{where}: not followed by the signature payload check: {check}")
+        self.assertEqual(found, 5)
+
+    def test_every_python_verify_uses_the_check(self):
+        sites = {p.relative_to(ROOT).as_posix() for p in (ROOT / "scripts").rglob("*.py")
+                 if p.parent.name != "ci" and re.search(r'cosign verify |"verify",? ', p.read_text())
+                 and "cosign" in p.read_text()}
+        self.assertEqual(sites, {"scripts/charts/attest.py", "scripts/charts/release-notes.py", "scripts/image/summary.py"})
+
+    def test_chart_attest_runs_cosign_verify_only_with_the_check(self):
+        self.assertEqual(attest.PAYLOAD_CHECK, SCRIPT)
+        tree = ast.parse((ROOT / "scripts/charts/attest.py").read_text())
+        funcs = {f.name: f for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)}
+        owners = []
+        for name, f in funcs.items():
+            for call in ast.walk(f):
+                if (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "cosign" and len(call.args) > 1
+                        and isinstance(call.args[1], ast.Constant) and call.args[1].value == "verify"):
+                    owners.append(name)
+        self.assertEqual(owners, ["signature_failure"])
+        self.assertIn("PAYLOAD_CHECK", ast.unparse(funcs["signature_failure"]))
+        for caller in ("sign", "verify"):
+            calls = [c.func.id for c in ast.walk(funcs[caller]) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)]
+            self.assertIn("signature_failure", calls, caller)
+
+    def test_chart_release_notes_check_each_verified_signature(self):
+        charts = {n: {"version": "0.3.0", "reference": f"ghcr.io/backend-bunny/charts/{n}", "digest": d, "archiveSha256": "sha256:" + "c" * 64}
+                  for n, d in (("konstapel-crds", DIGEST), ("konstapel", OTHER))}
+        lines = notes.block({"source": {"commit": "d" * 40, "tag": "v0.3.0"}, "image": {"digest": DIGEST}, "charts": charts}).splitlines()
+        found = 0
+        for i, line in enumerate(lines):
+            if not VERIFY.search(line):
+                continue
+            found += 1
+            m = re.search(r" (\S+@(sha256:[0-9a-f]{64})) > (\S+)$", line)
+            self.assertTrue(m, line)
+            ref, digest, out = m.groups()
+            self.assertEqual(lines[i + 1], f"jq -e --arg digest {digest} '{script_filter()}' {out} > /dev/null")
+            self.assertEqual(subprocess.run(["jq", "-e", "--arg", "digest", digest, script_filter()], input=json.dumps(ATTESTATIONS_ONLY),
+                                            capture_output=True, text=True).returncode, 1, "the notes' check accepts attestations only")
+        self.assertEqual(found, 2)
+
+    def test_job_summary_checks_its_verified_signature(self):
+        text = (ROOT / "scripts/image/summary.py").read_text().splitlines()
+        i = next(i for i, l in enumerate(text) if VERIFY.search(l))
+        self.assertIn("> signature.json", text[i])
+        rest = [l for l in text[i + 1:] if not l.strip().startswith('"#')]
+        self.assertIn('"jq -e --arg digest \\"${IMAGE#*@}\\" " + shlex.quote(SIGNATURE_FILTER) + " signature.json"', rest[0])
 
 if __name__ == "__main__":
     unittest.main()

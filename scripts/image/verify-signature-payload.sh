@@ -10,9 +10,11 @@
 # verified separately with `cosign verify-attestation`.
 #
 # Usage: verify-signature-payload.sh SIGNATURE_JSON IMAGE
-# IMAGE is the verified reference, repository@sha256:<digest>. The filter
-# below is quoted verbatim in docs/images.md ("Verify");
-# scripts/ci/test_image_signature_payload.py fails if they drift apart.
+# IMAGE is the verified reference, repository@sha256:<digest>: the controller
+# image, or a Helm chart's OCI subject (scripts/charts/attest.py). The filter
+# below is quoted verbatim in docs/images.md ("Verify"), scripts/image/summary.py
+# and scripts/charts/release-notes.py; scripts/ci/test_image_signature_payload.py
+# fails if they drift apart.
 set -euo pipefail
 usage='usage: verify-signature-payload.sh SIGNATURE_JSON IMAGE'
 signature=${1:?$usage}

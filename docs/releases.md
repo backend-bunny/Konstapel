@@ -149,7 +149,9 @@ digest. Its three jobs run in order, and any failure stops the publication:
       records `publication.json` and the acceptance record
       (`scripts/charts/attest.py sign`);
    3. adds GitHub build provenance for each subject;
-   4. verifies everything remotely: the signatures, the attestation
+   4. verifies everything remotely: the signatures (each subject's
+      `cosign verify` output must include a `cosign sign` payload for its
+      digest, `scripts/image/verify-signature-payload.sh`), the attestation
       predicate (source commit, tag, image digest, archive checksum, and an
       acceptance record that passes the publisher's checks against the
       release-required groups and tests at the source commit), the
@@ -159,7 +161,8 @@ digest. Its three jobs run in order, and any failure stops the publication:
 
 The release-notes job then adds a chart block next to the image block. It
 shows both OCI subjects with their digests and archive checksums, and
-copyable commands that verify each subject, pull it by digest, check the
+copyable commands that verify each subject's signature and its payload,
+verify the chart-inputs attestation, pull the subject by digest, check the
 archive checksum and install that file. Rerunning it replaces only that
 block.
 
@@ -174,7 +177,11 @@ pull request), but never sign or write to the chart registry.
 | `ghcr.io/backend-bunny/konstapel@sha256:…` (image) | `https://github.com/backend-bunny/Konstapel/.github/workflows/(publish\|release-please).yml@refs/heads/main` | `https://token.actions.githubusercontent.com` |
 | `ghcr.io/backend-bunny/charts/konstapel-crds@sha256:…`, `ghcr.io/backend-bunny/charts/konstapel@sha256:…` | `https://github.com/backend-bunny/Konstapel/.github/workflows/(charts\|release-please).yml@refs/heads/main` | `https://token.actions.githubusercontent.com` |
 
-A valid signature by any other identity doesn't satisfy verification. The
+A valid signature by any other identity doesn't satisfy verification, and
+neither does an attestation alone: Cosign v3's `cosign verify` also accepts
+the publisher's attestations as signatures, so chart and image verification
+require a verified payload of type `https://sigstore.dev/cosign/sign/v1` for
+the subject's digest ([images](images.md#verify)). The
 chart-inputs attestation (`https://github.com/backend-bunny/Konstapel/chart-inputs/v1`)
 must name the released source commit, image digest and archive checksum, and
 carry the release acceptance record with a `pass` for every test of every
