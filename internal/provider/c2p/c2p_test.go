@@ -68,8 +68,21 @@ type exported struct {
 // closing run evaluates it, as the controller's continuous export does.
 func exportSaved(t *testing.T) exported {
 	t.Helper()
-	root := repoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, savedCapture))
+	c := savedV2(t)
+	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: c, MaxEvidenceAge: maxEvidenceAge}, c.Window.Closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Outcomes.Fail == 0 || ev.Outcomes.Pass == 0 || ev.Evidence.Missing == 0 {
+		t.Fatalf("the saved capture no longer covers passes, failures and missing evidence: %+v %+v", ev.Evidence, ev.Outcomes)
+	}
+	return exportSnapshot(t, c, ev)
+}
+
+// savedV2 is the saved capture, read through the capture boundary.
+func savedV2(t *testing.T) collector.CaptureV2 {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), savedCapture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +94,14 @@ func exportSaved(t *testing.T) exported {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: c, MaxEvidenceAge: maxEvidenceAge}, c.Window.Closed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ev.Outcomes.Fail == 0 || ev.Outcomes.Pass == 0 || ev.Evidence.Missing == 0 {
-		t.Fatalf("the saved capture no longer covers passes, failures and missing evidence: %+v %+v", ev.Evidence, ev.Outcomes)
-	}
+	return c
+}
+
+// exportSnapshot exports a closed capture and its closure evaluation as
+// the controller's continuous export does.
+func exportSnapshot(t *testing.T, c collector.CaptureV2, ev collector.Evaluation) exported {
+	t.Helper()
+	root := repoRoot(t)
 	nsUIDs := []string{}
 	var rules []string
 	for _, s := range c.Subjects {
