@@ -493,6 +493,7 @@ func TestObserveIgnoresIrrelevantChurn(t *testing.T) {
 		f.mutate(pathPolicies, pol, func(m map[string]any) {
 			m["status"].(map[string]any)["conditionStatus"].(map[string]any)["conditions"].([]any)[0].(map[string]any)["lastTransitionTime"] = stamp
 			m["metadata"].(map[string]any)["annotations"].(map[string]any)["kyverno.io/unrelated"] = stamp
+			m["metadata"].(map[string]any)["annotations"].(map[string]any)[targeting.AnnotationReadinessRecheck] = fmt.Sprintf("%d@%s", n+1, stamp)
 		})
 		f.mutate(pathNamespaces, "prod", func(m map[string]any) {
 			m["metadata"].(map[string]any)["annotations"] = map[string]any{"touched": stamp}

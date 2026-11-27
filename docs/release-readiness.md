@@ -109,6 +109,7 @@ describes a candidate.
 | A capture lost before durable staging is reported as `CaptureLost`, never published; an S3 outage alone never causes it | `TestLiveHelmAvailability`, `TestLiveHelmDurableRecovery`, `TestLiveLeaderHandoverLoss` |
 | Installed before Kyverno, both charts become ready, report the missing engine and establish no evidence; Kyverno installed later is used without a restart | `TestLiveHelmLateKyverno` (`charts`) |
 | Kyverno API or permission loss is reported and recovers without a restart; unavailable policy reports never establish compliance | `TestLiveEngineCapabilityRecovery` (`capabilities`), `TestUnavailableReportsCannotEstablishCompliance`, `TestAssessmentCapabilityGate`, `TestDeliveryCapabilityReasons` |
+| A Kyverno installation without the ephemeral-container grant is reported at the binding with the missing verbs and policy; after the documented grant, the same controller recovers readiness and attributable evidence, keeping policy UIDs, ownership, revisions and enforcement | `TestLiveKyvernoPermissionRecovery` (`capabilities`), `TestBindingRechecksPermissionFailureWithinBackoff`, `TestRecheckWritesOnlyTheAnnotationWithinTheBackoff` |
 
 ### Upgrade and uninstall
 

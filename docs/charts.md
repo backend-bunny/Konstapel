@@ -199,6 +199,9 @@ stay `ReplacementPending`, in `Audit` as well as `Deny`. Neither Konstapel
 chart grants it: apply the operator example, after checking your
 installation's identities, as described in
 [Kyverno permissions for official bundles](integration/kyverno-rbac.md).
+Kyverno doesn't notice the grant by itself; the controller's bounded
+readiness recheck makes the bindings ready without a restart, within 15
+minutes ([after applying the grant](integration/kyverno-rbac.md#after-applying-the-grant)).
 
 **Tested versions.** The matrix above is tested against Kyverno chart
 `3.9.2` (`scripts/runtime.env`), which serves `policies.kyverno.io/v1` and
