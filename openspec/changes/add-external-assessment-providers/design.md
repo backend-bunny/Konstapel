@@ -227,9 +227,12 @@ detect a missing workload.
 
 The host builds the inventory at run start from targeting, the listed
 workloads and the reporting-only check definitions of the shared content
-extension (provider-contract group 6), which say which resources a check
-applies to. That derivation is wiring (task 3.1); the collection seam takes
-the inventory as input. The inventory travels in the Collect request, so one
+extension (provider-contract group 6). Which resources each check expects
+evidence for must come from that content, never from provider reports.
+Group 6's tasks do not yet say that its check definitions carry it, so 3.1
+depends on that change adding it (an open item for the content owner). The
+derivation is wiring (task 3.1); the collection seam takes the inventory as
+input. The inventory travels in the Collect request, so one
 message bound applies. An inventory larger than the negotiated bounds is not
 dispatched: the collection is explicitly incomplete, never truncated. A
 chunked inventory upload would be a later additive revision. Cloud accounts,
