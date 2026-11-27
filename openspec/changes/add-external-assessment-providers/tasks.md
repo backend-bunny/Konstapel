@@ -26,6 +26,8 @@ Each group includes its tests and documentation; final tasks prove integration.
   <!-- agent: tier=deep risk=high -->
 - [x] 2.3 Add core chart registration-client configuration and document TLS, permissions and platform installation; verify default charts retain built-in behavior without installing external providers or granting source permissions.
   <!-- agent: tier=standard risk=medium -->
+- [ ] 2.4 Add a separate evaluator endpoint (design Decision 11, owner decision 2026-11-27): `spec.evaluatorEndpoint` required exactly with Evaluate, `spec.endpoint` required exactly with Collect or Scan, with distinct Services and server names; probe and select each endpoint against its own expectation, send Evaluate only to the evaluator endpoint, and change the reference chart so the worker no longer forwards evaluation and the evaluator authorizes the host; test API validation, frozen revisions, per-endpoint availability and compatibility, and live denied source access from the evaluator called as the host.
+  <!-- agent: tier=deep risk=high reason="Registration authorization and evaluator isolation boundary" -->
 
 ## 3. Remote evidence and replay
 
@@ -40,6 +42,13 @@ decision (its design Decision 8).
 
 - [ ] 3.1 Integrate remote read-only collection with host scope, inventory and limits; test mixed-scope payloads/diagnostics, missing subjects, malformed results and deadline closure without scans.
   <!-- agent: tier=deep risk=high -->
+  Note (owner decision 2026-11-27): 3.1.1 to 3.1.3 deliver its prerequisites and a tested seam that no run calls. 3.1 stays open until the host derives the frozen inventory from targeting, listed workloads and the shared check definitions, assessment runs call the seam, and its evidence, diagnostics and limitations reach captures and reports. End-to-end collection, attribution and export are not complete before then.
+- [ ] 3.1.1 Define protocol revision 2 of `konstapel.provider.v1` (design Decision 9): a host-frozen inventory in Collect and the `CollectionResult` attribution envelope as the staged result. Prove the revision-1 reader behavior first (unknown fields, the revision check, `CheckCompatibility`), make the kit and host speak revision 2 only, and update the wire fixtures, protocol reference, quickstart and reference provider; test unsupported revisions, missing or out-of-scope inventory and malformed documents.
+  <!-- agent: tier=deep risk=high reason="Wire contract compatibility and scope attribution" -->
+- [ ] 3.1.2 Record the frozen registration identity in the version 3 capture envelope (design Decision 10), after verifying that no released or retained version 3 artifact depends on its shape and that incompatible readers reject it; test built-in readers rejecting it, registered captures without it, mismatched registration identities and the documented compatibility examples.
+  <!-- agent: tier=deep risk=high reason="Retained capture compatibility" -->
+- [ ] 3.1.3 Add the self-contained `external.Collect` seam and host attribution validation, not wired into runs (design Decision 12): Continue before dispatch, then Collect and ReadResult on one connection behind one result seam for 3.2, the stricter of host and negotiated limits, deadline and transfer failures as explicit incomplete limitations, and out-of-scope or missing subjects as diagnostics; test over mutual TLS `externaltest` servers.
+  <!-- agent: tier=deep risk=high reason="Evidence scope, bounded transfer and failure semantics" -->
 - [ ] 3.2 Implement immutable bounded result transfer and durable-capture acknowledgement; test interrupted transfer, checksum mismatch, result expiry, host restart and cleanup only after acknowledged capture or documented expiry.
   <!-- agent: tier=deep risk=high -->
 - [ ] 3.3 Connect external evaluation and the C2P bridge to projected frozen captures and exact RunContent, whose reporting-only check definitions come from the shared content extension (provider-contract task 6.2); test warning preservation, applied-versus-desired content, compatible replay without source access and explicit unavailable evaluator failures.

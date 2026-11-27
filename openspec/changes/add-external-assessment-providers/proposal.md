@@ -11,8 +11,10 @@ including an optional request for fresh evidence.
 
 - Add administrator-owned AssessmentProvider registrations for authenticated,
   compatible external endpoints; retain the existing built-in Kyverno path.
-- Define a versioned service protocol for capabilities, bounded collection,
-  optional durable scan requests, and deterministic evaluation of frozen inputs.
+- Define a versioned service protocol for capabilities, bounded collection
+  against a host-frozen inventory with host-readable attribution, optional
+  durable scan requests, and deterministic evaluation of frozen inputs at a
+  separately authenticated evaluator endpoint.
 - Run external providers in separate pods installed by platform operators through
   provider Helm charts and signed, digest-pinned OCI images. Konstapel does not
   install, upgrade, or execute provider binaries.
