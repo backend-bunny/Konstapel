@@ -166,7 +166,9 @@ exactly `$IMAGE`'s digest. Attestations are verified separately by
 The publish workflow runs these verification checks itself, including the source
 manifest attestation, with the same `jq` filter in
 `scripts/image/verify-signature-payload.sh`; the chart release workflow
-(`charts.yml`) applies it to the controller image the charts pin. Signing and OIDC
+(`charts.yml`) applies it to the controller image the charts pin and, through
+`scripts/charts/attest.py`, to each chart's own OCI subject; the chart release
+notes quote it after each chart's `cosign verify`. Signing and OIDC
 attestations require GitHub Actions and are not emulated by a local dry run.
 
 ## Dependency refresh

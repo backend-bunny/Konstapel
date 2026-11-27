@@ -4,7 +4,11 @@
 Text outside the markers (generated changelog, user notes, the image block)
 is preserved; rerunning replaces only the chart block. The commands verify
 each OCI subject by digest and install the archive pulled by that same
-digest, never an unchecked tag."""
+digest, never an unchecked tag. `cosign verify` alone also accepts the
+publisher's attestations as signatures (Cosign v3), so each is followed by
+the signature payload check of scripts/image/verify-signature-payload.sh,
+whose filter SIGNATURE_FILTER quotes (scripts/ci/test_image_signature_payload.py
+fails if they drift apart)."""
 
 import json
 import os
@@ -16,6 +20,7 @@ START, END = "<!-- konstapel-charts:start -->", "<!-- konstapel-charts:end -->"
 IDENTITY = r"^https://github.com/backend-bunny/Konstapel/\.github/workflows/(charts|release-please)\.yml@refs/heads/main$"
 ISSUER = "https://token.actions.githubusercontent.com"
 CHART_INPUTS = "https://github.com/backend-bunny/Konstapel/chart-inputs/v1"
+SIGNATURE_FILTER = 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)'
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -41,7 +46,8 @@ def block(release: dict) -> str:
         c = release["charts"][name]
         ref = f"{c['reference']}@{c['digest']}"
         lines += [
-            f"cosign verify --certificate-identity-regexp '{IDENTITY}' --certificate-oidc-issuer {ISSUER} {ref}",
+            f"cosign verify --certificate-identity-regexp '{IDENTITY}' --certificate-oidc-issuer {ISSUER} {ref} > {name}-signature.json",
+            f"jq -e --arg digest {c['digest']} '{SIGNATURE_FILTER}' {name}-signature.json > /dev/null",
             f"cosign verify-attestation --type {CHART_INPUTS} --certificate-identity-regexp '{IDENTITY}' --certificate-oidc-issuer {ISSUER} {ref} > /dev/null",
             f"gh attestation verify oci://{ref} --repo backend-bunny/Konstapel",
             f"helm pull oci://{ref}",
