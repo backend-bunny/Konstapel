@@ -204,6 +204,9 @@ see [Helm charts](../charts.md#external-engine-capabilities)).
 - **One version.** That a metadata-only update makes Kyverno recompute the
   condition was verified on Kyverno 1.19.2 only. Kyverno 1.20.0 has the same
   handlers by source inspection; it was not tested.
+- **Upstream report pending.** An issue report to Kyverno about
+  `RBACPermissionsGranted` not being recomputed after RBAC changes is
+  pending; there is no link yet.
 
 ## Other Kyverno versions
 
