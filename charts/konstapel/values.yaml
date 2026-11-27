@@ -359,10 +359,17 @@ metrics:
                 outstanding past its due time, collection timeout and grace.
                 Namespace requests and diagnostic runs do not meet it.
           KonstapelPublicationFailing:
-            # A failing run is actionable only until the 5-minute publish
-            # timeout after its collection closed, so the hold stays shorter.
+            # A run retries only until the 5-minute publish timeout after
+            # its collection closed, so the hold stays shorter. Retained
+            # signing failures stay in konstapel_publication_failed until
+            # recovery or expiry but no longer retry: they are subtracted so
+            # that only retrying runs, with recent failed attempts, fire. A
+            # controller without the retained series subtracts nothing.
             expr: |-
-              max by (__scope_labels__) (konstapel_publication_failed{__scope__} and on (__scope_labels__, instance) __owner(evidence_storage)__) > 0
+              max by (__scope_labels__) (
+                (konstapel_publication_failed{__scope__} - (konstapel_publication_retained_signing_failures{__scope__} or konstapel_publication_failed{__scope__} * 0))
+                and on (__scope_labels__, instance) __owner(evidence_storage)__
+              ) > 0
               and on (__scope_labels__)
               sum by (__scope_labels__) (increase(konstapel_operation_attempts_total{__scope__, operation="evidence_publication", result="failure"}[__window__])) >= __threshold__
             threshold: 3

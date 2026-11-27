@@ -403,6 +403,16 @@ reads ([who can read signing keys](#who-can-read-signing-keys)). Any metric
 derived from these fields must label only by these fixed reasons and modes,
 never by run, key, Secret, or package.
 
+A retained `SigningFailed` run counts in `konstapel_publication_failed`, and
+in `konstapel_publication_retained_signing_failures`, until signing recovery
+publishes it or its `expiresAt` passes. Signing recovery requests are counted
+by `konstapel_evidence_signing_recovery_requests` (labels `phase` and `reason`
+only). Recovery emits no Kubernetes Events. The controller writes Events only
+in its own namespace, and requests and runs are cluster-scoped. Use the request
+and run status and the controller logs instead. See the
+[metrics guide](metrics.md) and the
+[publication-failing runbook](alert-runbooks.md#konstapelpublicationfailing).
+
 ### Acceptance
 
 Signing is covered by the mandatory acceptance groups, against a real API

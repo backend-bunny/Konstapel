@@ -403,10 +403,14 @@ func (h *Hub) gather(now time.Time) []prometheus.Metric {
 		s := st.value
 		gauge("konstapel_publication_pending", float64(s.PublicationPending))
 		gauge("konstapel_publication_failed", float64(s.PublicationFailed))
+		gauge("konstapel_publication_retained_signing_failures", float64(s.RetainedSigningFailures))
 		gauge("konstapel_cleanup_pending", float64(s.CleanupPending))
 		gauge("konstapel_cleanup_blocked", float64(s.CleanupBlocked))
 		if s.OldestCleanupExpiry != nil {
 			gauge("konstapel_cleanup_oldest_expiry_timestamp_seconds", ts(*s.OldestCleanupExpiry))
+		}
+		for _, k := range RecoveryStates() {
+			gauge("konstapel_evidence_signing_recovery_requests", float64(s.RecoveryRequests[k]), k.Phase, k.Reason)
 		}
 	}
 	return out

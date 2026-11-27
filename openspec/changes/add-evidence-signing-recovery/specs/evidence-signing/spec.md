@@ -182,6 +182,20 @@ metrics SHALL use only bounded phase and reason labels.
 - **THEN** it receives the pair-verified archive and signature
 - **AND** the request status names no administrator, Secret, or recovery reason
 
+### Requirement: Signing recovery is observable without Events
+
+Recovery SHALL be observable through durable request and run status, metrics,
+and logs; the controller SHALL NOT need Event writes outside its namespace. A
+retained signing failure SHALL count as a failed publication until recovery
+publishes it or its retention expires, and SHALL be distinguishable from
+publications that are still retrying.
+
+#### Scenario: Monitor a retained signing failure until recovery
+
+- **WHEN** a run ends SigningFailed with its evidence retained and is later recovered
+- **THEN** it counts as one failed publication, distinguishable from retrying publications, until the recovery publishes it
+- **AND** it is never counted as both failed and published
+
 ### Requirement: Signing recovery has mandatory acceptance evidence
 
 Mandatory acceptance SHALL exercise recovery against a real API server and

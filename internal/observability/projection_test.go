@@ -268,7 +268,10 @@ func TestFrameworkNeutralProjection(t *testing.T) {
 	banned := regexp.MustCompile(`(?i)catalog|control|framework|profile|mapping|policy|digest|sha|reason|message|limitation|namespace|workload|key|url|secret|credential`)
 	for _, typ := range []any{TargetingSnapshot{}, AssessmentSnapshot{}, StorageSnapshot{}, BindingTargeting{}, BindingAssessment{}, CurrentView{}, ClosedRun{}, Summary{}, BindingRef{}} {
 		walkFields(reflect.TypeOf(typ), func(path string) {
-			if banned.MatchString(path) && path != "TargetNamespaces" {
+			// RecoveryState.Reason is the request's fixed status reason,
+			// validated against the phase's vocabulary, never free text.
+			_, storage := typ.(StorageSnapshot)
+			if banned.MatchString(path) && path != "TargetNamespaces" && (path != "Reason" || !storage) {
 				t.Errorf("%T has field %s", typ, path)
 			}
 		})
@@ -327,8 +330,9 @@ func TestSeriesBoundedAsWorkloadsAndHistoryGrow(t *testing.T) {
 	}
 	// 3 bindings: per binding 1 created + 6 condition + 1 targets + 8 status
 	// + 20 checks + 2 complete + 2 closure times + 4 schedule = 44. Global:
-	// 12 domain availability + 6 capability + 5 storage + 12 operation.
-	if want := 3*44 + 12 + 6 + 5 + 12; small != want {
+	// 12 domain availability + 6 capability + 6 storage + 16 recovery
+	// request phase/reason pairs + 12 operation.
+	if want := 3*44 + 12 + 6 + 6 + 16 + 12; small != want {
 		t.Errorf("series = %d, want %d", small, want)
 	}
 }

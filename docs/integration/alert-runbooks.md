@@ -271,15 +271,25 @@ claimed as assessed.
 **Meaning.** For 2 minutes, at least one closed run has been retrying
 publication of its evidence package, and at least 3 (`threshold`)
 publication attempts failed in the last 15m (`window`), summed across
-replicas. The backlog gauge counts `Publishing` runs whose `Published`
-condition is `False` with reason `Retrying`, or `SigningPending` while
-required signing is unmet.
+replicas. Retrying runs are `konstapel_publication_failed` minus
+`konstapel_publication_retained_signing_failures`: `Publishing` runs whose
+`Published` condition is `False` with reason `Retrying`, or `SigningPending`
+while required signing is unmet.
 
 A failing run retries only until the publish timeout, 5 minutes after its
-collection closed. It then becomes `Failed` with `PublicationFailed` (or
-`SigningFailed`), a historical failure, and the alert resolves. That is why
-the default hold is shorter than the timeout. The resolution is not
+collection closed. That is why the default hold is shorter than the timeout.
+It then becomes `Failed`, and the alert resolves. The resolution is not
 recovery: check the next runs.
+
+- With `PublicationFailed` it keeps no evidence. It is a historical failure
+  and leaves `konstapel_publication_failed`.
+- With `SigningFailed` it keeps its staged evidence and stays in
+  `konstapel_publication_failed`, and in
+  `konstapel_publication_retained_signing_failures`, until an
+  EvidenceSigningRequest recovers it or its `expiresAt` passes
+  ([signing recovery](evidence-signing.md)). It no longer retries, so it
+  does not keep this alert firing. Retained failures alone never fire it, and
+  neither do transient failures of other runs that publish within the hold.
 
 **Impact.** The run's assessment summary stands; publication success and
 evidence completeness are reported independently. The evidence package is
@@ -299,9 +309,22 @@ or its credentials ([evidence storage](s3-evidence.md)). Never disable
 signing that the destination requires.
 
 **Recovery check.** New runs reach `Completed` with
-`status.publication.publishedAt` recorded. Runs that already failed stay
-`Failed`: their evidence was not published and is not re-exported under the
-old identity.
+`status.publication.publishedAt` recorded. Runs that failed with
+`PublicationFailed` stay `Failed`: their evidence was not published and is
+not re-exported under the old identity.
+
+Runs that failed with `SigningFailed` are counted by
+`konstapel_publication_retained_signing_failures` until they expire. Once
+the key problem is fixed, recover them before their `expiresAt`:
+
+```sh
+kubectl get assessmentruns -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,FAILURE:.status.publication.failure.reason,EXPIRES:.status.publication.expiresAt'
+kubectl get evidencesigningrequests -o custom-columns='NAME:.metadata.name,RUN:.spec.run.name,PHASE:.status.phase,REASON:.status.reason'
+```
+
+`konstapel_evidence_signing_recovery_requests` shows the requests by phase
+and reason. Recovery emits no Kubernetes Events. The request and run status
+and the controller logs say what happened.
 
 ## KonstapelCleanupBlocked
 

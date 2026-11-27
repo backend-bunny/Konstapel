@@ -72,6 +72,16 @@ func committed(expires time.Time, cleanup string) func(*v1alpha1.AssessmentRun) 
 	}
 }
 
+// signingFailed is a run that ended SigningFailed and keeps its staged
+// evidence until expires.
+func signingFailed(expires time.Time, cleanup string) func(*v1alpha1.AssessmentRun) {
+	return func(r *v1alpha1.AssessmentRun) {
+		e := metav1.NewTime(expires)
+		r.Status.Publication = &v1alpha1.PublicationStatus{Phase: "Failed", ExpiresAt: &e, Cleanup: v1alpha1.PublicationCleanup{State: v1alpha1.CleanupState(cleanup)},
+			Failure: &v1alpha1.PublicationFailure{Reason: v1alpha1.ReasonSigningFailed}}
+	}
+}
+
 // The backlog comes from retained run records: actionable publication
 // failures are separate from pending work and from historical failures,
 // and cleanup counts only unconfirmed deletions.
@@ -96,10 +106,14 @@ func TestStorageFromRuns(t *testing.T) {
 		pubRun("blocked", v1alpha1.RunCompleted, committed(t0.Add(-3*time.Hour), "RetentionBlocked")),
 		pubRun("deleted", v1alpha1.RunCompleted, committed(t0.Add(-4*time.Hour), "Deleted")),
 		pubRun("orphaned", v1alpha1.RunCompleted, committed(t0.Add(-5*time.Hour), "Orphaned")),
+		pubRun("signing-retained", v1alpha1.RunFailed, signingFailed(t0.Add(time.Hour), "NotDue")),
+		pubRun("signing-expired", v1alpha1.RunFailed, signingFailed(t0.Add(-6*time.Hour), "NotDue")),
+		pubRun("signing-deleted", v1alpha1.RunFailed, signingFailed(t0.Add(-7*time.Hour), "Deleted")),
+		pubRun("signing-orphaned", v1alpha1.RunFailed, signingFailed(t0.Add(time.Hour), "Orphaned")),
 	}
 	got := StorageFrom(runs, t0)
-	want := StorageSnapshot{PublicationPending: 1, PublicationFailed: 2, CleanupPending: 2, CleanupBlocked: 1, OldestCleanupExpiry: ptr(t0.Add(-3 * time.Hour))}
-	if got.PublicationPending != want.PublicationPending || got.PublicationFailed != want.PublicationFailed || got.CleanupPending != want.CleanupPending ||
+	want := StorageSnapshot{PublicationPending: 1, PublicationFailed: 3, RetainedSigningFailures: 1, CleanupPending: 3, CleanupBlocked: 1, OldestCleanupExpiry: ptr(t0.Add(-6 * time.Hour))}
+	if got.PublicationPending != want.PublicationPending || got.PublicationFailed != want.PublicationFailed || got.RetainedSigningFailures != want.RetainedSigningFailures || got.CleanupPending != want.CleanupPending ||
 		got.CleanupBlocked != want.CleanupBlocked || got.OldestCleanupExpiry == nil || !got.OldestCleanupExpiry.Equal(*want.OldestCleanupExpiry) {
 		t.Errorf("backlog = %+v, want %+v", got, want)
 	}
@@ -110,7 +124,7 @@ func TestStorageFromRuns(t *testing.T) {
 	if s := StorageFrom(runs[5:6], t0.Add(time.Hour)); s.CleanupPending != 1 {
 		t.Errorf("expiry at the projection time: %+v", s)
 	}
-	if s := StorageFrom(nil, t0); s != (StorageSnapshot{}) {
+	if s := StorageFrom(nil, t0); s.PublicationPending+s.PublicationFailed+s.CleanupPending+s.CleanupBlocked != 0 || s.OldestCleanupExpiry != nil || s.RecoveryRequests != nil {
 		t.Errorf("no records: %+v", s)
 	}
 }

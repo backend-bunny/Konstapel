@@ -11,8 +11,9 @@
 # Bindings: "payments" (resolved, delivered, current evidence known with a
 # failure, an accepted risk and a warning counted as unknown, evidence
 # expiring at 7200s, overdue scheduled work due at 120s) and "legacy"
-# (profile missing, no assessment yet). Storage: one actionable publication
-# failure and one retention-blocked cleanup.
+# (profile missing, no assessment yet). Storage: two failed publications,
+# one retrying and one retained signing failure awaiting recovery, and one
+# retention-blocked cleanup.
 # Series last 150 minutes; counters increase by their exposed value every
 # minute.
 cases:
@@ -92,9 +93,21 @@ cases:
     exp_samples:
       - labels: '{job="konstapel"}'
         value: 45
-  - name: actionable publication failure with recent failed attempts
+  - name: failed publications, including retained signing failures
+    expr: max by (job) (konstapel_publication_failed)
+    eval_time: 1m
+    exp_samples:
+      - labels: '{job="konstapel"}'
+        value: 2
+  - name: retained signing failures awaiting recovery
+    expr: max by (job) (konstapel_publication_retained_signing_failures) > 0
+    eval_time: 1m
+    exp_samples:
+      - labels: '{job="konstapel"}'
+        value: 1
+  - name: retrying publication failure with recent failed attempts
     expr: |
-      max by (job) (konstapel_publication_failed) > 0
+      max by (job) (konstapel_publication_failed - konstapel_publication_retained_signing_failures) > 0
       and on (job)
       sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m])) >= 3
     eval_time: 20m

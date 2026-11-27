@@ -1180,11 +1180,26 @@ from retained AssessmentRun records, never from listing storage. The
 | --- | --- |
 | `Publishing`, last attempt not failed | `konstapel_publication_pending` |
 | `Publishing` with `Published=False`, reason `Retrying` or `SigningPending` (actionable) | `konstapel_publication_failed` |
+| `Failed` with `SigningFailed`, staged evidence retained, before `expiresAt` (recoverable) | `konstapel_publication_failed` and `konstapel_publication_retained_signing_failures` |
 | `Failed` with `PublicationFailed` (historical) | not counted |
-| Committed, past `expiresAt`, deletion not confirmed (including `DeletionFailed` retried with backoff) | `konstapel_cleanup_pending` |
+| Committed or retained `SigningFailed`, past `expiresAt`, deletion not confirmed (including `DeletionFailed` retried with backoff) | `konstapel_cleanup_pending` |
 | `cleanup.state` `RetentionBlocked` | `konstapel_cleanup_blocked` |
 | Oldest expiry among pending and blocked cleanup | `konstapel_cleanup_oldest_expiry_timestamp_seconds` |
 | `Deleted` or `Orphaned` | not counted |
+
+A recovered run (see [signing recovery](evidence-signing.md)) becomes a
+committed package with its recorded `expiresAt` unchanged. It leaves
+`konstapel_publication_failed` in the same record update that commits it, so it
+is never counted twice. A retained failure that is not recovered leaves it when
+its `expiresAt` passes, and is then cleanup backlog.
+
+`konstapel_evidence_signing_recovery_requests` counts EvidenceSigningRequests
+by their recorded `status.phase` and `status.reason`. Every reason allowed with
+its phase is exposed, zero when no request has it. Requests are audit records:
+terminal ones stay counted until an administrator deletes them. A request the
+controller has not accepted yet has no phase and is not counted. The labels are
+the fixed status vocabulary only. Run and request names, requesters and
+messages stay in the request status.
 
 Every replica counts its own publication and cleanup attempts in
 `konstapel_operation_attempts_total` and `konstapel_operation_duration_seconds`
@@ -1204,7 +1219,9 @@ Limits on availability:
 
 Producer tests: `TestStorageFromRuns`, `TestIncompletePublicationSucceeds`,
 `TestPublicationFailureIsActionableWhileRetried`,
-`TestBlockedCleanupOutlivesBindingAndRestart` and `TestObserveOperation`.
+`TestBlockedCleanupOutlivesBindingAndRestart`, `TestObserveOperation`,
+`TestRecoveryRequestGauge`, `TestSigningRecoveryObservability` and
+`TestRetainedSigningFailureCleanupBacklog`.
 
 ## Teardown
 

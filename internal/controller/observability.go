@@ -56,14 +56,21 @@ func publishTargeting(c client.Reader, hub *observability.Hub, caps capabilityCh
 	}
 }
 
-// publishStorage publishes the durable backlog from retained run records.
+// publishStorage publishes the durable backlog from retained run records
+// and the signing recovery requests from their recorded status.
 func publishStorage(c client.Reader, hub *observability.Hub) func(context.Context, observability.Term, time.Time) error {
 	return func(ctx context.Context, t observability.Term, now time.Time) error {
 		var list v1alpha1.AssessmentRunList
 		if err := c.List(ctx, &list); err != nil {
 			return fmt.Errorf("list assessment runs: %w", err)
 		}
-		return hub.PublishStorage(t, now, observability.StorageFrom(list.Items, now))
+		var reqs v1alpha1.EvidenceSigningRequestList
+		if err := c.List(ctx, &reqs); err != nil {
+			return fmt.Errorf("list evidence signing requests: %w", err)
+		}
+		s := observability.StorageFrom(list.Items, now)
+		s.RecoveryRequests = observability.RecoveryRequestsFrom(reqs.Items)
+		return hub.PublishStorage(t, now, s)
 	}
 }
 
@@ -146,7 +153,7 @@ func setupObservability(mgr manager.Manager, hub *observability.Hub, caps capabi
 	}{
 		{"targeting-projection", observability.DomainTargeting, []client.Object{&v1alpha1.ComplianceBinding{}}, publishTargeting(mgr.GetClient(), hub, caps)},
 		{"assessment-projection", observability.DomainAssessment, []client.Object{&v1alpha1.ComplianceBinding{}, &v1alpha1.AssessmentRun{}}, publishAssessment(mgr.GetClient(), hub)},
-		{"storage-projection", observability.DomainEvidenceStorage, []client.Object{&v1alpha1.AssessmentRun{}}, publishStorage(mgr.GetClient(), hub)},
+		{"storage-projection", observability.DomainEvidenceStorage, []client.Object{&v1alpha1.AssessmentRun{}, &v1alpha1.EvidenceSigningRequest{}}, publishStorage(mgr.GetClient(), hub)},
 	} {
 		trigger, notify := observability.Notifier()
 		for _, obj := range d.objs {
