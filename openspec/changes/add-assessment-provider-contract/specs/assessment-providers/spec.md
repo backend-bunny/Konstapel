@@ -113,6 +113,13 @@ SHALL NOT be replaced with desired, vendored, or another provider's content.
 - **THEN** the run uses its frozen content and revision, recording the change
 - **AND** it does not fabricate an engine policy or an applied-policy identity
 
+#### Scenario: A selection change is observed after the run freezes
+
+- **WHEN** the controller observes, while the run collects, that the binding selects other content than the run froze
+- **THEN** the run's status records that first observed selection, the frozen one and the observation time once, without later rewrites
+- **AND** the run's frozen selection, content and package descriptor are unchanged
+- **AND** a run with no observed difference, including a change reverted between observations, records no change
+
 ### Requirement: Evaluation is deterministic and shared with offline replay
 
 Current assessment and offline C2P conversion SHALL use the same provider

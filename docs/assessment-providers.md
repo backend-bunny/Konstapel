@@ -993,6 +993,18 @@ explicit content failure that makes the package a Diagnostic:
   binding that changes after the freeze affects the next run; this run keeps
   its frozen copy. Its descriptor records the selection as the frozen
   desired bundle (`DesiredNotApplied`), with no applied identity.
+- A selection change the controller observes after the freeze is reported
+  on the run only, as `status.observedSelectionChange`: the frozen and the
+  observed bundle reference (`observed` is absent when the binding's profile
+  was not found) and `observedTime`, the observation at which the controller
+  first read a selection other than the frozen one. Observations happen at
+  each collection poll until the window closes. The field is written once
+  and never updated or removed. It reports only what was observed: its
+  absence does not mean nothing changed, a change reverted between two
+  observations is not reported, and a run started by a controller that did
+  not stage its frozen bundle records nothing. The frozen content, capture
+  and package descriptor are unchanged
+  (`TestOCIRunObservedSelectionChangeKeepsFrozenDescriptor`).
 - Identity is the bundle name and manifest digest, never the digest alone:
   another name for a frozen digest is a `ContentMismatch`.
 
