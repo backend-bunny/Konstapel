@@ -14,7 +14,10 @@ import (
 // add-evidence-signing-recovery 3.1: the recovery request gauge and the
 // storage backlog of retained signing failures.
 
-const recoveryRequestsMetric = "konstapel_evidence_signing_recovery_requests"
+const (
+	recoveryRequestsMetric = "konstapel_evidence_signing_recovery_requests"
+	retainedMetric         = "konstapel_publication_retained_signing_failures{}"
+)
 
 // recoveryRequests returns the request gauge's series, failing on any
 // series outside the fixed phase/reason vocabulary.
@@ -57,16 +60,17 @@ func wantRequests(t *testing.T, m map[string]float64, want map[[2]string]float64
 	}
 }
 
-// A recovered run moves from the retained failure to the committed package
-// and is counted once: it is never publication backlog before or after,
-// and past its (unchanged) expiry it is one pending cleanup. The request
+// A retained signing failure is one failed publication (and one retained
+// signing failure) until recovery publishes it; the recovered run is then
+// a committed package, counted once, and past its (unchanged) expiry one
+// pending cleanup. The request
 // gauge follows the requests' recorded status, keeps terminal requests,
 // and is rebuilt from the records by a restarted or new leader.
 func TestSigningRecoveryObservability(t *testing.T) {
 	e := newRecoveryEnv(t)
 	m := storageMetrics(t, e.runEnv)
-	if b := backlog(m); b != [4]float64{} {
-		t.Fatalf("a retained SigningFailed run before its expiry is backlog: %v", b)
+	if b := backlog(m); b != [4]float64{0, 1, 0, 0} || m[retainedMetric] != 1 {
+		t.Fatalf("a retained SigningFailed run before its expiry is one failed publication: %v retained %v", b, m[retainedMetric])
 	}
 	wantRequests(t, m, nil)
 
@@ -80,8 +84,8 @@ func TestSigningRecoveryObservability(t *testing.T) {
 	e.reconcile("late")
 	m = storageMetrics(t, e.runEnv)
 	wantRequests(t, m, map[[2]string]float64{{"Pending", "Accepted"}: 1, {"Pending", "Waiting"}: 1})
-	if b := backlog(m); b != [4]float64{} {
-		t.Fatalf("a run under recovery is backlog: %v", b)
+	if b := backlog(m); b != [4]float64{0, 1, 0, 0} || m[retainedMetric] != 1 {
+		t.Fatalf("a run under recovery stays one failed publication until it is published: %v retained %v", b, m[retainedMetric])
 	}
 
 	e.now = e.now.Add(2 * time.Minute)
@@ -94,14 +98,14 @@ func TestSigningRecoveryObservability(t *testing.T) {
 	m = storageMetrics(t, e.runEnv)
 	recovered := map[[2]string]float64{{"Succeeded", "Recovered"}: 1, {"Succeeded", "AlreadyRecovered"}: 1, {"Failed", "RunNotFound"}: 1}
 	wantRequests(t, m, recovered)
-	if b := backlog(m); b != [4]float64{} {
-		t.Fatalf("a recovered run before its expiry is backlog: %v", b)
+	if b := backlog(m); b != [4]float64{} || m[retainedMetric] != 0 {
+		t.Fatalf("a recovered run before its expiry is still counted: %v retained %v", b, m[retainedMetric])
 	}
 
 	// A new leader (or a restarted controller) rebuilds the same gauges.
 	before := maps.Clone(m)
 	e.restart()
-	if after := storageMetrics(t, e.runEnv); !maps.Equal(recoveryRequests(t, after), recoveryRequests(t, before)) || backlog(after) != backlog(before) {
+	if after := storageMetrics(t, e.runEnv); !maps.Equal(recoveryRequests(t, after), recoveryRequests(t, before)) || backlog(after) != backlog(before) || after[retainedMetric] != before[retainedMetric] {
 		t.Fatalf("after restart:\n%v\n%v", after, before)
 	}
 
@@ -113,21 +117,25 @@ func TestSigningRecoveryObservability(t *testing.T) {
 	}
 	e.now = expires.Add(time.Second)
 	m = storageMetrics(t, e.runEnv)
-	if b := backlog(m); b != [4]float64{0, 0, 1, 0} || m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"] != float64(expires.Unix()) {
+	if b := backlog(m); b != [4]float64{0, 0, 1, 0} || m[retainedMetric] != 0 || m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"] != float64(expires.Unix()) {
 		t.Fatalf("expired recovered package: %v oldest %v", b, m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"])
 	}
 	wantRequests(t, m, recovered)
 }
 
-// Retained signing failures share the package lifecycle: past their expiry
-// they are pending cleanup until the deletion is confirmed, and a confirmed
+// Retained signing failures share the package lifecycle: until their expiry
+// they are failed publications; past it they are pending cleanup until the deletion is confirmed, and a confirmed
 // deletion leaves no backlog. A request for an expired run ends Expired.
 func TestRetainedSigningFailureCleanupBacklog(t *testing.T) {
 	e := newRecoveryEnv(t)
 	expires := e.failed.Publication.ExpiresAt.Time
+	e.now = expires.Add(-time.Second)
+	if m := storageMetrics(t, e.runEnv); backlog(m) != [4]float64{0, 1, 0, 0} || m[retainedMetric] != 1 {
+		t.Fatalf("retained failure just before expiry: %v retained %v", backlog(m), m[retainedMetric])
+	}
 	e.now = expires.Add(time.Second)
 	m := storageMetrics(t, e.runEnv)
-	if b := backlog(m); b != [4]float64{0, 0, 1, 0} || m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"] != float64(expires.Unix()) {
+	if b := backlog(m); b != [4]float64{0, 0, 1, 0} || m[retainedMetric] != 0 || m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"] != float64(expires.Unix()) {
 		t.Fatalf("expired retained failure: %v oldest %v", b, m["konstapel_cleanup_oldest_expiry_timestamp_seconds{}"])
 	}
 	e.request("too-late", e.name, e.uid())

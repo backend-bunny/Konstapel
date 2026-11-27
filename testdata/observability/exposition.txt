@@ -277,9 +277,12 @@ konstapel_operation_duration_seconds_bucket{operation="evidence_publication",res
 konstapel_operation_duration_seconds_bucket{operation="evidence_publication",result="success",le="+Inf"} 0
 konstapel_operation_duration_seconds_sum{operation="evidence_publication",result="success"} 0
 konstapel_operation_duration_seconds_count{operation="evidence_publication",result="success"} 0
-# HELP konstapel_publication_failed Closed runs whose publication currently fails and needs action.
+# HELP konstapel_publication_failed Closed runs whose publication currently fails and needs action, including retained signing failures until recovery or expiry.
 # TYPE konstapel_publication_failed gauge
 konstapel_publication_failed 0
 # HELP konstapel_publication_pending Closed runs whose evidence package is not yet committed and is still being attempted.
 # TYPE konstapel_publication_pending gauge
 konstapel_publication_pending 0
+# HELP konstapel_publication_retained_signing_failures Runs counted in konstapel_publication_failed that ended SigningFailed and keep their staged evidence for recovery until their expiry.
+# TYPE konstapel_publication_retained_signing_failures gauge
+konstapel_publication_retained_signing_failures 0

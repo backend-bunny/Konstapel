@@ -148,8 +148,11 @@ type AssessmentSnapshot struct {
 type StorageSnapshot struct {
 	PublicationPending int
 	PublicationFailed  int
-	CleanupPending     int
-	CleanupBlocked     int
+	// RetainedSigningFailures are the SigningFailed runs, among
+	// PublicationFailed, that keep their staged evidence until expiry.
+	RetainedSigningFailures int
+	CleanupPending          int
+	CleanupBlocked          int
 	// OldestCleanupExpiry is the expiry of the oldest package with pending
 	// or blocked cleanup; nil when there is none.
 	OldestCleanupExpiry *time.Time
@@ -255,6 +258,9 @@ func (s AssessmentSnapshot) validate() error {
 func (s StorageSnapshot) validate() error {
 	if s.PublicationPending < 0 || s.PublicationFailed < 0 || s.CleanupPending < 0 || s.CleanupBlocked < 0 {
 		return errors.New("negative backlog")
+	}
+	if s.RetainedSigningFailures < 0 || s.RetainedSigningFailures > s.PublicationFailed {
+		return errors.New("retained signing failures must be among the failed publications")
 	}
 	if s.OldestCleanupExpiry != nil && s.CleanupPending+s.CleanupBlocked == 0 {
 		return errors.New("oldest cleanup expiry without pending or blocked cleanup")

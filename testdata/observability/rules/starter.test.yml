@@ -705,6 +705,106 @@ tests:
   name: transient and historical publication failures do not fire
 - alert_rule_test:
   - alertname: KonstapelPublicationFailing
+    eval_time: 6m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 7m
+    exp_alerts:
+    - exp_annotations:
+        description: Assessment runs are retrying publication after repeated failed
+          attempts. Their assessment results stand; their evidence packages are not
+          committed.
+        runbook_url: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelpublicationfailing
+        summary: Konstapel evidence publication is failing.
+      exp_labels:
+        app_kubernetes_io_instance: konstapel
+        job: konstapel-controller-metrics
+        namespace: konstapel-system
+        severity: warning
+  - alertname: KonstapelPublicationFailing
+    eval_time: 10m
+    exp_alerts:
+    - exp_annotations:
+        description: Assessment runs are retrying publication after repeated failed
+          attempts. Their assessment results stand; their evidence packages are not
+          committed.
+        runbook_url: https://github.com/backend-bunny/Konstapel/blob/main/docs/integration/alert-runbooks.md#konstapelpublicationfailing
+        summary: Konstapel evidence publication is failing.
+      exp_labels:
+        app_kubernetes_io_instance: konstapel
+        job: konstapel-controller-metrics
+        namespace: konstapel-system
+        severity: warning
+  - alertname: KonstapelPublicationFailing
+    eval_time: 11m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 30m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 45m
+    exp_alerts: []
+  input_series:
+  - series: up{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 1x90
+  - series: up{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics"}
+    values: 1x90
+  - series: konstapel_observation_enabled{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_enabled{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_ready{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_ready{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: "0x90"
+  - series: konstapel_observation_updated_timestamp_seconds{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 0+60x90
+  - series: konstapel_publication_failed{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 0x4 1x35 0x10
+  - series: konstapel_publication_retained_signing_failures{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 0x10 1x29 0x10
+  - series: konstapel_operation_attempts_total{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",operation="evidence_publication",result="failure"}
+    values: 0x4 4+4x5 24x40
+  interval: 1m
+  name: a retained signing failure stays counted but does not keep firing
+- alert_rule_test:
+  - alertname: KonstapelPublicationFailing
+    eval_time: 7m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 8m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 22m
+    exp_alerts: []
+  - alertname: KonstapelPublicationFailing
+    eval_time: 40m
+    exp_alerts: []
+  input_series:
+  - series: up{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 1x90
+  - series: up{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics"}
+    values: 1x90
+  - series: konstapel_observation_enabled{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_enabled{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_ready{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 1x90
+  - series: konstapel_observation_ready{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.11:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-1",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: "0x90"
+  - series: konstapel_observation_updated_timestamp_seconds{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",domain="evidence_storage"}
+    values: 0+60x90
+  - series: konstapel_publication_failed{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 1x4 2x3 1x10 2 1x30
+  - series: konstapel_publication_retained_signing_failures{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics"}
+    values: 1x48
+  - series: konstapel_operation_attempts_total{app_kubernetes_io_instance="konstapel",container="controller",endpoint="https",instance="10.0.0.10:8443",job="konstapel-controller-metrics",namespace="konstapel-system",pod="konstapel-0",service="konstapel-controller-metrics",operation="evidence_publication",result="failure"}
+    values: 0x4 1 2x13 6 10 14x30
+  interval: 1m
+  name: transient failures beside a retained signing failure do not fire
+- alert_rule_test:
+  - alertname: KonstapelPublicationFailing
     eval_time: 7m
     exp_alerts:
     - exp_annotations:

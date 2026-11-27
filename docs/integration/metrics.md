@@ -188,16 +188,26 @@ values.
 | Gauge | Counted runs |
 | --- | --- |
 | `konstapel_publication_pending` | `Publishing` runs whose last attempt did not fail |
-| `konstapel_publication_failed` | `Publishing` runs whose last attempt failed and is retried (`Published=False`, reason `Retrying`, or `SigningPending` while required signing is unmet). This is an actionable failure. A run that exhausted the publish timeout is `Failed` with `PublicationFailed`; that is a historical failure and is not counted. |
+| `konstapel_publication_failed` | Unpublished runs that need action: `Publishing` runs whose last attempt failed and is retried (`Published=False`, reason `Retrying`, or `SigningPending` while required signing is unmet), and `Failed` runs with `SigningFailed` that keep their staged evidence, until recovery publishes them or their `expiresAt` passes. A run that exhausted the publish timeout with `PublicationFailed` keeps no evidence; that is a historical failure and is not counted. |
+| `konstapel_publication_retained_signing_failures` | The retained `SigningFailed` runs among `konstapel_publication_failed`. They no longer retry; an administrator recovers them with an EvidenceSigningRequest. Subtract them to get the retrying runs. |
 | `konstapel_cleanup_pending` | Retained packages past their recorded expiry whose deletion is not confirmed, including deletions that failed and are retried with backoff. A retained package is a committed package or the staged evidence a `SigningFailed` run keeps until its expiry. |
 | `konstapel_cleanup_blocked` | Deletions refused by storage retention (`RetentionBlocked`), which need action |
 | `konstapel_cleanup_oldest_expiry_timestamp_seconds` | Oldest recorded expiry among pending and blocked cleanup |
 | `konstapel_evidence_signing_recovery_requests` | EvidenceSigningRequests by recorded `status.phase` and `status.reason`; every reason allowed with its phase is a series, zero when unused. Requests not yet accepted (no phase) are not counted. |
 
-A `Failed` run with `SigningFailed` is a historical failure, like
-`PublicationFailed`: it is not publication backlog. Its retained evidence is
-cleanup backlog after its expiry. A recovered run becomes a committed package
-with the same expiry in one record update, so it is counted once.
+A retained `SigningFailed` run leaves `konstapel_publication_failed` in one of
+two ways. Recovery publishes it: the run becomes a committed package with the
+same expiry in one record update, so it is counted once. Otherwise its
+`expiresAt` passes and its evidence becomes cleanup backlog until the deletion
+is confirmed.
+
+Signing recovery emits no Kubernetes Events. The controller's Event recorder
+writes only in the controller namespace, and Konstapel does not grant Event
+writes outside it. EvidenceSigningRequests and AssessmentRuns are
+cluster-scoped, so their Events would need such a grant. Recovery is observed
+through the durable request and run status, the request gauge, the publication
+gauges, and controller logs, which name the run and request but never key
+material.
 
 Deleted and operator-owned (orphaned) packages are not backlog. A delete
 request reduces the backlog only after the run records the confirmed
@@ -318,10 +328,23 @@ Failed publication attempts in 15 minutes, across replicas:
 sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m]))
 ```
 
-A current, actionable publication failure with recent failed attempts:
+Failed publications, including retained signing failures:
 
 ```promql
-max by (job) (konstapel_publication_failed) > 0
+max by (job) (konstapel_publication_failed)
+```
+
+Retained signing failures awaiting recovery (see
+[signing recovery](evidence-signing.md)):
+
+```promql
+max by (job) (konstapel_publication_retained_signing_failures) > 0
+```
+
+A retrying publication failure with recent failed attempts:
+
+```promql
+max by (job) (konstapel_publication_failed - konstapel_publication_retained_signing_failures) > 0
 and on (job)
 sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m])) >= 3
 ```
@@ -415,7 +438,8 @@ The whole test takes about 30 minutes; the `monitoring` job about 35.
 | `konstapel_operation_attempts_total` | counter | `operation` (bundle_resolution, evidence_publication, evidence_cleanup)<br>`result` (success, failure) | Completed attempts of a bounded operation; each retry is a separate attempt. | Always; zero until the first attempt. | Process-local counter; resets to zero on restart; never reconstructed. |
 | `konstapel_operation_duration_seconds` | histogram, seconds | `operation` (bundle_resolution, evidence_publication, evidence_cleanup)<br>`result` (success, failure) | Duration of completed attempts of a bounded operation. | Always; empty until the first attempt. | Process-local counter; resets to zero on restart; never reconstructed. |
 | `konstapel_publication_pending` | gauge |  | Closed runs whose evidence package is not yet committed and is still being attempted. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
-| `konstapel_publication_failed` | gauge |  | Closed runs whose publication currently fails and needs action. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
+| `konstapel_publication_failed` | gauge |  | Closed runs whose publication currently fails and needs action, including retained signing failures until recovery or expiry. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
+| `konstapel_publication_retained_signing_failures` | gauge |  | Runs counted in konstapel_publication_failed that ended SigningFailed and keep their staged evidence for recovery until their expiry. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 | `konstapel_cleanup_pending` | gauge |  | Retained packages past expiry whose deletion is not yet confirmed. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 | `konstapel_cleanup_blocked` | gauge |  | Retained packages whose deletion is blocked and needs action. | Only while the domain's projection is fresh and ready; absent otherwise. | Gauge reflecting current owner state; reconstructed from owner state after restart. |
 | `konstapel_cleanup_oldest_expiry_timestamp_seconds` | gauge, seconds |  | Expiry of the oldest package with pending or blocked cleanup. | Only while the storage projection is fresh and ready and cleanup is pending or blocked. | Gauge reflecting current owner state; reconstructed from owner state after restart. |

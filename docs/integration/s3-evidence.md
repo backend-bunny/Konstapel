@@ -1180,17 +1180,18 @@ from retained AssessmentRun records, never from listing storage. The
 | --- | --- |
 | `Publishing`, last attempt not failed | `konstapel_publication_pending` |
 | `Publishing` with `Published=False`, reason `Retrying` or `SigningPending` (actionable) | `konstapel_publication_failed` |
+| `Failed` with `SigningFailed`, staged evidence retained, before `expiresAt` (recoverable) | `konstapel_publication_failed` and `konstapel_publication_retained_signing_failures` |
 | `Failed` with `PublicationFailed` (historical) | not counted |
-| `Failed` with `SigningFailed`, staged evidence retained (historical, recoverable until `expiresAt`) | not counted before `expiresAt`; then like a committed package |
 | Committed or retained `SigningFailed`, past `expiresAt`, deletion not confirmed (including `DeletionFailed` retried with backoff) | `konstapel_cleanup_pending` |
 | `cleanup.state` `RetentionBlocked` | `konstapel_cleanup_blocked` |
 | Oldest expiry among pending and blocked cleanup | `konstapel_cleanup_oldest_expiry_timestamp_seconds` |
 | `Deleted` or `Orphaned` | not counted |
 
 A recovered run (see [signing recovery](evidence-signing.md)) becomes a
-committed package with its recorded `expiresAt` unchanged. It leaves the
-retained-failure row and enters the committed one in the same record update,
-so it is never counted twice.
+committed package with its recorded `expiresAt` unchanged. It leaves
+`konstapel_publication_failed` in the same record update that commits it, so it
+is never counted twice. A retained failure that is not recovered leaves it when
+its `expiresAt` passes, and is then cleanup backlog.
 
 `konstapel_evidence_signing_recovery_requests` counts EvidenceSigningRequests
 by their recorded `status.phase` and `status.reason`. Every reason allowed with

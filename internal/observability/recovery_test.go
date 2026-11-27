@@ -69,6 +69,9 @@ func TestRecoveryRequestsFrom(t *testing.T) {
 	if s := (StorageSnapshot{RecoveryRequests: got}); s.validate() != nil {
 		t.Error(s.validate())
 	}
+	if (StorageSnapshot{PublicationFailed: 1, RetainedSigningFailures: 2}).validate() == nil || (StorageSnapshot{RetainedSigningFailures: -1}).validate() == nil {
+		t.Error("retained signing failures outside the failed publications accepted")
+	}
 	for _, bad := range []map[RecoveryState]int{{{"Failed", "Recovered"}: 1}, {{"Failed", "free text"}: 1}, {{"Pending", "Accepted"}: -1}} {
 		if (StorageSnapshot{RecoveryRequests: bad}).validate() == nil {
 			t.Errorf("%v accepted", bad)

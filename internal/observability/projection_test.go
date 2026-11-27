@@ -330,9 +330,9 @@ func TestSeriesBoundedAsWorkloadsAndHistoryGrow(t *testing.T) {
 	}
 	// 3 bindings: per binding 1 created + 6 condition + 1 targets + 8 status
 	// + 20 checks + 2 complete + 2 closure times + 4 schedule = 44. Global:
-	// 12 domain availability + 6 capability + 5 storage + 16 recovery
+	// 12 domain availability + 6 capability + 6 storage + 16 recovery
 	// request phase/reason pairs + 12 operation.
-	if want := 3*44 + 12 + 6 + 5 + 16 + 12; small != want {
+	if want := 3*44 + 12 + 6 + 6 + 16 + 12; small != want {
 		t.Errorf("series = %d, want %d", small, want)
 	}
 }

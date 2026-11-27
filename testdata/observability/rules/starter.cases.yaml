@@ -314,7 +314,8 @@ tests:
 
   # A run closes at 5m and its publication fails every 15s (4 attempts a
   # minute) until the 5-minute publish timeout fails it at 11m; then it is a
-  # historical failure. The alert fires after the 2m hold and resolves when
+  # historical failure. No retained-failure series is exposed, as by a
+  # controller that predates it: nothing is subtracted. The alert fires after the 2m hold and resolves when
   # nothing is actionable any more, which is not recovery.
   - name: persistent publication failure
     interval: 1m
@@ -354,6 +355,58 @@ tests:
       - *rd-k1-s
       - *up-k0-s
       - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1x3 0x10 1 0x30'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 1 2x13 6 10 14x30'}
+    alert_rule_test:
+      - {eval_time: 7m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 8m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 22m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 40m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+
+  # A signing outage: a run closes at 5m and its required signing fails
+  # (SigningPending) every 15s until the publish timeout fails it with
+  # SigningFailed at 11m. It keeps its staged evidence and stays in
+  # konstapel_publication_failed, as a retained signing failure, until
+  # recovery publishes it at 40m. The alert fires while it retries and
+  # resolves when it stops retrying, although it is still counted.
+  - name: a retained signing failure stays counted but does not keep firing
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_publication_failed{@k0}', values: '0x4 1x35 0x10'}
+      - {series: 'konstapel_publication_retained_signing_failures{@k0}', values: '0x10 1x29 0x10'}
+      - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 4+4x5 24x40'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - eval_time: 7m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+      - eval_time: 10m
+        alertname: KonstapelPublicationFailing
+        exp_alerts: [{release: konstapel}]
+      - {eval_time: 11m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 30m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+      - {eval_time: 45m, alertname: KonstapelPublicationFailing, exp_alerts: []}
+
+  # The transient failures above, while a retained signing failure is
+  # counted throughout: neither fires.
+  - name: transient failures beside a retained signing failure do not fire
+    interval: 1m
+    input_series:
+      - *up-k0
+      - *up-k1
+      - *en-k0-s
+      - *en-k1-s
+      - *rd-k0-s
+      - *rd-k1-s
+      - *up-k0-s
+      - {series: 'konstapel_publication_failed{@k0}', values: '1x4 2x3 1x10 2 1x30'}
+      - {series: 'konstapel_publication_retained_signing_failures{@k0}', values: '1x48'}
       - {series: 'konstapel_operation_attempts_total{@k0,operation="evidence_publication",result="failure"}', values: '0x4 1 2x13 6 10 14x30'}
     alert_rule_test:
       - {eval_time: 7m, alertname: KonstapelPublicationFailing, exp_alerts: []}

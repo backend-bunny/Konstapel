@@ -59,10 +59,14 @@ func TargetingFrom(bindings []v1alpha1.ComplianceBinding, capabilities map[Capab
 //
 //   - publication pending: closed runs still publishing whose last attempt
 //     did not fail;
-//   - publication failed: runs still publishing whose last attempt failed
-//     and is being retried (actionable), including required signing that
-//     is not yet met. A run whose publication finally
-//     failed is a historical failure and is not counted;
+//   - publication failed: unpublished runs that need action. These are runs
+//     still publishing whose last attempt failed and is being retried,
+//     including required signing that is not yet met, and SigningFailed
+//     runs that keep their staged evidence and can still be recovered
+//     before their expiry. A run whose publication finally failed with
+//     PublicationFailed keeps no evidence and is not counted;
+//   - retained signing failures: the SigningFailed runs among publication
+//     failed. Recovery (the run becomes published) or expiry removes them;
 //   - cleanup pending: retained packages past their recorded expiry whose
 //     deletion is not yet confirmed, including failed deletions that are
 //     retried with backoff;
@@ -71,10 +75,8 @@ func TargetingFrom(bindings []v1alpha1.ComplianceBinding, capabilities map[Capab
 //
 // A retained package is a committed package or the staged evidence a
 // SigningFailed run keeps until its expiry. Signing recovery turns such a
-// run into a committed one with the same expiry, so a recovered run moves
-// from the retained failure to the committed package and is counted once.
-// A signing failure, like any finally failed publication, is historical
-// and never publication backlog.
+// run into a committed one with the same expiry in one record update, so a
+// recovered run leaves publication failed and is never counted twice.
 //
 // Deleted and operator-owned (orphaned) packages are not backlog. The
 // records outlive their bindings, so the backlog does too.
@@ -109,6 +111,10 @@ func StorageFrom(runs []v1alpha1.AssessmentRun, now time.Time) StorageSnapshot {
 		case p.ExpiresAt != nil && !now.Before(p.ExpiresAt.Time):
 			s.CleanupPending++
 			oldest(p.ExpiresAt)
+		case retainedSigningFailure(r):
+			// Unpublished, and recoverable until its expiry.
+			s.PublicationFailed++
+			s.RetainedSigningFailures++
 		}
 	}
 	return s

@@ -66,7 +66,7 @@ func queryFixture(t *testing.T) map[string]*Hub {
 	}}))
 	mustOK(t, leader.PublishBundleResolution(term, at))
 	blocked := time.Unix(0, 0)
-	mustOK(t, leader.PublishStorage(term, at, StorageSnapshot{PublicationFailed: 1, CleanupBlocked: 1, OldestCleanupExpiry: &blocked}))
+	mustOK(t, leader.PublishStorage(term, at, StorageSnapshot{PublicationFailed: 2, RetainedSigningFailures: 1, CleanupBlocked: 1, OldestCleanupExpiry: &blocked}))
 	for range 3 {
 		leader.ObserveOperation(OperationEvidencePublication, ResultFailure, time.Second)
 	}

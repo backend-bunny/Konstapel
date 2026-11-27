@@ -281,14 +281,23 @@ recovered run never displaces a newer published run.
 
 ### 9. Observability
 
-- The recovery reconciler emits Kubernetes Events on the request and the run,
-  with reason only.
+- Recovery emits no Kubernetes Events (owner decision, 2026-11-27). This
+  is a choice about the controller's Event recorder and permissions:
+  Konstapel grants the controller Event writes only in its own namespace.
+  EvidenceSigningRequests and AssessmentRuns are cluster-scoped, so their
+  Events would need such writes outside it. Recovery is observed through
+  the durable request and run status, the metrics below, and logs.
 - Add one durable gauge, `konstapel_evidence_signing_recovery_requests`,
   labelled only by `phase` and `reason` (fixed vocabularies) and
   reconstructed from request records after restart, following
   `prometheus-observability`.
-- The existing publication projection must move a recovered run from
-  failed to published counts without double counting.
+- The publication projection counts a retained `SigningFailed` run in
+  `konstapel_publication_failed` until recovery publishes it or its expiry
+  passes (owner decision, 2026-11-27). After expiry it is cleanup backlog.
+  `konstapel_publication_retained_signing_failures` counts these runs, so
+  the publication-failing alert subtracts them and fires only for runs that
+  are retrying. Recovery moves a run from failed to published in one record
+  update, without double counting.
 - Logs carry run and request names but no key material.
 
 ### 10. Testing

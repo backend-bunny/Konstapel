@@ -232,9 +232,11 @@ tests:
       - series: 'konstapel_operation_duration_seconds_count{instance="konstapel-0",job="konstapel",operation="evidence_publication",result="success"}'
         values: '0+5x150'
       - series: 'konstapel_publication_failed{instance="konstapel-0",job="konstapel"}'
-        values: '1x150'
+        values: '2x150'
       - series: 'konstapel_publication_pending{instance="konstapel-0",job="konstapel"}'
         values: '0x150'
+      - series: 'konstapel_publication_retained_signing_failures{instance="konstapel-0",job="konstapel"}'
+        values: '1x150'
       - series: 'konstapel_observation_enabled{domain="assessment",instance="konstapel-1",job="konstapel"}'
         values: '1x150'
       - series: 'konstapel_observation_enabled{domain="bundle_resolution",instance="konstapel-1",job="konstapel"}'
@@ -359,9 +361,23 @@ tests:
         exp_samples:
           - labels: '{job="konstapel"}'
             value: 45
-      # actionable publication failure with recent failed attempts
+      # failed publications, including retained signing failures
       - expr: |
-          max by (job) (konstapel_publication_failed) > 0
+          max by (job) (konstapel_publication_failed)
+        eval_time: 1m
+        exp_samples:
+          - labels: '{job="konstapel"}'
+            value: 2
+      # retained signing failures awaiting recovery
+      - expr: |
+          max by (job) (konstapel_publication_retained_signing_failures) > 0
+        eval_time: 1m
+        exp_samples:
+          - labels: '{job="konstapel"}'
+            value: 1
+      # retrying publication failure with recent failed attempts
+      - expr: |
+          max by (job) (konstapel_publication_failed - konstapel_publication_retained_signing_failures) > 0
           and on (job)
           sum by (job) (increase(konstapel_operation_attempts_total{operation="evidence_publication", result="failure"}[15m])) >= 3
         eval_time: 20m

@@ -45,7 +45,7 @@ permission, or Taskfile task.
 
 ## 3. Observability
 
-- [ ] 3.1 Add the `konstapel_evidence_signing_recovery_requests` gauge (labels `phase` and `reason` only, reconstructed from records after restart), the Events on requests and runs, and the update to the publication projection; verify bounded labels, restart reconstruction, and no double counting when a run moves from failed to published.
+- [x] 3.1 Add the `konstapel_evidence_signing_recovery_requests` gauge (labels `phase` and `reason` only, reconstructed from records after restart) and the update to the publication projection (retained signing failures counted as failed until recovery or expiry, with `konstapel_publication_retained_signing_failures` so the publication-failing alert distinguishes them); verify bounded labels, restart reconstruction, and no double counting when a run moves from failed to published. Events on requests and runs were dropped (owner decision, 2026-11-27); recovery is observed through status, metrics, and logs.
   <!-- agent: tier=standard risk=medium reason="Bounded metrics against the existing observability contract" -->
 
 ## 4. Documentation
