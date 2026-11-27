@@ -79,6 +79,8 @@ type BindingReconciler struct {
 	// (content.ValidateParameters). Content without a contract
 	// (LocalContent) keeps the resolver's message.
 	ValidateParameters ParameterValidator
+	// Now is the clock for readiness rechecks; nil is time.Now.
+	Now func() time.Time
 }
 
 func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -126,6 +128,9 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	engine := metav1.Condition{Type: v1alpha1.ConditionEngineReady, ObservedGeneration: b.Generation}
 	requeue := time.Duration(0)
+	// recheck runs after status is written, so a recheck failure never
+	// hides the diagnostic.
+	var recheck func() (ctrl.Result, error)
 	// Unavailable content is retried per its class; configuration and
 	// trust changes also re-trigger the binding through its profile.
 	contentRetry := ContentRequeue(snap.contentErr)
@@ -176,6 +181,9 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			meta.SetStatusCondition(&status.Conditions, resolved)
 		}
 		logger.V(1).Info("synced", "current", sync.Current, "notReady", sync.NotReady, "retained", sync.Retained, "removed", sync.Removed, "conflicts", sync.Conflicts)
+		if len(targeting.RecheckCandidates(sync)) > 0 {
+			recheck = func() (ctrl.Result, error) { return r.recheck(ctx, d, b.UID, desired, sync) }
+		}
 	}
 	meta.SetStatusCondition(&status.Conditions, engine)
 
@@ -185,10 +193,45 @@ func (r *BindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	if recheck != nil {
+		if res, err := recheck(); err != nil || res.RequeueAfter > 0 {
+			return res, err
+		}
+	}
 	if contentRetry > 0 && (requeue == 0 || contentRetry < requeue) {
 		requeue = contentRetry
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// recheck asks Kyverno to evaluate RBACPermissionsGranted again on current
+// policies that report it failing, within targeting.DefaultRecheckBackoff
+// (see targeting.AnnotationReadinessRecheck). Kyverno 1.19 does not notice
+// a repaired grant on its own. Each write is logged; a stale snapshot
+// resolves again, and other errors retry the binding with the controller's
+// error backoff.
+func (r *BindingReconciler) recheck(ctx context.Context, d *targeting.Delivery, uid types.UID, desired []*unstructured.Unstructured, sync targeting.DeliveryResult) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	now := time.Now
+	if r.Now != nil {
+		now = r.Now
+	}
+	out, err := d.Recheck(ctx, uid, desired, sync, now(), targeting.DefaultRecheckBackoff)
+	for _, x := range out.Rechecked {
+		logger.Info("asked the engine to recheck policy readiness after a permission failure",
+			"policy", x.Policy, "condition", targeting.RecheckCondition, "attempt", x.Attempt)
+	}
+	if len(out.Conflicted) > 0 {
+		logger.V(1).Info("readiness recheck conflicted with concurrent writes; retrying later", "policies", out.Conflicted)
+	}
+	if errors.Is(err, targeting.ErrStaleSnapshot) {
+		logger.V(1).Info("stale snapshot; resolving again before a readiness recheck", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("readiness recheck: %w", err)
+	}
+	return ctrl.Result{}, nil
 }
 
 // explain gives the resolver's errors the detail it cannot know: the class

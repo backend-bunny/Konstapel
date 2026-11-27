@@ -671,7 +671,8 @@ protected revocation record, its finalizer, the owner's `RevocationRecorded`
 status and reason, and the revocation records), and source and trust data,
 including the referenced values of Secrets (compared as a digest keyed per run, so not even
 a digest of a credential leaves the process). Status timestamps,
-report times and unrelated annotations are ignored, so constantly changing
+report times and unrelated annotations (including delivery's
+`compliance.erenius.io/readiness-recheck` marker) are ignored, so constantly changing
 status does not force retries. The bindings' recorded current evidence is
 informational and taken from the final capture without a recheck. If a
 relevant projection changed, or a list continuation expired, the whole capture

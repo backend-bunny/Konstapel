@@ -63,9 +63,10 @@
     "core": false,
     "exceptionAdmission": false,
     "release": false,
-    "timeoutMinutes": 15,
+    "timeoutMinutes": 25,
     "goTests": [
-      "TestLiveEngineCapabilityRecovery"
+      "TestLiveEngineCapabilityRecovery",
+      "TestLiveKyvernoPermissionRecovery"
     ]
   },
   "charts": {

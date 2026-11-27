@@ -594,7 +594,9 @@ func (c *capture) readEnginePolicies(ctx context.Context, _ ObserveOptions) *Dia
 		u := &items[i]
 		ann := map[string]string{}
 		for k, v := range u.GetAnnotations() {
-			if strings.HasPrefix(k, v1alpha1.GroupVersion.Group+"/") {
+			// The readiness recheck marker is not provenance; it changes
+			// while a permission failure lasts.
+			if strings.HasPrefix(k, v1alpha1.GroupVersion.Group+"/") && k != targeting.AnnotationReadinessRecheck {
 				ann[k] = v
 			}
 		}

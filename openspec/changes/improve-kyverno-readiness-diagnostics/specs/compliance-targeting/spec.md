@@ -50,3 +50,9 @@ failures, and clean only test-owned grants.
 - **WHEN** the administrator supplies the required permissions to the same Kyverno installation
 - **THEN** affected bindings recover through ordinary reconciliation and reports become usable
 - **AND** Konstapel did not modify another controller's RBAC or withdraw retained enforcement
+
+#### Scenario: Engine does not re-evaluate permissions after repair
+
+- **WHEN** a current policy owned by the binding still reports RBACPermissionsGranted False or Unknown because the engine does not re-evaluate RBAC changes
+- **THEN** Konstapel writes only a dedicated readiness-recheck annotation to that policy, at most once per step of a bounded backoff, conditional on the version it read
+- **AND** it never changes the policy spec, rendered identity, revision, enforcement epoch, ownership or other metadata, never writes ready, unowned, retained or held policies, and stops once the policy is ready

@@ -258,6 +258,11 @@ Konstapel owns:
   are kept. There is no binding generation: reporting-only edits such as
   `spec.assessment` advance it, and must not write to engine policies.
 - A controller owner reference to the ComplianceBinding.
+- Delivery may add `compliance.erenius.io/readiness-recheck` later (see
+  [Readiness recheck](#ownership-readiness-and-transitions)); it is not part
+  of the rendered policy. Drift repair, assessment verification and the
+  policy-change preview's consistency check ignore it; captured engine
+  policies in evidence keep it as observed.
 - `spec.validationActions: [<mode>]`, `spec.evaluation.background.enabled: true`,
   and `spec.matchConstraints.namespaceSelector` set from the binding.
 
@@ -285,6 +290,29 @@ passing, so selector inclusion is also checked in Go.
   reported is `Missing`; one that can't be read is `Malformed`. Both count as
   not ready. These details are diagnostic only: they never change which
   policies are ready, retained or removed.
+- **Readiness recheck.** Kyverno 1.19 doesn't recompute
+  `RBACPermissionsGranted` when RBAC changes, only when the policy object
+  changes. So when a current policy reports that condition `False` or
+  `Unknown`, `Delivery.Recheck` asks Kyverno to evaluate it again by writing
+  one annotation, `compliance.erenius.io/readiness-recheck:
+  "<attempt>@<RFC3339 time>"`. The write is a metadata-only merge patch,
+  conditional on the `resourceVersion` it read, with field manager
+  `konstapel`. It never changes the spec, the generation, the revision, the
+  enforcement epoch, the labels, the owner reference or any other
+  annotation. The first recheck is 30 seconds after the policy was created,
+  the next ones 1, 2, 4 and 8 minutes after the previous one, then every 15
+  minutes while the failure lasts. A policy that is ready, owned by another
+  binding or not by Konstapel, at another revision, retained, held, being
+  deleted, or failing another condition (`WebhookConfigured`, or a `Missing`
+  or `Malformed` condition) is never written. Each candidate is read again
+  first; after an update conflict it is read and judged again, at most three
+  times per reconcile, so a newer write (Kyverno's status, another replica's
+  recheck) is never overwritten. The snapshot check runs before the first
+  write. Each recheck is logged at info level ("asked the engine to recheck
+  policy readiness after a permission failure", with the policy and
+  attempt). Recheck failures are returned after status is written, so they
+  never hide the diagnostic. See
+  [Kyverno permissions](kyverno-rbac.md#after-applying-the-grant).
 - **Replacement.** When a revision changes, the new policy is created next to
   the old one. The old one stays in `Retained` until every desired instance of
   that logical policy is ready, and only then is it deleted. During the overlap
@@ -480,7 +508,7 @@ shows with the collector:
 | `EngineReady` reason | Meaning |
 | --- | --- |
 | `Ready` | Every desired policy exists at the current revision and Kyverno reports it ready. The message says this is not a compliance result. |
-| `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. The message names the failing Kyverno readiness conditions per policy (see [Readiness diagnostics](#readiness-diagnostics)). Retried every 5 seconds. |
+| `ReplacementPending` | New policies are not ready yet; earlier revisions stay applied until they are. The message names the failing Kyverno readiness conditions per policy (see [Readiness diagnostics](#readiness-diagnostics)). Retried every 5 seconds; an `RBACPermissionsGranted` failure is also rechecked with backoff (see [Ownership, readiness and transitions](#ownership-readiness-and-transitions)). |
 | `StaleRevision` | Configuration did not resolve (see `Resolved`). The last applied policies, if any, stay in force and are named in the message. |
 | `OwnershipConflict` | An unmanaged resource holds a desired name. It is left untouched; the binding re-checks every minute and delivers once the name is free. |
 | `EngineAPINotServed` | `policies.kyverno.io/v1` is not served. Nothing is changed. |
@@ -577,7 +605,9 @@ kubectl get validatingpolicy POLICY -o jsonpath='{.status.conditionStatus.condit
   [verified permission matrix](kyverno-permission-matrix.json) records which
   grants the delivered policies need on the pinned Kyverno release and why;
   [Kyverno permissions for official bundles](kyverno-rbac.md) has the
-  operator-applied example and the commands to verify it.
+  operator-applied example and the commands to verify it. After the grant,
+  the binding recovers at the next readiness recheck, within 15 minutes
+  ([after applying the grant](kyverno-rbac.md#after-applying-the-grant)).
 - `OwnershipConflict`: the named resource was not created by this binding.
   Remove or rename it deliberately; Konstapel never adopts it.
 - `EngineAPINotServed`, `EngineResourceMissing`, `EngineResourceUnsupported`:

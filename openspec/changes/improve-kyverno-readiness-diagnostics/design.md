@@ -71,6 +71,28 @@ Retain policy UIDs and check retained revision behavior. Verify removing/readdin
 a tested prerequisite is visible where the pinned engine supports reevaluation.
 Keep helpers private behind existing acceptance groups; CI runs the same workflow.
 
+### 4. Bounded readiness recheck of owned policies
+
+The verified matrix (2.1) found that Kyverno 1.19.2 computes
+RBACPermissionsGranted only when a policy is created or updated, so a repaired
+grant is never noticed by an unchanged policy. Owner decision (2026-11-27):
+Konstapel may nudge its own pending policies with a dedicated metadata
+annotation, after live proof that this makes Kyverno re-evaluate.
+
+Delivery writes compliance.erenius.io/readiness-recheck ("attempt@time") only
+on current, owned policies at the desired revision whose readiness details
+report RBACPermissionsGranted False or Unknown. The write is a metadata-only
+merge patch conditional on the resourceVersion read; a conflict re-reads and
+re-decides, a bounded number of times. Backoff: 30s after creation, then
+doubling to a 15-minute cap; nothing is written once the policy is ready.
+The spec, revision, epoch, ownership and other metadata are never changed,
+and Konstapel still never changes RBAC. Removing a grant from a ready policy
+stays unnoticed until the engine re-evaluates for another reason.
+
+Alternatives: restarting Kyverno (another operator's workload) or touching the
+spec (changes rendered identity) were rejected; doing nothing leaves bindings
+pending indefinitely after a correct repair.
+
 ## Risks / Trade-offs
 
 - Large engine messages -> bounded sanitized summaries with inspection fallback.

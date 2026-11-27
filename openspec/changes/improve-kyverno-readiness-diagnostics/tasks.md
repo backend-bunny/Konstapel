@@ -23,8 +23,8 @@ or mark the issue fixed merely because these planning artifacts are merged.
 
 ## 3. Live recovery and handoff
 
-- [ ] 3.1 Add a required acceptance case that starts without ephemeral grants, checks actionable binding diagnostics, applies the documented example and verifies readiness/report recovery without controller restart; confirm policy ownership and retained enforcement.
+- [x] 3.1 Add a required acceptance case that starts without ephemeral grants, checks actionable binding diagnostics, applies the documented example and verifies readiness/report recovery without controller restart; confirm policy ownership and retained enforcement.
   <!-- agent: tier=deep risk=high -->
-- [ ] 3.2 Run pinned Devbox checks, affected acceptance and strict spec/task-routing validation; retain sanitized evidence, clean owned grants/clusters and document supported engine versions and remaining evidence limitations.
+- [x] 3.2 Run pinned Devbox checks, affected acceptance and strict spec/task-routing validation; retain sanitized evidence, clean owned grants/clusters and document supported engine versions and remaining evidence limitations.
   <!-- agent: tier=standard risk=medium -->
 
