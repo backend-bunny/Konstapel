@@ -101,11 +101,15 @@ The prototype exercises policy generation and result conversion with Kyverno
 1.19.2, using a pinned core and a focused provider for modern policies and reports.
 Upstream also documents an Open Cluster Management integration.
 
-The planned Trivy provider uses the pinned v2 Configure/Generate/GetResults
-interface. Generate produces a local evaluation plan; it creates no Kubernetes
-objects. GetResults evaluates a scoped frozen capture using the same evaluator
-as current controller status. Kubernetes access remains in the collector, so
-offline replay requires neither a running cluster nor an image registry.
+The planned Trivy provider reuses the shared provider seams
+([assessment providers](docs/assessment-providers.md)): the installed registry,
+host-scoped bounded collection, the capture envelope, a pure evaluator and the
+one C2P conversion that continuous export and the existing `konstapel-provider`
+plugin dispatch to. It adds no second plugin executable. GetResults converts a
+scoped frozen snapshot evaluated by the same evaluator as current controller
+status; Generate creates no Kubernetes objects. Kubernetes access remains in the
+collector, so offline replay requires neither a running cluster nor an image
+registry.
 
 ## Provider capabilities and scope
 
@@ -151,16 +155,21 @@ incomplete or unknown; missing scanner/database provenance stays explicit.
 Operator versions and configuration must pass compatibility tests before support
 is claimed.
 
-Eligible findings reuse authenticated self-service risk acceptance with reason,
-bounded expiry, explicit renewal/revocation, and central Forbidden/SelfService
-rules. The immutable target includes namespace identity, exact image digest,
-vulnerability ID, and affected package. It applies to matching workloads in that
+The initial read-only slice makes Trivy checks exception-ineligible: SelfService
+eligibility for a Trivy check is rejected as an invalid configuration. The
+separate governance follow-up,
+[add-vulnerability-risk-governance](openspec/changes/add-vulnerability-risk-governance/proposal.md),
+lets eligible findings reuse authenticated self-service risk acceptance with
+reason, bounded expiry, explicit renewal/revocation, and central
+Forbidden/SelfService rules. The immutable target includes namespace identity,
+exact image digest, vulnerability ID, and affected package. It applies to matching workloads in that
 namespace; another digest requires new acceptance. Original findings remain
 visible with accepted-risk disposition, and no acceptance can fill a scan gap.
 
 Versioned captures retain provider/check revisions, inventory, source evidence,
-provenance limitations, and acceptance snapshots. Namespace projection precedes
-export; existing OSCAL/S3 publication and retention handle the result. Initial
+provenance limitations and, with the governance follow-up, acceptance
+snapshots. Namespace projection precedes export; existing OSCAL/S3 publication
+and retention handle the result. Initial
 RA-5 mappings describe partial technical evidence. Implementation details and
 dependency boundaries are in the
 [Trivy design](openspec/changes/add-trivy-vulnerability-assessment/design.md).
@@ -199,7 +208,11 @@ Trivy's first implementation step is a focused compatibility investigation of
 digest correlation, source scan times, filtering, and provenance. Deterministic
 fixtures and real-operator acceptance must establish those semantics. Its isolated
 CI acceptance group will run alongside existing groups and verify collection,
-exceptions, export, and offline replay.
+export, and offline replay; support is claimed only for the operator versions it
+pins. The initial slice is read-only and exception-ineligible; exact-finding
+vulnerability exceptions are the separate governance follow-up change. Trivy's
+bundle checks use the provider-neutral reporting-only content that the shared
+provider contract adds for every reporting-only provider.
 
 ## Upstream references
 

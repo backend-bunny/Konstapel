@@ -211,8 +211,58 @@ collectors, schedulers or exporters. Its source compatibility research can run
 now; shared runtime integration waits for this contract. The first useful Trivy
 slice is read-only collection/evaluation/export. Its broader vulnerability-risk
 API backlog is not required by this contract and is not authorized by implementing
-it; split that governance work into a separate follow-up before selecting the
-initial Trivy implementation scope.
+it. That governance work is now the separate
+[add-vulnerability-risk-governance](../add-vulnerability-risk-governance/proposal.md)
+change (owner decision 2026-11-27).
+
+### 8. Shared reporting-only check content (group 6)
+
+Owner decision 2026-11-27: the content extension that lets bundles define
+checks for reporting-only providers belongs to these shared provider and bundle
+seams, not to a producer change. Trivy (`add-trivy-vulnerability-assessment`)
+and registered external providers (`add-external-assessment-providers` group 3)
+both consume it; neither defines its own content format, and the extension does
+not depend on either runtime. It is proven with the test-only reporting provider
+in a test registry, which stays unselectable in production builds, so production
+behavior is unchanged until a real reporting-only provider becomes selectable.
+
+Today the content contract is Kyverno-only in three places: the bundle
+specification's initial runtime policies are modern Kyverno policies,
+`bundle.validateContent` accepts only the Kyverno provider contract, and the
+targeting content loader accepts only `policies.kyverno.io/v1`
+ValidatingPolicy documents. The extension reconciles those with the bundle
+owner (`add-policy-bundle-distribution` while active, a durable delta if
+archived) and adds declarative reporting-only check definitions to the same
+versioned payload: a logical check identity, the descriptor's check kind,
+parameters validated against that kind's descriptor schema, and OSCAL mappings
+under the existing closure, inventory, checksum, signature and provenance
+rules. A definition never carries an executable, engine resource, endpoint or
+permission. Existing Kyverno bundles keep their format, logical identities and
+policy revisions.
+
+Binding resolution consults `Registry.Select`, which the contract left
+unconnected to the targeting resolver. Wiring it in must keep
+`TestDefaultSelectionMatchesTheResolver` and every Kyverno resolver result
+unchanged and map `UnsupportedMode`, `MixedProviders` and unknown contracts to
+existing binding reasons. Bundle compatibility (`content.Compatibility.Providers`)
+is fed from the selectable contracts, `installed.Registry().Contracts()` and,
+when the external extension is enabled, registered contracts through
+`external.Catalog`, instead of a separate allowlist.
+
+**Design consideration (undecided): compatibility revision churn.**
+`content.Compatibility.Revision()` hashes the sorted provider allowlist, and
+that revision is the `Compat` component of every bundle acceptance key
+(`resolve.Key`). Any change in the allowlist therefore makes every bundle's
+acceptance unreachable, so every bundle, including unrelated Kyverno bundles,
+re-verifies and in-flight verifications end as stale. For the built-in registry
+this happens only with a controller release, which already changes the
+revision. A registry-fed allowlist that includes administrator registrations
+would also churn on every registration create, delete, enable or readiness
+change. Mitigation question for the owner: should the acceptance key carry only
+the built-in contracts, with registered contracts checked at selection time and
+kept out of the key; should the compatibility revision be scoped per bundle to
+the contract it names; or should registration churn forcing re-acceptance be
+accepted as intended? Task 6.3 does not start until this is answered.
 
 ## Risks / Trade-offs
 
@@ -228,6 +278,10 @@ initial Trivy implementation scope.
   step and consume owner interfaces; preserve content leases and package roles.
 - [A synthetic provider masks upstream limitations] → Keep it test-only and retain
   real producer compatibility as an independent acceptance gate.
+- [Reporting-only content becomes a second format] → One versioned payload for
+  every provider, extended with the bundle owner; Kyverno bundles unchanged.
+- [A registry-fed allowlist forces re-acceptance] → Undecided; see Decision 8's
+  compatibility revision consideration before wiring registrations into it.
 
 ## Migration Plan
 

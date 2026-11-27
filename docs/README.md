@@ -33,6 +33,7 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
 | [Assessment-loop prototype](integration/assessment-loop.md) | Standalone Kyverno/C2P runner and shared disposable-cluster acceptance commands. |
 | [Policy change preview](policy-preview.md) | The read-only `konstapel preview` command: rendered inputs, cluster observation under the caller's kubeconfig, semantic comparison, verified bundle content, evidence context, JSON report v1 and text, exit statuses, and verified local and CI examples. Exception-acceptance consequences are not analyzed, and a preview that could affect an observed exception is incomplete. |
 | [Trivy proposal](../openspec/changes/add-trivy-vulnerability-assessment/proposal.md) | Planned reporting-only image vulnerability assessment; no implemented Trivy provider yet. |
+| [Vulnerability risk governance proposal](../openspec/changes/add-vulnerability-risk-governance/proposal.md) | Planned follow-up to the Trivy slice: exact-finding vulnerability risk acceptance through ComplianceException. Not implemented; Trivy checks are exception-ineligible until it lands. |
 
 ## Develop and release
 

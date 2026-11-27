@@ -113,6 +113,19 @@ real AWS provider is enabled, not synthetic namespace identities.
 
 ### 5. Frozen results, evaluation and C2P
 
+Check content for a registered reporting contract uses the shared
+reporting-only check definitions owned by `add-assessment-provider-contract`
+group 6 (owner decision 2026-11-27): the same signed bundle payload, verification
+and closure as every other provider, with compatibility judged against the
+selectable contracts through the same `Registry.Select` gating the targeting
+resolver uses, the external `Catalog` contributing registered contracts. This
+change defines no content format or allowlist of its own. Because
+`content.Compatibility.Revision()` covers the provider allowlist and is part of
+every bundle acceptance key, feeding registrations into it would force
+re-acceptance of every bundle on registration changes; how to avoid that is an
+open question recorded in that change's Decision 8, and registered contracts are
+not fed into the allowlist before it is answered.
+
 Transfer only authorized scope; source-specific extraction happens in the
 provider, with host validation before summaries, package export or diagnostics.
 Independent inventory and producer coverage metadata prevent empty/partial

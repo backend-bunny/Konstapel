@@ -36,6 +36,12 @@ tooling rather than taking ownership of those tools.
   not establish support for Trivy or any other external producer.
 - Make this contract a prerequisite for Trivy runtime integration. Its producer
   compatibility research can proceed independently.
+- Extend shared bundle content so signed bundles can define declarative checks
+  for reporting-only providers, and connect bundle compatibility and binding
+  resolution to the provider selection seam (owner decision 2026-11-27,
+  group 6). This is one provider-neutral extension of the existing payload,
+  consumed by Trivy and by registered external providers alike; it is not a
+  second content format and does not depend on any real reporting provider.
 
 No new runtime plugin marketplace, provider CRD, arbitrary bundle-selected binary,
 scanner orchestration, remediation, mixed-provider binding, vulnerability-specific
@@ -60,7 +66,8 @@ deltas. It does not redefine their outcomes, authority, or publication lifecycle
 ## Impact
 
 Implementation will touch `internal/assessment`, `internal/collector`, provider
-selection at targeting/content boundaries, manager capability/watch integration,
+selection at targeting/content boundaries, the bundle payload and content
+validation (`internal/bundle`, `internal/bundle/content`), manager capability/watch integration,
 `cmd/konstapel-provider`, image provider manifests, and test fixtures. Add a focused
 provider package only where needed; reuse existing shared types and interfaces.
 The current C2P-Go v2 pin and plugin packaging remain authoritative. Document the

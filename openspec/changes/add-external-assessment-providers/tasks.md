@@ -29,11 +29,20 @@ Each group includes its tests and documentation; final tasks prove integration.
 
 ## 3. Remote evidence and replay
 
+Bundle check definitions for registered reporting contracts, resolver gating
+through `Registry.Select` and `content.Compatibility` fed from the selectable
+contracts are the shared, provider-neutral extension of
+[add-assessment-provider-contract](../add-assessment-provider-contract/tasks.md)
+group 6 (owner decision 2026-11-27). Group 3 consumes it and defines no content
+format, check-definition schema or provider allowlist of its own; feeding
+registrations into the allowlist waits for that change's compatibility revision
+decision (its design Decision 8).
+
 - [ ] 3.1 Integrate remote read-only collection with host scope, inventory and limits; test mixed-scope payloads/diagnostics, missing subjects, malformed results and deadline closure without scans.
   <!-- agent: tier=deep risk=high -->
 - [ ] 3.2 Implement immutable bounded result transfer and durable-capture acknowledgement; test interrupted transfer, checksum mismatch, result expiry, host restart and cleanup only after acknowledged capture or documented expiry.
   <!-- agent: tier=deep risk=high -->
-- [ ] 3.3 Connect external evaluation and the C2P bridge to projected frozen captures and exact RunContent; test warning preservation, applied-versus-desired content, compatible replay without source access and explicit unavailable evaluator failures.
+- [ ] 3.3 Connect external evaluation and the C2P bridge to projected frozen captures and exact RunContent, whose reporting-only check definitions come from the shared content extension (provider-contract task 6.2); test warning preservation, applied-versus-desired content, compatible replay without source access and explicit unavailable evaluator failures.
   <!-- agent: tier=deep risk=high -->
 - [ ] 3.4 Document evidence formats, C2P setup and offline replay dependencies; run the replay walkthrough with source access denied and verify unsupported historical versions fail explicitly.
   <!-- agent: tier=standard risk=medium -->

@@ -205,3 +205,41 @@ as production-ready installed providers.
 - **WHEN** Kyverno is routed through the shared interfaces
 - **THEN** its existing CLI, live controller, package, and replay checks remain green
 - **AND** no new provider is advertised merely because generic plumbing exists
+
+### Requirement: Bundles define reporting-only checks in the shared content format
+
+Signed bundles SHALL be able to define declarative checks for a reporting-only
+provider contract in the same versioned payload and under the same verification
+as engine policy content. A check definition SHALL name a check kind and
+parameters its provider's descriptor declares and SHALL NOT carry an executable,
+engine resource, endpoint, or permission. One content format SHALL serve every
+provider; engine policy content SHALL keep its format, identities and revisions.
+
+#### Scenario: A verified bundle defines reporting-only checks
+
+- **WHEN** a trusted bundle names a selectable reporting-only contract and defines checks of a kind its descriptor declares
+- **THEN** resolution adopts the content and binding resolution selects that provider in Audit mode
+- **AND** no engine resource is rendered and no executable is downloaded or selected from the bundle
+
+#### Scenario: A check definition does not match the provider
+
+- **WHEN** a reporting-only check names an undeclared check kind or parameters outside its descriptor schema
+- **THEN** the bundle or affected binding reports invalid content without partially adopting it
+
+### Requirement: Bundle compatibility follows provider selection
+
+Bundle compatibility SHALL be judged against the provider contracts the host can
+select, through the same provider selection that binding resolution uses,
+whether the provider is built in or administrator-registered. No separate
+provider allowlist SHALL decide content compatibility.
+
+#### Scenario: The contract cannot be selected
+
+- **WHEN** verified content names a reporting-only contract that is neither built in nor registered and selectable
+- **THEN** resolution reports the incompatibility despite a valid signature
+- **AND** independently compatible bundles and bindings continue normally
+
+#### Scenario: Existing engine content is unaffected
+
+- **WHEN** an existing Kyverno policy bundle is resolved after the extension
+- **THEN** its verification result, rendered policies, logical identities and policy revisions are unchanged
