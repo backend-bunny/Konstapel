@@ -43,9 +43,10 @@ existing read-only scenario and historical capture guarantee.
 ### 2. Registration and platform installation
 
 Add cluster-scoped compliance.erenius.io/v1alpha1 AssessmentProvider using existing
-generation and CRD chart conventions. Spec identifies a Kubernetes Service
-(namespace/name/port), server trust/name, expected provider name and immutable
-release digest, protocol/evaluator/payload compatibility, allowed capabilities,
+generation and CRD chart conventions. Spec identifies a source endpoint and,
+when evaluation is allowed, a separate evaluator endpoint (Decision 11), each a
+Kubernetes Service (namespace/name/port) with its own server trust/name, the
+expected provider name and immutable release digest, protocol/evaluator/payload compatibility, allowed capabilities,
 and whether new requests are enabled. Status holds observed generation,
 bounded Conditions and observed compatible identity. No credentials in status.
 
@@ -79,10 +80,12 @@ capture payload versions are distinct compatibility dimensions.
 
 Operations:
 - Describe: identity, capabilities, schema/version compatibility and limits.
-- Collect: bounded scoped evidence/inventory exchange without source mutations.
+- Collect: bounded evidence for a host-frozen inventory, without source
+  mutations; the result is an attribution envelope (Decision 9).
 - Start/Get/Cancel: optional asynchronous scan operations.
 - ReadResult/Acknowledge: bounded immutable result transfer and durable handoff.
-- Evaluate: pure evaluation from a projected frozen input envelope.
+- Evaluate: pure evaluation from a projected frozen input envelope, served at
+  the registration's evaluator endpoint (Decision 11).
 
 Use bounded streams/chunks, checksums, deadlines, request limits and cancellation;
 never arbitrary provider-returned download URLs or local file paths. Share the
@@ -139,6 +142,8 @@ buffer. Host RunContent, storage, signing and retention remain authoritative.
 Evaluate shares semantics with the provider's C2P-facing adapter. The reference
 deployment separates a source-reading worker from a credential-free evaluator
 with denied source egress, rather than claiming an RPC method is a sandbox.
+The host reaches that evaluator directly at the registration's evaluator
+endpoint, never through the worker (Decision 11).
 The C2P bridge uses prepared projected inputs and invokes the compatible evaluator;
 it never starts scans or forwards source credentials. C2P does not acquire native
 OCI discovery through this change.
@@ -199,6 +204,188 @@ rotation, canceled/duplicate operations, lost responses, partial results, bounde
 transfer and deterministic replay. Required installed-image acceptance proves the
 real controller consumes the protocol; a unit-only mock is insufficient.
 
+### 9. Host-frozen inventory and attribution: protocol revision 2
+
+Owner decisions 6b and 6c (2026-11-27). Revision 1 left inventory, attribution
+and the result format to the provider: `CollectRequest.inventory` was opaque
+provider input and a staged result an opaque JSON object, so the host could
+not tell which subject or check evidence belonged to, or what was missing. An
+earlier 3.1 attempt stopped on that gap.
+
+**Inventory.** The host derives the inventory and freezes it before dispatch;
+the provider never defines it. For the supported Kubernetes scope it lists the
+scope's namespace identities and the workload instances in them. Each subject
+has its stable UID, its namespace UID, its resource (`group/version/resource`,
+empty group for core), its name, a host revision of the state checks can read
+(the spec, labels and annotations digest, never `resourceVersion`) and the
+names of the checks expected for it. The expected (subject, check) pairs are
+the collection's denominator. Only these fields are projected: no labels,
+specs, images or owners cross the boundary. A provider that needs more reads
+its own source under its own authority. Namespaces alone are insufficient,
+because a namespace-only scope can neither attribute workload evidence nor
+detect a missing workload.
+
+The host builds the inventory at run start from targeting, the listed
+workloads and the reporting-only check definitions of the shared content
+extension (provider-contract group 6), which say which resources a check
+applies to. That derivation is wiring (task 3.1); the collection seam takes
+the inventory as input. The inventory travels in the Collect request, so one
+message bound applies. An inventory larger than the negotiated bounds is not
+dispatched: the collection is explicitly incomplete, never truncated. A
+chunked inventory upload would be a later additive revision. Cloud accounts,
+regions and other non-Kubernetes targets need their own target contract and
+are out of scope here.
+
+**Supplements.** A provider may report subjects it discovers itself, such as
+containers or images of a workload, only when the inventory allows
+supplements, and only under a frozen workload subject (the scope rule). A
+supplement never changes the denominator (the completeness rule). A frozen
+expectation is attributable only through evidence attributed to that frozen
+subject. A supplement's own expectations (its parent's checks) are reported
+separately, and their evidence or gaps never make a frozen expectation
+complete or passing. Reports never define their own denominator.
+
+**Attribution envelope.** At revision 2 a staged result is a `CollectionResult`
+document, the proto3 JSON mapping of that message. It lists evidence items and
+the supplements and subject limitations the provider reports. Each evidence
+item has an id, its (subject, check) attributions, the source observation time
+and `details`. `details` is a JSON object (`google.protobuf.Struct`) and the
+only opaque, source-specific part; the payload version versions it. The
+document is the result's bytes, so its size and digest are verified and its
+transfer resumes like any result, and the capture keeps exactly those bytes.
+The kit checks its structure strictly on both sides: unknown fields, bounds,
+unique ids and valid times.
+
+The host validates attribution against its frozen inventory before anything
+is used:
+
+- evidence is accepted only when every attribution names an inventory subject
+  (or an accepted supplement) and a check expected for it. An item that mixes
+  in-scope and out-of-scope attributions is withheld whole, because its
+  details can carry the other subject's data;
+- out-of-scope subjects, unexpected checks, disallowed or orphaned supplements
+  and malformed items become bounded diagnostics, never evidence;
+- an expectation without accepted evidence is missing, with the provider's
+  limitation when it gave one, and never a pass;
+- diagnostics name item locations and reasons, never provider-supplied
+  identifiers or details, because they reach operator status.
+
+Collection computes no outcomes. Evaluation (3.3) receives the captured
+document and the frozen inventory.
+
+**Why revision 2.** The owner allowed additive revision-1 fields only if
+negotiation made the new contract mandatory for this path and older peers
+demonstrably rejected unsupported use. Tests against main's generated v1 code
+and kit (0ddcaa5) as the old peer showed:
+
+- unknown fields: a revision-1 `CollectRequest` carrying a new field 6 decodes
+  without error, the kit server serves it, and the handler never sees the
+  field. A revision-1 host accepts a `ResultReference` carrying a new field 8
+  and drops it. Additive revision-1 fields are silently ignored;
+- the revision check: a revision-1 kit server refuses a revision-2 request with
+  `UNSUPPORTED_PROTOCOL_VERSION` before any handler runs;
+- `CheckCompatibility`: a revision-1 host refuses a provider serving only
+  revision 2. It accepts one serving revisions 1 and 2, at revision 1.
+
+So the inventory and the envelope are revision 2 of `konstapel.provider.v1`:
+additive messages in the same package, made mandatory by the revision. The kit
+speaks and serves revision 2 only, and a kit server refuses a description that
+lists another revision, so no revision-1 host can collect without an
+inventory. Collect requires an inventory. Revision-1 peers fail explicitly as
+`UnsupportedProtocolVersion` in both directions. No release speaks revision 1
+(0.3.0 has no `pkg/providerkit`), so no dual-revision window is kept. The
+opaque revision-1 `CollectRequest.inventory` field is removed and reserved.
+
+### 10. Frozen registration identity in the capture envelope
+
+Owner decision 6d. A capture of a registered provider records what is needed
+to interpret it: the registration name, UID and configuration revision, the
+release digest (the implementation), and the protocol and its revision. The
+envelope already records the provider contract, payload version and evaluator
+version. Evaluator endpoint configuration is configuration, not identity, and
+is not recorded.
+
+The identity is a `registration` member of the version 3 envelope, not a new
+version 4, because:
+
+- released readers reject every version 3 document. 0.1.0 to 0.3.0 have no
+  envelope reader: `CaptureVersion` accepts 1 and 2, `CaptureV2.Validate`
+  requires 2 and `assessment.Reconcile` requires 1. Running 0.3.0's readers on
+  a version 3 document with the member confirmed it;
+- no retained version 3 artifact depends on the current shape. No production
+  code writes an envelope (Kyverno writes version 2; only tests build
+  envelopes), and no saved testdata capture is version 3;
+- unreleased readers reject the member. Main's envelope decoding is strict, so
+  `ReadCapture` fails with `ErrUnsupportedCapture` (`unknown field
+  "registration"`). The published main commit builds read it the same way and
+  write no envelope.
+
+Inside the member every field is required. Only readers that support
+registered providers accept it: the built-in registry refuses any capture
+carrying it, and a registered contract is never read without it. A capture
+read against another registration UID, revision or release fails explicitly.
+
+### 11. Separate evaluator endpoint
+
+Owner decision 2026-11-27. Evaluation uses its own explicit endpoint with its
+own authenticated identity, so evaluator isolation can be tested without
+trusting a worker to forward evaluation.
+
+- API: an additive `spec.evaluatorEndpoint` (a Service, `serverName` and
+  `serverTrust`, shaped like `endpoint`) is required exactly when
+  `capabilities` include Evaluate and is forbidden otherwise. `spec.endpoint`
+  becomes the source endpoint, required exactly when Collect or Scan is
+  allowed. An Evaluate-only registration, such as replay after the worker is
+  gone, therefore names only an evaluator. The two endpoints must name
+  different Services and different server names. Both follow 2.1's
+  conventions: they are mutable, each change is a new revision that only new
+  work uses, and work freezes the revision's endpoints.
+- Probing describes each endpoint against its own expectation. The source
+  endpoint serves the allowed Collect and Scan and writes the payload version.
+  The evaluator serves Evaluate and reads the payload version. Both report the
+  same provider contract, evaluator version and release digest. Either failing
+  makes Available or Compatible False with the endpoint named. Ready and
+  selection need both.
+- The host sends Collect, Scan, ReadResult and Acknowledge only to the source
+  endpoint, and Evaluate only to the evaluator endpoint.
+- The evaluator workload holds no source credential and has no source network
+  access; the worker keeps collection and scans. In the reference chart the
+  worker stops serving and forwarding Evaluate. The evaluator authorizes the
+  host identity directly, admits the host namespaces, and still has no token
+  and no egress. Live acceptance calls the evaluator as the host.
+- Registration checks identities, not isolation: two Services can select the
+  same pods. The platform's separate deployment is the isolation boundary, as
+  it is for release digests.
+
+### 12. Self-contained collection seam
+
+Owner decision 6d. `external.Collect(ctx, dialer, frozen, inventory, limits,
+deadline)` is merged, tested, before it is wired into assessment runs:
+
+1. `Frozen.Continue` checks the current registration before anything is
+   dispatched.
+2. Bounds: the deadline is the earlier of the argument and the limits'
+   timeout. Result bytes, subjects and evidence items use the stricter of the
+   host's limits and the provider's advertised ones; an inventory beyond them
+   is not dispatched.
+3. One authenticated connection: Describe (checking the frozen
+   implementation), Collect, then ReadResult, within the same deadline. The
+   returned collection is the single result seam that 3.2 extends with durable
+   capture, Acknowledge and resume; the seam itself never acknowledges.
+4. Every failure (registration gone, unavailable or incompatible endpoint,
+   deadline, malformed or oversized result, digest mismatch, expired result,
+   provider gone mid-transfer) is an explicit incomplete collection with one
+   bounded limitation and no evidence. When the host context ends (leadership
+   loss, shutdown) the seam returns an error, and nothing is recorded.
+5. Attribution validation (Decision 9) yields accepted evidence, missing
+   expectations and diagnostics.
+6. The capture is the version 3 envelope with the registration (Decision 10)
+   and the staged bytes verbatim, read back through the frozen identity before
+   it is returned.
+
+No run calls the seam yet. Task 3.1 stays open until it is wired; end-to-end
+collection, attribution in reports and export are not complete.
+
 ## Risks / Trade-offs
 
 - More services and TLS configuration -> reference chart and diagnosed readiness.
@@ -209,11 +396,17 @@ real controller consumes the protocol; a unit-only mock is insufficient.
 - Premature cloud abstraction -> synthetic scan example; real cloud scope deferred.
 - Replay depends on retained evaluator support -> documented compatibility matrix
   and explicit unavailable results, never silent reinterpretation.
+- Inventory and attribution volume -> negotiated bounds and explicit incomplete
+  collections; a larger scope needs a later chunked revision, never truncation.
+- Endpoint separation is configuration -> live isolation acceptance on the
+  reference deployment; registration claims no attestation.
 
 ## Migration Plan
 
 1. Finish shared contract seams; add protocol and reference kit without changing
    the default Kyverno path.
+   Protocol revision 2, the capture registration identity and the unwired
+   collection seam land before run wiring; revision-1 peers fail explicitly.
 2. Ship registration readers, client and authenticated reference charts.
 3. Prove reporting capture/export and optional scan recovery in required CI.
 4. Publish executable authoring documentation and compatibility matrix.

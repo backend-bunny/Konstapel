@@ -10,8 +10,9 @@ optional scan execution through an authenticated, versioned contract.
 ### Requirement: Administrators register external providers
 
 Konstapel SHALL select external providers only through administrator-owned
-AssessmentProvider registrations. Registration SHALL bind an endpoint, expected
-provider identity, compatible contracts, and permitted capabilities. Bundles
+AssessmentProvider registrations. Registration SHALL bind its source and
+evaluator endpoints, expected provider identity, compatible contracts, and
+permitted capabilities. Bundles
 SHALL NOT install providers, grant permissions, or choose arbitrary endpoints.
 Built-in identities SHALL NOT be silently shadowed.
 
@@ -64,6 +65,124 @@ users access to cloud-wide or sibling evidence.
 - **WHEN** returned evidence includes subjects outside the request's scope
 - **THEN** those subjects are rejected or safely projected before any disclosure
 - **AND** unknown scope cannot establish a pass or expose raw findings
+
+### Requirement: Collection is attributed against a host-frozen inventory
+
+Konstapel SHALL send each collection a host-derived inventory, frozen before
+dispatch: the scope's namespace identities and its workload instances, each
+with a stable UID, the host revision of the state checks read, and the checks
+expected for it. It SHALL project only those fields to the provider. The
+expected subject-check pairs SHALL be the collection's denominator. Cloud
+accounts and other non-Kubernetes targets SHALL require a separate target
+contract.
+
+#### Scenario: Evidence names a subject outside the inventory
+
+- **WHEN** a result attributes evidence to a subject or check the frozen inventory does not expect
+- **THEN** that item is withheld with a diagnostic, even when it also names in-scope subjects
+- **AND** it never counts as evidence for any subject
+
+#### Scenario: An expected subject has no evidence
+
+- **WHEN** a result omits an expected subject or check
+- **THEN** the expectation is recorded as missing and is never a pass
+
+#### Scenario: The inventory exceeds the negotiated bounds
+
+- **WHEN** the frozen inventory is larger than the host's or the provider's bounds
+- **THEN** nothing is dispatched and the collection is explicitly incomplete, never truncated
+
+### Requirement: Reports never define their own denominator
+
+Returned evidence SHALL NOT define, narrow or replace the frozen expectations.
+Provider-discovered subjects SHALL supplement an inventory workload only when
+the inventory allows it and only under that workload, and SHALL NOT make a
+frozen expectation complete or passing.
+
+#### Scenario: A provider discovers parts of a workload
+
+- **WHEN** a result reports containers of an inventory workload as supplements
+- **THEN** they are accepted only if the inventory allows supplements, and only under that workload
+- **AND** the workload's frozen expectations still need evidence attributed to the workload itself
+
+#### Scenario: A supplement names no inventory workload
+
+- **WHEN** a supplement's parent is not a frozen workload subject, or the inventory allows no supplements
+- **THEN** the supplement and the evidence attributed to it are diagnostics, not evidence
+
+### Requirement: Results carry a host-readable attribution envelope
+
+A collection result SHALL be a protocol-defined document that attributes each
+evidence item to inventory subjects and checks, with its source time. Only
+source-specific details SHALL be opaque. Konstapel SHALL validate the document
+and its attribution before it uses any evidence. A malformed, oversized,
+digest-mismatched, expired or interrupted result, or one not read before the
+deadline, SHALL become an explicit incomplete collection with a bounded
+limitation and no evidence.
+
+#### Scenario: The result is malformed
+
+- **WHEN** the staged document has an unknown field, an invalid time or a duplicate item, or exceeds its bounds
+- **THEN** no evidence is used and the collection records one bounded limitation
+
+#### Scenario: The deadline passes during transfer
+
+- **WHEN** the collection deadline ends before the result is read and verified
+- **THEN** the collection is explicitly incomplete and partial bytes are never evidence
+
+### Requirement: Protocol additions are negotiated, never silently ignored
+
+A wire contract change that older peers would ignore SHALL be a new protocol
+revision that both peers must speak. Konstapel and the authoring kit SHALL
+reject a peer of another revision explicitly, in both directions, before any
+assessment payload is sent.
+
+#### Scenario: A revision 1 provider is registered
+
+- **WHEN** the endpoint serves only protocol revision 1
+- **THEN** Konstapel reports the registration incompatible and sends no collection
+
+#### Scenario: A revision 1 host calls a revision 2 provider
+
+- **WHEN** a request carries protocol revision 1
+- **THEN** the provider rejects it as an unsupported protocol version before any handler runs
+
+### Requirement: Captures record the frozen registration identity
+
+A capture of a registered provider SHALL record the registration name, UID and
+configuration revision, the release digest, the protocol and its revision, and
+the provider contract, payload and evaluator versions. A reader without
+registered-provider support SHALL reject such a capture, and a registered
+provider's capture without that identity SHALL be rejected.
+
+#### Scenario: A built-in reader reads a registered capture
+
+- **WHEN** a reader that knows only built-in providers reads a capture carrying a registration identity
+- **THEN** it rejects the capture explicitly instead of reading it as a built-in capture
+
+#### Scenario: The capture names another registration
+
+- **WHEN** a capture frozen to one registration UID, revision or release is read for another
+- **THEN** it is rejected explicitly
+
+### Requirement: Evaluation uses a separately authenticated evaluator endpoint
+
+A registration that allows evaluation SHALL name an evaluator endpoint with its
+own Service, server name and trust, distinct from the source endpoint.
+Konstapel SHALL send evaluation only to that endpoint, and collection, scans
+and result transfer only to the source endpoint, authenticating each
+separately. The reference evaluator SHALL hold no source credentials and have
+no source network access.
+
+#### Scenario: Register evaluation without an evaluator endpoint
+
+- **WHEN** a registration allows Evaluate without an evaluator endpoint, or reuses the source endpoint's Service or server name
+- **THEN** the API rejects it
+
+#### Scenario: The evaluator endpoint is unavailable
+
+- **WHEN** the source endpoint is healthy but the evaluator endpoint fails authentication
+- **THEN** the registration is not Ready, and no evaluation is sent to the source endpoint
 
 ### Requirement: Fresh evidence requests are optional and explicit
 
