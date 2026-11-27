@@ -11,6 +11,9 @@ import sys
 IMAGE = "ghcr.io/backend-bunny/konstapel"
 REPOSITORY = "https://github.com/backend-bunny/Konstapel"
 IDENTITY = r"^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$"
+# The jq filter of scripts/image/verify-signature-payload.sh (kept identical by
+# scripts/ci/test_image_signature_payload.py).
+SIGNATURE_FILTER = 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)'
 
 
 def cell(value):
@@ -39,7 +42,9 @@ def render(out):
             "```sh",
             f"IMAGE={IMAGE}@{digest}",
             f"IDENTITY={shlex.quote(IDENTITY)}",
-            'cosign verify "$IMAGE" --certificate-identity-regexp "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com',
+            'cosign verify "$IMAGE" --certificate-identity-regexp "$IDENTITY" \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com > signature.json',
+            "# Require the cosign sign signature for this digest, not only attestations",
+            "jq -e --arg digest \"${IMAGE#*@}\" " + shlex.quote(SIGNATURE_FILTER) + " signature.json",
         ]
         for label, predicate in (
             ("SPDX SBOMs", "spdxjson"),

@@ -71,7 +71,8 @@ jobs:
             digest=$(docker buildx imagetools inspect "$IMAGE:${RELEASE_TAG#v}" --format '{{json .Manifest}}' | jq -er .digest)
           fi
           [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
-          devbox run -- cosign verify --certificate-identity-regexp "$IMAGE_IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE@$digest" > /dev/null
+          devbox run -- cosign verify --certificate-identity-regexp "$IMAGE_IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE@$digest" > "$RUNNER_TEMP/image-signature.json"
+          devbox run -- bash scripts/image/verify-signature-payload.sh "$RUNNER_TEMP/image-signature.json" "$IMAGE@$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Freeze chart inputs, or reuse the release's frozen inputs
         env:
@@ -242,6 +243,7 @@ jobs:
           done
           image=$(jq -er '.image.digest' out/charts-release.json)
           devbox run -- cosign verify --certificate-identity-regexp "$IMAGE_IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE@$image" > out/chart-verification/image-signature.json
+          devbox run -- bash scripts/image/verify-signature-payload.sh out/chart-verification/image-signature.json "$IMAGE@$image"
       - name: Attach the release record
         env:
           GH_TOKEN: ${{ github.token }}

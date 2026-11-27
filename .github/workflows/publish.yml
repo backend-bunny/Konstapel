@@ -115,6 +115,7 @@ jobs:
           mkdir -p out/image/verification
           identity='^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$'
           devbox run -- cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST" > out/image/verification/signature.json
+          devbox run -- bash scripts/image/verify-signature-payload.sh out/image/verification/signature.json "$IMAGE@$DIGEST"
           count=0
           for type in spdxjson https://github.com/backend-bunny/Konstapel/sources/v1 https://github.com/backend-bunny/Konstapel/notices/v1; do
             count=$((count + 1))
