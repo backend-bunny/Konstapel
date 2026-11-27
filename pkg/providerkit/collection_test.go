@@ -1,9 +1,13 @@
 package providerkit
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	providerv1 "github.com/backend-bunny/Konstapel/pkg/providerapi/v1"
@@ -93,4 +97,20 @@ func TestParseCollectionResult(t *testing.T) {
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED)
 	_, err = ParseCollectionResult([]byte(`{"supplements":[{"id":"s1","parent":"w1","kind":"c"},{"id":"s2","parent":"w1","kind":"c"}]}`), &providerv1.Limits{MaxSubjects: 1})
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED)
+}
+
+// A provider that ends a call on the propagated deadline answers with a
+// DeadlineExceeded status without a detail, possibly a moment before the
+// host's own context ends: it is still a deadline, not an unknown failure.
+func TestStatusWithoutDetailKeepsItsContextError(t *testing.T) {
+	ctx := context.Background()
+	for code, want := range map[codes.Code]error{codes.DeadlineExceeded: context.DeadlineExceeded, codes.Canceled: context.Canceled} {
+		err := fromStatus(ctx, status.Error(code, "stream terminated"))
+		if !errors.Is(err, want) || ReasonOf(err) != providerv1.ErrorReason_ERROR_REASON_UNSPECIFIED {
+			t.Errorf("%s: %v", code, err)
+		}
+	}
+	if err := fromStatus(ctx, status.Error(codes.Unavailable, "gone")); errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		t.Errorf("unavailable: %v", err)
+	}
 }

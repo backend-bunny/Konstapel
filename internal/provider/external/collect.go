@@ -200,7 +200,7 @@ func Collect(ctx context.Context, d *Dialer, f Frozen, inv Inventory, limits pro
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("external %s collection: %w", f.Contract(), ctx.Err())
 		}
-		if cctx.Err() != nil {
+		if cctx.Err() != nil || reason == StopDeadline {
 			reason, format, a = StopDeadline, "the collection did not finish within its deadline %s (%s)", []any{end.UTC().Format(time.RFC3339), fmt.Sprintf(format, a...)}
 		}
 		*c = Collection{Frozen: f, Inventory: c.Inventory, Stop: &Stop{Reason: reason, Message: bound(fmt.Sprintf(format, a...), 512)}}
@@ -256,6 +256,11 @@ func Collect(ctx context.Context, d *Dialer, f Frozen, inv Inventory, limits pro
 // stopFor classifies a failed call by its protocol reason.
 func stopFor(stop func(StopReason, string, ...any) (*Collection, error), at string, err error) (*Collection, error) {
 	reason := StopUnavailable
+	if errors.Is(err, context.DeadlineExceeded) {
+		// The provider ended the call on the propagated deadline, a moment
+		// before the host's own context ended.
+		return stop(StopDeadline, "%s: %s", at, bound(err.Error(), 512))
+	}
 	switch providerkit.ReasonOf(err) {
 	case providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED:
 		reason = StopLimit
