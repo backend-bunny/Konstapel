@@ -37,6 +37,22 @@ func Scope() *providerv1.Scope {
 	}}
 }
 
+// Check is the name of the quickstart's one check, expected for every
+// namespace of the scope.
+const Check = "namespace-owner"
+
+// Inventory is the host-frozen inventory the quickstart collects for: each
+// scope namespace as a subject expecting Check. A real host derives it
+// from targeting and the listed workloads.
+func Inventory() *providerv1.Inventory {
+	inv := &providerv1.Inventory{Supplements: providerv1.Supplements_SUPPLEMENTS_NONE}
+	for _, ns := range Scope().GetNamespaces() {
+		inv.Subjects = append(inv.Subjects, &providerv1.InventorySubject{Uid: ns.GetUid(), NamespaceUid: ns.GetUid(),
+			Resource: providerkit.NamespaceResource, Name: ns.GetName(), Revision: "quickstart", Checks: []string{Check}})
+	}
+	return inv
+}
+
 // Dial connects to a provider at addr whose certificate must name
 // serverName, presenting the host certificate in files.
 func Dial(addr string, files providerkit.TLSFiles, serverName string) (*grpc.ClientConn, error) {
@@ -57,6 +73,7 @@ type Report struct {
 	Limits       *providerv1.Limits
 	Result       *providerv1.ResultReference
 	Payload      []byte
+	Collection   *providerv1.CollectionResult
 	Observations []*providerv1.Observation
 }
 
@@ -88,26 +105,29 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, out io.Writer) (*Re
 
 	cctx, cancel = call()
 	deadline, _ := cctx.Deadline()
-	r.Result, err = client.Collect(cctx, Scope(), nil, deadline)
+	r.Result, err = client.Collect(cctx, Scope(), Inventory(), deadline)
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("collect: %w", err)
 	}
 	fmt.Fprintf(out, "collect: result %s, %d bytes, %s\n", r.Result.GetResultId(), r.Result.GetSizeBytes(), r.Result.GetSha256())
-	for _, l := range r.Result.GetLimitations() {
-		fmt.Fprintf(out, "  limitation: %s\n", l)
-	}
 
-	// The kit verifies offset continuity, chunk bounds, size and digest. On
-	// an interrupted stream, ResumeResult(ref, received) continues from
-	// the bytes already received.
+	// The kit verifies offset continuity, chunk bounds, size and digest, and
+	// that the bytes are a well-formed CollectionResult. On an interrupted
+	// stream, ResumeResult(ref, received) continues from the bytes already
+	// received. A real host then attributes the result against its
+	// inventory before using any evidence.
 	cctx, cancel = call()
-	r.Payload, err = client.ReadResult(cctx, r.Result)
+	r.Payload, r.Collection, err = client.ReadCollection(cctx, r.Result)
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("read result: %w", err)
 	}
-	fmt.Fprintf(out, "read result: %d bytes verified in chunks of at most %d\n", len(r.Payload), r.Limits.GetMaxChunkBytes())
+	fmt.Fprintf(out, "read result: %d bytes verified in chunks of at most %d: %d evidence items, %d limitations\n",
+		len(r.Payload), r.Limits.GetMaxChunkBytes(), len(r.Collection.GetEvidence()), len(r.Collection.GetLimitations()))
+	for _, l := range r.Collection.GetLimitations() {
+		fmt.Fprintf(out, "  limitation: %s\n", l.GetMessage())
+	}
 
 	// A real host acknowledges only once its capture is durable; the
 	// provider may then release its staging.
@@ -128,7 +148,7 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, out io.Writer) (*Re
 		At:               time.Now().UTC(),
 		Scope:            Scope(),
 		Content:          []*providerv1.ContentReference{{Bundle: "quickstart", ManifestDigest: providerkit.Digest([]byte("quickstart"))}},
-		Checks:           []*providerv1.CheckDefinition{{Kind: "reporting.example.test/v1/RequiredLabel", Name: "namespace-owner", Definition: def}},
+		Checks:           []*providerv1.CheckDefinition{{Kind: "reporting.example.test/v1/RequiredLabel", Name: Check, Definition: def}},
 	})
 	cancel()
 	if err != nil {

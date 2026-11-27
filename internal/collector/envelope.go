@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 )
 
 // CaptureEnvelopeVersion is the provider-discriminated capture document,
@@ -54,6 +55,9 @@ type CaptureHeader struct {
 	// EvaluatorVersion is the provider evaluation semantics the capture
 	// was evaluated with.
 	EvaluatorVersion int `json:"evaluatorVersion"`
+	// Registration is the frozen registration of a registered external
+	// provider's envelope, nil for a built-in provider's capture.
+	Registration *CaptureRegistration `json:"registration,omitempty"`
 }
 
 // Legacy reports whether the header is implied by a version 1 or 2
@@ -61,19 +65,113 @@ type CaptureHeader struct {
 func (h CaptureHeader) Legacy() bool { return h.Version != CaptureEnvelopeVersion }
 
 func (h CaptureHeader) String() string {
-	return fmt.Sprintf("capture version %d (%s payload %d, evaluator %d)", h.Version, h.Provider, h.PayloadVersion, h.EvaluatorVersion)
+	s := fmt.Sprintf("capture version %d (%s payload %d, evaluator %d", h.Version, h.Provider, h.PayloadVersion, h.EvaluatorVersion)
+	if r := h.Registration; r != nil {
+		s += fmt.Sprintf(", registration %s uid %s revision %d", r.Name, r.UID, r.Revision)
+	}
+	return s + ")"
 }
 
 // CaptureEnvelope is the version 3 capture document: a provider-discriminated
-// header and that provider's payload. Every field is required. A reader
-// rejects any other field, so a field added later is never silently
-// ignored: it needs a new version.
+// header and that provider's payload. Every field but Registration is
+// required, and Registration is required exactly for a registered external
+// provider. A reader rejects any other field, so a field added later is
+// never silently ignored: once a release writes envelopes, it needs a new
+// version.
+//
+// Registration was added within version 3 (add-external-assessment-providers
+// design Decision 10) because no release reads version 3 (0.3.0 and earlier
+// refuse it), nothing writes it, and every reader that predates the field
+// decodes the envelope strictly and refuses it as an unknown field.
 type CaptureEnvelope struct {
-	Version          int             `json:"version"`
-	Provider         string          `json:"provider"`
-	PayloadVersion   int             `json:"payloadVersion"`
-	EvaluatorVersion int             `json:"evaluatorVersion"`
-	Payload          json.RawMessage `json:"payload"`
+	Version          int                  `json:"version"`
+	Provider         string               `json:"provider"`
+	PayloadVersion   int                  `json:"payloadVersion"`
+	EvaluatorVersion int                  `json:"evaluatorVersion"`
+	Registration     *CaptureRegistration `json:"registration,omitempty"`
+	Payload          json.RawMessage      `json:"payload"`
+}
+
+// CaptureRegistration is what interpreting a registered external
+// provider's capture needs beyond the envelope's provider contract, payload
+// version and evaluator version: the frozen registration (its name, UID and
+// configuration revision), the release the endpoint reported as its
+// implementation, and the protocol and its revision. Every field is
+// required. It holds identities only, never endpoint configuration or
+// credentials.
+type CaptureRegistration struct {
+	Name             string `json:"name"`
+	UID              string `json:"uid"`
+	Revision         int64  `json:"revision"`
+	ReleaseDigest    string `json:"releaseDigest"`
+	Protocol         string `json:"protocol"`
+	ProtocolRevision int    `json:"protocolRevision"`
+}
+
+var (
+	registrationName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	releaseDigest    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	protocolName     = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*\.v[1-9][0-9]*$`)
+)
+
+// Validate requires every field: a registration name, a UID of at most 128
+// bytes, a revision and protocol revision of at least 1, a sha256 release
+// digest and a protocol package name such as konstapel.provider.v1.
+func (r CaptureRegistration) Validate() error {
+	switch {
+	case !registrationName.MatchString(r.Name):
+		return errors.New("the registration name must be a DNS subdomain name")
+	case r.UID == "" || len(r.UID) > 128:
+		return errors.New("the registration uid must be set and at most 128 bytes")
+	case r.Revision < 1 || r.ProtocolRevision < 1:
+		return errors.New("the registration revision and protocol revision start at 1")
+	case !releaseDigest.MatchString(r.ReleaseDigest):
+		return errors.New("the release digest must be sha256:<64 lowercase hex>")
+	case !protocolName.MatchString(r.Protocol):
+		return errors.New("the protocol must be a protocol package name such as konstapel.provider.v1")
+	}
+	return nil
+}
+
+// RegistrationReaders is what CaptureReaders also implement to read the
+// captures of registered external providers. Readers without it, such as
+// the built-in provider registry, refuse every capture that records a
+// registration. A reader with it is asked about every capture it reads,
+// with the recorded registration or nil, and refuses a registered
+// provider's capture without one.
+type RegistrationReaders interface {
+	CheckRegistration(contract string, registration *CaptureRegistration) error
+}
+
+// EncodeEnvelope writes a version 3 capture document of h and payload,
+// keeping the payload's bytes exactly as given: encoding/json would compact
+// and escape a raw payload, so a payload's digest would no longer be the
+// digest of what its provider staged. payload must be one JSON object
+// without surrounding whitespace, which a reader would not keep.
+// h.Version is ignored. The result reads back through ReadCapture only
+// when its readers support h.
+func EncodeEnvelope(h CaptureHeader, payload json.RawMessage) ([]byte, error) {
+	if len(payload) == 0 || payload[0] != '{' || payload[len(payload)-1] != '}' || !json.Valid(payload) {
+		return nil, errors.New("capture envelope: the payload is not one JSON object without surrounding whitespace")
+	}
+	if h.Registration != nil {
+		if err := h.Registration.Validate(); err != nil {
+			return nil, fmt.Errorf("capture envelope: %w", err)
+		}
+	}
+	head, err := json.Marshal(struct {
+		Version          int                  `json:"version"`
+		Provider         string               `json:"provider"`
+		PayloadVersion   int                  `json:"payloadVersion"`
+		EvaluatorVersion int                  `json:"evaluatorVersion"`
+		Registration     *CaptureRegistration `json:"registration,omitempty"`
+	}{CaptureEnvelopeVersion, h.Provider, h.PayloadVersion, h.EvaluatorVersion, h.Registration})
+	if err != nil {
+		return nil, err
+	}
+	out := append(head[:len(head)-1:len(head)-1], `,"payload":`...)
+	out = append(out, payload...)
+	return append(out, '}'), nil
 }
 
 // CaptureReaders is the installed compatibility a capture is read against,
@@ -114,6 +212,10 @@ type CaptureDocument struct {
 //     JSON object
 //   - a provider that is not installed, or a payload version it does not
 //     read
+//   - an envelope recording a registration that is incomplete, read by
+//     readers without RegistrationReaders (a built-in provider's reader),
+//     or refused by their CheckRegistration (another registration, or a
+//     registered provider's capture without one)
 //   - a Kyverno envelope payload that is not exactly a valid CaptureV2 of
 //     the header's payload version
 //
@@ -135,6 +237,14 @@ func ReadCapture(raw []byte, readers CaptureReaders) (CaptureDocument, error) {
 	}
 	if err := readers.CheckCapture(h.Provider, h.PayloadVersion); err != nil {
 		return CaptureDocument{}, fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
+	}
+	if rr, ok := readers.(RegistrationReaders); ok {
+		if err := rr.CheckRegistration(h.Provider, h.Registration); err != nil {
+			return CaptureDocument{}, fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
+		}
+	} else if h.Registration != nil {
+		return CaptureDocument{}, fmt.Errorf("%w: %s: a registered external provider's capture is read only by a reader of registered providers, not by built-in providers' readers",
+			ErrUnsupportedCapture, h)
 	}
 	d := CaptureDocument{Header: h, Payload: payload}
 	if err := d.decodeEnvelope(); err != nil {
@@ -201,6 +311,7 @@ func readHeader(raw []byte) (CaptureHeader, json.RawMessage, error) {
 		PayloadVersion   json.RawMessage `json:"payloadVersion"`
 		EvaluatorVersion json.RawMessage `json:"evaluatorVersion"`
 		Payload          json.RawMessage `json:"payload"`
+		Registration     json.RawMessage `json:"registration"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return CaptureHeader{}, nil, fmt.Errorf("%w: %v", ErrUnsupportedCapture, err)
@@ -210,8 +321,8 @@ func readHeader(raw []byte) (CaptureHeader, json.RawMessage, error) {
 	}
 	switch v := *probe.Version; v {
 	case 1, CaptureV2Version:
-		if probe.Provider != nil || probe.PayloadVersion != nil || probe.EvaluatorVersion != nil || probe.Payload != nil {
-			return CaptureHeader{}, nil, fmt.Errorf("%w: a version %d capture has no provider, payload or evaluator fields; a provider-discriminated capture is version %d",
+		if probe.Provider != nil || probe.PayloadVersion != nil || probe.EvaluatorVersion != nil || probe.Payload != nil || probe.Registration != nil {
+			return CaptureHeader{}, nil, fmt.Errorf("%w: a version %d capture has no provider, payload, evaluator or registration fields; a provider-discriminated capture is version %d",
 				ErrUnsupportedCapture, v, CaptureEnvelopeVersion)
 		}
 		return CaptureHeader{Version: v, Provider: LegacyProvider, PayloadVersion: v, EvaluatorVersion: LegacyEvaluatorVersion}, raw, nil
@@ -227,7 +338,12 @@ func readEnvelope(raw []byte) (CaptureHeader, json.RawMessage, error) {
 	if err := decodeStrict(raw, &e); err != nil {
 		return CaptureHeader{}, nil, fmt.Errorf("%w: capture envelope: %v", ErrUnsupportedCapture, err)
 	}
-	h := CaptureHeader{Version: e.Version, Provider: e.Provider, PayloadVersion: e.PayloadVersion, EvaluatorVersion: e.EvaluatorVersion}
+	h := CaptureHeader{Version: e.Version, Provider: e.Provider, PayloadVersion: e.PayloadVersion, EvaluatorVersion: e.EvaluatorVersion, Registration: e.Registration}
+	if e.Registration != nil {
+		if err := e.Registration.Validate(); err != nil {
+			return h, nil, fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
+		}
+	}
 	switch {
 	case e.Provider == "":
 		return h, nil, fmt.Errorf("%w: the capture envelope names no provider", ErrUnsupportedCapture)

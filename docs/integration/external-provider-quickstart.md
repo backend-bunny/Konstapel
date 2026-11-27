@@ -33,7 +33,7 @@ is its own Go module (`example.com/konstapel-reporting`), with its own
 
 | Path | What it is |
 | --- | --- |
-| `provider/` | The provider. `Description()` is its `Describe` response: `example-reporting/v1`, protocol revision 1, evaluator 1, payload 1, capabilities Collect and Evaluate, check kind `reporting.example.test/v1/RequiredLabel`, and a 256-byte chunk limit, so even a small payload travels in several chunks. `Provider` implements the kit's `Collector`, `Results` and `Evaluator` over a fixed in-memory source. `Serve` runs the protocol port over mutual TLS, with probes on a separate port. |
+| `provider/` | The provider. `Description()` is its `Describe` response: `example-reporting/v1`, protocol revision 2, evaluator 1, payload 1, capabilities Collect and Evaluate, check kind `reporting.example.test/v1/RequiredLabel`, and a 256-byte chunk limit, so even a small payload travels in several chunks. `Provider` implements the kit's `Collector`, `Results` and `Evaluator` over a fixed in-memory source. `Serve` runs the protocol port over mutual TLS, with probes on a separate port. |
 | `host/` | A stand-in for the Konstapel host. Through `providerkit.Client` it runs Describe, then Collect, then ReadResult, then Acknowledge, then Evaluate, giving each call its own deadline. |
 | `certs/` | Throwaway CA, server and host certificates generated at run time. |
 | `cmd/quickstart-certs`, `cmd/reporting-provider`, `cmd/reporting-host` | The three commands used below. `reporting-provider` runs the combined process by default; `-role worker` and `-role evaluator` are the [reference chart](external-provider-chart.md)'s two deployments. |
@@ -107,11 +107,11 @@ Run these commands from the repository root, inside the Devbox environment
    ```
 
    ```text
-   describe: example-reporting/v1 protocol=[1] evaluator=1 payload=write 1 read [1] capabilities=[CAPABILITY_COLLECT CAPABILITY_EVALUATE]
+   describe: example-reporting/v1 protocol=[2] evaluator=1 payload=write 1 read [1] capabilities=[CAPABILITY_COLLECT CAPABILITY_EVALUATE]
    negotiated limits: max_result_bytes=1048576 max_chunk_bytes=256 max_observations=1000
-   collect: result result-…, 272 bytes, sha256:…
+   collect: result result-…, 557 bytes, sha256:…
+   read result: 557 bytes verified in chunks of at most 256: 2 evidence items, 1 limitations
      limitation: namespace team-c is not in the synthetic source
-   read result: 272 bytes verified in chunks of at most 256
    acknowledge: provider may release result-…
    evaluate: 3 observations, 0 stale scopes
      team-a namespace-owner: EVIDENCE_STATE_ATTRIBUTABLE OUTCOME_PASS (raw "present")
@@ -119,9 +119,15 @@ Run these commands from the repository root, inside the Devbox environment
      team-c namespace-owner: EVIDENCE_STATE_MISSING -
    ```
 
-   The negotiated chunk bound is the provider's stricter 256 bytes, not the
-   kit's 1 MiB default. `team-c` is missing from the source, so it comes back
-   as a limitation and as missing evidence, never as a pass.
+   The host collects for a frozen inventory: each scope namespace is a
+   subject expecting the `namespace-owner` check
+   ([inventory](external-provider-protocol.md#inventory)). The result is a
+   `CollectionResult` that attributes one evidence item to each namespace the
+   source has. The negotiated chunk bound is the provider's stricter 256
+   bytes, not the kit's 1 MiB default. `team-c` is missing from the source,
+   so it comes back as a subject limitation and as missing evidence, never as
+   a pass. The byte count can differ between builds: the provider stages its
+   result with `protojson`, whose spacing is not stable.
 
 5. Expect a different server identity. The handshake fails and the host
    sends no request:

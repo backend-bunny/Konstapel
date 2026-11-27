@@ -10,8 +10,12 @@ import (
 )
 
 // ProtocolVersion is the revision of protocol major version 1
-// (konstapel.provider.v1) this kit speaks and serves.
-const ProtocolVersion uint32 = 1
+// (konstapel.provider.v1) this kit speaks and serves, and the only one.
+// Revision 2 made the host-frozen Inventory and the CollectionResult
+// attribution envelope mandatory. A revision 1 peer would silently ignore
+// both, so the kit rejects every other revision in both directions rather
+// than serving two.
+const ProtocolVersion uint32 = 2
 
 // Default bounds. The host applies the stricter of these and a provider's
 // advertised Limits; an advertised limit never raises them.
@@ -25,6 +29,12 @@ const (
 	// DefaultMaxObservations bounds one evaluation's observations. It is
 	// the host's collection object budget.
 	DefaultMaxObservations uint32 = 100_000
+	// DefaultMaxSubjects bounds one inventory's subjects, and separately a
+	// result's supplements. It is the host's collection object budget.
+	DefaultMaxSubjects uint32 = 100_000
+	// DefaultMaxEvidence bounds one result's evidence items, and separately
+	// its limitations. It is the host's collection object budget.
+	DefaultMaxEvidence uint32 = 100_000
 )
 
 // Text bounds of provider-written diagnostics.
@@ -33,12 +43,22 @@ const (
 	MaxLimitations = 64
 	// MaxTextBytes bounds one limitation, operation message or identifier.
 	MaxTextBytes = 1024
+	// MaxNameBytes bounds an inventory subject's name, a Kubernetes object
+	// name.
+	MaxNameBytes = 253
+	// MaxSubjectChecks bounds the checks expected for one subject.
+	MaxSubjectChecks = 256
+	// MaxAttributions bounds the attributions of one evidence item.
+	MaxAttributions = 1024
 )
 
 var (
 	namePattern   = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	kindPattern   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/v[0-9][a-z0-9]*/[A-Z][A-Za-z0-9]*$`)
 	digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	// resourcePattern is "<group>/<version>/<resource>", the core group
+	// empty.
+	resourcePattern = regexp.MustCompile(`^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?/v[0-9][a-z0-9]*/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
 // Digest is "sha256:" and the lowercase hex SHA-256 of b, the digest form
@@ -199,10 +219,14 @@ func NegotiateLimits(host, advertised *providerv1.Limits) *providerv1.Limits {
 		MaxResultBytes:  stricter(host.GetMaxResultBytes(), DefaultMaxResultBytes),
 		MaxChunkBytes:   stricter(host.GetMaxChunkBytes(), DefaultMaxChunkBytes),
 		MaxObservations: stricter(host.GetMaxObservations(), DefaultMaxObservations),
+		MaxSubjects:     stricter(host.GetMaxSubjects(), DefaultMaxSubjects),
+		MaxEvidence:     stricter(host.GetMaxEvidence(), DefaultMaxEvidence),
 	}
 	out.MaxResultBytes = stricter(advertised.GetMaxResultBytes(), out.MaxResultBytes)
 	out.MaxChunkBytes = stricter(advertised.GetMaxChunkBytes(), out.MaxChunkBytes)
 	out.MaxObservations = stricter(advertised.GetMaxObservations(), out.MaxObservations)
+	out.MaxSubjects = stricter(advertised.GetMaxSubjects(), out.MaxSubjects)
+	out.MaxEvidence = stricter(advertised.GetMaxEvidence(), out.MaxEvidence)
 	return out
 }
 

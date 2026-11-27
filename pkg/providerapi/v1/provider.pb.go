@@ -13,7 +13,7 @@
 //      package name (konstapel.provider.v1); a breaking change is a new
 //      package. RequestHeader.protocol_version is the revision of this
 //      major the caller speaks, and DescribeResponse.protocol_versions are
-//      the revisions the provider serves. This definition is revision 1.
+//      the revisions the provider serves. This definition is revision 2.
 //   2. Provider contract version: the provider's capability contract,
 //      selected by bundles as "<name>/v<version>" (ProviderContract). It is
 //      the host's provider descriptor version.
@@ -27,6 +27,16 @@
 //
 // An unsupported version in any dimension is rejected with that
 // dimension's ErrorReason. It is never adapted, defaulted or ignored.
+//
+// Revisions. Revision 2 adds the host-frozen Inventory every Collect
+// carries and makes a staged result a CollectionResult, the host-readable
+// attribution envelope in which only evidence details are opaque. Its
+// messages are additive, but a revision 1 peer would silently ignore them
+// (protobuf keeps unknown fields and its readers never see them), so the
+// revision is what makes them mandatory: a revision 2 host and provider
+// speak revision 2 only, and each rejects the other revision with
+// ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION before any payload is sent.
+// Revision 1's opaque CollectRequest.inventory (field 3) is removed.
 //
 // Errors. A failed call returns a gRPC status whose details carry exactly
 // one ErrorDetail naming the reason. Clients branch on the ErrorReason,
@@ -53,6 +63,7 @@ package providerv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -228,6 +239,62 @@ func (ErrorReason) EnumDescriptor() ([]byte, []int) {
 	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{1}
 }
 
+// Supplements says whether a provider may supplement the inventory with
+// subjects it discovers itself.
+type Supplements int32
+
+const (
+	Supplements_SUPPLEMENTS_UNSPECIFIED Supplements = 0
+	// Only inventory subjects. A supplement is out of scope.
+	Supplements_SUPPLEMENTS_NONE Supplements = 1
+	// Parts of an inventory workload (for example its containers or images)
+	// may be reported as supplements of that workload. A supplement adds
+	// observations of its own; it never changes the inventory's
+	// expectations, and evidence attributed to it never completes one.
+	Supplements_SUPPLEMENTS_WITHIN_WORKLOADS Supplements = 2
+)
+
+// Enum value maps for Supplements.
+var (
+	Supplements_name = map[int32]string{
+		0: "SUPPLEMENTS_UNSPECIFIED",
+		1: "SUPPLEMENTS_NONE",
+		2: "SUPPLEMENTS_WITHIN_WORKLOADS",
+	}
+	Supplements_value = map[string]int32{
+		"SUPPLEMENTS_UNSPECIFIED":      0,
+		"SUPPLEMENTS_NONE":             1,
+		"SUPPLEMENTS_WITHIN_WORKLOADS": 2,
+	}
+)
+
+func (x Supplements) Enum() *Supplements {
+	p := new(Supplements)
+	*p = x
+	return p
+}
+
+func (x Supplements) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Supplements) Descriptor() protoreflect.EnumDescriptor {
+	return file_konstapel_provider_v1_provider_proto_enumTypes[2].Descriptor()
+}
+
+func (Supplements) Type() protoreflect.EnumType {
+	return &file_konstapel_provider_v1_provider_proto_enumTypes[2]
+}
+
+func (x Supplements) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Supplements.Descriptor instead.
+func (Supplements) EnumDescriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{2}
+}
+
 // OperationState is a scan operation's lifecycle state.
 type OperationState int32
 
@@ -286,11 +353,11 @@ func (x OperationState) String() string {
 }
 
 func (OperationState) Descriptor() protoreflect.EnumDescriptor {
-	return file_konstapel_provider_v1_provider_proto_enumTypes[2].Descriptor()
+	return file_konstapel_provider_v1_provider_proto_enumTypes[3].Descriptor()
 }
 
 func (OperationState) Type() protoreflect.EnumType {
-	return &file_konstapel_provider_v1_provider_proto_enumTypes[2]
+	return &file_konstapel_provider_v1_provider_proto_enumTypes[3]
 }
 
 func (x OperationState) Number() protoreflect.EnumNumber {
@@ -299,7 +366,7 @@ func (x OperationState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OperationState.Descriptor instead.
 func (OperationState) EnumDescriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{2}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{3}
 }
 
 // EvidenceState is an expected observation's evidence state.
@@ -348,11 +415,11 @@ func (x EvidenceState) String() string {
 }
 
 func (EvidenceState) Descriptor() protoreflect.EnumDescriptor {
-	return file_konstapel_provider_v1_provider_proto_enumTypes[3].Descriptor()
+	return file_konstapel_provider_v1_provider_proto_enumTypes[4].Descriptor()
 }
 
 func (EvidenceState) Type() protoreflect.EnumType {
-	return &file_konstapel_provider_v1_provider_proto_enumTypes[3]
+	return &file_konstapel_provider_v1_provider_proto_enumTypes[4]
 }
 
 func (x EvidenceState) Number() protoreflect.EnumNumber {
@@ -361,7 +428,7 @@ func (x EvidenceState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EvidenceState.Descriptor instead.
 func (EvidenceState) EnumDescriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{3}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{4}
 }
 
 // Outcome is a normalized check outcome.
@@ -407,11 +474,11 @@ func (x Outcome) String() string {
 }
 
 func (Outcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_konstapel_provider_v1_provider_proto_enumTypes[4].Descriptor()
+	return file_konstapel_provider_v1_provider_proto_enumTypes[5].Descriptor()
 }
 
 func (Outcome) Type() protoreflect.EnumType {
-	return &file_konstapel_provider_v1_provider_proto_enumTypes[4]
+	return &file_konstapel_provider_v1_provider_proto_enumTypes[5]
 }
 
 func (x Outcome) Number() protoreflect.EnumNumber {
@@ -420,7 +487,7 @@ func (x Outcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Outcome.Descriptor instead.
 func (Outcome) EnumDescriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{4}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{5}
 }
 
 // ErrorDetail is the one detail of every failed call's gRPC status.
@@ -530,7 +597,7 @@ func (x *ProviderContract) GetVersion() uint32 {
 type RequestHeader struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// protocol_version is the revision of this major version the caller
-	// speaks. This definition is revision 1.
+	// speaks. This definition is revision 2.
 	ProtocolVersion uint32 `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 	// provider is the contract the caller expects to reach.
 	Provider      *ProviderContract `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -752,8 +819,13 @@ type Limits struct {
 	MaxChunkBytes uint32 `protobuf:"varint,2,opt,name=max_chunk_bytes,json=maxChunkBytes,proto3" json:"max_chunk_bytes,omitempty"`
 	// max_observations bounds the observations one evaluation returns.
 	MaxObservations uint32 `protobuf:"varint,3,opt,name=max_observations,json=maxObservations,proto3" json:"max_observations,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// max_subjects bounds the subjects of one collection: the inventory's
+	// subjects, and separately the supplements its result reports.
+	MaxSubjects uint32 `protobuf:"varint,4,opt,name=max_subjects,json=maxSubjects,proto3" json:"max_subjects,omitempty"`
+	// max_evidence bounds the evidence items of one result.
+	MaxEvidence   uint32 `protobuf:"varint,5,opt,name=max_evidence,json=maxEvidence,proto3" json:"max_evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Limits) Reset() {
@@ -803,6 +875,20 @@ func (x *Limits) GetMaxChunkBytes() uint32 {
 func (x *Limits) GetMaxObservations() uint32 {
 	if x != nil {
 		return x.MaxObservations
+	}
+	return 0
+}
+
+func (x *Limits) GetMaxSubjects() uint32 {
+	if x != nil {
+		return x.MaxSubjects
+	}
+	return 0
+}
+
+func (x *Limits) GetMaxEvidence() uint32 {
+	if x != nil {
+		return x.MaxEvidence
 	}
 	return 0
 }
@@ -1027,7 +1113,9 @@ func (x *Scope) GetNamespaces() []*Namespace {
 }
 
 // ResultReference identifies one immutable staged result: a payload of the
-// provider's payload version, UTF-8 JSON encoding one object.
+// provider's payload version, UTF-8 JSON encoding one object. The staged
+// result of a collection or scan is a CollectionResult in its proto3 JSON
+// mapping.
 type ResultReference struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// result_id is the provider's opaque identifier of the staged bytes.
@@ -1134,16 +1222,15 @@ type CollectRequest struct {
 	Header *RequestHeader         `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
 	// scope is the host-frozen scope to collect for.
 	Scope *Scope `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
-	// inventory is optional provider-specific frozen inventory input (UTF-8
-	// JSON object), such as the subjects the host expects. It never selects
-	// credentials, identities, commands or images.
-	Inventory []byte `protobuf:"bytes,3,opt,name=inventory,proto3" json:"inventory,omitempty"`
 	// payload_version is the payload version the host will store; it must be
 	// the provider's payload.write.
 	PayloadVersion uint32 `protobuf:"varint,4,opt,name=payload_version,json=payloadVersion,proto3" json:"payload_version,omitempty"`
 	// deadline is the collection's deadline. The enclosing assessment
 	// deadline is authoritative; a provider never extends it.
-	Deadline      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	Deadline *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	// inventory is the host-frozen inventory to collect for: the
+	// collection's denominator. Required.
+	Inventory     *Inventory `protobuf:"bytes,6,opt,name=inventory,proto3" json:"inventory,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1192,13 +1279,6 @@ func (x *CollectRequest) GetScope() *Scope {
 	return nil
 }
 
-func (x *CollectRequest) GetInventory() []byte {
-	if x != nil {
-		return x.Inventory
-	}
-	return nil
-}
-
 func (x *CollectRequest) GetPayloadVersion() uint32 {
 	if x != nil {
 		return x.PayloadVersion
@@ -1213,6 +1293,510 @@ func (x *CollectRequest) GetDeadline() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *CollectRequest) GetInventory() *Inventory {
+	if x != nil {
+		return x.Inventory
+	}
+	return nil
+}
+
+// Inventory is the host-derived inventory of a collection, frozen before
+// dispatch. The provider never defines it: its expected (subject, check)
+// pairs are the denominator evidence is attributed against, and a result
+// can neither add to them, narrow them nor replace them. It projects
+// identities, revisions and expectations only, never object data.
+type Inventory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// subjects are the namespaces and workload instances evidence is
+	// expected for, at least one, each uid once.
+	Subjects []*InventorySubject `protobuf:"bytes,1,rep,name=subjects,proto3" json:"subjects,omitempty"`
+	// supplements says whether supplements are allowed.
+	Supplements   Supplements `protobuf:"varint,2,opt,name=supplements,proto3,enum=konstapel.provider.v1.Supplements" json:"supplements,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Inventory) Reset() {
+	*x = Inventory{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Inventory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Inventory) ProtoMessage() {}
+
+func (x *Inventory) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Inventory.ProtoReflect.Descriptor instead.
+func (*Inventory) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *Inventory) GetSubjects() []*InventorySubject {
+	if x != nil {
+		return x.Subjects
+	}
+	return nil
+}
+
+func (x *Inventory) GetSupplements() Supplements {
+	if x != nil {
+		return x.Supplements
+	}
+	return Supplements_SUPPLEMENTS_UNSPECIFIED
+}
+
+// InventorySubject is one Kubernetes object instance of the inventory.
+type InventorySubject struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// uid is the object's metadata.uid, its stable instance identity.
+	Uid string `protobuf:"bytes,1,opt,name=uid,proto3" json:"uid,omitempty"`
+	// namespace_uid is the uid of the scope namespace the subject is in; a
+	// namespace subject is its own namespace.
+	NamespaceUid string `protobuf:"bytes,2,opt,name=namespace_uid,json=namespaceUid,proto3" json:"namespace_uid,omitempty"`
+	// resource is "<group>/<version>/<resource>", with an empty group for
+	// the core group: "/v1/namespaces" for a namespace subject, for example
+	// "apps/v1/deployments" for a workload.
+	Resource string `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource,omitempty"`
+	// name is the object's name.
+	Name string `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	// revision is the host's revision of the object state checks can read
+	// (for a workload, a digest of its spec, labels and annotations; never
+	// its resourceVersion). Evidence about another state is not this
+	// subject's.
+	Revision string `protobuf:"bytes,5,opt,name=revision,proto3" json:"revision,omitempty"`
+	// checks are the names of the run's checks expected for the subject, at
+	// least one, each once: the subject's expected observations.
+	Checks        []string `protobuf:"bytes,6,rep,name=checks,proto3" json:"checks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventorySubject) Reset() {
+	*x = InventorySubject{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventorySubject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventorySubject) ProtoMessage() {}
+
+func (x *InventorySubject) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventorySubject.ProtoReflect.Descriptor instead.
+func (*InventorySubject) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *InventorySubject) GetUid() string {
+	if x != nil {
+		return x.Uid
+	}
+	return ""
+}
+
+func (x *InventorySubject) GetNamespaceUid() string {
+	if x != nil {
+		return x.NamespaceUid
+	}
+	return ""
+}
+
+func (x *InventorySubject) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+func (x *InventorySubject) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *InventorySubject) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+func (x *InventorySubject) GetChecks() []string {
+	if x != nil {
+		return x.Checks
+	}
+	return nil
+}
+
+// CollectionResult is the staged result of a collection or scan, the
+// host-readable attribution envelope: evidence items attributed to
+// inventory subjects and checks, and the supplements and limitations the
+// provider reports. Only Evidence.details is source-specific. It is staged
+// as its proto3 JSON mapping, one UTF-8 JSON object without surrounding
+// whitespace, so a host capture keeps exactly the staged bytes; a reader
+// rejects unknown fields.
+type CollectionResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Evidence      []*Evidence            `protobuf:"bytes,1,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	Supplements   []*Supplement          `protobuf:"bytes,2,rep,name=supplements,proto3" json:"supplements,omitempty"`
+	Limitations   []*SubjectLimitation   `protobuf:"bytes,3,rep,name=limitations,proto3" json:"limitations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CollectionResult) Reset() {
+	*x = CollectionResult{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CollectionResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CollectionResult) ProtoMessage() {}
+
+func (x *CollectionResult) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CollectionResult.ProtoReflect.Descriptor instead.
+func (*CollectionResult) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CollectionResult) GetEvidence() []*Evidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+func (x *CollectionResult) GetSupplements() []*Supplement {
+	if x != nil {
+		return x.Supplements
+	}
+	return nil
+}
+
+func (x *CollectionResult) GetLimitations() []*SubjectLimitation {
+	if x != nil {
+		return x.Limitations
+	}
+	return nil
+}
+
+// Evidence is one evidence item.
+type Evidence struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the provider's identifier of the item, unique in the result.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// attributions are the subjects and checks the item is evidence for, at
+	// least one, each pair once. The host withholds the whole item when any
+	// of them is outside the inventory.
+	Attributions []*Attribution `protobuf:"bytes,2,rep,name=attributions,proto3" json:"attributions,omitempty"`
+	// observed is when the source evaluated or observed what the item
+	// records.
+	Observed *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=observed,proto3" json:"observed,omitempty"`
+	// details are the item's source-specific details (one JSON object) in
+	// the provider's payload version. The host never interprets them.
+	Details       *structpb.Struct `protobuf:"bytes,4,opt,name=details,proto3" json:"details,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Evidence) Reset() {
+	*x = Evidence{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Evidence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Evidence) ProtoMessage() {}
+
+func (x *Evidence) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Evidence.ProtoReflect.Descriptor instead.
+func (*Evidence) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *Evidence) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Evidence) GetAttributions() []*Attribution {
+	if x != nil {
+		return x.Attributions
+	}
+	return nil
+}
+
+func (x *Evidence) GetObserved() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Observed
+	}
+	return nil
+}
+
+func (x *Evidence) GetDetails() *structpb.Struct {
+	if x != nil {
+		return x.Details
+	}
+	return nil
+}
+
+// Attribution names one expected observation an item is evidence for.
+type Attribution struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// subject is an inventory subject's uid or a supplement's id.
+	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	// check is the name of a check expected for the subject (for a
+	// supplement, for its parent).
+	Check         string `protobuf:"bytes,2,opt,name=check,proto3" json:"check,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Attribution) Reset() {
+	*x = Attribution{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Attribution) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Attribution) ProtoMessage() {}
+
+func (x *Attribution) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Attribution.ProtoReflect.Descriptor instead.
+func (*Attribution) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *Attribution) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *Attribution) GetCheck() string {
+	if x != nil {
+		return x.Check
+	}
+	return ""
+}
+
+// Supplement is a subject the provider discovered under an inventory
+// workload, only when the inventory allows supplements.
+type Supplement struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the provider's identifier, unique in the result and never an
+	// inventory uid.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// parent is the uid of the inventory workload subject it is part of.
+	Parent string `protobuf:"bytes,2,opt,name=parent,proto3" json:"parent,omitempty"`
+	// kind and name describe it, for example "container" and its name.
+	Kind          string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Name          string `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Supplement) Reset() {
+	*x = Supplement{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Supplement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Supplement) ProtoMessage() {}
+
+func (x *Supplement) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Supplement.ProtoReflect.Descriptor instead.
+func (*Supplement) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *Supplement) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Supplement) GetParent() string {
+	if x != nil {
+		return x.Parent
+	}
+	return ""
+}
+
+func (x *Supplement) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Supplement) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// SubjectLimitation is what the provider could not collect for a subject.
+// It is never a finding and never a pass.
+type SubjectLimitation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// subject is an inventory subject's uid or a supplement's id.
+	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	// check is the check it concerns; empty for every check of the subject.
+	Check string `protobuf:"bytes,2,opt,name=check,proto3" json:"check,omitempty"`
+	// message is a bounded human-readable reason.
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubjectLimitation) Reset() {
+	*x = SubjectLimitation{}
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubjectLimitation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubjectLimitation) ProtoMessage() {}
+
+func (x *SubjectLimitation) ProtoReflect() protoreflect.Message {
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubjectLimitation.ProtoReflect.Descriptor instead.
+func (*SubjectLimitation) Descriptor() ([]byte, []int) {
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SubjectLimitation) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *SubjectLimitation) GetCheck() string {
+	if x != nil {
+		return x.Check
+	}
+	return ""
+}
+
+func (x *SubjectLimitation) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type CollectResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Result        *ResultReference       `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
@@ -1222,7 +1806,7 @@ type CollectResponse struct {
 
 func (x *CollectResponse) Reset() {
 	*x = CollectResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[12]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1234,7 +1818,7 @@ func (x *CollectResponse) String() string {
 func (*CollectResponse) ProtoMessage() {}
 
 func (x *CollectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[12]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1247,7 +1831,7 @@ func (x *CollectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectResponse.ProtoReflect.Descriptor instead.
 func (*CollectResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{12}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CollectResponse) GetResult() *ResultReference {
@@ -1275,7 +1859,7 @@ type ScanKey struct {
 
 func (x *ScanKey) Reset() {
 	*x = ScanKey{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[13]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1287,7 +1871,7 @@ func (x *ScanKey) String() string {
 func (*ScanKey) ProtoMessage() {}
 
 func (x *ScanKey) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[13]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1300,7 +1884,7 @@ func (x *ScanKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanKey.ProtoReflect.Descriptor instead.
 func (*ScanKey) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{13}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ScanKey) GetRunUid() string {
@@ -1352,7 +1936,7 @@ type Operation struct {
 
 func (x *Operation) Reset() {
 	*x = Operation{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[14]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1364,7 +1948,7 @@ func (x *Operation) String() string {
 func (*Operation) ProtoMessage() {}
 
 func (x *Operation) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[14]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1961,7 @@ func (x *Operation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Operation.ProtoReflect.Descriptor instead.
 func (*Operation) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{14}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Operation) GetOperationId() string {
@@ -1465,7 +2049,7 @@ type StartRequest struct {
 
 func (x *StartRequest) Reset() {
 	*x = StartRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[15]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +2061,7 @@ func (x *StartRequest) String() string {
 func (*StartRequest) ProtoMessage() {}
 
 func (x *StartRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[15]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +2074,7 @@ func (x *StartRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRequest.ProtoReflect.Descriptor instead.
 func (*StartRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{15}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *StartRequest) GetHeader() *RequestHeader {
@@ -1544,7 +2128,7 @@ type StartResponse struct {
 
 func (x *StartResponse) Reset() {
 	*x = StartResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[16]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1556,7 +2140,7 @@ func (x *StartResponse) String() string {
 func (*StartResponse) ProtoMessage() {}
 
 func (x *StartResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[16]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1569,7 +2153,7 @@ func (x *StartResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartResponse.ProtoReflect.Descriptor instead.
 func (*StartResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{16}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StartResponse) GetOperation() *Operation {
@@ -1589,7 +2173,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[17]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1601,7 +2185,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[17]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1614,7 +2198,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{17}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetRequest) GetHeader() *RequestHeader {
@@ -1640,7 +2224,7 @@ type GetResponse struct {
 
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[18]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1652,7 +2236,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[18]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1665,7 +2249,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{18}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetResponse) GetOperation() *Operation {
@@ -1685,7 +2269,7 @@ type CancelRequest struct {
 
 func (x *CancelRequest) Reset() {
 	*x = CancelRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[19]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1697,7 +2281,7 @@ func (x *CancelRequest) String() string {
 func (*CancelRequest) ProtoMessage() {}
 
 func (x *CancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[19]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1710,7 +2294,7 @@ func (x *CancelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelRequest.ProtoReflect.Descriptor instead.
 func (*CancelRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{19}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CancelRequest) GetHeader() *RequestHeader {
@@ -1736,7 +2320,7 @@ type CancelResponse struct {
 
 func (x *CancelResponse) Reset() {
 	*x = CancelResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[20]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1748,7 +2332,7 @@ func (x *CancelResponse) String() string {
 func (*CancelResponse) ProtoMessage() {}
 
 func (x *CancelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[20]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1761,7 +2345,7 @@ func (x *CancelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelResponse.ProtoReflect.Descriptor instead.
 func (*CancelResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{20}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CancelResponse) GetOperation() *Operation {
@@ -1783,7 +2367,7 @@ type ReadResultRequest struct {
 
 func (x *ReadResultRequest) Reset() {
 	*x = ReadResultRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[21]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1795,7 +2379,7 @@ func (x *ReadResultRequest) String() string {
 func (*ReadResultRequest) ProtoMessage() {}
 
 func (x *ReadResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[21]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1808,7 +2392,7 @@ func (x *ReadResultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadResultRequest.ProtoReflect.Descriptor instead.
 func (*ReadResultRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{21}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ReadResultRequest) GetHeader() *RequestHeader {
@@ -1844,7 +2428,7 @@ type ReadResultResponse struct {
 
 func (x *ReadResultResponse) Reset() {
 	*x = ReadResultResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[22]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +2440,7 @@ func (x *ReadResultResponse) String() string {
 func (*ReadResultResponse) ProtoMessage() {}
 
 func (x *ReadResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[22]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1869,7 +2453,7 @@ func (x *ReadResultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadResultResponse.ProtoReflect.Descriptor instead.
 func (*ReadResultResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{22}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ReadResultResponse) GetOffset() uint64 {
@@ -1899,7 +2483,7 @@ type AcknowledgeRequest struct {
 
 func (x *AcknowledgeRequest) Reset() {
 	*x = AcknowledgeRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[23]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1911,7 +2495,7 @@ func (x *AcknowledgeRequest) String() string {
 func (*AcknowledgeRequest) ProtoMessage() {}
 
 func (x *AcknowledgeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[23]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1924,7 +2508,7 @@ func (x *AcknowledgeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeRequest.ProtoReflect.Descriptor instead.
 func (*AcknowledgeRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{23}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AcknowledgeRequest) GetHeader() *RequestHeader {
@@ -1963,7 +2547,7 @@ type AcknowledgeResponse struct {
 
 func (x *AcknowledgeResponse) Reset() {
 	*x = AcknowledgeResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[24]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1975,7 +2559,7 @@ func (x *AcknowledgeResponse) String() string {
 func (*AcknowledgeResponse) ProtoMessage() {}
 
 func (x *AcknowledgeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[24]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1988,7 +2572,7 @@ func (x *AcknowledgeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcknowledgeResponse.ProtoReflect.Descriptor instead.
 func (*AcknowledgeResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{24}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{31}
 }
 
 // ContentReference is one bundle of the run's frozen content set,
@@ -2003,7 +2587,7 @@ type ContentReference struct {
 
 func (x *ContentReference) Reset() {
 	*x = ContentReference{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[25]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2015,7 +2599,7 @@ func (x *ContentReference) String() string {
 func (*ContentReference) ProtoMessage() {}
 
 func (x *ContentReference) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[25]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2028,7 +2612,7 @@ func (x *ContentReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentReference.ProtoReflect.Descriptor instead.
 func (*ContentReference) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{25}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ContentReference) GetBundle() string {
@@ -2064,7 +2648,7 @@ type CheckDefinition struct {
 
 func (x *CheckDefinition) Reset() {
 	*x = CheckDefinition{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[26]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2660,7 @@ func (x *CheckDefinition) String() string {
 func (*CheckDefinition) ProtoMessage() {}
 
 func (x *CheckDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[26]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2673,7 @@ func (x *CheckDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckDefinition.ProtoReflect.Descriptor instead.
 func (*CheckDefinition) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{26}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CheckDefinition) GetKind() string {
@@ -2145,7 +2729,7 @@ type EvaluateStart struct {
 
 func (x *EvaluateStart) Reset() {
 	*x = EvaluateStart{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[27]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2157,7 +2741,7 @@ func (x *EvaluateStart) String() string {
 func (*EvaluateStart) ProtoMessage() {}
 
 func (x *EvaluateStart) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[27]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2170,7 +2754,7 @@ func (x *EvaluateStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvaluateStart.ProtoReflect.Descriptor instead.
 func (*EvaluateStart) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{27}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *EvaluateStart) GetHeader() *RequestHeader {
@@ -2249,7 +2833,7 @@ type EvaluateRequest struct {
 
 func (x *EvaluateRequest) Reset() {
 	*x = EvaluateRequest{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[28]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2261,7 +2845,7 @@ func (x *EvaluateRequest) String() string {
 func (*EvaluateRequest) ProtoMessage() {}
 
 func (x *EvaluateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[28]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2274,7 +2858,7 @@ func (x *EvaluateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvaluateRequest.ProtoReflect.Descriptor instead.
 func (*EvaluateRequest) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{28}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *EvaluateRequest) GetPart() isEvaluateRequest_Part {
@@ -2343,7 +2927,7 @@ type Observation struct {
 
 func (x *Observation) Reset() {
 	*x = Observation{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[29]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2355,7 +2939,7 @@ func (x *Observation) String() string {
 func (*Observation) ProtoMessage() {}
 
 func (x *Observation) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[29]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2368,7 +2952,7 @@ func (x *Observation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Observation.ProtoReflect.Descriptor instead.
 func (*Observation) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{29}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *Observation) GetSubject() string {
@@ -2429,7 +3013,7 @@ type ObservationBatch struct {
 
 func (x *ObservationBatch) Reset() {
 	*x = ObservationBatch{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[30]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2441,7 +3025,7 @@ func (x *ObservationBatch) String() string {
 func (*ObservationBatch) ProtoMessage() {}
 
 func (x *ObservationBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[30]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2454,7 +3038,7 @@ func (x *ObservationBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObservationBatch.ProtoReflect.Descriptor instead.
 func (*ObservationBatch) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{30}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ObservationBatch) GetObservations() []*Observation {
@@ -2481,7 +3065,7 @@ type EvaluationSummary struct {
 
 func (x *EvaluationSummary) Reset() {
 	*x = EvaluationSummary{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[31]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2493,7 +3077,7 @@ func (x *EvaluationSummary) String() string {
 func (*EvaluationSummary) ProtoMessage() {}
 
 func (x *EvaluationSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[31]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2506,7 +3090,7 @@ func (x *EvaluationSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvaluationSummary.ProtoReflect.Descriptor instead.
 func (*EvaluationSummary) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{31}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *EvaluationSummary) GetProvider() *ProviderContract {
@@ -2550,7 +3134,7 @@ type EvaluateResponse struct {
 
 func (x *EvaluateResponse) Reset() {
 	*x = EvaluateResponse{}
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[32]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2562,7 +3146,7 @@ func (x *EvaluateResponse) String() string {
 func (*EvaluateResponse) ProtoMessage() {}
 
 func (x *EvaluateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[32]
+	mi := &file_konstapel_provider_v1_provider_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2575,7 +3159,7 @@ func (x *EvaluateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvaluateResponse.ProtoReflect.Descriptor instead.
 func (*EvaluateResponse) Descriptor() ([]byte, []int) {
-	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{32}
+	return file_konstapel_provider_v1_provider_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *EvaluateResponse) GetPart() isEvaluateResponse_Part {
@@ -2623,7 +3207,7 @@ var File_konstapel_provider_v1_provider_proto protoreflect.FileDescriptor
 
 const file_konstapel_provider_v1_provider_proto_rawDesc = "" +
 	"\n" +
-	"$konstapel/provider/v1/provider.proto\x12\x15konstapel.provider.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"I\n" +
+	"$konstapel/provider/v1/provider.proto\x12\x15konstapel.provider.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"I\n" +
 	"\vErrorDetail\x12:\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\".konstapel.provider.v1.ErrorReasonR\x06reason\"@\n" +
 	"\x10ProviderContract\x12\x12\n" +
@@ -2639,11 +3223,13 @@ const file_konstapel_provider_v1_provider_proto_rawDesc = "" +
 	"\x04read\x18\x02 \x03(\rR\x04read\"J\n" +
 	"\tCheckKind\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12)\n" +
-	"\x10parameter_schema\x18\x02 \x01(\fR\x0fparameterSchema\"\x85\x01\n" +
+	"\x10parameter_schema\x18\x02 \x01(\fR\x0fparameterSchema\"\xcb\x01\n" +
 	"\x06Limits\x12(\n" +
 	"\x10max_result_bytes\x18\x01 \x01(\x04R\x0emaxResultBytes\x12&\n" +
 	"\x0fmax_chunk_bytes\x18\x02 \x01(\rR\rmaxChunkBytes\x12)\n" +
-	"\x10max_observations\x18\x03 \x01(\rR\x0fmaxObservations\"\xd8\x03\n" +
+	"\x10max_observations\x18\x03 \x01(\rR\x0fmaxObservations\x12!\n" +
+	"\fmax_subjects\x18\x04 \x01(\rR\vmaxSubjects\x12!\n" +
+	"\fmax_evidence\x18\x05 \x01(\rR\vmaxEvidence\"\xd8\x03\n" +
 	"\x10DescribeResponse\x12C\n" +
 	"\bprovider\x18\x01 \x01(\v2'.konstapel.provider.v1.ProviderContractR\bprovider\x12+\n" +
 	"\x11protocol_versions\x18\x02 \x03(\rR\x10protocolVersions\x12+\n" +
@@ -2670,13 +3256,45 @@ const file_konstapel_provider_v1_provider_proto_rawDesc = "" +
 	"\x06sha256\x18\x05 \x01(\tR\x06sha256\x129\n" +
 	"\n" +
 	"expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12 \n" +
-	"\vlimitations\x18\a \x03(\tR\vlimitations\"\x81\x02\n" +
+	"\vlimitations\x18\a \x03(\tR\vlimitations\"\xa9\x02\n" +
 	"\x0eCollectRequest\x12<\n" +
 	"\x06header\x18\x01 \x01(\v2$.konstapel.provider.v1.RequestHeaderR\x06header\x122\n" +
-	"\x05scope\x18\x02 \x01(\v2\x1c.konstapel.provider.v1.ScopeR\x05scope\x12\x1c\n" +
-	"\tinventory\x18\x03 \x01(\fR\tinventory\x12'\n" +
+	"\x05scope\x18\x02 \x01(\v2\x1c.konstapel.provider.v1.ScopeR\x05scope\x12'\n" +
 	"\x0fpayload_version\x18\x04 \x01(\rR\x0epayloadVersion\x126\n" +
-	"\bdeadline\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\"Q\n" +
+	"\bdeadline\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12>\n" +
+	"\tinventory\x18\x06 \x01(\v2 .konstapel.provider.v1.InventoryR\tinventoryJ\x04\b\x03\x10\x04\"\x96\x01\n" +
+	"\tInventory\x12C\n" +
+	"\bsubjects\x18\x01 \x03(\v2'.konstapel.provider.v1.InventorySubjectR\bsubjects\x12D\n" +
+	"\vsupplements\x18\x02 \x01(\x0e2\".konstapel.provider.v1.SupplementsR\vsupplements\"\xad\x01\n" +
+	"\x10InventorySubject\x12\x10\n" +
+	"\x03uid\x18\x01 \x01(\tR\x03uid\x12#\n" +
+	"\rnamespace_uid\x18\x02 \x01(\tR\fnamespaceUid\x12\x1a\n" +
+	"\bresource\x18\x03 \x01(\tR\bresource\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1a\n" +
+	"\brevision\x18\x05 \x01(\tR\brevision\x12\x16\n" +
+	"\x06checks\x18\x06 \x03(\tR\x06checks\"\xe0\x01\n" +
+	"\x10CollectionResult\x12;\n" +
+	"\bevidence\x18\x01 \x03(\v2\x1f.konstapel.provider.v1.EvidenceR\bevidence\x12C\n" +
+	"\vsupplements\x18\x02 \x03(\v2!.konstapel.provider.v1.SupplementR\vsupplements\x12J\n" +
+	"\vlimitations\x18\x03 \x03(\v2(.konstapel.provider.v1.SubjectLimitationR\vlimitations\"\xcd\x01\n" +
+	"\bEvidence\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12F\n" +
+	"\fattributions\x18\x02 \x03(\v2\".konstapel.provider.v1.AttributionR\fattributions\x126\n" +
+	"\bobserved\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bobserved\x121\n" +
+	"\adetails\x18\x04 \x01(\v2\x17.google.protobuf.StructR\adetails\"=\n" +
+	"\vAttribution\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x14\n" +
+	"\x05check\x18\x02 \x01(\tR\x05check\"\\\n" +
+	"\n" +
+	"Supplement\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06parent\x18\x02 \x01(\tR\x06parent\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\"]\n" +
+	"\x11SubjectLimitation\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x14\n" +
+	"\x05check\x18\x02 \x01(\tR\x05check\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"Q\n" +
 	"\x0fCollectResponse\x12>\n" +
 	"\x06result\x18\x01 \x01(\v2&.konstapel.provider.v1.ResultReferenceR\x06result\"\xa5\x01\n" +
 	"\aScanKey\x12\x17\n" +
@@ -2797,7 +3415,11 @@ const file_konstapel_provider_v1_provider_proto_rawDesc = "" +
 	"\x1bERROR_REASON_RESULT_EXPIRED\x10\v\x12 \n" +
 	"\x1cERROR_REASON_DIGEST_MISMATCH\x10\f\x12\x1c\n" +
 	"\x18ERROR_REASON_UNAVAILABLE\x10\r\x12!\n" +
-	"\x1dERROR_REASON_INVALID_RESPONSE\x10\x0e*\x82\x02\n" +
+	"\x1dERROR_REASON_INVALID_RESPONSE\x10\x0e*b\n" +
+	"\vSupplements\x12\x1b\n" +
+	"\x17SUPPLEMENTS_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10SUPPLEMENTS_NONE\x10\x01\x12 \n" +
+	"\x1cSUPPLEMENTS_WITHIN_WORKLOADS\x10\x02*\x82\x02\n" +
 	"\x0eOperationState\x12\x1f\n" +
 	"\x1bOPERATION_STATE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17OPERATION_STATE_PENDING\x10\x01\x12\x1b\n" +
@@ -2843,115 +3465,133 @@ func file_konstapel_provider_v1_provider_proto_rawDescGZIP() []byte {
 	return file_konstapel_provider_v1_provider_proto_rawDescData
 }
 
-var file_konstapel_provider_v1_provider_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_konstapel_provider_v1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_konstapel_provider_v1_provider_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_konstapel_provider_v1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_konstapel_provider_v1_provider_proto_goTypes = []any{
 	(Capability)(0),               // 0: konstapel.provider.v1.Capability
 	(ErrorReason)(0),              // 1: konstapel.provider.v1.ErrorReason
-	(OperationState)(0),           // 2: konstapel.provider.v1.OperationState
-	(EvidenceState)(0),            // 3: konstapel.provider.v1.EvidenceState
-	(Outcome)(0),                  // 4: konstapel.provider.v1.Outcome
-	(*ErrorDetail)(nil),           // 5: konstapel.provider.v1.ErrorDetail
-	(*ProviderContract)(nil),      // 6: konstapel.provider.v1.ProviderContract
-	(*RequestHeader)(nil),         // 7: konstapel.provider.v1.RequestHeader
-	(*DescribeRequest)(nil),       // 8: konstapel.provider.v1.DescribeRequest
-	(*PayloadCompatibility)(nil),  // 9: konstapel.provider.v1.PayloadCompatibility
-	(*CheckKind)(nil),             // 10: konstapel.provider.v1.CheckKind
-	(*Limits)(nil),                // 11: konstapel.provider.v1.Limits
-	(*DescribeResponse)(nil),      // 12: konstapel.provider.v1.DescribeResponse
-	(*Namespace)(nil),             // 13: konstapel.provider.v1.Namespace
-	(*Scope)(nil),                 // 14: konstapel.provider.v1.Scope
-	(*ResultReference)(nil),       // 15: konstapel.provider.v1.ResultReference
-	(*CollectRequest)(nil),        // 16: konstapel.provider.v1.CollectRequest
-	(*CollectResponse)(nil),       // 17: konstapel.provider.v1.CollectResponse
-	(*ScanKey)(nil),               // 18: konstapel.provider.v1.ScanKey
-	(*Operation)(nil),             // 19: konstapel.provider.v1.Operation
-	(*StartRequest)(nil),          // 20: konstapel.provider.v1.StartRequest
-	(*StartResponse)(nil),         // 21: konstapel.provider.v1.StartResponse
-	(*GetRequest)(nil),            // 22: konstapel.provider.v1.GetRequest
-	(*GetResponse)(nil),           // 23: konstapel.provider.v1.GetResponse
-	(*CancelRequest)(nil),         // 24: konstapel.provider.v1.CancelRequest
-	(*CancelResponse)(nil),        // 25: konstapel.provider.v1.CancelResponse
-	(*ReadResultRequest)(nil),     // 26: konstapel.provider.v1.ReadResultRequest
-	(*ReadResultResponse)(nil),    // 27: konstapel.provider.v1.ReadResultResponse
-	(*AcknowledgeRequest)(nil),    // 28: konstapel.provider.v1.AcknowledgeRequest
-	(*AcknowledgeResponse)(nil),   // 29: konstapel.provider.v1.AcknowledgeResponse
-	(*ContentReference)(nil),      // 30: konstapel.provider.v1.ContentReference
-	(*CheckDefinition)(nil),       // 31: konstapel.provider.v1.CheckDefinition
-	(*EvaluateStart)(nil),         // 32: konstapel.provider.v1.EvaluateStart
-	(*EvaluateRequest)(nil),       // 33: konstapel.provider.v1.EvaluateRequest
-	(*Observation)(nil),           // 34: konstapel.provider.v1.Observation
-	(*ObservationBatch)(nil),      // 35: konstapel.provider.v1.ObservationBatch
-	(*EvaluationSummary)(nil),     // 36: konstapel.provider.v1.EvaluationSummary
-	(*EvaluateResponse)(nil),      // 37: konstapel.provider.v1.EvaluateResponse
-	(*timestamppb.Timestamp)(nil), // 38: google.protobuf.Timestamp
+	(Supplements)(0),              // 2: konstapel.provider.v1.Supplements
+	(OperationState)(0),           // 3: konstapel.provider.v1.OperationState
+	(EvidenceState)(0),            // 4: konstapel.provider.v1.EvidenceState
+	(Outcome)(0),                  // 5: konstapel.provider.v1.Outcome
+	(*ErrorDetail)(nil),           // 6: konstapel.provider.v1.ErrorDetail
+	(*ProviderContract)(nil),      // 7: konstapel.provider.v1.ProviderContract
+	(*RequestHeader)(nil),         // 8: konstapel.provider.v1.RequestHeader
+	(*DescribeRequest)(nil),       // 9: konstapel.provider.v1.DescribeRequest
+	(*PayloadCompatibility)(nil),  // 10: konstapel.provider.v1.PayloadCompatibility
+	(*CheckKind)(nil),             // 11: konstapel.provider.v1.CheckKind
+	(*Limits)(nil),                // 12: konstapel.provider.v1.Limits
+	(*DescribeResponse)(nil),      // 13: konstapel.provider.v1.DescribeResponse
+	(*Namespace)(nil),             // 14: konstapel.provider.v1.Namespace
+	(*Scope)(nil),                 // 15: konstapel.provider.v1.Scope
+	(*ResultReference)(nil),       // 16: konstapel.provider.v1.ResultReference
+	(*CollectRequest)(nil),        // 17: konstapel.provider.v1.CollectRequest
+	(*Inventory)(nil),             // 18: konstapel.provider.v1.Inventory
+	(*InventorySubject)(nil),      // 19: konstapel.provider.v1.InventorySubject
+	(*CollectionResult)(nil),      // 20: konstapel.provider.v1.CollectionResult
+	(*Evidence)(nil),              // 21: konstapel.provider.v1.Evidence
+	(*Attribution)(nil),           // 22: konstapel.provider.v1.Attribution
+	(*Supplement)(nil),            // 23: konstapel.provider.v1.Supplement
+	(*SubjectLimitation)(nil),     // 24: konstapel.provider.v1.SubjectLimitation
+	(*CollectResponse)(nil),       // 25: konstapel.provider.v1.CollectResponse
+	(*ScanKey)(nil),               // 26: konstapel.provider.v1.ScanKey
+	(*Operation)(nil),             // 27: konstapel.provider.v1.Operation
+	(*StartRequest)(nil),          // 28: konstapel.provider.v1.StartRequest
+	(*StartResponse)(nil),         // 29: konstapel.provider.v1.StartResponse
+	(*GetRequest)(nil),            // 30: konstapel.provider.v1.GetRequest
+	(*GetResponse)(nil),           // 31: konstapel.provider.v1.GetResponse
+	(*CancelRequest)(nil),         // 32: konstapel.provider.v1.CancelRequest
+	(*CancelResponse)(nil),        // 33: konstapel.provider.v1.CancelResponse
+	(*ReadResultRequest)(nil),     // 34: konstapel.provider.v1.ReadResultRequest
+	(*ReadResultResponse)(nil),    // 35: konstapel.provider.v1.ReadResultResponse
+	(*AcknowledgeRequest)(nil),    // 36: konstapel.provider.v1.AcknowledgeRequest
+	(*AcknowledgeResponse)(nil),   // 37: konstapel.provider.v1.AcknowledgeResponse
+	(*ContentReference)(nil),      // 38: konstapel.provider.v1.ContentReference
+	(*CheckDefinition)(nil),       // 39: konstapel.provider.v1.CheckDefinition
+	(*EvaluateStart)(nil),         // 40: konstapel.provider.v1.EvaluateStart
+	(*EvaluateRequest)(nil),       // 41: konstapel.provider.v1.EvaluateRequest
+	(*Observation)(nil),           // 42: konstapel.provider.v1.Observation
+	(*ObservationBatch)(nil),      // 43: konstapel.provider.v1.ObservationBatch
+	(*EvaluationSummary)(nil),     // 44: konstapel.provider.v1.EvaluationSummary
+	(*EvaluateResponse)(nil),      // 45: konstapel.provider.v1.EvaluateResponse
+	(*timestamppb.Timestamp)(nil), // 46: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),       // 47: google.protobuf.Struct
 }
 var file_konstapel_provider_v1_provider_proto_depIdxs = []int32{
 	1,  // 0: konstapel.provider.v1.ErrorDetail.reason:type_name -> konstapel.provider.v1.ErrorReason
-	6,  // 1: konstapel.provider.v1.RequestHeader.provider:type_name -> konstapel.provider.v1.ProviderContract
-	7,  // 2: konstapel.provider.v1.DescribeRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	6,  // 3: konstapel.provider.v1.DescribeResponse.provider:type_name -> konstapel.provider.v1.ProviderContract
-	9,  // 4: konstapel.provider.v1.DescribeResponse.payload:type_name -> konstapel.provider.v1.PayloadCompatibility
+	7,  // 1: konstapel.provider.v1.RequestHeader.provider:type_name -> konstapel.provider.v1.ProviderContract
+	8,  // 2: konstapel.provider.v1.DescribeRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	7,  // 3: konstapel.provider.v1.DescribeResponse.provider:type_name -> konstapel.provider.v1.ProviderContract
+	10, // 4: konstapel.provider.v1.DescribeResponse.payload:type_name -> konstapel.provider.v1.PayloadCompatibility
 	0,  // 5: konstapel.provider.v1.DescribeResponse.capabilities:type_name -> konstapel.provider.v1.Capability
-	10, // 6: konstapel.provider.v1.DescribeResponse.checks:type_name -> konstapel.provider.v1.CheckKind
-	11, // 7: konstapel.provider.v1.DescribeResponse.limits:type_name -> konstapel.provider.v1.Limits
-	13, // 8: konstapel.provider.v1.Scope.namespaces:type_name -> konstapel.provider.v1.Namespace
-	6,  // 9: konstapel.provider.v1.ResultReference.provider:type_name -> konstapel.provider.v1.ProviderContract
-	38, // 10: konstapel.provider.v1.ResultReference.expires_at:type_name -> google.protobuf.Timestamp
-	7,  // 11: konstapel.provider.v1.CollectRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	14, // 12: konstapel.provider.v1.CollectRequest.scope:type_name -> konstapel.provider.v1.Scope
-	38, // 13: konstapel.provider.v1.CollectRequest.deadline:type_name -> google.protobuf.Timestamp
-	15, // 14: konstapel.provider.v1.CollectResponse.result:type_name -> konstapel.provider.v1.ResultReference
-	18, // 15: konstapel.provider.v1.Operation.key:type_name -> konstapel.provider.v1.ScanKey
-	2,  // 16: konstapel.provider.v1.Operation.state:type_name -> konstapel.provider.v1.OperationState
-	15, // 17: konstapel.provider.v1.Operation.result:type_name -> konstapel.provider.v1.ResultReference
-	38, // 18: konstapel.provider.v1.Operation.created_at:type_name -> google.protobuf.Timestamp
-	38, // 19: konstapel.provider.v1.Operation.updated_at:type_name -> google.protobuf.Timestamp
-	7,  // 20: konstapel.provider.v1.StartRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	18, // 21: konstapel.provider.v1.StartRequest.key:type_name -> konstapel.provider.v1.ScanKey
-	14, // 22: konstapel.provider.v1.StartRequest.scope:type_name -> konstapel.provider.v1.Scope
-	38, // 23: konstapel.provider.v1.StartRequest.deadline:type_name -> google.protobuf.Timestamp
-	19, // 24: konstapel.provider.v1.StartResponse.operation:type_name -> konstapel.provider.v1.Operation
-	7,  // 25: konstapel.provider.v1.GetRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	19, // 26: konstapel.provider.v1.GetResponse.operation:type_name -> konstapel.provider.v1.Operation
-	7,  // 27: konstapel.provider.v1.CancelRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	19, // 28: konstapel.provider.v1.CancelResponse.operation:type_name -> konstapel.provider.v1.Operation
-	7,  // 29: konstapel.provider.v1.ReadResultRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	7,  // 30: konstapel.provider.v1.AcknowledgeRequest.header:type_name -> konstapel.provider.v1.RequestHeader
-	7,  // 31: konstapel.provider.v1.EvaluateStart.header:type_name -> konstapel.provider.v1.RequestHeader
-	38, // 32: konstapel.provider.v1.EvaluateStart.evaluation_time:type_name -> google.protobuf.Timestamp
-	14, // 33: konstapel.provider.v1.EvaluateStart.scope:type_name -> konstapel.provider.v1.Scope
-	30, // 34: konstapel.provider.v1.EvaluateStart.content:type_name -> konstapel.provider.v1.ContentReference
-	31, // 35: konstapel.provider.v1.EvaluateStart.checks:type_name -> konstapel.provider.v1.CheckDefinition
-	32, // 36: konstapel.provider.v1.EvaluateRequest.start:type_name -> konstapel.provider.v1.EvaluateStart
-	3,  // 37: konstapel.provider.v1.Observation.state:type_name -> konstapel.provider.v1.EvidenceState
-	4,  // 38: konstapel.provider.v1.Observation.outcome:type_name -> konstapel.provider.v1.Outcome
-	38, // 39: konstapel.provider.v1.Observation.evaluated:type_name -> google.protobuf.Timestamp
-	34, // 40: konstapel.provider.v1.ObservationBatch.observations:type_name -> konstapel.provider.v1.Observation
-	6,  // 41: konstapel.provider.v1.EvaluationSummary.provider:type_name -> konstapel.provider.v1.ProviderContract
-	35, // 42: konstapel.provider.v1.EvaluateResponse.observations:type_name -> konstapel.provider.v1.ObservationBatch
-	36, // 43: konstapel.provider.v1.EvaluateResponse.summary:type_name -> konstapel.provider.v1.EvaluationSummary
-	8,  // 44: konstapel.provider.v1.AssessmentProvider.Describe:input_type -> konstapel.provider.v1.DescribeRequest
-	16, // 45: konstapel.provider.v1.AssessmentProvider.Collect:input_type -> konstapel.provider.v1.CollectRequest
-	20, // 46: konstapel.provider.v1.AssessmentProvider.Start:input_type -> konstapel.provider.v1.StartRequest
-	22, // 47: konstapel.provider.v1.AssessmentProvider.Get:input_type -> konstapel.provider.v1.GetRequest
-	24, // 48: konstapel.provider.v1.AssessmentProvider.Cancel:input_type -> konstapel.provider.v1.CancelRequest
-	26, // 49: konstapel.provider.v1.AssessmentProvider.ReadResult:input_type -> konstapel.provider.v1.ReadResultRequest
-	28, // 50: konstapel.provider.v1.AssessmentProvider.Acknowledge:input_type -> konstapel.provider.v1.AcknowledgeRequest
-	33, // 51: konstapel.provider.v1.AssessmentProvider.Evaluate:input_type -> konstapel.provider.v1.EvaluateRequest
-	12, // 52: konstapel.provider.v1.AssessmentProvider.Describe:output_type -> konstapel.provider.v1.DescribeResponse
-	17, // 53: konstapel.provider.v1.AssessmentProvider.Collect:output_type -> konstapel.provider.v1.CollectResponse
-	21, // 54: konstapel.provider.v1.AssessmentProvider.Start:output_type -> konstapel.provider.v1.StartResponse
-	23, // 55: konstapel.provider.v1.AssessmentProvider.Get:output_type -> konstapel.provider.v1.GetResponse
-	25, // 56: konstapel.provider.v1.AssessmentProvider.Cancel:output_type -> konstapel.provider.v1.CancelResponse
-	27, // 57: konstapel.provider.v1.AssessmentProvider.ReadResult:output_type -> konstapel.provider.v1.ReadResultResponse
-	29, // 58: konstapel.provider.v1.AssessmentProvider.Acknowledge:output_type -> konstapel.provider.v1.AcknowledgeResponse
-	37, // 59: konstapel.provider.v1.AssessmentProvider.Evaluate:output_type -> konstapel.provider.v1.EvaluateResponse
-	52, // [52:60] is the sub-list for method output_type
-	44, // [44:52] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	11, // 6: konstapel.provider.v1.DescribeResponse.checks:type_name -> konstapel.provider.v1.CheckKind
+	12, // 7: konstapel.provider.v1.DescribeResponse.limits:type_name -> konstapel.provider.v1.Limits
+	14, // 8: konstapel.provider.v1.Scope.namespaces:type_name -> konstapel.provider.v1.Namespace
+	7,  // 9: konstapel.provider.v1.ResultReference.provider:type_name -> konstapel.provider.v1.ProviderContract
+	46, // 10: konstapel.provider.v1.ResultReference.expires_at:type_name -> google.protobuf.Timestamp
+	8,  // 11: konstapel.provider.v1.CollectRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	15, // 12: konstapel.provider.v1.CollectRequest.scope:type_name -> konstapel.provider.v1.Scope
+	46, // 13: konstapel.provider.v1.CollectRequest.deadline:type_name -> google.protobuf.Timestamp
+	18, // 14: konstapel.provider.v1.CollectRequest.inventory:type_name -> konstapel.provider.v1.Inventory
+	19, // 15: konstapel.provider.v1.Inventory.subjects:type_name -> konstapel.provider.v1.InventorySubject
+	2,  // 16: konstapel.provider.v1.Inventory.supplements:type_name -> konstapel.provider.v1.Supplements
+	21, // 17: konstapel.provider.v1.CollectionResult.evidence:type_name -> konstapel.provider.v1.Evidence
+	23, // 18: konstapel.provider.v1.CollectionResult.supplements:type_name -> konstapel.provider.v1.Supplement
+	24, // 19: konstapel.provider.v1.CollectionResult.limitations:type_name -> konstapel.provider.v1.SubjectLimitation
+	22, // 20: konstapel.provider.v1.Evidence.attributions:type_name -> konstapel.provider.v1.Attribution
+	46, // 21: konstapel.provider.v1.Evidence.observed:type_name -> google.protobuf.Timestamp
+	47, // 22: konstapel.provider.v1.Evidence.details:type_name -> google.protobuf.Struct
+	16, // 23: konstapel.provider.v1.CollectResponse.result:type_name -> konstapel.provider.v1.ResultReference
+	26, // 24: konstapel.provider.v1.Operation.key:type_name -> konstapel.provider.v1.ScanKey
+	3,  // 25: konstapel.provider.v1.Operation.state:type_name -> konstapel.provider.v1.OperationState
+	16, // 26: konstapel.provider.v1.Operation.result:type_name -> konstapel.provider.v1.ResultReference
+	46, // 27: konstapel.provider.v1.Operation.created_at:type_name -> google.protobuf.Timestamp
+	46, // 28: konstapel.provider.v1.Operation.updated_at:type_name -> google.protobuf.Timestamp
+	8,  // 29: konstapel.provider.v1.StartRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	26, // 30: konstapel.provider.v1.StartRequest.key:type_name -> konstapel.provider.v1.ScanKey
+	15, // 31: konstapel.provider.v1.StartRequest.scope:type_name -> konstapel.provider.v1.Scope
+	46, // 32: konstapel.provider.v1.StartRequest.deadline:type_name -> google.protobuf.Timestamp
+	27, // 33: konstapel.provider.v1.StartResponse.operation:type_name -> konstapel.provider.v1.Operation
+	8,  // 34: konstapel.provider.v1.GetRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	27, // 35: konstapel.provider.v1.GetResponse.operation:type_name -> konstapel.provider.v1.Operation
+	8,  // 36: konstapel.provider.v1.CancelRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	27, // 37: konstapel.provider.v1.CancelResponse.operation:type_name -> konstapel.provider.v1.Operation
+	8,  // 38: konstapel.provider.v1.ReadResultRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	8,  // 39: konstapel.provider.v1.AcknowledgeRequest.header:type_name -> konstapel.provider.v1.RequestHeader
+	8,  // 40: konstapel.provider.v1.EvaluateStart.header:type_name -> konstapel.provider.v1.RequestHeader
+	46, // 41: konstapel.provider.v1.EvaluateStart.evaluation_time:type_name -> google.protobuf.Timestamp
+	15, // 42: konstapel.provider.v1.EvaluateStart.scope:type_name -> konstapel.provider.v1.Scope
+	38, // 43: konstapel.provider.v1.EvaluateStart.content:type_name -> konstapel.provider.v1.ContentReference
+	39, // 44: konstapel.provider.v1.EvaluateStart.checks:type_name -> konstapel.provider.v1.CheckDefinition
+	40, // 45: konstapel.provider.v1.EvaluateRequest.start:type_name -> konstapel.provider.v1.EvaluateStart
+	4,  // 46: konstapel.provider.v1.Observation.state:type_name -> konstapel.provider.v1.EvidenceState
+	5,  // 47: konstapel.provider.v1.Observation.outcome:type_name -> konstapel.provider.v1.Outcome
+	46, // 48: konstapel.provider.v1.Observation.evaluated:type_name -> google.protobuf.Timestamp
+	42, // 49: konstapel.provider.v1.ObservationBatch.observations:type_name -> konstapel.provider.v1.Observation
+	7,  // 50: konstapel.provider.v1.EvaluationSummary.provider:type_name -> konstapel.provider.v1.ProviderContract
+	43, // 51: konstapel.provider.v1.EvaluateResponse.observations:type_name -> konstapel.provider.v1.ObservationBatch
+	44, // 52: konstapel.provider.v1.EvaluateResponse.summary:type_name -> konstapel.provider.v1.EvaluationSummary
+	9,  // 53: konstapel.provider.v1.AssessmentProvider.Describe:input_type -> konstapel.provider.v1.DescribeRequest
+	17, // 54: konstapel.provider.v1.AssessmentProvider.Collect:input_type -> konstapel.provider.v1.CollectRequest
+	28, // 55: konstapel.provider.v1.AssessmentProvider.Start:input_type -> konstapel.provider.v1.StartRequest
+	30, // 56: konstapel.provider.v1.AssessmentProvider.Get:input_type -> konstapel.provider.v1.GetRequest
+	32, // 57: konstapel.provider.v1.AssessmentProvider.Cancel:input_type -> konstapel.provider.v1.CancelRequest
+	34, // 58: konstapel.provider.v1.AssessmentProvider.ReadResult:input_type -> konstapel.provider.v1.ReadResultRequest
+	36, // 59: konstapel.provider.v1.AssessmentProvider.Acknowledge:input_type -> konstapel.provider.v1.AcknowledgeRequest
+	41, // 60: konstapel.provider.v1.AssessmentProvider.Evaluate:input_type -> konstapel.provider.v1.EvaluateRequest
+	13, // 61: konstapel.provider.v1.AssessmentProvider.Describe:output_type -> konstapel.provider.v1.DescribeResponse
+	25, // 62: konstapel.provider.v1.AssessmentProvider.Collect:output_type -> konstapel.provider.v1.CollectResponse
+	29, // 63: konstapel.provider.v1.AssessmentProvider.Start:output_type -> konstapel.provider.v1.StartResponse
+	31, // 64: konstapel.provider.v1.AssessmentProvider.Get:output_type -> konstapel.provider.v1.GetResponse
+	33, // 65: konstapel.provider.v1.AssessmentProvider.Cancel:output_type -> konstapel.provider.v1.CancelResponse
+	35, // 66: konstapel.provider.v1.AssessmentProvider.ReadResult:output_type -> konstapel.provider.v1.ReadResultResponse
+	37, // 67: konstapel.provider.v1.AssessmentProvider.Acknowledge:output_type -> konstapel.provider.v1.AcknowledgeResponse
+	45, // 68: konstapel.provider.v1.AssessmentProvider.Evaluate:output_type -> konstapel.provider.v1.EvaluateResponse
+	61, // [61:69] is the sub-list for method output_type
+	53, // [53:61] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_konstapel_provider_v1_provider_proto_init() }
@@ -2959,11 +3599,11 @@ func file_konstapel_provider_v1_provider_proto_init() {
 	if File_konstapel_provider_v1_provider_proto != nil {
 		return
 	}
-	file_konstapel_provider_v1_provider_proto_msgTypes[28].OneofWrappers = []any{
+	file_konstapel_provider_v1_provider_proto_msgTypes[35].OneofWrappers = []any{
 		(*EvaluateRequest_Start)(nil),
 		(*EvaluateRequest_PayloadChunk)(nil),
 	}
-	file_konstapel_provider_v1_provider_proto_msgTypes[32].OneofWrappers = []any{
+	file_konstapel_provider_v1_provider_proto_msgTypes[39].OneofWrappers = []any{
 		(*EvaluateResponse_Observations)(nil),
 		(*EvaluateResponse_Summary)(nil),
 	}
@@ -2972,8 +3612,8 @@ func file_konstapel_provider_v1_provider_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_konstapel_provider_v1_provider_proto_rawDesc), len(file_konstapel_provider_v1_provider_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   33,
+			NumEnums:      6,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

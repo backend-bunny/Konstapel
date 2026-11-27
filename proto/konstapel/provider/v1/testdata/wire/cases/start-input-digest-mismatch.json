@@ -4,10 +4,10 @@
   "message": "konstapel.provider.v1.StartRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-scanning",
-        "version": 2
+        "version": 4
       }
     },
     "key": {
@@ -30,5 +30,5 @@
     "deadline": "2026-11-26T12:00:00Z"
   },
   "expect": "ERROR_REASON_DIGEST_MISMATCH",
-  "wire": "ChgIARIUChBleGFtcGxlLXNjYW5uaW5nEAISZgoHcnVuLXVpZBIQcmVnaXN0cmF0aW9uLXVpZBgBIkdzaGEyNTY6MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMhohCgtjbHVzdGVyLXVpZBISCgZ0ZWFtLWESCG5zLWEtdWlkIhZ7ImNoZWNrcyI6WyJwb3N0dXJlIl19KAMyBgjAvqDYBg=="
+  "wire": "ChgIAhIUChBleGFtcGxlLXNjYW5uaW5nEAQSZgoHcnVuLXVpZBIQcmVnaXN0cmF0aW9uLXVpZBgBIkdzaGEyNTY6MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMhohCgtjbHVzdGVyLXVpZBISCgZ0ZWFtLWESCG5zLWEtdWlkIhZ7ImNoZWNrcyI6WyJwb3N0dXJlIl19KAMyBgjAvqDYBg=="
 }

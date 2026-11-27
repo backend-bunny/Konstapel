@@ -1,14 +1,14 @@
 {
-  "description": "Serving a further revision besides 1 is compatible.",
+  "description": "Serving a further revision besides 2 is compatible.",
   "message": "konstapel.provider.v1.DescribeResponse",
   "value": {
     "provider": {
       "name": "example-reporting",
-      "version": 2
+      "version": 4
     },
     "protocolVersions": [
-      1,
-      2
+      2,
+      3
     ],
     "evaluatorVersion": 5,
     "payload": {
@@ -35,5 +35,5 @@
     "implementation": "registry.example.invalid/example-reporting@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
   "expect": "OK",
-  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAISAgECGAUiBggDEgICAyoCAQMyNAofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIReyJ0eXBlIjoib2JqZWN0In06CAiAgEAQgIAEQnJyZWdpc3RyeS5leGFtcGxlLmludmFsaWQvZXhhbXBsZS1yZXBvcnRpbmdAc2hhMjU2OjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAQSAgIDGAUiBggDEgICAyoCAQMyNAofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIReyJ0eXBlIjoib2JqZWN0In06CAiAgEAQgIAEQnJyZWdpc3RyeS5leGFtcGxlLmludmFsaWQvZXhhbXBsZS1yZXBvcnRpbmdAc2hhMjU2OjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 }

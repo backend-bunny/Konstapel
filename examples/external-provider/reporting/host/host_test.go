@@ -69,8 +69,11 @@ func TestQuickstartAssessment(t *testing.T) {
 	if r.Result.GetSizeBytes() <= 256 {
 		t.Errorf("result of %d bytes does not exercise chunked transfer", r.Result.GetSizeBytes())
 	}
-	if got := r.Result.GetLimitations(); len(got) != 1 || !strings.Contains(got[0], "team-c") {
-		t.Errorf("limitations %q, want team-c missing from the source", got)
+	if got := r.Collection.GetLimitations(); len(got) != 1 || got[0].GetSubject() != host.Scope().GetNamespaces()[2].GetUid() || !strings.Contains(got[0].GetMessage(), "team-c") {
+		t.Errorf("limitations %v, want team-c missing from the source", got)
+	}
+	if got := r.Collection.GetEvidence(); len(got) != 2 || got[0].GetAttributions()[0].GetCheck() != host.Check {
+		t.Errorf("evidence %v, want team-a and team-b attributed to %s", got, host.Check)
 	}
 	if n := p.Staged(); n != 0 {
 		t.Errorf("%d results still staged after acknowledgement", n)

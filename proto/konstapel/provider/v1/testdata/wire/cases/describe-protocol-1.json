@@ -1,16 +1,16 @@
 {
-  "description": "Protocol revision 2 is not served.",
+  "description": "Protocol revision 1 is not served: a revision 1 host is refused.",
   "provider": "reporting",
   "message": "konstapel.provider.v1.DescribeRequest",
   "value": {
     "header": {
-      "protocolVersion": 2,
+      "protocolVersion": 1,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     }
   },
   "expect": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
-  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAC"
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxAE"
 }

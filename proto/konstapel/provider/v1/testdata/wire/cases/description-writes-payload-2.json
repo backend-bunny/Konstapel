@@ -4,10 +4,10 @@
   "value": {
     "provider": {
       "name": "example-reporting",
-      "version": 2
+      "version": 4
     },
     "protocolVersions": [
-      1
+      2
     ],
     "evaluatorVersion": 5,
     "payload": {
@@ -34,5 +34,5 @@
     "implementation": "registry.example.invalid/example-reporting@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
   "expect": "ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION",
-  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAISAQEYBSIGCAISAgIDKgIBAzI0Ch9yZXBvcnRpbmcuZXhhbXBsZS5pby92MS9Qb3N0dXJlEhF7InR5cGUiOiJvYmplY3QifToICICAQBCAgARCcnJlZ2lzdHJ5LmV4YW1wbGUuaW52YWxpZC9leGFtcGxlLXJlcG9ydGluZ0BzaGEyNTY6MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMA=="
+  "wire": "ChUKEWV4YW1wbGUtcmVwb3J0aW5nEAQSAQIYBSIGCAISAgIDKgIBAzI0Ch9yZXBvcnRpbmcuZXhhbXBsZS5pby92MS9Qb3N0dXJlEhF7InR5cGUiOiJvYmplY3QifToICICAQBCAgARCcnJlZ2lzdHJ5LmV4YW1wbGUuaW52YWxpZC9leGFtcGxlLXJlcG9ydGluZ0BzaGEyNTY6MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMA=="
 }

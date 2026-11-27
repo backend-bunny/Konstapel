@@ -1,13 +1,13 @@
 {
-  "description": "Reference descriptions the request cases are served by, the host expectation the description cases are checked against, and the result the reference providers have staged. The four version dimensions use distinct numbers (protocol 1, contract 2, payload write 3 and read 2-3, evaluator 5) so that a mix-up of two dimensions fails a case.",
+  "description": "Reference descriptions the request cases are served by, the host expectation the description cases are checked against, and the result the reference providers have staged. The four version dimensions use distinct numbers (protocol 2, contract 4, payload write 3 and read 2-3, evaluator 5) so that a mix-up of two dimensions fails a case.",
   "providers": {
     "reporting": {
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       },
       "protocolVersions": [
-        1
+        2
       ],
       "evaluatorVersion": 5,
       "payload": {
@@ -36,10 +36,10 @@
     "scanning": {
       "provider": {
         "name": "example-scanning",
-        "version": 2
+        "version": 4
       },
       "protocolVersions": [
-        1
+        2
       ],
       "evaluatorVersion": 5,
       "payload": {
@@ -69,7 +69,7 @@
   },
   "host": {
     "provider": "example-reporting",
-    "contractVersion": 2,
+    "contractVersion": 4,
     "payloadVersion": 3,
     "evaluatorVersion": 5,
     "capabilities": [
@@ -79,6 +79,6 @@
   },
   "staged": {
     "resultId": "result-1",
-    "payload": "eyJyZXBvcnRzIjpbXX0="
+    "payload": "eyJldmlkZW5jZSI6W3siaWQiOiJldmlkZW5jZS0xIiwiYXR0cmlidXRpb25zIjpbeyJzdWJqZWN0Ijoid29ya2xvYWQtYS11aWQiLCJjaGVjayI6InBvc3R1cmUifV0sIm9ic2VydmVkIjoiMjAyNi0xMS0yNlQxMTowMDowMFoiLCJkZXRhaWxzIjp7InZlcmRpY3QiOiJQQVNTRUQifX1dfQ=="
   }
 }

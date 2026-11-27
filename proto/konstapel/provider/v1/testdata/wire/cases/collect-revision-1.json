@@ -1,0 +1,27 @@
+{
+  "description": "A revision 1 collection, as a revision 1 host would send it, is refused before any handler.",
+  "provider": "reporting",
+  "message": "konstapel.provider.v1.CollectRequest",
+  "value": {
+    "header": {
+      "protocolVersion": 1,
+      "provider": {
+        "name": "example-reporting",
+        "version": 4
+      }
+    },
+    "scope": {
+      "cluster": "cluster-uid",
+      "namespaces": [
+        {
+          "name": "team-a",
+          "uid": "ns-a-uid"
+        }
+      ]
+    },
+    "payloadVersion": 3,
+    "deadline": "2026-11-26T12:00:00Z"
+  },
+  "expect": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
+  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxAEEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAyoGCMC+oNgG"
+}

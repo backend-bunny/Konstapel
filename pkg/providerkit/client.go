@@ -96,10 +96,11 @@ func (c *Client) described(ctx context.Context, capabilities ...providerv1.Capab
 
 func (c *Client) contract() *providerv1.ProviderContract { return c.want.Header().GetProvider() }
 
-// Collect asks the provider to collect existing evidence for scope and
-// returns the checked reference of the staged result. inventory is optional
-// provider-specific frozen inventory input (a JSON object).
-func (c *Client) Collect(ctx context.Context, scope *providerv1.Scope, inventory []byte, deadline time.Time) (*providerv1.ResultReference, error) {
+// Collect asks the provider to collect existing evidence for scope against
+// the host-frozen inventory and returns the checked reference of the staged
+// result. An inventory with more subjects than the negotiated bound is
+// ERROR_REASON_LIMIT_EXCEEDED and is never sent, or truncated.
+func (c *Client) Collect(ctx context.Context, scope *providerv1.Scope, inventory *providerv1.Inventory, deadline time.Time) (*providerv1.ResultReference, error) {
 	_, l, err := c.described(ctx, providerv1.Capability_CAPABILITY_COLLECT)
 	if err != nil {
 		return nil, err
@@ -110,8 +111,8 @@ func (c *Client) Collect(ctx context.Context, scope *providerv1.Scope, inventory
 	if deadline.IsZero() {
 		return nil, invalidRequest("collect needs a deadline")
 	}
-	if len(inventory) > 0 && !jsonObject(inventory) {
-		return nil, invalidRequest("collect inventory must be one JSON object")
+	if err := CheckInventory(inventory, scope, l.GetMaxSubjects()); err != nil {
+		return nil, err
 	}
 	resp, err := c.rpc.Collect(ctx, &providerv1.CollectRequest{Header: c.want.Header(), Scope: scope, Inventory: inventory,
 		PayloadVersion: c.want.PayloadVersion, Deadline: timestamppb.New(deadline)})
@@ -194,13 +195,40 @@ func (c *Client) ReadResult(ctx context.Context, ref *providerv1.ResultReference
 	return c.ResumeResult(ctx, ref, nil)
 }
 
+// ReadCollection transfers a result from the start and returns its bytes
+// with the decoded CollectionResult, checked as ParseCollectionResult
+// checks it within the negotiated bounds.
+func (c *Client) ReadCollection(ctx context.Context, ref *providerv1.ResultReference) ([]byte, *providerv1.CollectionResult, error) {
+	data, err := c.resume(ctx, ref, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := ParseCollectionResult(data, c.Limits())
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, res, nil
+}
+
 // ResumeResult continues a transfer after the bytes already received. It
-// returns the complete result once its size and digest match ref. On an
+// returns the complete result once its size and digest match ref and it is
+// a well-formed CollectionResult (ParseCollectionResult). On an
 // interrupted stream it returns the bytes received so far with the error,
 // so the caller can resume again; on any protocol violation it returns no
 // bytes. The reference must be one a checked response returned for the
 // registration's payload version.
 func (c *Client) ResumeResult(ctx context.Context, ref *providerv1.ResultReference, have []byte) ([]byte, error) {
+	data, err := c.resume(ctx, ref, have)
+	if err != nil {
+		return data, err
+	}
+	if _, err := ParseCollectionResult(data, c.Limits()); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (c *Client) resume(ctx context.Context, ref *providerv1.ResultReference, have []byte) ([]byte, error) {
 	_, l, err := c.described(ctx, providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_SCAN)
 	if err != nil {
 		return nil, err

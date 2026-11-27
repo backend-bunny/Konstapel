@@ -4,10 +4,10 @@
   "message": "konstapel.provider.v1.CollectRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     },
     "scope": {
@@ -19,8 +19,33 @@
         }
       ]
     },
-    "payloadVersion": 3
+    "payloadVersion": 3,
+    "inventory": {
+      "subjects": [
+        {
+          "uid": "ns-a-uid",
+          "namespaceUid": "ns-a-uid",
+          "resource": "/v1/namespaces",
+          "name": "team-a",
+          "revision": "rev-ns-a",
+          "checks": [
+            "posture"
+          ]
+        },
+        {
+          "uid": "workload-a-uid",
+          "namespaceUid": "ns-a-uid",
+          "resource": "apps/v1/deployments",
+          "name": "web",
+          "revision": "rev-web",
+          "checks": [
+            "posture"
+          ]
+        }
+      ],
+      "supplements": "SUPPLEMENTS_NONE"
+    }
   },
   "expect": "ERROR_REASON_INVALID_REQUEST",
-  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAw=="
+  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAEEiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWQgAzKLAQo/Cghucy1hLXVpZBIIbnMtYS11aWQaDi92MS9uYW1lc3BhY2VzIgZ0ZWFtLWEqCHJldi1ucy1hMgdwb3N0dXJlCkYKDndvcmtsb2FkLWEtdWlkEghucy1hLXVpZBoTYXBwcy92MS9kZXBsb3ltZW50cyIDd2ViKgdyZXYtd2ViMgdwb3N0dXJlEAE="
 }

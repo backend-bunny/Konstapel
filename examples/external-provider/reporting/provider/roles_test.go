@@ -34,7 +34,12 @@ func collectRequest(pairs ...string) *providerv1.CollectRequest {
 	for i := 0; i < len(pairs); i += 2 {
 		scope.Namespaces = append(scope.Namespaces, &providerv1.Namespace{Name: pairs[i], Uid: pairs[i+1]})
 	}
-	return &providerv1.CollectRequest{Scope: scope}
+	inv := &providerv1.Inventory{Supplements: providerv1.Supplements_SUPPLEMENTS_NONE}
+	for _, ns := range scope.GetNamespaces() {
+		inv.Subjects = append(inv.Subjects, &providerv1.InventorySubject{Uid: ns.GetUid(), NamespaceUid: ns.GetUid(),
+			Resource: providerkit.NamespaceResource, Name: ns.GetName(), Revision: "test", Checks: []string{host.Check}})
+	}
+	return &providerv1.CollectRequest{Scope: scope, Inventory: inv}
 }
 
 // start serves s with the server material in dir, authorizing client, and

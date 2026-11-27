@@ -665,19 +665,30 @@ func (l *live) refAssess(conn grpc.ClientConnInterface, uids map[string]string, 
 	scope := &providerv1.Scope{Cluster: "live", Namespaces: []*providerv1.Namespace{
 		{Name: "erl-team-a", Uid: uids["erl-team-a"]}, {Name: "erl-team-b", Uid: uids["erl-team-b"]},
 		{Name: "erl-missing", Uid: "00000000-0000-4000-8000-000000000000"}}}
+	// The host-frozen inventory (protocol revision 2): each scope namespace
+	// is a subject expecting the one check.
+	inv := &providerv1.Inventory{Supplements: providerv1.Supplements_SUPPLEMENTS_NONE}
+	for _, ns := range scope.GetNamespaces() {
+		inv.Subjects = append(inv.Subjects, &providerv1.InventorySubject{Uid: ns.GetUid(), NamespaceUid: ns.GetUid(),
+			Resource: providerkit.NamespaceResource, Name: ns.GetName(), Revision: "live", Checks: []string{"namespace-owner"}})
+	}
 	ctx, cancel := call()
 	defer cancel()
 	deadline, _ := ctx.Deadline()
-	ref, err := c.Collect(ctx, scope, nil, deadline)
+	ref, err := c.Collect(ctx, scope, inv, deadline)
 	if err != nil {
 		t.Fatalf("%s: collect: %v", step, err)
 	}
-	if got := ref.GetLimitations(); len(got) != 1 || got[0] != "namespace erl-missing is not in the Kubernetes API" {
-		t.Errorf("%s: limitations %q", step, got)
-	}
-	payload, err := c.ReadResult(ctx, ref)
+	payload, res, err := c.ReadCollection(ctx, ref)
 	if err != nil {
 		t.Fatalf("%s: read result: %v", step, err)
+	}
+	if got := res.GetLimitations(); len(got) != 1 || got[0].GetSubject() != "00000000-0000-4000-8000-000000000000" ||
+		got[0].GetMessage() != "namespace erl-missing is not in the Kubernetes API" {
+		t.Errorf("%s: limitations %v", step, got)
+	}
+	if got := res.GetEvidence(); len(got) != 2 {
+		t.Errorf("%s: evidence %v, want the two live namespaces", step, got)
 	}
 	if err := c.Acknowledge(ctx, ref); err != nil {
 		t.Fatalf("%s: acknowledge: %v", step, err)

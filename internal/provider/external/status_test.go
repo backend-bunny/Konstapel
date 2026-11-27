@@ -15,6 +15,7 @@ import (
 	"github.com/backend-bunny/Konstapel/internal/provider"
 	"github.com/backend-bunny/Konstapel/internal/provider/external"
 	"github.com/backend-bunny/Konstapel/internal/provider/external/externaltest"
+	"github.com/backend-bunny/Konstapel/pkg/providerkit"
 )
 
 // validStatus checks a status write against the generated CRD as the API
@@ -106,7 +107,7 @@ func TestStatusReportsAvailabilityCompatibilityAndReadiness(t *testing.T) {
 			checkConditions(t, ap.Status, ap.Generation, tc.want)
 			if id := ap.Status.Identity; tc.identity != (id != nil) {
 				t.Fatalf("identity %+v", id)
-			} else if id != nil && (id.ReleaseDigest != externaltest.Release || id.ProtocolRevision != 1 || !id.ObservedAt.Time.Equal(at) ||
+			} else if id != nil && (id.ReleaseDigest != externaltest.Release || id.ProtocolRevision != int32(providerkit.ProtocolVersion) || !id.ObservedAt.Time.Equal(at) ||
 				len(id.Capabilities) != 2) {
 				t.Fatalf("identity %+v", id)
 			}

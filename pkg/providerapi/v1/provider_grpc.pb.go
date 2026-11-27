@@ -13,7 +13,7 @@
 //      package name (konstapel.provider.v1); a breaking change is a new
 //      package. RequestHeader.protocol_version is the revision of this
 //      major the caller speaks, and DescribeResponse.protocol_versions are
-//      the revisions the provider serves. This definition is revision 1.
+//      the revisions the provider serves. This definition is revision 2.
 //   2. Provider contract version: the provider's capability contract,
 //      selected by bundles as "<name>/v<version>" (ProviderContract). It is
 //      the host's provider descriptor version.
@@ -27,6 +27,16 @@
 //
 // An unsupported version in any dimension is rejected with that
 // dimension's ErrorReason. It is never adapted, defaulted or ignored.
+//
+// Revisions. Revision 2 adds the host-frozen Inventory every Collect
+// carries and makes a staged result a CollectionResult, the host-readable
+// attribution envelope in which only evidence details are opaque. Its
+// messages are additive, but a revision 1 peer would silently ignore them
+// (protobuf keeps unknown fields and its readers never see them), so the
+// revision is what makes them mandatory: a revision 2 host and provider
+// speak revision 2 only, and each rejects the other revision with
+// ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION before any payload is sent.
+// Revision 1's opaque CollectRequest.inventory (field 3) is removed.
 //
 // Errors. A failed call returns a gRPC status whose details carry exactly
 // one ErrorDetail naming the reason. Clients branch on the ErrorReason,

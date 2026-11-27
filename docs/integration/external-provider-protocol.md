@@ -13,9 +13,11 @@ authoring kit are implemented and tested. The administrator-owned
 ([assessment providers](../assessment-providers.md#registration-is-code-not-data)),
 and a controller configured for external providers probes registrations and
 selects them ([registration, selection and status](#registration-selection-and-status)).
-No assessment uses an external provider yet: remote collection, result
-capture, evaluation replay and Helm distribution of providers are later
-tasks of the change. Nothing on this page installs a provider. Konstapel's
+No assessment uses an external provider yet. The host's collection seam
+(`external.Collect`, [collection seam](#host-collection-seam)) is
+implemented and tested but no run calls it; run wiring, result capture,
+evaluation replay and Helm distribution of providers are later tasks of the
+change. Nothing on this page installs a provider. Konstapel's
 only supported provider is still the in-tree Kyverno provider
 ([assessment providers](../assessment-providers.md)).
 
@@ -102,11 +104,53 @@ later calls. An incompatible description blocks every other call.
 
 `CollectRequest` names the host-frozen `scope`: the cluster and the
 namespace instances (name and UID) that the expected inventory covers. It
-also has optional provider-specific `inventory` (one UTF-8 JSON object),
-the `payload_version` the host will store (which must be the provider's
+carries the host-frozen `inventory` (required since revision 2), the
+`payload_version` the host will store (which must be the provider's
 `payload.write`), and the collection `deadline`.
 
-The provider reads existing evidence for that scope. It never mutates a
+#### Inventory
+
+The host derives the inventory and freezes it before dispatch. The provider
+never defines it. Each `InventorySubject` is one namespace or workload
+instance of the scope:
+
+| Field | Meaning |
+| --- | --- |
+| `uid` | The object's `metadata.uid`, its stable instance identity. Unique in the inventory. |
+| `namespace_uid` | The UID of the scope namespace the subject is in. A namespace subject is its own namespace. |
+| `resource` | `<group>/<version>/<resource>`, with an empty group for core: `/v1/namespaces` for a namespace subject, for example `apps/v1/deployments` for a workload. |
+| `name` | The object's name, at most 253 bytes. A namespace subject has the scope's name for its UID. |
+| `revision` | The host's revision of the state checks can read: for a workload, a digest of its spec, labels and annotations, never its `resourceVersion`. Evidence about another state is not this subject's. |
+| `checks` | The names of the run's checks expected for the subject: at least one, at most 256, each once. |
+
+The expected (subject, check) pairs are the collection's denominator. A
+result can neither add to them, narrow them nor replace them. The inventory
+projects identities, revisions and expectations only, never labels, specs,
+images or other object data. A provider that needs more reads its own
+source under its own authority.
+
+`supplements` says whether the provider may report subjects it discovers
+itself. It is never defaulted: `SUPPLEMENTS_UNSPECIFIED` is
+`ERROR_REASON_INVALID_REQUEST`.
+
+- `SUPPLEMENTS_NONE`: only inventory subjects.
+- `SUPPLEMENTS_WITHIN_WORKLOADS`: parts of an inventory workload, such as
+  its containers or images, may be reported as supplements of that
+  workload. A supplement adds observations of its own (its parent's checks).
+  It never changes the inventory's expectations, and evidence attributed to
+  it never completes one.
+
+The provider (`providerkit.CheckInventory`) refuses an inventory without
+subjects, with a subject outside the scope's namespaces, a repeated UID or
+check, a malformed resource, or a missing name, revision or check. More
+subjects than the negotiated `max_subjects` is `ERROR_REASON_LIMIT_EXCEEDED`.
+The kit's `Client` refuses such an inventory before sending it, and never
+truncates one. Cloud accounts and other non-Kubernetes targets need their
+own target contract and are not part of this protocol.
+
+#### Result
+
+The provider reads existing evidence for that inventory. It never mutates a
 source and never starts a scan. It stages the result as one immutable
 payload and returns its `ResultReference`:
 
@@ -121,9 +165,34 @@ payload and returns its `ResultReference`:
   not be collected or assessed. A limitation is never a finding and never a
   pass.
 
-The payload is one UTF-8 JSON object in the provider's payload format.
-Evidence must be attributable to the request's scope only. The host rejects
-or projects anything else before disclosure. `inventory` and every other
+The staged payload is a `CollectionResult`, the host-readable attribution
+envelope, as its proto3 JSON mapping: one UTF-8 JSON object without
+surrounding whitespace, so the host's capture keeps exactly the staged
+bytes.
+
+- `evidence`: the evidence items. Each has an `id` unique in the result, at
+  least one `attributions` entry (a `subject`, the UID of an inventory
+  subject or the id of a supplement, and a `check` expected for it, each pair
+  once), the `observed` time at which the source evaluated or observed it,
+  and `details`.
+- `supplements`: the subjects the provider discovered, each with an `id`
+  unique in the result, the `parent` inventory workload UID, a `kind` and a
+  `name`. Allowed only when the inventory allows supplements.
+- `limitations`: what the provider could not collect for a `subject`
+  (optionally one `check`), with a `message`. Never a finding and never a
+  pass.
+
+`details` (a JSON object, `google.protobuf.Struct`) is the only
+source-specific part. Its format is the provider's payload version, and the
+host never interprets it. A reader rejects unknown fields, so a field added
+later needs a new revision. `providerkit.ParseCollectionResult` checks the
+structure and bounds: at most `max_evidence` items and limitations, at most
+`max_subjects` supplements, at most 1024 attributions per item, and bounded
+text.
+
+Evidence must be attributable to the inventory only. The host validates
+attribution before anything is used
+([collection seam](#host-collection-seam)). The inventory and every other
 input never select credentials, identities, commands or images. The
 deadline is the enclosing assessment's, and a provider never extends it.
 
@@ -183,9 +252,10 @@ bytes. The kit's `Client.ResumeResult(ctx, ref, have)` asks for
 so far together with the error, so the caller can resume again. On any
 protocol violation, such as a gap, an overlong or empty chunk, or more bytes
 than `size_bytes`, it returns no bytes. A complete transfer is accepted
-only when its length and SHA-256 match the reference and it is one JSON
-object. Before sending, the kit's `Server` also checks that the staged
-bytes match their reference.
+only when its length and SHA-256 match the reference and it is a
+well-formed `CollectionResult`. `Client.ReadCollection` also returns the
+decoded result. Before sending, the kit's `Server` also checks that the
+staged bytes match their reference and are a well-formed `CollectionResult`.
 
 `Acknowledge` sends the `result_id` with the `size_bytes` and `sha256` of
 the bytes the host captured. The provider verifies them against the result
@@ -249,8 +319,30 @@ evaluation.
 
 Every request opens with a `RequestHeader`. It holds `protocol_version` (the
 revision of major version 1 the caller speaks; this definition is revision
-1, `providerkit.ProtocolVersion`) and `provider` (the contract the caller
+2, `providerkit.ProtocolVersion`) and `provider` (the contract the caller
 expects to reach). For `Evaluate`, the header is in `EvaluateStart`.
+
+### Revision 2
+
+Revision 2 added the inventory, the `CollectionResult` envelope and the
+`max_subjects` and `max_evidence` limits, and removed revision 1's opaque
+`CollectRequest.inventory` bytes (field 3, now reserved). The messages are
+additive, but a revision 1 peer would silently ignore them: protobuf keeps
+unknown fields, and revision 1 readers never see them
+(`TestRevision1ReadersSilentlyIgnoreRevision2Fields` decodes revision 2
+messages with revision 1's saved descriptor). The revision is therefore what
+makes them mandatory:
+
+- the kit speaks and serves revision 2 only. `NewServer` refuses a
+  description that lists any other revision, because it would accept that
+  revision's requests: a revision 1 host would collect without an inventory;
+- a revision 2 provider refuses a revision 1 request with
+  `UNSUPPORTED_PROTOCOL_VERSION` before any handler runs, as a revision 1
+  provider refuses a revision 2 request;
+- a revision 2 host refuses a provider that does not serve revision 2.
+
+No Konstapel release speaks revision 1, so no dual-revision window is kept
+(`TestOtherRevisionsAreRejectedInBothDirections`).
 
 Four versions are separate compatibility dimensions. None implies another,
 and none is negotiated downward, defaulted or adapted:
@@ -363,6 +455,8 @@ srv.Limits()}`). Exceeding a protocol bound is `ERROR_REASON_LIMIT_EXCEEDED`.
 | `Limits.max_result_bytes` | 512 MiB | `DefaultMaxResultBytes`: one staged result, and one evaluated payload |
 | `Limits.max_chunk_bytes` | 1 MiB | `DefaultMaxChunkBytes`: the data of one `ReadResultResponse` or `EvaluateRequest.payload_chunk`, and the encoded observations of one `ObservationBatch` |
 | `Limits.max_observations` | 100000 | `DefaultMaxObservations`: the observations of one evaluation |
+| `Limits.max_subjects` | 100000 | `DefaultMaxSubjects`: the subjects of one inventory, and separately the supplements of one result |
+| `Limits.max_evidence` | 100000 | `DefaultMaxEvidence`: the evidence items of one result, and separately its subject limitations |
 | gRPC message, either direction | 4 MiB | `TransportLimits.MaxMessageBytes` (`DefaultMaxMessageBytes`); at least 64 KiB and one chunk plus its envelope |
 | Received bytes of one call | largest bounded transfer plus one message | `TransportLimits.MaxStreamBytes`: a full result or payload in chunks, or a full evaluation's observations |
 | Concurrent calls per connection | 100 | `TransportLimits.MaxConcurrentStreams` (`DefaultMaxConcurrentStreams`), server side |
@@ -370,6 +464,9 @@ srv.Limits()}`). Exceeding a protocol bound is `ERROR_REASON_LIMIT_EXCEEDED`.
 | Call metadata | 16 KiB | Fixed header-list bound, both sides |
 | Limitations per result | 64 | `MaxLimitations` |
 | Identifier, limitation, operation message or raw outcome | 1024 bytes | `MaxTextBytes` |
+| Inventory subject name | 253 bytes | `MaxNameBytes`, a Kubernetes object name |
+| Expected checks per inventory subject | 256 | `MaxSubjectChecks` |
+| Attributions per evidence item | 1024 | `MaxAttributions` |
 | One mounted TLS file | 1 MiB | Fixed; at most 512 certificates |
 | TLS file reload interval | 10s | `DefaultReloadInterval` (`MutualTLS.Watch`) |
 <!-- END GENERATED: limits -->
@@ -559,6 +656,59 @@ Work frozen to it keeps that configuration:
   it needs a capability its revision did not allow (`CapabilityNotFrozen`),
   or when the endpoint no longer reports the frozen release or compatibility
   (`ImplementationChanged`). It is never reinterpreted.
+
+A capture of frozen work records the identity needed to interpret it: the
+envelope's `registration` (name, UID, revision, release digest, protocol and
+protocol revision) beside its provider contract, payload version and
+evaluator version
+([captures](../assessment-providers.md#captures)).
+
+## Host collection seam
+
+`external.Collect(ctx, dialer, frozen, inventory, limits, deadline)` in
+`internal/provider/external` is the host's whole read-only collection from
+one registered provider
+([design Decision 12](../../openspec/changes/add-external-assessment-providers/design.md#12-self-contained-collection-seam)).
+It is tested over real mutual TLS endpoints (`externaltest`), but no
+assessment run calls it yet: wiring it into runs, captures and reports is
+the open task 3.1. In order, it:
+
+1. calls `Frozen.Continue` with the registration as the dialer's
+   `Registration` reader sees it now. Removed, replaced or changed
+   registrations and capabilities the frozen revision does not allow end the
+   collection before anything is dispatched;
+2. bounds the collection by the earlier of `deadline` and the limits'
+   timeout, and applies the stricter of the host's limits (result bytes from
+   the byte budget; subjects, evidence items and supplements from the object
+   budget) and the provider's advertised ones. An inventory beyond them is
+   never dispatched or truncated;
+3. on one authenticated connection, describes the endpoint (checked against
+   the frozen identity and release), sends Collect with the inventory, and
+   reads the result back with `ReadCollection`. It never acknowledges:
+   acknowledgement follows durable capture (task 3.2), so the provider keeps
+   the result until then or until `expires_at`;
+4. attributes the result against the inventory (`external.Attribute`). An
+   item is evidence only when every one of its attributions names an
+   inventory subject, or an accepted supplement, and a check expected for it.
+   An item that also names anything else is withheld whole. Supplements are
+   accepted only when the inventory allows them and only under an inventory
+   workload, and never complete a frozen expectation. Every expectation
+   without accepted evidence is missing, with the provider's limitation for
+   it when it gave one, and never a pass. Withheld items and limitations
+   become at most 64 diagnostics. Each names the item's location and the
+   reason, never a provider-supplied identifier or detail;
+5. writes the capture: a version 3 envelope recording the frozen
+   registration, with the staged bytes as its payload unchanged
+   (`collector.EncodeEnvelope`). It reads the capture back through
+   `Frozen.CaptureReaders`, which read only captures of that registration
+   UID, revision and release.
+
+Every other outcome is an incomplete collection with no payload, capture
+or evidence: its one limitation names a stop reason (`registration`,
+`unavailable`, `incompatible`, `deadline`, `limit`, `malformed`,
+`digest-mismatch`, `result-lost` or `refused`) and a bounded message. When
+the host's own context ends (leadership loss or shutdown), `Collect` returns
+the context's error, and nothing may be recorded.
 
 ## What is not specified here
 
