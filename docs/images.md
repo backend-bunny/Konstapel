@@ -143,7 +143,8 @@ Use the digest printed in the publishing job summary:
 IMAGE=ghcr.io/backend-bunny/konstapel@sha256:...
 IDENTITY='^https://github.com/backend-bunny/Konstapel/\.github/workflows/(publish|release-please)\.yml@refs/heads/main$'
 cosign verify "$IMAGE" --certificate-identity-regexp "$IDENTITY" \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com > signature.json
+jq -e --arg digest "${IMAGE#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json
 cosign verify-attestation "$IMAGE" --type spdxjson \
   --certificate-identity-regexp "$IDENTITY" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -154,9 +155,19 @@ cosign verify-attestation "$IMAGE" \
 gh attestation verify "oci://$IMAGE" --repo backend-bunny/Konstapel
 ```
 
+`cosign verify` alone is not enough: Cosign v3 also verifies the publisher's
+attestations (SBOMs, sources, notices, build provenance) as signatures and
+prints every verified payload, so an image carrying only attestations passes
+it. The `jq` check requires the `cosign sign` signature itself: a verified
+payload whose type is `https://sigstore.dev/cosign/sign/v1` and whose subject is
+exactly `$IMAGE`'s digest. Attestations are verified separately by
+`cosign verify-attestation` and `gh attestation verify`.
+
 The publish workflow runs these verification checks itself, including the source
-manifest attestation. Signing and OIDC attestations require GitHub Actions and
-are not emulated by a local dry run.
+manifest attestation, with the same `jq` filter in
+`scripts/image/verify-signature-payload.sh`; the chart release workflow
+(`charts.yml`) applies it to the controller image the charts pin. Signing and OIDC
+attestations require GitHub Actions and are not emulated by a local dry run.
 
 ## Dependency refresh
 

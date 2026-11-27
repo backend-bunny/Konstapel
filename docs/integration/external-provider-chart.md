@@ -212,7 +212,7 @@ verify the chart, find the image it runs, and verify that image:
 
 ```sh
 cosign verify "${TRUST[@]}" "$CHART" > chart-signature.json
-jq -e 'any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1")' chart-signature.json
+jq -e --arg digest "${CHART#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' chart-signature.json
 cosign verify-attestation "${TRUST[@]}" --type slsaprovenance1 "$CHART" > chart-provenance.jsonl
 jq -se --arg builder "$BUILDER" 'any(.[].payload | @base64d | fromjson; .predicate.runDetails.builder.id == $builder)' chart-provenance.jsonl
 mkdir chart
@@ -220,7 +220,7 @@ helm pull "oci://$CHART" "${PULL[@]}" --destination chart
 IMAGE=$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)
 [[ $IMAGE =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]
 cosign verify "${TRUST[@]}" "$IMAGE" > image-signature.json
-jq -e 'any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1")' image-signature.json
+jq -e --arg digest "${IMAGE#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' image-signature.json
 cosign verify-attestation "${TRUST[@]}" --type spdxjson "$IMAGE" > image-sbom.jsonl
 cosign verify-attestation "${TRUST[@]}" --type slsaprovenance1 "$IMAGE" > image-provenance.jsonl
 jq -se --arg builder "$BUILDER" 'any(.[].payload | @base64d | fromjson; .predicate.runDetails.builder.id == $builder)' image-provenance.jsonl
@@ -231,7 +231,10 @@ What each step establishes:
 - `cosign verify` accepts only proofs signed under `TRUST` whose signed
   statement names exactly that digest, so proofs copied from another digest
   fail. Cosign v3 also counts the publisher's attestations as signatures,
-  so `jq` then requires the `cosign sign` signature itself.
+  so `jq` then requires the `cosign sign` signature itself: a verified
+  payload of type `https://sigstore.dev/cosign/sign/v1` whose subject is
+  exactly the verified digest (the controller image's
+  [check](../images.md#verify) is the same filter).
 - `cosign verify-attestation` requires an SBOM and a provenance attestation
   under the same trust, again for exactly that digest, and `jq` requires the
   documented builder.
@@ -302,6 +305,9 @@ On each registry the run must end exactly as listed, at the listed step:
 | `chart-unsigned` | a chart with no proofs | rejected at the chart signature |
 | `chart-signature-only` | a signed chart without provenance | rejected at the chart provenance |
 | `chart-other-publisher` | a chart signed and attested by another key | rejected at the chart signature |
+| `controller-check-valid` | the valid image, through the controller image's signature check ([images](../images.md#verify), `scripts/image/verify-signature-payload.sh`) | accepted |
+| `controller-check-attestations-only` | the attestation-only image, through that check | `cosign verify` accepts it; rejected at the payload check |
+| `controller-check-other-subject` | the valid image's verified payloads, required to name another digest | rejected at the payload check |
 
 Each fixture is another digest of the same image (one more manifest
 annotation) or another chart version. `OUTPUT_DIR/reference-provider-signing.json`
@@ -343,7 +349,8 @@ Cosign's documented keyless verification.
 - The [signing fixture](#signing-fixture) (acceptance group `providers`)
   signs the built image and a chart pinning it in two disposable registries
   and runs the documented verification on the valid release and twelve
-  fixtures that must be rejected.
+  fixtures that must be rejected, and the controller image's signature check
+  on the valid image and two fixtures it must reject.
 - `TestLiveReferenceProviderChart` (acceptance group `providers`,
   `task acceptance GROUP=providers OUTPUT=/absolute/fresh/path`) builds the
   image, loads it by digest into the disposable kind cluster, installs the

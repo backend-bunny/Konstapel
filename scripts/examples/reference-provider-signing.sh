@@ -13,8 +13,12 @@
 # signature, a signature without attestations, provenance from another
 # builder, proofs copied from another digest, a signed chart pinning an
 # unsigned image, and charts that are unsigned, lack provenance or were
-# signed by another key. Each case must end exactly as expected, at the
-# expected step.
+# signed by another key. It also runs the controller image's signature check
+# (docs/images.md "Verify", scripts/image/verify-signature-payload.sh) on the
+# valid image, on the attestation-only image, which plain `cosign verify`
+# accepts and that check must reject, and on the valid image's verified
+# payloads checked against another digest. Each case must end exactly as
+# expected, at the expected step.
 #
 # Usage: reference-provider-signing.sh IMAGE_DIR OUTPUT_DIR
 # IMAGE_DIR is what scripts/examples/reference-provider-image.sh wrote; its
@@ -38,6 +42,7 @@
 # ambient credential is used and nothing reaches a public service.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+root=$PWD
 source scripts/runtime.env
 usage='usage: reference-provider-signing.sh IMAGE_DIR OUTPUT_DIR'
 images=${1:?$usage}
@@ -66,7 +71,7 @@ sign_kind=https://sigstore.dev/cosign/sign/v1
 # the documentation and this run cannot drift apart.
 documented=(
   'cosign verify "${TRUST[@]}" "$CHART" > chart-signature.json'
-  "jq -e 'any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\")' chart-signature.json"
+  "jq -e --arg digest \"\${CHART#*@}\" 'type == \"array\" and any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\" and .critical.image.\"docker-manifest-digest\" == \$digest)' chart-signature.json"
   'cosign verify-attestation "${TRUST[@]}" --type slsaprovenance1 "$CHART" > chart-provenance.jsonl'
   "jq -se --arg builder \"\$BUILDER\" 'any(.[].payload | @base64d | fromjson; .predicate.runDetails.builder.id == \$builder)' chart-provenance.jsonl"
   'mkdir chart'
@@ -74,7 +79,7 @@ documented=(
   "IMAGE=\$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)"
   '[[ $IMAGE =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]'
   'cosign verify "${TRUST[@]}" "$IMAGE" > image-signature.json'
-  "jq -e 'any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\")' image-signature.json"
+  "jq -e --arg digest \"\${IMAGE#*@}\" 'type == \"array\" and any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\" and .critical.image.\"docker-manifest-digest\" == \$digest)' image-signature.json"
   'cosign verify-attestation "${TRUST[@]}" --type spdxjson "$IMAGE" > image-sbom.jsonl'
   'cosign verify-attestation "${TRUST[@]}" --type slsaprovenance1 "$IMAGE" > image-provenance.jsonl'
   "jq -se --arg builder \"\$BUILDER\" 'any(.[].payload | @base64d | fromjson; .predicate.runDetails.builder.id == \$builder)' image-provenance.jsonl"
@@ -298,7 +303,7 @@ verify_image() { # IMAGE
   step image-signature
   cosign verify "${TRUST[@]}" "$IMAGE" > image-signature.json
   step image-signature-kind
-  jq -e 'any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1")' image-signature.json
+  jq -e --arg digest "${IMAGE#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' image-signature.json
   step image-sbom
   cosign verify-attestation "${TRUST[@]}" --type spdxjson "$IMAGE" > image-sbom.jsonl
   step image-provenance
@@ -312,7 +317,7 @@ verify_release() { # CHART; prints the verified image
   step chart-signature
   cosign verify "${TRUST[@]}" "$CHART" > chart-signature.json
   step chart-signature-kind
-  jq -e 'any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1")' chart-signature.json
+  jq -e --arg digest "${CHART#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' chart-signature.json
   step chart-provenance
   cosign verify-attestation "${TRUST[@]}" --type slsaprovenance1 "$CHART" > chart-provenance.jsonl
   step chart-provenance-builder
@@ -325,6 +330,18 @@ verify_release() { # CHART; prints the verified image
   [[ $IMAGE =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]
   echo "image: $IMAGE"
   verify_image "$IMAGE"
+}
+
+# The controller image's signature check: `cosign verify` under the trust,
+# then the payload check of scripts/image/verify-signature-payload.sh for
+# SUBJECT (default IMAGE). Cosign v3's `cosign verify` alone also accepts
+# the publisher's attestations as signatures; this pins that behaviour.
+verify_controller_signature() { # IMAGE [SUBJECT]
+  step controller-signature
+  cosign verify "${TRUST[@]}" "$1" > signature.json
+  step controller-signature-payload
+  "$root/scripts/image/verify-signature-payload.sh" signature.json "${2:-$1}"
+  step accepted
 }
 
 results=$work/results.jsonl
@@ -349,7 +366,7 @@ expect() {
   jq -nc --arg registry "$registry" --arg case "$name" --arg description "$what" --arg expected "$want" --arg outcome "$got" \
     --arg expectedStep "$at" --arg step "$last" --argjson passed "$passed" --arg detail "$(grep -v '^step: ' "$dir/log" | tail -c 400)" \
     '{registry:$registry,case:$case,description:$description,expected:$expected,outcome:$outcome,expectedStep:$expectedStep,step:$step,passed:$passed,detail:$detail}' >> "$results"
-  printf '%-12s %-28s expected %s at %s, got %s at %s%s\n' "$registry" "$name" "$want" "$at" "$got" "$last" "$([[ $passed == true ]] || echo '  <-- FAILED')"
+  printf '%-12s %-34s expected %s at %s, got %s at %s%s\n' "$registry" "$name" "$want" "$at" "$got" "$last" "$([[ $passed == true ]] || echo '  <-- FAILED')"
 }
 # The fixture's trust and pull options, as documented.
 TRUST=(--key publisher.pub --insecure-ignore-tlog=true --allow-http-registry)
@@ -419,6 +436,9 @@ for registry in distribution zot; do
   expect chart-unsigned reject chart-signature "a chart with no proofs" verify_release "$chart_unsigned"
   expect chart-signature-only reject chart-provenance "a signed chart without provenance" verify_release "$chart_signature_only"
   expect chart-other-publisher reject chart-signature "a chart signed and attested by another key" verify_release "$chart_other"
+  expect controller-check-valid accept accepted "the controller image signature check on the valid image" verify_controller_signature "$image"
+  expect controller-check-attestations-only reject controller-signature-payload "attestations by the publisher but no signature: plain cosign verify accepts, the payload check rejects" verify_controller_signature "$attestations_only"
+  expect controller-check-other-subject reject controller-signature-payload "the valid image's verified payloads required for another digest" verify_controller_signature "$image" "$attestations_only"
 
   # The accepted release's evidence: what was verified and the image the
   # chart runs (its digest is the registration's releaseDigest).
