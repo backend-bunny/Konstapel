@@ -1008,7 +1008,10 @@ explicit content failure that makes the package a Diagnostic:
 - Identity is the bundle name and manifest digest, never the digest alone:
   another name for a frozen digest is a `ContentMismatch`.
 
-Replay reads a retained package alone. `collector.PackageContent(dir,
+Replay reads a retained package alone. It retrieves and validates the
+evaluation stored at closure; it does not re-evaluate
+([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
+`collector.PackageContent(dir,
 descriptor)` returns the members packaged under their recorded paths,
 verified against the descriptor's record (`VerifyContent`). It never reads
 the cache, a registry or this image's vendored content. A packaged vendored
@@ -1169,7 +1172,9 @@ The saved captures keep their bytes and their interpretation. Read through
 the boundary with the production registry, and evaluated with the evaluator
 their version implies (`assessment.Reconcile` for version 1 and
 `CaptureV2.Evaluate` for version 2, with the chart's 2h maximum evidence
-age), they give (`TestDocumentedExamples`):
+age and no continuity boundaries), they give (`TestDocumentedExamples`).
+The reader supplies the age and the boundaries; the capture does not record
+them ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)):
 
 <!-- verified: retained-interpretations -->
 ```json
@@ -1308,7 +1313,10 @@ the capture's content role and `RunContent.Resolve`:
 - After the source objects are removed, collection finds no evidence and
   evaluates as the case without evidence.
 - The retained capture, replayed after that removal and without a
-  cluster, evaluates exactly as the collection it retained.
+  cluster, evaluates exactly as the collection it retained. The harness
+  supplies the case's evidence-age limit to that evaluation; a package
+  does not record it
+  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
 - Replayed with the run's content unavailable, it fails as unavailable
   content (`conformance.ErrContentUnavailable` wrapping the
   `ContentUnavailable` failure) and returns nothing.
@@ -1365,8 +1373,12 @@ the time they pass.
   is the Kyverno evaluator. It is `collector.CaptureV2.EvaluateAt`, the
   unchanged freshness and attribution rules with the capture closed at
   `at`, summarized by `collector.Tally`. The current projection passes the
-  current assessment boundary. A closing run passes the closure it freezes,
-  and replay passes the frozen closure (`CaptureV2.Evaluate`). A zero time,
+  current assessment boundary. A closing run passes the closure it freezes.
+  Re-evaluating a retained capture passes its frozen closure
+  (`CaptureV2.Evaluate`). Package replay does not re-evaluate: it converts
+  the evaluation stored at closure, because a package lacks the boundaries
+  and the evidence-age limit
+  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)). A zero time,
   a time before the window started or one before a recorded scope change is
   refused, never replaced by another time.
 - `reporttest.Evaluate(Input, at)` is the test-only reporting evaluator;
@@ -1448,11 +1460,59 @@ controller freezes both before export. A package retains them as
   evaluation and does not re-evaluate, so the replay's wall clock changes
   nothing.
 
-The package does not record the host's continuity boundaries or the
-binding's maximum evidence age. Exact re-evaluation of a retained capture
-is therefore possible only when its boundaries did not matter. This is why
-conversion reads the frozen evaluation and checks that it is consistent
-with the capture, instead of re-evaluating.
+### Replay is retrieval, not re-evaluation
+
+Replaying a continuous package means two checks and one conversion:
+
+1. **Retrieve** the evaluation stored at closure (`evaluation.json`) and
+   the capture it was made of (`capture.json`), read through the capture
+   boundary with the recorded evaluator (`collector.ReadSnapshot`).
+2. **Validate** that the evaluation is one evaluation of that capture
+   (`Snapshot.Validate`, above) and that the package content verifies
+   (`collector.PackageContent`).
+3. **Convert** that stored evaluation, unchanged.
+
+Replay does not run `kyverno.Evaluate` again. A valid replay shows that the
+package holds a consistent closure evaluation and converts it. It does
+**not** show that re-evaluating the frozen inputs gives semantically
+equivalent results: the package lacks inputs that evaluation needs. This
+means the deterministic-evaluation requirement
+([Pure evaluators](#pure-evaluators)) is not yet met for packages. It is
+recorded as open task 4.5 of `add-assessment-provider-contract`.
+
+What `kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`
+needs, and what a continuous package holds:
+
+| Input | In the package? | Evidence |
+| --- | --- | --- |
+| `Capture`: frozen scope, expected inventory, workload states, scope changes and watch discontinuities, reports, engine policies | Yes, `capture.json` | `collector.CaptureV2` |
+| `at`, the closure boundary | Yes, `capture.json` `window.closed` (also the descriptor `window`) | `CaptureV2.Evaluate` passes `Window.Closed` |
+| Evaluator version | Implied for a legacy version 2 capture (evaluator 1). A version 3 envelope records it | `CaptureDocument.CheckEvaluator` |
+| Content the evaluator reads | Yes. Applicability reads the capture's `enginePolicies`. The package also carries the content tree and its record | `linuxOnly` in `internal/collector/freshness.go` |
+| `Boundaries`, the host's continuity boundaries for each workload state | **No** | The controller reads them from its in-memory tracker (`AssessmentRunReconciler.boundaries`). Neither `capture.json`, `evaluation.json` nor `closed.json` records them |
+| `MaxEvidenceAge`, the binding's evidence-age limit | **No** | Read from the binding at closure (`bindingMaxEvidenceAge`). The descriptor's `revisions.bindingConfiguration` is an opaque revision, not the setting |
+
+`TestPackageLacksReevaluationInputs` (`internal/provider/c2p`) checks the
+two gaps on an exported package. No JSON file in it has a `since`,
+`boundaries` or `maxEvidenceAge` key. A run that starts after its
+workloads' reports were evaluated, on a host that observed the workloads
+continuously from before then, is attributable at closure. Re-evaluating
+the package without the host's boundaries rejects that evidence. A
+different evidence-age limit also changes the result. With the boundaries
+and the limit supplied from outside the package, re-evaluation reproduces
+the closure evaluation exactly. Replay still converts the stored
+evaluation.
+
+`evaluation.json`'s `nextExpiry` is the earliest attributable evaluation
+plus the limit, so the limit can sometimes be inferred from it. That is an
+output, absent when nothing is attributable, and not a recorded input.
+Re-evaluation must not depend on it.
+
+Byte-identical output is not the goal. A new package format is not
+justified just to regenerate identical serialized OSCAL. It is justified
+only to carry the missing inputs above, for semantic re-evaluation. The
+proposal is in the change's design (decision 3, "Package inputs for semantic
+re-evaluation"). Under it, readers ship before writers.
 
 The tests:
 
@@ -1469,7 +1529,12 @@ The tests:
   identically.
 - `TestReplayKeepsTheRetainedInterpretation` re-evaluates the retained
   capture at its closure and gets the retained evaluation. A later time
-  changes freshness, but not the conversion.
+  changes freshness, but not the conversion. The test supplies the
+  evidence-age limit itself, and its capture needs no continuity
+  boundaries. It does not show that a package alone is enough for
+  re-evaluation.
+- `TestPackageLacksReevaluationInputs` pins the missing inputs
+  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
 - `TestDispatchKeepsThePrototype` and `TestDispatchRefusesWhatItCannotConvert`
   cover the other two dispatch paths.
 - `TestPluginBinaryIsLocalAndConvertsLikeTheDispatch` builds the plugin
@@ -1851,5 +1916,9 @@ provider's contract.
   producer, through its own change. Trivy integration is deferred by the
   owner and must prove digest/owner correlation, evaluation time, filtering
   and missing evidence against real reports.
+- No semantic re-evaluation of a retained package. Replay converts the
+  evaluation stored at closure. The package does not record the continuity
+  boundaries or the evidence-age limit
+  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
 - No runtime plugin loading, provider CRD, marketplace, scanner
   orchestration, mixed-provider binding, or new outcome or exception API.

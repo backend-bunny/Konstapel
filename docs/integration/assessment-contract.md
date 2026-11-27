@@ -648,7 +648,12 @@ This is the comparison delivery uses to decide a policy is current.
   [policy bundles](../policy-bundles.md#assessment-runs-freeze-their-bundle).
 - **Always present:** `capture.json`, `evaluation.json` (per-observation states
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is
-  verified against the directory before `Export` returns.
+  verified against the directory before `Export` returns. `evaluation.json`
+  is the evaluation made at closure. A package does not record the host's
+  continuity boundaries or the binding's `maxEvidenceAge`, so replay
+  retrieves and validates that evaluation rather than re-evaluating the
+  capture
+  ([replay is retrieval, not re-evaluation](../assessment-providers.md#replay-is-retrieval-not-re-evaluation)).
 - **Control coverage summary.** With an `ExportRequest.Coverage` producer
   (the assessment controller always sets one), the package also carries
   `coverage.json` and `coverage.txt` with the roles above, and the producer

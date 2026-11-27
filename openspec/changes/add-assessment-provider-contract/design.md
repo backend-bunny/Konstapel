@@ -127,6 +127,40 @@ normalized semantic results for equal inputs. This does not require byte-identic
 newly rendered OSCAL documents where permitted generated identifiers differ, and
 never rewrites an already published package to replay it.
 
+**Package replay versus semantic re-evaluation (owner decision 2026-11-27).**
+Retrieving and validating the evaluation stored at closure is distinct from
+re-evaluating frozen inputs to reproduce equivalent semantic results, and the
+first is not proof of the second. Continuous packages today support only the
+first: replay (`collector.ReadSnapshot`, `Snapshot.Validate`,
+`SnapshotProvider`) converts `evaluation.json` after checking it is an
+evaluation of `capture.json`. The deterministic-evaluation requirement stays as
+specified and is not yet met for packages (task 4.5). No package format is
+added merely to regenerate identical serialized output.
+
+*Proposal: package inputs for semantic re-evaluation (not implemented).* A
+package lacks these inputs of `kyverno.Evaluate(EvaluationInput{Capture,
+Boundaries, MaxEvidenceAge}, at)`:
+
+- `Boundaries`: per frozen workload, the host continuity boundary used at
+  closure (`collector.Boundary`: `workloadUID`, `stateSha256`, `since`). The
+  controller reads them from its in-memory tracker; without them a result
+  evaluated before the window start but after continuous observation began is
+  attributable at closure and rejected on re-evaluation.
+- `MaxEvidenceAge`: the binding's effective evidence-age limit at closure. The
+  descriptor records only an opaque `bindingConfiguration` revision, and
+  `nextExpiry` is a derived output that is absent when nothing is attributable.
+
+Already present and not part of the proposal: the evaluation time
+(`window.closed`), the capture and its scope changes and discontinuities, the
+engine policies applicability reads, the content record, and the evaluator
+version (implied for legacy version 2, recorded by the version 3 envelope).
+These inputs change semantics that legacy readers would ignore, so they need
+an explicit version boundary rather than optional JSON fields, and readers
+ship before writers: a release that reads and re-evaluates the new form, while
+still converting the stored evaluation of every retained form, must be
+released before any controller writes it. Packages written earlier are never
+rewritten and remain retrieve-and-validate only.
+
 Alternative: let a C2P plugin fetch live evidence or implement its own evaluator.
 That makes offline replay depend on external state and risks divergent controller
 and exported results. Runtime sandboxing of arbitrary collectors is out of scope.
