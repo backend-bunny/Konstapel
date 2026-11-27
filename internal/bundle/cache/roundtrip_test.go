@@ -147,25 +147,32 @@ func TestPutUnderSetgidRoot(t *testing.T) {
 	}
 }
 
-// The Linux hardening bundle (five policies, variants, fixtures) also stores
-// and reads back through the cache, passing the default content check.
+// The Linux hardening bundle (variants, fixtures) also stores and reads back
+// through the cache, passing the default content check: the released 0.1.0
+// (five policies) and the split revision 0.2.0 (seven single-validation
+// policies) side by side in one cache.
 func TestHardeningBundleRoundTrip(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "bundles/konstapel-linux-hardening/definition.json"))
-	must(t, err)
-	def, err := bundle.LoadDefinition(raw)
-	must(t, err)
-	def.Source.Revision = strings.Repeat("c", 40)
-	a, err := bundle.Build(def, os.DirFS(repoRoot), time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
-	must(t, err)
 	c := newEnv(t).open(t, Config{})
-	got, err := c.Put(bg(), a.Manifest, a.Layer)
-	must(t, err)
-	if got.Digest != a.ManifestDigest || got.ContentDigest != a.Descriptor.ContentDigest() {
-		t.Fatalf("identities: %+v", got)
-	}
-	must(t, got.Descriptor.VerifyPayload(got.FS()))
-	again, err := c.Get(bg(), a.ManifestDigest)
-	if err != nil || again.Dir != got.Dir || len(again.Descriptor.Policies) != 5 {
-		t.Fatalf("Get: %+v %v", again, err)
+	for def, policies := range map[string]int{
+		"bundles/konstapel-linux-hardening/released/0.1.0.json": 5,
+		"bundles/konstapel-linux-hardening/definition.json":     7,
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, def))
+		must(t, err)
+		d, err := bundle.LoadDefinition(raw)
+		must(t, err)
+		d.Source.Revision = strings.Repeat("c", 40)
+		a, err := bundle.Build(d, os.DirFS(repoRoot), time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
+		must(t, err)
+		got, err := c.Put(bg(), a.Manifest, a.Layer)
+		must(t, err)
+		if got.Digest != a.ManifestDigest || got.ContentDigest != a.Descriptor.ContentDigest() {
+			t.Fatalf("%s identities: %+v", def, got)
+		}
+		must(t, got.Descriptor.VerifyPayload(got.FS()))
+		again, err := c.Get(bg(), a.ManifestDigest)
+		if err != nil || again.Dir != got.Dir || len(again.Descriptor.Policies) != policies {
+			t.Fatalf("%s Get: %+v %v", def, again, err)
+		}
 	}
 }

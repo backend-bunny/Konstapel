@@ -54,6 +54,12 @@ their retained captures SHALL retain their original interpretation.
 - **THEN** replay uses its frozen content and original identities, preserving missing observations
 - **AND** new mappings do not rewrite the historical result
 
+#### Scenario: Replay a retained run without substituting current content
+
+- **WHEN** a retained OCI assessment package is replayed after the split revision exists
+- **THEN** replay reads only the package's frozen member content, never current vendored or OCI content
+- **AND** a missing or unverifiable frozen member is a blocking diagnostic, not a fallback to other content
+
 ### Requirement: Migration preserves enforcement until replacements are ready
 
 Migration SHALL explicitly update bundle pins and old-ID selections to the
@@ -108,3 +114,15 @@ the repository's separate release authorization and remote artifact verification
 - **WHEN** implementation validation completes
 - **THEN** release inputs identify the tested content and required new revision
 - **AND** users can retain the old pin until they explicitly adopt a verified new artifact
+
+### Requirement: Vendored content stays on the original revision
+
+The split revision SHALL ship only as a separately versioned OCI bundle. The
+vendored content and its digest SHALL remain unchanged, and users SHALL obtain
+independent outcomes only by explicitly selecting the new OCI revision.
+
+#### Scenario: Vendored content stays on the original revision
+
+- **WHEN** the split OCI revision is prepared
+- **THEN** the vendored content, its checksums and its digest are byte-unchanged
+- **AND** a profile pinning the vendored digest keeps the original policy identities and their documented sibling gaps

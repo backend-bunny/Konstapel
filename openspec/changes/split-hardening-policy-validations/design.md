@@ -50,10 +50,26 @@ Record original source hash and local split derivation. Map each old validation
 to its new policy/check identity and retain its bounded NIST rationale; multiple
 checks still do not imply whole-control satisfaction.
 
-Prepare a new independently versioned OCI bundle via existing tooling. Do not
-overwrite linux-hardening 0.1.0 or mutate old pinned content. Update vendored
-content and default examples coherently where they select this revision, while
-preserving historical fixtures and frozen-content replay.
+Owner decision 2026-11-27 (decision 5, option a): the split ships through a
+separately versioned OCI bundle, and the vendored bundle stays stable.
+
+- The vendored content and its digest (the sha256 of content/SHA256SUMS) are
+  byte-unchanged and keep selecting the original five-policy revision; saved
+  captures and rendered fixtures pin that digest. Revision files keep their own
+  SHA256SUMS and are never added to content/SHA256SUMS. Moving vendored content
+  to the split revision is a separate, later decision.
+- The split ships as konstapel-linux-hardening 0.2.0: the next version of
+  bundles/konstapel-linux-hardening/definition.json, built and released by the
+  existing bundle package and release tooling. The released 0.1.0 definition is
+  retained byte-identical beside it, and tests rebuild it to its released content
+  digest. Do not overwrite linux-hardening 0.1.0 or mutate old pinned content.
+- Examples that demonstrate independent outcomes select the OCI 0.2.0 revision
+  by digest; vendored examples and fixtures are unchanged. Documentation states
+  that users must explicitly select the new OCI revision; the vendored bundle and
+  0.1.0 pins keep reporting unreported siblings as Missing.
+- Frozen-content replay is not weakened: a retained run replays only against its
+  own frozen content (the frozen OCI member, or the vendored content its package
+  records), never current vendored or OCI content substituted for it.
 
 The active add-linux-workload-hardening-bundle describes the original families.
 At implementation handoff reconcile its remaining tasks and wording with the
@@ -128,10 +144,14 @@ follow-up, not permission implied by applying this change.
 - Exception waiver differences -> explicit reacceptance, no silent transfer.
 - CI engine drift -> record exact supported pin and rerun matrix on upgrades.
 - Existing incomplete captures -> preserve their honest historical interpretation.
+- Vendored users keep sibling gaps -> document that only an explicit OCI 0.2.0
+  selection yields independent outcomes.
 
 ## Migration Plan
 
-Implement and validate new content and release inputs, publish only after separate
-approval, then document verified new digest selection. Operators stage new bindings,
-verify readiness/results and retire old bindings. Keep the previous digest and
+Implement and validate new content and OCI 0.2.0 release inputs, publish only
+after separate approval, then document verified new digest selection. Operators
+stage new bindings selecting the OCI 0.2.0 digest beside their vendored or 0.1.0
+bindings, verify readiness/results and retire old bindings. The vendored bundle
+does not change, so staying on it is a supported (incomplete-evidence) choice. Keep the previous digest and
 historical capture readers available; never remove stored evidence on migration.

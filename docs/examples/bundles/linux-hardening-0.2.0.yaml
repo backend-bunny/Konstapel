@@ -1,0 +1,40 @@
+# Select the independently reported Linux hardening revision:
+# konstapel-linux-hardening 0.2.0 (docs/integration/linux-hardening.md,
+# "Independently reported revision"). The vendored bundle and 0.1.0 keep the
+# original five policies. Only a profile pinned to the 0.2.0 digest reports
+# each capabilities and seccomp validation on its own.
+#
+# The digest below is a placeholder. 0.2.0 is not published yet: replace it
+# with the verified digest from the 0.2.0 release notes. Policy names are the
+# 0.2.0 check IDs; internal/bundle tests keep this list equal to the definition.
+# Exceptions default to Forbidden. Acceptances recorded against
+# disallow-capabilities-strict or restrict-seccomp-strict do not transfer.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceProfile
+metadata:
+  name: linux-hardening-independent
+spec:
+  bundle:
+    name: konstapel-linux-hardening
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  policies:
+    - name: disallow-privileged-containers
+    - name: disallow-privilege-escalation
+    - name: require-drop-all-capabilities
+    - name: restrict-added-capabilities
+    - name: require-run-as-nonroot
+    - name: restrict-pod-seccomp-profile
+    - name: require-container-seccomp-profile
+---
+# Audit everywhere beside any existing bindings. Bindings are cumulative, so
+# this adds evidence and does not relax an existing Deny binding. Retire an
+# old enforcing binding only through the staged migration.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: ComplianceBinding
+metadata:
+  name: linux-hardening-independent-audit
+spec:
+  profileRef:
+    name: linux-hardening-independent
+  namespaceSelector: {}
+  mode: Audit

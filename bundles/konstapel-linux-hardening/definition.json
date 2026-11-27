@@ -1,6 +1,6 @@
 {
   "name": "konstapel-linux-hardening",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "source": {
     "repository": "https://github.com/backend-bunny/Konstapel"
   },
@@ -26,12 +26,22 @@
       ]
     },
     {
-      "name": "disallow-capabilities-strict",
-      "path": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
+      "name": "require-drop-all-capabilities",
+      "path": "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
       "checks": [
         {
-          "ruleID": "disallow-capabilities-strict",
-          "checkID": "disallow-capabilities-strict"
+          "ruleID": "require-drop-all-capabilities",
+          "checkID": "require-drop-all-capabilities"
+        }
+      ]
+    },
+    {
+      "name": "restrict-added-capabilities",
+      "path": "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+      "checks": [
+        {
+          "ruleID": "restrict-added-capabilities",
+          "checkID": "restrict-added-capabilities"
         }
       ]
     },
@@ -46,12 +56,22 @@
       ]
     },
     {
-      "name": "restrict-seccomp-strict",
-      "path": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
+      "name": "restrict-pod-seccomp-profile",
+      "path": "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
       "checks": [
         {
-          "ruleID": "restrict-seccomp-strict",
-          "checkID": "restrict-seccomp-strict"
+          "ruleID": "restrict-pod-seccomp-profile",
+          "checkID": "restrict-pod-seccomp-profile"
+        }
+      ]
+    },
+    {
+      "name": "require-container-seccomp-profile",
+      "path": "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+      "checks": [
+        {
+          "ruleID": "require-container-seccomp-profile",
+          "checkID": "require-container-seccomp-profile"
         }
       ]
     }
@@ -81,7 +101,7 @@
       "version": "1.1.3"
     },
     {
-      "path": "content/linux-hardening/component-definition.json",
+      "path": "content/linux-hardening/split/component-definition.json",
       "version": "1.1.3"
     },
     {
@@ -115,8 +135,8 @@
       "role": "component-definition"
     },
     {
-      "from": "content/linux-hardening/component-definition.json",
-      "to": "content/linux-hardening/component-definition.json",
+      "from": "content/linux-hardening/split/component-definition.json",
+      "to": "content/linux-hardening/split/component-definition.json",
       "role": "component-definition"
     },
     {
@@ -130,13 +150,28 @@
       "role": "upstream"
     },
     {
+      "from": "content/linux-hardening/split/variants.json",
+      "to": "content/linux-hardening/split/variants.json",
+      "role": "upstream"
+    },
+    {
       "from": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
       "to": "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
-      "role": "policy"
+      "role": "upstream"
     },
     {
       "from": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
       "to": "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+      "to": "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
+      "to": "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
       "role": "policy"
     },
     {
@@ -145,9 +180,19 @@
       "role": "policy"
     },
     {
+      "from": "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+      "to": "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+      "role": "policy"
+    },
+    {
+      "from": "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
+      "to": "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
+      "role": "policy"
+    },
+    {
       "from": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
       "to": "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
-      "role": "policy"
+      "role": "upstream"
     },
     {
       "from": "content/provenance.json",
@@ -662,6 +707,26 @@
     {
       "from": "testdata/linux-hardening/seccomp/resources.yaml",
       "to": "tests/linux-hardening/seccomp/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/split/capabilities/kyverno-test.yaml",
+      "to": "tests/linux-hardening/split/capabilities/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/split/capabilities/resources.yaml",
+      "to": "tests/linux-hardening/split/capabilities/resources.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/split/seccomp/kyverno-test.yaml",
+      "to": "tests/linux-hardening/split/seccomp/kyverno-test.yaml",
+      "role": "test"
+    },
+    {
+      "from": "testdata/linux-hardening/split/seccomp/resources.yaml",
+      "to": "tests/linux-hardening/split/seccomp/resources.yaml",
       "role": "test"
     }
   ]

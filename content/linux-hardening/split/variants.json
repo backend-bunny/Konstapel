@@ -2,16 +2,21 @@
   "change": "split-hardening-policy-validations",
   "purpose": "Single-validation revision of the Linux hardening checks: each validation of a multi-validation policy becomes its own policy, so the engine reports every check's outcome independently. Expressions, variables, matching, operations and the Windows guard are unchanged; only the policy boundary moves.",
   "supersedes": {
-    "bundle": "bundles/konstapel-linux-hardening/definition.json",
+    "bundle": "bundles/konstapel-linux-hardening/released/0.1.0.json",
     "version": "0.1.0",
     "componentDefinition": "content/linux-hardening/component-definition.json",
     "variants": "content/linux-hardening/variants.json"
+  },
+  "bundle": {
+    "definition": "bundles/konstapel-linux-hardening/definition.json",
+    "version": "0.2.0",
+    "detail": "Only the separately versioned OCI bundle konstapel-linux-hardening 0.2.0 ships this revision; users get independent outcomes only by selecting its digest. The vendored bundle keeps the original five-policy revision and its digest (owner decision 2026-11-27)."
   },
   "sources": "content/linux-hardening/sources.json",
   "componentDefinition": "content/linux-hardening/split/component-definition.json",
   "checksums": {
     "file": "content/linux-hardening/split/SHA256SUMS",
-    "detail": "Covers the four split variants, this inventory and the revision's component definition. They are deliberately not listed in content/SHA256SUMS: its sha256 is the identity of the vendored bundle (konstapel-vendored), and saved vendored captures replay only against that exact content. Selecting this revision for the vendored or OCI bundle is a separate step."
+    "detail": "Covers the four split variants, this inventory and the revision's component definition. They are deliberately not listed in content/SHA256SUMS: its sha256 is the identity of the vendored bundle (konstapel-vendored), and saved vendored captures replay only against that exact content. The OCI bundle selects this revision through its own definition; the vendored bundle does not."
   },
   "provenanceAnnotations": [
     "compliance.erenius.io/variant-of",

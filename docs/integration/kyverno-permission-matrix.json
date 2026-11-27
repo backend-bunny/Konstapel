@@ -1,6 +1,6 @@
 {
   "task": "improve-kyverno-readiness-diagnostics 2.1",
-  "observed": "2026-11-26",
+  "observed": "2026-11-27",
   "command": "flock /tmp/konstapel-live-cluster.lock devbox run -- scripts/kyverno-permission-matrix.sh OUTPUT",
   "kyvernoChart": "3.9.2",
   "kyvernoVersion": "v1.19.2",
@@ -9,7 +9,11 @@
   "policies": [
     "content/linux-hardening/variants/disallow-capabilities-strict.yaml",
     "content/linux-hardening/variants/disallow-privilege-escalation.yaml",
+    "content/linux-hardening/variants/require-container-seccomp-profile.yaml",
+    "content/linux-hardening/variants/require-drop-all-capabilities.yaml",
     "content/linux-hardening/variants/require-run-as-nonroot.yaml",
+    "content/linux-hardening/variants/restrict-added-capabilities.yaml",
+    "content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml",
     "content/linux-hardening/variants/restrict-seccomp-strict.yaml",
     "content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml"
   ],
@@ -109,8 +113,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -139,8 +143,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -169,8 +173,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -199,8 +203,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -229,8 +233,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -259,8 +263,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -289,8 +293,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -319,8 +323,8 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
-        "policyReportFailPolicies": 5
+        "admissionReportFailPolicies": 7,
+        "policyReportFailPolicies": 7
       },
       "forbiddenLogLines": {
         "admission": 0,
@@ -349,12 +353,12 @@
       },
       "audit": {
         "ephemeralUpdate": "admitted",
-        "admissionReportFailPolicies": 5,
+        "admissionReportFailPolicies": 7,
         "policyReportFailPolicies": 0
       },
       "forbiddenLogLines": {
         "admission": 0,
-        "reports": 236
+        "reports": 234
       }
     }
   ],

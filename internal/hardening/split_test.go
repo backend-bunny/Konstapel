@@ -42,6 +42,13 @@ type splitManifest struct {
 		ComponentDefinition string `json:"componentDefinition"`
 		Variants            string `json:"variants"`
 	} `json:"supersedes"`
+	// Bundle is the OCI definition that ships this revision; the vendored
+	// bundle keeps the superseded revision (owner decision 2026-11-27).
+	Bundle struct {
+		Definition string `json:"definition"`
+		Version    string `json:"version"`
+		Detail     string `json:"detail"`
+	} `json:"bundle"`
 	Sources             string `json:"sources"`
 	ComponentDefinition string `json:"componentDefinition"`
 	Checksums           struct {
@@ -333,27 +340,45 @@ func TestSplitInventory(t *testing.T) {
 	if origValidations != 7 || revValidations != 7 || len(fromFiles) != 5 || len(to) != 7 {
 		t.Errorf("the full-bundle check denominator changed: %d policies/%d validations -> %d/%d", len(fromFiles), origValidations, len(to), revValidations)
 	}
-	// While the bundle definition is still the superseded version, its
-	// policies are exactly the identity map's original side.
-	var def struct {
+	// The released superseded definition ships exactly the identity map's
+	// original side, and the OCI definition that ships this revision exactly
+	// its new side, in identity order.
+	type definition struct {
+		Name     string `json:"name"`
 		Version  string `json:"version"`
 		Policies []struct{ Name, Path string }
 	}
-	raw, err := os.ReadFile(filepath.Join(root, m.Supersedes.Bundle))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, &def); err != nil {
-		t.Fatal(err)
-	}
-	if def.Version == m.Supersedes.Version {
-		if len(def.Policies) != len(fromFiles) {
-			t.Errorf("bundle %s has %d policies, identity map %d", def.Version, len(def.Policies), len(fromFiles))
+	readDef := func(p string) definition {
+		raw, err := os.ReadFile(filepath.Join(root, p))
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, p := range def.Policies {
-			if fromFiles[p.Name] != p.Path {
-				t.Errorf("bundle policy %s at %s, identity map %s", p.Name, p.Path, fromFiles[p.Name])
-			}
+		var d definition
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	old := readDef(m.Supersedes.Bundle)
+	if old.Name != "konstapel-linux-hardening" || old.Version != m.Supersedes.Version || len(old.Policies) != len(fromFiles) {
+		t.Errorf("superseded bundle %s@%s has %d policies, identity map %d", old.Name, old.Version, len(old.Policies), len(fromFiles))
+	}
+	for _, p := range old.Policies {
+		if fromFiles[p.Name] != p.Path {
+			t.Errorf("superseded bundle policy %s at %s, identity map %s", p.Name, p.Path, fromFiles[p.Name])
+		}
+	}
+	rev := readDef(m.Bundle.Definition)
+	if m.Bundle.Definition != "bundles/konstapel-linux-hardening/definition.json" || rev.Name != old.Name || rev.Version != m.Bundle.Version ||
+		rev.Version == old.Version || !strings.Contains(m.Bundle.Detail, "vendored") {
+		t.Errorf("revision bundle %+v: %s@%s", m.Bundle, rev.Name, rev.Version)
+	}
+	if len(rev.Policies) != len(m.Identities) {
+		t.Fatalf("revision bundle has %d policies, identity map %d", len(rev.Policies), len(m.Identities))
+	}
+	for i, id := range m.Identities {
+		if p := rev.Policies[i]; p.Name != id.To.Check || p.Path != id.To.File {
+			t.Errorf("revision bundle policy %d is %s at %s, identity map %s at %s", i, p.Name, p.Path, id.To.Check, id.To.File)
 		}
 	}
 }
