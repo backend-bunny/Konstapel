@@ -54,6 +54,10 @@ type runSelection struct {
 	// Profile is nil when the binding selected no profile.
 	Profile   *profileRef         `json:"profile,omitempty"`
 	Selection *coverage.Selection `json:"selection,omitempty"`
+	// Bundle is the bundle the profile selected, for observing selection
+	// changes (observeSelection). A record with a profile and no bundle
+	// was staged by an earlier controller: its frozen bundle is unknown.
+	Bundle *v1alpha1.BundleReference `json:"bundle,omitempty"`
 }
 
 type profileRef struct {
@@ -69,6 +73,8 @@ func (r *AssessmentRunReconciler) freezeSelection(run *v1alpha1.AssessmentRun, p
 		sel := coverage.SelectionOf(profile.Spec)
 		rec.Profile = &profileRef{Name: profile.Name, UID: string(profile.UID), Generation: profile.Generation}
 		rec.Selection = &sel
+		ref := profile.Spec.Bundle
+		rec.Bundle = &ref
 	}
 	return assessment.Write(filepath.Join(r.staging(run), runSelectionFile), rec)
 }

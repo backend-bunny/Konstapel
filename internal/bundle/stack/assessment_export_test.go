@@ -487,6 +487,46 @@ func TestOCIRunExportsFrozenBundle(t *testing.T) {
 	}
 }
 
+// A selection change the controller observes after an OCI run froze is
+// recorded in the run's status only (add-assessment-provider-contract
+// 3.5): the run exports, packages and records in its descriptor exactly the
+// selection it froze, and the observed bundle appears nowhere in the
+// package.
+func TestOCIRunObservedSelectionChangeKeepsFrozenDescriptor(t *testing.T) {
+	t.Parallel()
+	w := newCraftedWorld(t)
+	rc := newRunCluster(t, w.router(), w.ref())
+	rc.deliver()
+	run := rc.start()
+	rc.report(runT0.Add(time.Minute))
+
+	observed := v1alpha1.BundleReference{Name: "observed-bundle", Digest: "sha256:" + strings.Repeat("e", 64)}
+	p := &v1alpha1.ComplianceProfile{}
+	rc.must(rc.c.Get(context.Background(), client.ObjectKey{Name: "org"}, p))
+	p.Spec.Bundle = observed
+	rc.must(rc.c.Update(context.Background(), p))
+	observedAt := runT0.Add(2 * time.Minute)
+	rc.now = observedAt
+	rc.must(rc.reconcile(rc.runs, run.Name))
+	if r := rc.run(run.Name); r.Status.Phase != v1alpha1.RunCollecting && r.Status.Phase != v1alpha1.RunCompleted {
+		t.Fatalf("phase %s", r.Status.Phase)
+	}
+
+	run = rc.finish(run.Name)
+	got := run.Status.ObservedSelectionChange
+	if got == nil || !got.ObservedTime.Time.Equal(observedAt) || got.Frozen == nil || *got.Frozen != w.ref() || got.Observed == nil || *got.Observed != observed {
+		t.Fatalf("observed selection change %+v", got)
+	}
+	dir, d := rc.pkg(run)
+	requireBundleExport(t, dir, d, w.ref())
+	requireContent(t, d, w.ref(), w.ref())
+	raw, err := os.ReadFile(filepath.Join(dir, publication.DescriptorFile))
+	rc.must(err)
+	if strings.Contains(string(raw), observed.Name) || strings.Contains(string(raw), strings.TrimPrefix(observed.Digest, "sha256:")) {
+		t.Fatal("the descriptor names the observed selection")
+	}
+}
+
 // Content that cannot be frozen when the run starts makes the run's package
 // an explicit Diagnostic; nothing is exported from the vendored content.
 // Content that becomes available before closure is frozen then.

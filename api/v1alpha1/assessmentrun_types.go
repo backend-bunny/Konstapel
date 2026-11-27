@@ -115,6 +115,27 @@ type CaptureWindow struct {
 	Closed *metav1.Time `json:"closed,omitempty"`
 }
 
+// ObservedSelectionChange is a change to the binding's content selection
+// that the controller observed after the run froze its own selection. It
+// reports one observation only: the selection the controller read and
+// when. The run keeps its frozen selection and content; nothing here
+// changes what the run assesses, exports or publishes.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="observedSelectionChange is written once"
+type ObservedSelectionChange struct {
+	// observedTime is when the controller first observed a selection other
+	// than the frozen one.
+	// +required
+	ObservedTime metav1.Time `json:"observedTime"`
+	// frozen is the bundle the binding selected when the run started.
+	// Absent when the binding then selected none.
+	// +optional
+	Frozen *BundleReference `json:"frozen,omitempty"`
+	// observed is the bundle the binding selected at observedTime. Absent
+	// when the binding then selected none (its profile was not found).
+	// +optional
+	Observed *BundleReference `json:"observed,omitempty"`
+}
+
 // AssessmentRunStatus holds controller-resolved fields. Only the controller
 // can write status; users cannot set resolved scope, captured data, or
 // publication state.
@@ -149,6 +170,14 @@ type AssessmentRunStatus struct {
 	DescriptorSHA256 string `json:"descriptorSha256,omitempty"`
 	// +optional
 	Publication *PublicationStatus `json:"publication,omitempty"`
+	// observedSelectionChange is the first change to the binding's content
+	// selection the controller observed while the run collected, after it
+	// froze its selection. It is written once and never updated or
+	// removed. Absent means no change was observed at the controller's
+	// observations, not that none occurred: a change made and reverted
+	// between observations is not reported.
+	// +optional
+	ObservedSelectionChange *ObservedSelectionChange `json:"observedSelectionChange,omitempty"`
 	// destination is the evidence destination pinned when the run started.
 	// Absent for runs that use the controller's legacy file destination.
 	// +optional
@@ -183,6 +212,7 @@ type AssessmentRunStatus struct {
 // +kubebuilder:printcolumn:name="Publication",type=string,JSONPath=`.status.publication.phase`
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.signingIntent) || (has(self.status) && has(self.status.signingIntent))",message="status.signingIntent is never removed"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.signingRecovery) || !has(oldSelf.status.signingRecovery.recovered) || (has(self.status) && has(self.status.signingRecovery) && has(self.status.signingRecovery.recovered))",message="status.signingRecovery.recovered is never removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.observedSelectionChange) || (has(self.status) && has(self.status.observedSelectionChange))",message="status.observedSelectionChange is never removed"
 type AssessmentRun struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

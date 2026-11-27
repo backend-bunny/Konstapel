@@ -315,6 +315,65 @@ spec:
                 maxItems: 64
                 type: array
                 x-kubernetes-list-type: set
+              observedSelectionChange:
+                description: |-
+                  observedSelectionChange is the first change to the binding's content
+                  selection the controller observed while the run collected, after it
+                  froze its selection. It is written once and never updated or
+                  removed. Absent means no change was observed at the controller's
+                  observations, not that none occurred: a change made and reverted
+                  between observations is not reported.
+                properties:
+                  frozen:
+                    description: |-
+                      frozen is the bundle the binding selected when the run started.
+                      Absent when the binding then selected none.
+                    properties:
+                      digest:
+                        description: digest is the sha256 digest of the bundle content.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      name:
+                        description: name identifies the bundle, for example "linux-workload-hardening".
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - digest
+                    - name
+                    type: object
+                  observed:
+                    description: |-
+                      observed is the bundle the binding selected at observedTime. Absent
+                      when the binding then selected none (its profile was not found).
+                    properties:
+                      digest:
+                        description: digest is the sha256 digest of the bundle content.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      name:
+                        description: name identifies the bundle, for example "linux-workload-hardening".
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - digest
+                    - name
+                    type: object
+                  observedTime:
+                    description: |-
+                      observedTime is when the controller first observed a selection other
+                      than the frozen one.
+                    format: date-time
+                    type: string
+                required:
+                - observedTime
+                type: object
+                x-kubernetes-validations:
+                - message: observedSelectionChange is written once
+                  rule: self == oldSelf
               phase:
                 description: |-
                   RunPhase is an AssessmentRun's lifecycle. Evidence completeness, outcomes,
@@ -1072,6 +1131,9 @@ spec:
         - message: status.signingRecovery.recovered is never removed
           rule: '!has(oldSelf.status) || !has(oldSelf.status.signingRecovery) || !has(oldSelf.status.signingRecovery.recovered)
             || (has(self.status) && has(self.status.signingRecovery) && has(self.status.signingRecovery.recovered))'
+        - message: status.observedSelectionChange is never removed
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.observedSelectionChange)
+            || (has(self.status) && has(self.status.observedSelectionChange))'
     served: true
     storage: true
     subresources:

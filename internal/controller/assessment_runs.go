@@ -937,8 +937,11 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		collector.NewTracker(&c).Discontinuity(now, collector.ObserverDiscontinuity)
 		c.Observer = r.Instance
 	}
-	cur, _, maxAge, err := r.Assess.snapshot(ctx, b, now)
+	cur, _, maxAge, profile, _, err := r.Assess.snapshotContent(ctx, b, now)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.observeSelection(ctx, run, profile, now); err != nil {
 		return ctrl.Result{}, err
 	}
 	subjects, stale, workloads := cur.Subjects, cur.Stale, cur.Workloads
