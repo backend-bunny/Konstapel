@@ -155,18 +155,21 @@ incomplete or unknown; missing scanner/database provenance stays explicit.
 Operator versions and configuration must pass compatibility tests before support
 is claimed.
 
-The initial read-only slice makes Trivy checks exception-ineligible. As a
-governance follow-up, eligible findings reuse authenticated self-service risk
-acceptance with reason,
-bounded expiry, explicit renewal/revocation, and central Forbidden/SelfService
-rules. The immutable target includes namespace identity, exact image digest,
-vulnerability ID, and affected package. It applies to matching workloads in that
+The initial read-only slice makes Trivy checks exception-ineligible: SelfService
+eligibility for a Trivy check is rejected as an invalid configuration. The
+separate governance follow-up,
+[add-vulnerability-risk-governance](openspec/changes/add-vulnerability-risk-governance/proposal.md),
+lets eligible findings reuse authenticated self-service risk acceptance with
+reason, bounded expiry, explicit renewal/revocation, and central
+Forbidden/SelfService rules. The immutable target includes namespace identity,
+exact image digest, vulnerability ID, and affected package. It applies to matching workloads in that
 namespace; another digest requires new acceptance. Original findings remain
 visible with accepted-risk disposition, and no acceptance can fill a scan gap.
 
 Versioned captures retain provider/check revisions, inventory, source evidence,
-provenance limitations, and acceptance snapshots. Namespace projection precedes
-export; existing OSCAL/S3 publication and retention handle the result. Initial
+provenance limitations and, with the governance follow-up, acceptance
+snapshots. Namespace projection precedes export; existing OSCAL/S3 publication
+and retention handle the result. Initial
 RA-5 mappings describe partial technical evidence. Implementation details and
 dependency boundaries are in the
 [Trivy design](openspec/changes/add-trivy-vulnerability-assessment/design.md).
@@ -207,7 +210,9 @@ fixtures and real-operator acceptance must establish those semantics. Its isolat
 CI acceptance group will run alongside existing groups and verify collection,
 export, and offline replay; support is claimed only for the operator versions it
 pins. The initial slice is read-only and exception-ineligible; exact-finding
-vulnerability exceptions are a governance follow-up.
+vulnerability exceptions are the separate governance follow-up change. Trivy's
+bundle checks use the provider-neutral reporting-only content that the shared
+provider contract adds for every reporting-only provider.
 
 ## Upstream references
 

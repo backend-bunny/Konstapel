@@ -45,8 +45,9 @@ protocol; remote selection is an explicit extension of its installed catalog.
 
 ## Impact
 
-Consumes `internal/provider` descriptors, limits and conformance; integrates with
-collector/content ownership, manager lifecycle and the existing C2P adapter.
+Consumes `internal/provider` descriptors, limits and conformance, and the shared
+reporting-only bundle content of `add-assessment-provider-contract` group 6;
+integrates with collector/content ownership, manager lifecycle and the existing C2P adapter.
 Adds generated API/RBAC/chart wiring for registration and a remote client,
 versioned protocol definitions, reference provider assets, and authoring docs.
 Provider charts/images release independently of Konstapel; core and CRD charts
