@@ -81,6 +81,24 @@ class SigningRecoveryAcceptanceTests(unittest.TestCase):
             with self.subTest(test=test):
                 self.assertIn(test, acceptance.GROUPS[group]["goTests"])
 
+    def test_the_signing_guide_acceptance_table_matches_the_groups(self):
+        """add-evidence-signing-recovery 4.2: every live test in the evidence
+        signing guide's acceptance table runs in the group the table names,
+        and every cluster-free row names an existing Go test."""
+        root = HERE.parents[1]
+        guide = (root / "docs/integration/evidence-signing.md").read_text()
+        table = guide.split("\n### Acceptance\n", 1)[1].split("\n#", 1)[0]
+        rows = re.findall(r"^\| `(Test\w+)` \| ([^|]+?) \|", table, re.M)
+        self.assertGreaterEqual(len(rows), 10)
+        sources = "\n".join(p.read_text() for p in (root / "internal").rglob("*_test.go"))
+        for test, group in rows:
+            with self.subTest(test=test):
+                if group.startswith("`task check`"):
+                    self.assertNotIn(test, str(acceptance.GROUPS))
+                    self.assertRegex(sources, rf"\nfunc {test}\(t \*testing\.T\)")
+                else:
+                    self.assertIn(test, acceptance.GROUPS[group]["goTests"])
+
     def test_the_workflow_verifies_offline_with_cosign(self):
         text = (HERE.parents[1] / "internal/controller/signing_recovery_workflow_live_test.go").read_text()
         self.assertIn("verifyOfflinePair(", text)

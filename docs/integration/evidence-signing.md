@@ -14,15 +14,14 @@ the parts implemented so far:
 - [key rotation](#rotate-a-signing-key), [the signature
   lifecycle](#signature-lifecycle), [migration, rollback, and trust
   withdrawal](#migration-rollback-and-trust-withdrawal), and the [status and
-  deployment contract](#status-observability-and-deployment).
+  deployment contract](#status-observability-and-deployment);
+- [signing recovery](#signing-recovery): a platform administrator's
+  attributed EvidenceSigningRequest that finishes the signed publication of
+  a run that ended `SigningFailed`, with its retained archive and original
+  signing intent ([`add-evidence-signing-recovery`](../../openspec/changes/add-evidence-signing-recovery/proposal.md)).
 
-**Not implemented yet:** a trigger to re-sign a run that ended with
-`SigningFailed`. Its evidence is retained (see [failure and recovery
-states](#publication-failure-and-recovery-states)). Re-signing is planned
-as a separate platform-administrator action in the
-[`add-evidence-signing-recovery`](../../openspec/changes/add-evidence-signing-recovery/proposal.md)
-change. Until then, fix the key and start a new run. The signing change's
-own tasks are [archived](../../openspec/changes/archive/2026-11-14-add-evidence-signing/tasks.md).
+The signing change's own tasks are
+[archived](../../openspec/changes/archive/2026-11-14-add-evidence-signing/tasks.md).
 
 ## What is signed
 
@@ -270,6 +269,7 @@ that run except whether its intent can still be satisfied.
 | Signing pending | False, `SigningPending` (retrying every poll) | Staged archive kept; nothing committed |
 | Signed | True, `Committed`; `status.publication.signature` set | Archive and signature committed together |
 | Signing failed | False, `SigningFailed` (after the publish timeout) | Staged archive retained, see below |
+| Recovered | True, `Committed`, naming the EvidenceSigningRequest; `status.signingRecovery.recovered` set | The retained archive and its signature committed by [signing recovery](#signing-recovery); the run moved from `Failed` to `Completed` |
 | Capture lost | False, `CaptureLost` | The frozen package itself was lost; a later run assesses current state |
 
 A signing failure never costs evidence:
@@ -286,9 +286,9 @@ A signing failure never costs evidence:
 - **Evidence unchanged.** Completeness and outcomes stay as they were. Nothing
   is recollected under the run's identity. The binding's slot is released,
   so later runs are scheduled normally.
-- **Recoverable.** The intent stays recorded so an authorized recovery can
-  later re-sign the same archive. That recovery trigger is not implemented
-  yet.
+- **Recoverable.** The intent stays recorded, so an administrator can
+  finish the publication of the same archive with [signing
+  recovery](#signing-recovery) until `expiresAt`.
 
 If the staged archive itself is lost while signing is pending, the run ends
 with `CaptureLost` instead.
@@ -391,13 +391,17 @@ Signing reports through the existing resources, with fixed vocabularies:
 | AssessmentRun | `Published` condition | `SigningPending`, `SigningFailed` (beside the existing publication reasons) |
 | AssessmentRun | `status.signingIntent`, `status.publication.signature` | mode `Disabled`/`Required`; public key identity; signature reference |
 | AssessmentRun | `status.publication.failure.reason` | `ObjectMissing`, `IntegrityFailed`, `SigningFailed` |
+| AssessmentRun | `status.signingRecovery` | `active` claim and `recovered` record ([request fields](#request-fields)) |
+| AssessmentRun | `status.publication.retention.notAfter` | set only on a recovered publication ([recovery expiry](#recovery-expiry)) |
+| EvidenceSigningRequest | `status.phase`, `status.reason` | the pairs in [recovery outcomes](#recovery-outcomes) |
 
 These describe signing only. Evidence completeness, outcomes, and the export
 kind are reported separately and never changed by signing.
 
 Signing runs in the existing controller and destination reconcilers, and the
 existing download server serves signatures. Signing adds no controller, Helm
-value, image, or metric. Its permissions are the controller's existing
+value, or image. Recovery adds the EvidenceSigningRequest CRD, its two roles
+and admission policies, and one gauge, all in the existing charts. Its permissions are the controller's existing
 Secret `get` in the controller namespace and the download server's existing
 reads ([who can read signing keys](#who-can-read-signing-keys)). Any metric
 derived from these fields must label only by these fixed reasons and modes,
@@ -407,9 +411,11 @@ A retained `SigningFailed` run counts in `konstapel_publication_failed`, and
 in `konstapel_publication_retained_signing_failures`, until signing recovery
 publishes it or its `expiresAt` passes. Signing recovery requests are counted
 by `konstapel_evidence_signing_recovery_requests` (labels `phase` and `reason`
-only). Recovery emits no Kubernetes Events. The controller writes Events only
-in its own namespace, and requests and runs are cluster-scoped. Use the request
-and run status and the controller logs instead. See the
+only). Recovery emits no Kubernetes Events, by owner decision: it is a choice
+about the controller's Event recorder and permissions, which allow Event
+writes only in the controller's own namespace, while requests and runs are
+cluster-scoped. Use the request and run status and the controller logs
+instead. See the
 [metrics guide](metrics.md) and the
 [publication-failing runbook](alert-runbooks.md#konstapelpublicationfailing).
 
@@ -425,9 +431,362 @@ Cosign:
 | `TestLiveSignedEvidenceDownload` | storage | the documented download and verification commands, signature authorization, key retirement, and a replaced signature object |
 | `TestLiveSignedPublicationWorkflow` | storage | full-binding and namespace packages, incomplete and diagnostic packages, rotation with a pending key dependency and a re-encrypted key, retention deletion of the signature, and an orphan handoff with its inventory. Every pair is verified offline with the trusted key and rejected with the other key. Bundles, public keys, digests, and Cosign output are kept as evidence. |
 | `TestLiveHelmDurableRecovery` | availability | on the Helm-installed image, the leader is removed while its signature upload is held, and again after the signature was stored with its response lost and the private key deleted. The successor finishes the same signed publication, uploading the signature only once. |
+| `TestLiveSigningRecoveryWorkflow` | storage | [signing recovery](#signing-recovery) on the RustFS S3 fixture: a deleted key Secret ends a run `SigningFailed` with an unpinned intent; the key is restored and a recoverer with only the shipped recoverer and operator roles recovers it with `expectedKeyFingerprint`. One signature and one commit; digest, `retention.notAfter`, and evidence fields unchanged; the namespace request is `Completed` and names no administrator; namespace and platform downloads verify with the pinned Cosign and the trusted key and are rejected with the other key. |
+| `TestLiveSigningRecoveryFaults` | recovery | key mismatch, leader loss after the signature was stored, expiry during the attempt (controller and storage clocks), a lost commit response adopted with its own expiry, a lost or replaced staged archive, concurrent requests and overlapping reconcilers, an orphan handoff in flight, and crashes after the run and namespace-request status writes with a restart past the attempt deadline. Exactly one signature and commit, the defined outcomes, and no unsigned publication. |
+| `TestLiveSigningRecoveryClaim` | recovery | the claim protocol, the bounded attempt and its deadline, and the recorded success on a real retained `SigningFailed` run |
+| `TestLiveEvidenceSigningRequestAPI` | admission | the generated CRD, the shipped roles and admission policies through impersonation: requester attribution, spec immutability, controller-only status, and each role's denials |
+| `TestLiveSigningRecoveryCredentials` | admission | the same with real credentials (bound ServiceAccount tokens, an X.509 client certificate, the cluster administrator): forged requesters, spec edits, user status writes, and each role's denials, keeping the API server's denial responses as evidence |
+| `TestSigningRecoveryNetworkBoundary` | `task check` (cluster-free) | a recovery on a new leader opens connections only to the S3 fixture and none to Fulcio, Rekor, a timestamp authority, TUF, OIDC issuers, or cloud metadata; the stored bundle is key-based v0.3 with no certificate, log entry, or timestamp, and verifies offline under the pinned key |
 
-`scripts/ci/test_acceptance.py` fails if any of these leaves its group.
+`scripts/ci/test_acceptance.py` fails if any of the live tests leaves its
+group.
 Each test removes only the Secrets and objects it created.
+
+## Signing recovery
+
+A run that ended `SigningFailed` keeps its staged archive and its signing
+intent until its recorded expiry. A platform administrator who has fixed the
+key can finish that publication with an EvidenceSigningRequest
+(`compliance.erenius.io/v1alpha1`, cluster-scoped, short name `esreq`). The
+controller then signs the exact retained archive with the intent's key, or
+reuses a stored signature, and commits it through the same commit gate as
+any signed publication. Recovery never recollects evidence and never signs
+with another key. It never extends retention or changes the run's evidence
+summary, completeness, outcomes, or export kind. Nothing happens to a
+retained run until someone creates a request for it.
+
+### Recovery roles
+
+Two shipped ClusterRoles, `config/rbac/evidence-signing-recovery.yaml`. Bind
+each with a ClusterRoleBinding to platform subjects only. Neither is
+aggregated into `admin`, `edit`, or `view`. No namespace role and not
+`konstapel-compliance-admin` includes them: recovery is a separate grant.
+
+| Role | Grants | Use |
+| --- | --- | --- |
+| `konstapel-evidence-signing-recoverer` | `evidencesigningrequests`: get, list, watch, create; `evidencesigningrequests/status`: get | Create requests and follow them. Bind it together with `konstapel-assessment-operator`, which reads runs and their status, to find the run and its UID. |
+| `konstapel-evidence-signing-recovery-reader` | `evidencesigningrequests` and `evidencesigningrequests/status`: get, list, watch | Audit requests and their outcomes |
+
+Neither role can update, patch, or delete a request, or write any status. Neither
+can write run status, read Secrets, or change destinations. Requests are the
+audit record: they have no owner reference to the run, outlive it, and can be
+deleted only through a cluster-administrator grant outside these roles. The
+controller gains only `evidencesigningrequests` get, list, watch and
+`evidencesigningrequests/status` get, update, patch. It reads the key with its
+existing Secret `get` in `konstapel-system`
+([who can read signing keys](#who-can-read-signing-keys)).
+
+Check a recoverer's permissions, as that subject:
+
+```sh
+# As a recoverer bound to konstapel-evidence-signing-recoverer and konstapel-assessment-operator:
+kubectl auth can-i create evidencesigningrequests.compliance.erenius.io                        # yes
+kubectl auth can-i get evidencesigningrequests.compliance.erenius.io --subresource=status      # yes
+kubectl auth can-i get assessmentruns.compliance.erenius.io --subresource=status               # yes
+kubectl auth can-i update evidencesigningrequests.compliance.erenius.io                        # no
+kubectl auth can-i delete evidencesigningrequests.compliance.erenius.io                        # no
+kubectl auth can-i update evidencesigningrequests.compliance.erenius.io --subresource=status   # no
+kubectl auth can-i update assessmentruns.compliance.erenius.io --subresource=status            # no
+kubectl auth can-i update evidencedestinations.compliance.erenius.io                           # no
+kubectl auth can-i get secrets -n konstapel-system                                             # no
+# As an auditor bound to konstapel-evidence-signing-recovery-reader:
+kubectl auth can-i list evidencesigningrequests.compliance.erenius.io                          # yes
+kubectl auth can-i create evidencesigningrequests.compliance.erenius.io                        # no
+```
+
+**Admission.** The shipped policies apply to every identity, including
+cluster administrators. Both use `failurePolicy: Fail`.
+- `konstapel-evidence-signing-requester`
+  (`config/admission/evidence-signing-requester.yaml`): on create, a
+  MutatingAdmissionPolicy replaces `spec.requestedBy` as a whole with the API
+  server's user info (username, and UID when the credential has one). A
+  ValidatingAdmissionPolicy then rejects a request whose `requestedBy` is not
+  the authenticated user. A forged requester or UID is never stored.
+- `konstapel-evidence-signing-status-writer`
+  (`config/admission/evidence-signing-status-writer.yaml`): only the
+  controller's ServiceAccount, read from the `konstapel-assessment-admission`
+  ConfigMap like `konstapel-assessment-run-scope`, may update request status.
+  Without the ConfigMap every status write is denied.
+- The CRD makes the whole spec immutable (`spec is immutable; create a new
+  EvidenceSigningRequest`), keeps each phase to its own reasons, and never
+  lets a terminal status change.
+
+Admission does not look up the run. The controller does, and reports
+`RunNotFound`.
+
+### Request recovery
+
+1. **Find the run.** Retained signing failures are runs whose publication
+   failed with `SigningFailed`:
+
+   ```sh
+   kubectl get assessmentruns -o jsonpath='{range .items[?(@.status.publication.failure.reason=="SigningFailed")]}{.metadata.name}{"\t"}{.metadata.uid}{"\t"}{.status.publication.expiresAt}{"\n"}{end}'
+   ```
+
+   Recovery must finish before that `expiresAt` ([expiry](#recovery-expiry)).
+2. **Fix the key.** Read what the intent recorded:
+
+   ```sh
+   kubectl get assessmentrun baseline-audit-manual-1 -o jsonpath='{.status.signingIntent.secretName}{"\t"}{.status.signingIntent.key.fingerprint}{"\n"}'
+   ```
+
+   The key must be in a Secret of exactly that name in `konstapel-system`.
+   If the intent pinned a fingerprint, the Secret must hold that key. The
+   same key re-encrypted with another password is accepted. If a signature was
+   already stored, no key is needed at all. The destination's current
+   `spec.signing`, other Secrets, and later rotations are ignored.
+3. **Create the request** as a recoverer, with the run's name and UID and a
+   reason for the audit trail
+   ([`docs/examples/evidence-signing/recovery-request.yaml`](../examples/evidence-signing/recovery-request.yaml)):
+
+   ```yaml
+   # Recover one retained SigningFailed run whose signing intent pinned its key
+   # (docs/integration/evidence-signing.md#signing-recovery). Create it as a
+   # konstapel-evidence-signing-recoverer subject. Admission records the
+   # requester in spec.requestedBy; the spec is immutable.
+   apiVersion: compliance.erenius.io/v1alpha1
+   kind: EvidenceSigningRequest
+   metadata:
+     name: recover-baseline-audit-manual-1
+   spec:
+     run:
+       name: baseline-audit-manual-1
+       uid: 0b1c2d3e-4f50-4617-8899-aabbccddeeff
+     reason: Signing key Secret restored after the 2026-11-20 rotation incident (CHG-1234).
+   ```
+
+   ```sh
+   kubectl create -f recovery-request.yaml
+   ```
+
+   A run recreated under the same name has another UID and never matches.
+   To correct a request, create a new one. The spec can't be edited.
+4. **Follow it** until the phase is `Succeeded` or `Failed`:
+
+   ```sh
+   kubectl get esreq recover-baseline-audit-manual-1
+   kubectl get esreq recover-baseline-audit-manual-1 -o jsonpath='{.status.phase}{"\t"}{.status.reason}{"\t"}{.status.message}{"\n"}'
+   ```
+
+**What the controller does.** It reads the run uncached and checks it:
+- the run exists with that UID and is not being deleted;
+- it is a retained `SigningFailed` run (phase `Failed`, failure
+  `SigningFailed`, no commit);
+- its intent is `Required`, for the pinned destination and the retained
+  archive;
+- its cleanup is `NotDue` and its `expiresAt` has not passed;
+- the pinned destination still exists and has no orphan handoff.
+
+Under the destination fence, as `run <name> signature recovery`, it then:
+
+1. **Checks storage.** The staged archive must still verify and have the
+   intent's digest. An existing commit must be the intent's signed commit of
+   that archive, as after a commit whose response was lost.
+2. **Claims the run.** It writes `status.signingRecovery.active` (request name
+   and UID, `claimedAt`, and `deadline` = claim time + the publish timeout)
+   with a resourceVersion-conditional update. Only one request holds a run.
+   Others wait (`Waiting`) and may claim it once the holder fails. A claim
+   whose request is gone or already terminal is cleared.
+3. **Signs or reuses** (`Signing`). A stored `package.sigstore.json` that
+   verifies under the pinned key is reused without reading any private key.
+   Otherwise it loads the intent's recorded Secret, requires the pinned
+   fingerprint, signs, and stores the bundle with first-writer-wins, as in
+   [signed publication](#signed-publication). For an intent that never pinned
+   a key, see [unpinned intent](#worked-recovery-examples).
+4. **Commits** (`Committing`) through the commit gate with the intent's
+   signing record and the run's recorded retention, bounded by its recorded
+   expiry ([expiry](#recovery-expiry)).
+5. **Records success** in one run status update: the committed
+   `status.publication` with its signature reference, `phase: Completed`, the
+   `Published` condition True with reason `Committed` and a message naming the
+   request, and `status.signingRecovery.recovered` (request name and UID,
+   `requestedBy`, `at`), which also clears the claim. A namespace run's
+   AssessmentRequest then becomes `Completed` with its artifact reference,
+   naming no administrator, Secret, or reason. A missing or recreated request
+   is never recreated or overwritten. Only then does the EvidenceSigningRequest
+   become `Succeeded`.
+
+A transient error (the key Secret is missing or unreadable, storage is
+unavailable) is retried at the publication poll interval until the claim's
+deadline. The message gives the cause without the Secret's name. A request
+that reaches its deadline without a durable recovery fails with
+`SigningFailed`. Its run keeps its original failure record and expiry, and
+a new request can try again. Retried, overlapping, and successor-leader
+attempts converge on one signature and one commit. A recovered run that is
+already recorded takes precedence over the deadline: a restart finishes the
+namespace request and the EvidenceSigningRequest without re-signing or
+re-committing.
+
+Recovery emits no Kubernetes Events. That is an owner decision about the
+controller's Event recorder and permissions, which grant Event writes only
+in the controller's own namespace, while requests and runs are cluster-scoped.
+Follow recovery through the request and run status, the
+`konstapel_evidence_signing_recovery_requests` gauge
+([status and observability](#status-observability-and-deployment)), and the
+controller logs, which name the run and request but carry no key material.
+
+#### Request fields
+
+| Field | Content |
+| --- | --- |
+| `spec.run` | Required `name` and `uid` of the AssessmentRun |
+| `spec.reason` | Required free text for the audit trail, 1 to 1024 characters, not blank |
+| `spec.expectedKeyFingerprint` | Optional `sha256:` and 64 lowercase hex digits. Confirms the key for an intent that never pinned one; a pinned intent ignores it |
+| `spec.requestedBy` | `username` and `uid`, always written by admission |
+| `status.phase` | `Pending`, `Running`, `Succeeded`, or `Failed`; the last two are terminal |
+| `status.reason` | The phase's fixed reason ([outcomes](#recovery-outcomes)) |
+| `status.message` | Explanation, at most 1024 characters, never key or Secret bytes |
+| `status.requestedBy` | `spec.requestedBy`, copied at acceptance and set once |
+| `status.run` | `spec.run`, as observed at acceptance and set once |
+| `status.keyFingerprint` | The intent key used or confirmed; never the Secret name |
+| `status.publication` | On success: `publicationID`, `packageSha256`, `signatureSha256`, `publishedAt`, `expiresAt` |
+| `status.acceptedAt` | When the controller first recorded the request |
+| `status.startedAt` | Defined by the API; this release's controller does not set it |
+| `status.completedAt` | When the request reached a terminal phase |
+| `status.conditions` | `Complete`, True exactly on a terminal phase, with its reason |
+
+On the run, the additive, controller-owned `status.signingRecovery`:
+
+| Field | Content |
+| --- | --- |
+| `status.signingRecovery.active` | The request holding the run: `name`, `uid`, `claimedAt`, `deadline` |
+| `status.signingRecovery.recovered` | The request that recovered it: `name`, `uid`, `requestedBy`, `at`. Written once, never with `active` |
+
+Runs that never had a request have no `signingRecovery` and keep their exact
+status bytes.
+
+### Recovery outcomes
+
+Every phase and reason the API allows. Only `Succeeded` publishes. A failed
+request changes nothing on the run except releasing its claim, and none of
+them changes evidence fields.
+
+| Phase | Reason | Meaning | Storage writes |
+| --- | --- | --- | --- |
+| Pending | `Accepted` | Accepted: the requester and run are recorded and the request holds the run's claim | none |
+| Pending | `Waiting` | Another request holds the run's claim | none |
+| Running | `Signing` | Signing the archive under the intent key, reusing a stored signature, or confirming an unpinned key | at most one signature |
+| Running | `Committing` | Committing the signed publication | at most one commit |
+| Succeeded | `Recovered` | This request committed the signed publication, or adopted a matching commit already in storage | its signature and commit, or none when adopted |
+| Succeeded | `AlreadyRecovered` | The run was already recovered; the request names the same publication | none |
+| Failed | `RunNotFound` | No run has that name and UID | none |
+| Failed | `RunDeleting` | The run is being deleted | none |
+| Failed | `NotRecoverable` | Not a retained `SigningFailed` run with a `Required` intent for its pinned destination and archive, it has no recorded expiry, or the pinned destination no longer exists | none |
+| Failed | `Expired` | The recorded expiry has passed or cleanup has started, the commit was refused at the expiry, or a commit landed at or after it ([expiry](#recovery-expiry)) | none, or a commit that is never served |
+| Failed | `Orphaned` | The pinned destination is fenced or handed off, before or during the attempt | none |
+| Failed | `EvidenceLost` | The staged archive is missing, no longer verifies, or has another digest, or an existing commit's package is not intact | none |
+| Failed | `KeyConfirmationRequired` | The intent never pinned a key and the request has no `expectedKeyFingerprint`; decided before any Secret is read | none |
+| Failed | `KeyMismatch` | The recorded Secret holds a key other than the pinned or confirmed one | none |
+| Failed | `SigningFailed` | The attempt deadline passed without a durable recovery; a new request can try again | possibly a stored signature, which a later request reuses |
+| Failed | `Conflict` | A stored signature does not verify, or storage holds a commit that is not the intent's signed commit of the archive (unsigned, another key, another archive, or an unsupported record); nothing is overwritten | none |
+
+`api/v1alpha1` tests check this table against the API's phase and reason
+vocabulary, and the CRD enforces the same pairs.
+
+### Recovery expiry
+
+Recovery never extends retention. The deadline is the run's
+`status.publication.expiresAt`, recorded at the signing failure as closure +
+the run's recorded retention.
+- **Before the attempt.** A request evaluated at or after that time, or once
+  cleanup is no longer `NotDue`, ends `Expired` without touching storage.
+- **The commit.** The recovered `SignedPublicationCommit` records
+  `retention.notAfter` = that expiry, and its receipt's `expiresAt` is
+  `notAfter`, never `publishedAt` + retention. Readers require
+  `notAfter <= publishedAt + duration`. The run's
+  `status.publication.retention.notAfter` shows the same bound. Only
+  recovery writes it; every other publication omits it.
+- **Commit at the expiry.** When the controller's clock has reached
+  `notAfter`, nothing is committed (`Expired`). If storage's clock is ahead
+  and the commit lands at or after `notAfter`, it is expired at once: it is
+  never served, retention deletes it with the archive, and the request ends
+  `Expired`.
+- **Adopted commit.** A matching commit that landed before the run failed,
+  with its response lost, is adopted unchanged with its own `publishedAt` and
+  expiry, which can be later than the failure record. That expiry was fixed
+  by that earlier commit; recovery does not change it.
+
+`publishedAt` is the storage commit time, so it shows that the publication was
+late. The capture window, evaluation times, and summary keep their original
+values, so evidence freshness is not renewed. Coverage selects runs by
+window closure, so an older recovered run never displaces a newer one.
+
+### Recovery upgrade, mixed versions, and rollback
+
+- **Upgrade first.** Install this release's CRDs, then the runtime chart,
+  which ships the request CRD's roles, admission policies, and the
+  controller and download server (one image). Create requests only after
+  every controller and download replica runs it. Existing retained
+  `SigningFailed` runs then become recoverable until their recorded expiry.
+- **Mixed versions.** A release without signing recovery (0.3.0 and earlier)
+  decodes commits strictly. It reads a recovered commit's
+  `retention.notAfter` as an unsupported record, never as unsigned, and
+  neither serves nor rewrites it. It does not process requests.
+- **Rollback.** Wait until no request is `Pending` or `Running`
+  (`kubectl get esreq`); a cluster administrator may delete unprocessed ones
+  instead. Do not roll back while recovered publications are retained: the
+  older release cannot serve or retire them, just as for [signed
+  history](#mixed-versions-and-rollback). Keep this release's CRDs: an older
+  schema has no EvidenceSigningRequest and would prune `signingRecovery` and
+  `retention.notAfter` from stored runs.
+
+### Worked recovery examples
+
+- **Key restored.** Run `baseline-audit-manual-1` pinned key `sha256:…a1` in
+  Secret `konstapel-evidence-signing-2026-11`. The Secret was deleted, so the
+  run ended `SigningFailed` with its archive retained. The administrator
+  restores the same key under that name, re-encrypted if needed, and creates
+  the [request above](#request-recovery). It is `Pending`/`Accepted`, then
+  `Running` with `Signing` and `Committing`, then `Succeeded`/`Recovered`
+  with `keyFingerprint: sha256:…a1` and the publication. The run is
+  `Completed`, `Published=True` (`Committed`), with
+  `signingRecovery.recovered` naming the request. Its package digest and
+  evidence fields are unchanged, and the namespace and platform downloads
+  serve the pair, which verifies with the trusted key. Had a different key
+  been installed under that name, the request would end `KeyMismatch` with
+  nothing signed and the run unchanged.
+- **Unpinned intent.** Run `nightly-team-a-1` recorded its `Required` intent
+  while its Secret was missing, so `status.signingIntent.key` is absent.
+  Install the intended key under the recorded Secret name, compute its
+  fingerprint from its `cosign.pub` ([signing readiness](#signing-readiness)),
+  and state it
+  ([`docs/examples/evidence-signing/recovery-request-confirmed-key.yaml`](../examples/evidence-signing/recovery-request-confirmed-key.yaml)):
+
+  ```yaml
+  # Recover a retained SigningFailed run whose signing intent never pinned a
+  # key (docs/integration/evidence-signing.md#signing-recovery).
+  # expectedKeyFingerprint confirms the key now in the intent's recorded Secret;
+  # without it the request ends KeyConfirmationRequired before any Secret read.
+  apiVersion: compliance.erenius.io/v1alpha1
+  kind: EvidenceSigningRequest
+  metadata:
+    name: recover-nightly-team-a-1
+  spec:
+    run:
+      name: nightly-team-a-1
+      uid: 11111111-2222-4333-8444-555555555555
+    reason: Key Secret was missing at preparation; installed konstapel-evidence-signing-2026-11 (CHG-1301).
+    expectedKeyFingerprint: sha256:3f9a0c7e5b21d84c6e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f
+  ```
+
+  If the Secret holds that key, the controller pins it on the intent with
+  the usual write-once update, then signs and commits. Another key is
+  `KeyMismatch`, with nothing pinned. Without `expectedKeyFingerprint` the
+  request is `KeyConfirmationRequired`. The fingerprint authorizes the
+  initial key choice for this run, attributed to the requester. It does not
+  prove that this is a key the run was ever meant to use, so check it
+  against the public key your auditors trust.
+- **Late recovery.** A run closed on 2026-11-20 with 90 days' retention, so
+  its failure record has `expiresAt: 2027-02-18T…`. It is recovered on
+  2026-12-15. The commit has `publishedAt` 2026-12-15 and `expiresAt`
+  2027-02-18 (`retention.notAfter`), not 2027-03-15. On 2027-02-18 the
+  package is deleted like any expired one. A second request created later
+  ends `AlreadyRecovered` with the same publication and writes nothing.
+- **Expired evidence.** A request for a run whose `expiresAt` has passed ends
+  `Expired` with no storage write. The run stays `Failed` with
+  `SigningFailed`, and retention deletes its archive and any stored signature.
+  The evidence can't be published any more; collect current evidence with a
+  new run.
 
 ## Signature format
 

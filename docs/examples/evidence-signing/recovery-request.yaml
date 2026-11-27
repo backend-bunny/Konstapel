@@ -1,0 +1,13 @@
+# Recover one retained SigningFailed run whose signing intent pinned its key
+# (docs/integration/evidence-signing.md#signing-recovery). Create it as a
+# konstapel-evidence-signing-recoverer subject. Admission records the
+# requester in spec.requestedBy; the spec is immutable.
+apiVersion: compliance.erenius.io/v1alpha1
+kind: EvidenceSigningRequest
+metadata:
+  name: recover-baseline-audit-manual-1
+spec:
+  run:
+    name: baseline-audit-manual-1
+    uid: 0b1c2d3e-4f50-4617-8899-aabbccddeeff
+  reason: Signing key Secret restored after the 2026-11-20 rotation incident (CHG-1234).
