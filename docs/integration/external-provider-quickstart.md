@@ -34,7 +34,7 @@ is its own Go module (`example.com/konstapel-reporting`), with its own
 | Path | What it is |
 | --- | --- |
 | `provider/` | The provider. `Description()` is its `Describe` response: `example-reporting/v1`, protocol revision 2, evaluator 1, payload 1, capabilities Collect and Evaluate, check kind `reporting.example.test/v1/RequiredLabel`, and a 256-byte chunk limit, so even a small payload travels in several chunks. `Provider` implements the kit's `Collector`, `Results` and `Evaluator` over a fixed in-memory source. `Serve` runs the protocol port over mutual TLS, with probes on a separate port. |
-| `host/` | A stand-in for the Konstapel host. Through `providerkit.Client` it runs Describe, then Collect, then ReadResult, then Acknowledge, then Evaluate, giving each call its own deadline. |
+| `host/` | A stand-in for the Konstapel host. Through `providerkit.Client` it runs Describe, then Collect, then ReadResult, then Acknowledge at the source endpoint, then Evaluate at the evaluator endpoint, giving each call its own deadline. The quickstart's single process is both endpoints; `-evaluator-addr` and `-evaluator-server-name` point `reporting-host` at a separate evaluator. |
 | `certs/` | Throwaway CA, server and host certificates generated at run time. |
 | `cmd/quickstart-certs`, `cmd/reporting-provider`, `cmd/reporting-host` | The three commands used below. `reporting-provider` runs the combined process by default; `-role worker` and `-role evaluator` are the [reference chart](external-provider-chart.md)'s two deployments. |
 | `provider/kubernetes.go`, `provider/roles.go` | The worker's Kubernetes Namespace source and the worker/evaluator split: `Forward` sends each evaluation to the evaluator. |

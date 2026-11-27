@@ -1,5 +1,6 @@
-# The source worker: the registered endpoint. It reads the source with its
-# own ServiceAccount and forwards every evaluation to the evaluator.
+# The source worker: the registration's source endpoint (spec.endpoint). It
+# reads the source with its own ServiceAccount and serves collection only;
+# it evaluates nothing and forwards nothing.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,9 +40,6 @@ spec:
             - -health-listen=:{{ .Values.ports.health }}
             - -tls-dir=/etc/example-reporting/tls
             - -authorized-hosts={{ join "," .Values.worker.authorizedHosts }}
-            - -evaluator-addr={{ include "reporting.evaluator" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}
-            - -evaluator-server-name={{ include "reporting.evaluatorServerName" . }}
-            - -evaluator-tls-dir=/etc/example-reporting/evaluator-client-tls
           ports:
             - {name: protocol, containerPort: {{ .Values.ports.protocol }}, protocol: TCP}
             - {name: health, containerPort: {{ .Values.ports.health }}, protocol: TCP}
@@ -54,14 +52,11 @@ spec:
           {{- end }}
           volumeMounts:
             - {name: tls, mountPath: /etc/example-reporting/tls, readOnly: true}
-            - {name: evaluator-client-tls, mountPath: /etc/example-reporting/evaluator-client-tls, readOnly: true}
       # Whole-Secret volumes (never subPath), so the kubelet updates rotated
       # material in place.
       volumes:
         - name: tls
           secret: {secretName: {{ include "reporting.workerSecret" . }}, defaultMode: 0440}
-        - name: evaluator-client-tls
-          secret: {secretName: {{ include "reporting.workerClientSecret" . }}, defaultMode: 0440}
 ---
 apiVersion: v1
 kind: Service

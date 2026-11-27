@@ -570,15 +570,40 @@ covers the certificates, trust ConfigMaps, roles to bind and the platform
 installation boundary. The controller never installs or downloads a
 provider. Content and assessment runs do not use registrations yet.
 
+### Endpoints
+
+A registration names up to two endpoints, each its own Service with its own
+`serverName` and `serverTrust`
+([design Decision 11](../../openspec/changes/add-external-assessment-providers/design.md#11-separate-evaluator-endpoint)):
+
+| Endpoint | Required | Serves | The host sends |
+| --- | --- | --- | --- |
+| `spec.endpoint` (source) | exactly when `Collect` or `Scan` is allowed | the allowed `Collect` and `Scan`, writing the payload version | Collect, Start, Get, Cancel, ReadResult, Acknowledge |
+| `spec.evaluatorEndpoint` (evaluator) | exactly when `Evaluate` is allowed | `Evaluate`, reading the payload version | Evaluate |
+
+The API refuses an evaluator endpoint with the source endpoint's Service or
+`serverName`. The host's client for each endpoint allows only that
+endpoint's capabilities, so evaluation never reaches the source endpoint
+and collection never reaches the evaluator (`external.Dialer.Connect` and
+`ConnectEvaluator`). An Evaluate-only registration, such as replay after the
+worker is gone, names only an evaluator endpoint. Registration checks the
+two identities, not that their workloads are separate: the provider's
+deployment is that boundary
+([reference chart](external-provider-chart.md#source-worker-and-evaluator)).
+
 ### Probing
 
 Every registration is probed when it changes and then every minute. A probe
-reads the `serverTrust` ConfigMap key in the controller namespace and the
-controller's credentials, dials `<service>.<namespace>.svc:<port>`,
-authenticates the server as `serverName` over mutual TLS 1.3 and sends
-`Describe` with a 10 second deadline. Nothing else is sent. The description
-must match the registration in every dimension, and its `implementation`
-must equal `spec.provider.releaseDigest`. A matching `implementation` is the
+covers each endpoint of the current revision, the source endpoint first,
+within one 10 second deadline. For each, it reads the `serverTrust`
+ConfigMap key in the controller namespace and the controller's credentials,
+dials `<service>.<namespace>.svc:<port>`, authenticates the server as that
+endpoint's `serverName` over mutual TLS 1.3 and sends `Describe`. Nothing
+else is sent. Each description must match the registration in every
+dimension for that endpoint's capabilities, and its `implementation` must
+equal `spec.provider.releaseDigest`. The first failing endpoint is the
+condition's reason, and the message names it. A registration is Ready only
+when every endpoint it names is available and compatible. A matching `implementation` is the
 endpoint's own claim, not attestation. A rotated trust ConfigMap or client
 certificate is used from the next probe, without a restart. Up to four
 probes run at once, and each probe is bounded, so a slow endpoint never
@@ -592,8 +617,8 @@ versions and errors, never certificate contents or keys.
 
 | Condition | `True` when | Reasons when not `True` |
 | --- | --- | --- |
-| `Available` | The Service accepted a connection, the server authenticated as `serverName`, the controller was accepted, and `Describe` answered. | `TrustUnavailable`, `ClientCredentialsUnavailable`, `EndpointUnavailable`, `AuthenticationFailed`; `NotChecked` (`Unknown`) for a built-in name |
-| `Compatible` | The description matches the registration: provider, release, protocol revision, contract, evaluator, payload and allowed capabilities. | `ProviderMismatch`, `ReleaseMismatch`, `UnsupportedProtocolVersion`, `UnsupportedContractVersion`, `UnsupportedEvaluatorVersion`, `UnsupportedPayloadVersion`, `UnsupportedCapability`, `InvalidDescription`, `BuiltInProvider`; `NotChecked` (`Unknown`) while unavailable |
+| `Available` | At each endpoint, the Service accepted a connection, the server authenticated as that endpoint's `serverName`, the controller was accepted, and `Describe` answered. | `TrustUnavailable`, `ClientCredentialsUnavailable`, `EndpointUnavailable`, `AuthenticationFailed`; `NotChecked` (`Unknown`) for a built-in name |
+| `Compatible` | Each endpoint's description matches the registration: provider, release, protocol revision, contract, evaluator, payload and the allowed capabilities of that endpoint. | `ProviderMismatch`, `ReleaseMismatch`, `UnsupportedProtocolVersion`, `UnsupportedContractVersion`, `UnsupportedEvaluatorVersion`, `UnsupportedPayloadVersion`, `UnsupportedCapability`, `InvalidDescription`, `BuiltInProvider`; `NotChecked` (`Unknown`) while unavailable |
 | `Ready` | New work may select the registration. | `Unavailable`, `Incompatible`, `NewRequestsDisabled`, `AmbiguousRegistration` |
 
 The `True` reasons are `Available`, `Compatible` and `Ready`.
@@ -639,11 +664,12 @@ release once it is `Ready`.
 A selection freezes the selected registration: its name, UID,
 configuration revision (`metadata.generation`), provider contract, release
 digest, protocol revision, evaluator and payload versions, allowed
-capabilities, and that revision's endpoint (Service, `serverName` and
-`serverTrust` ConfigMap name and key). The record contains no credentials.
+capabilities, and that revision's endpoints (for each, the Service,
+`serverName` and `serverTrust` ConfigMap name and key). The record contains
+no credentials.
 Work frozen to it keeps that configuration:
 
-- A later revision, such as a moved Service, other capabilities or
+- A later revision, such as a moved Service or evaluator, other capabilities or
   `newRequests: Disabled`, is used only by new work. Disabled lets frozen
   work drain.
 - The trust ConfigMap's contents are read at every connection, so trust

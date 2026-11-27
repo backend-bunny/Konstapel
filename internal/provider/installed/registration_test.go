@@ -33,6 +33,11 @@ func TestRegistrationsCannotShadowBuiltInProviders(t *testing.T) {
 					"serverName":  "provider.providers.svc",
 					"serverTrust": map[string]any{"name": "provider-ca"},
 				},
+				"evaluatorEndpoint": map[string]any{
+					"service":     map[string]any{"namespace": "providers", "name": "provider-evaluator", "port": int64(8443)},
+					"serverName":  "provider-evaluator.providers.svc",
+					"serverTrust": map[string]any{"name": "provider-ca"},
+				},
 				"compatibility": map[string]any{"protocol": "konstapel.provider.v1", "contractVersion": int64(1), "evaluatorVersion": int64(1), "payloadVersion": int64(1)},
 				"capabilities":  []any{"Collect", "Evaluate"},
 			},

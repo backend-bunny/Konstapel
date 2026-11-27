@@ -32,6 +32,10 @@ spec:
     service: {namespace: example-provider, name: example-reporting, port: 8443}
     serverName: example-reporting.example-provider.svc
     serverTrust: {name: example-reporting-ca}
+  evaluatorEndpoint:
+    service: {namespace: example-provider, name: example-reporting-evaluator, port: 8443}
+    serverName: example-reporting-evaluator.example-provider.svc
+    serverTrust: {name: example-reporting-ca}
   compatibility: {protocol: konstapel.provider.v1, contractVersion: 1, evaluatorVersion: 1, payloadVersion: 1}
   capabilities: [Collect, Evaluate]
 `)
@@ -56,20 +60,23 @@ func TestAssessmentProviderCreateValidation(t *testing.T) {
 	}
 
 	for name, patch := range map[string]string{
-		"disabled":              `{"spec":{"newRequests":"Disabled"}}`,
-		"every capability":      `{"spec":{"capabilities":["Collect","Scan","Evaluate"]}}`,
-		"evaluate only":         `{"spec":{"capabilities":["Evaluate"]}}`,
-		"scan only":             `{"spec":{"capabilities":["Scan"]}}`,
-		"trust key":             `{"spec":{"endpoint":{"serverTrust":{"key":"bundle.pem"}}}}`,
-		"dotted trust name":     `{"spec":{"endpoint":{"serverTrust":{"name":"provider.ca.v2"}}}}`,
-		"single-label server":   `{"spec":{"endpoint":{"serverName":"provider"}}}`,
-		"external server name":  `{"spec":{"endpoint":{"serverName":"reporting.provider.example.com"}}}`,
-		"numeric label in name": `{"spec":{"endpoint":{"serverName":"r1.10.example.internal"}}}`,
-		"highest port":          `{"spec":{"endpoint":{"service":{"port":65535}}}}`,
-		"later versions":        `{"spec":{"compatibility":{"contractVersion":3,"evaluatorVersion":7,"payloadVersion":2}}}`,
-		"name with konstapel":   `{"spec":{"provider":{"name":"acme-konstapel"}}}`,
-		"longest server label":  `{"spec":{"endpoint":{"serverName":"` + strings.Repeat("a", 63) + `.svc"}}}`,
-		"longest provider name": `{"spec":{"provider":{"name":"` + strings.Repeat("a", 63) + `"}}}`,
+		"disabled":                       `{"spec":{"newRequests":"Disabled"}}`,
+		"every capability":               `{"spec":{"capabilities":["Collect","Scan","Evaluate"]}}`,
+		"evaluate only":                  `{"spec":{"capabilities":["Evaluate"],"endpoint":null}}`,
+		"scan only":                      `{"spec":{"capabilities":["Scan"],"evaluatorEndpoint":null}}`,
+		"collect only":                   `{"spec":{"capabilities":["Collect"],"evaluatorEndpoint":null}}`,
+		"evaluator in another namespace": `{"spec":{"evaluatorEndpoint":{"service":{"namespace":"example-evaluator","name":"example-reporting"}}}}`,
+		"evaluator trust":                `{"spec":{"evaluatorEndpoint":{"serverTrust":{"name":"example-evaluator-ca","key":"roots.pem"}}}}`,
+		"trust key":                      `{"spec":{"endpoint":{"serverTrust":{"key":"bundle.pem"}}}}`,
+		"dotted trust name":              `{"spec":{"endpoint":{"serverTrust":{"name":"provider.ca.v2"}}}}`,
+		"single-label server":            `{"spec":{"endpoint":{"serverName":"provider"}}}`,
+		"external server name":           `{"spec":{"endpoint":{"serverName":"reporting.provider.example.com"}}}`,
+		"numeric label in name":          `{"spec":{"endpoint":{"serverName":"r1.10.example.internal"}}}`,
+		"highest port":                   `{"spec":{"endpoint":{"service":{"port":65535}}}}`,
+		"later versions":                 `{"spec":{"compatibility":{"contractVersion":3,"evaluatorVersion":7,"payloadVersion":2}}}`,
+		"name with konstapel":            `{"spec":{"provider":{"name":"acme-konstapel"}}}`,
+		"longest server label":           `{"spec":{"endpoint":{"serverName":"` + strings.Repeat("a", 63) + `.svc"}}}`,
+		"longest provider name":          `{"spec":{"provider":{"name":"` + strings.Repeat("a", 63) + `"}}}`,
 	} {
 		o := assessmentProvider(t)
 		mergePatch(t, o, patch)
@@ -79,8 +86,17 @@ func TestAssessmentProviderCreateValidation(t *testing.T) {
 	}
 
 	cases := []struct{ name, patch, expect string }{
-		// Endpoint: a Service reference, never a URL.
-		{"no endpoint", `{"spec":{"endpoint":null}}`, "spec.endpoint: Required"},
+		// Endpoints: the source endpoint exactly with Collect or Scan, the
+		// evaluator endpoint exactly with Evaluate, each its own identity.
+		{"no endpoint", `{"spec":{"endpoint":null}}`, "endpoint (the source endpoint) is required exactly when Collect or Scan is allowed"},
+		{"endpoint without collection", `{"spec":{"capabilities":["Evaluate"]}}`, "endpoint (the source endpoint) is required exactly when Collect or Scan is allowed"},
+		{"no evaluator endpoint", `{"spec":{"evaluatorEndpoint":null}}`, "evaluatorEndpoint is required exactly when Evaluate is allowed"},
+		{"evaluator endpoint without evaluation", `{"spec":{"capabilities":["Collect"]}}`, "evaluatorEndpoint is required exactly when Evaluate is allowed"},
+		{"evaluation at the source server name", `{"spec":{"evaluatorEndpoint":{"serverName":"example-reporting.example-provider.svc"}}}`, "evaluatorEndpoint must name another serverName than endpoint"},
+		{"evaluation at the source Service", `{"spec":{"evaluatorEndpoint":{"service":{"name":"example-reporting","port":9443}}}}`, "evaluatorEndpoint must name another Service than endpoint"},
+		{"no evaluator server name", `{"spec":{"evaluatorEndpoint":{"serverName":null}}}`, "spec.evaluatorEndpoint.serverName: Required"},
+		{"evaluator trust in another namespace", `{"spec":{"evaluatorEndpoint":{"serverTrust":{"namespace":"example-provider"}}}}`, "references resolve in the controller namespace only"},
+		{"evaluator wildcard server name", `{"spec":{"evaluatorEndpoint":{"serverName":"*.example-provider.svc"}}}`, "spec.evaluatorEndpoint.serverName"},
 		{"no service", `{"spec":{"endpoint":{"service":null}}}`, "spec.endpoint.service: Required"},
 		{"service without namespace", `{"spec":{"endpoint":{"service":{"namespace":null}}}}`, "spec.endpoint.service.namespace: Required"},
 		{"service without name", `{"spec":{"endpoint":{"service":{"name":null}}}}`, "spec.endpoint.service.name: Required"},
@@ -186,6 +202,7 @@ func TestAssessmentProviderCarriesNoURLsOrCredentials(t *testing.T) {
 		"endpoint":{"url":"https://attacker.example","insecureSkipVerify":true,"plaintext":true,
 			"clientCertificate":{"name":"stolen"},"clientKey":"LS0t","caBundle":"LS0t",
 			"service":{"url":"https://attacker.example"},"serverTrust":{"pem":"LS0t"}},
+		"evaluatorEndpoint":{"url":"https://attacker.example","insecureSkipVerify":true,"sourceCredentials":{"name":"aws"}},
 		"compatibility":{"protocolRevision":2},
 		"credentials":{"secretName":"aws"}},
 		"status":{"identity":{"clientKey":"LS0t","certificate":"LS0t"},"certificate":"LS0t","token":"s3cr3t"}}`)
@@ -247,7 +264,9 @@ func TestAssessmentProviderUpdateValidation(t *testing.T) {
 		"server name":       `{"spec":{"endpoint":{"serverName":"reporting.example-provider.svc.cluster.local"}}}`,
 		"moved service":     `{"spec":{"endpoint":{"service":{"namespace":"providers","name":"reporting","port":9443}}}}`,
 		"scan allowed":      `{"spec":{"capabilities":["Collect","Scan","Evaluate"]}}`,
-		"collect revoked":   `{"spec":{"capabilities":["Evaluate"]}}`,
+		"collect revoked":   `{"spec":{"capabilities":["Evaluate"],"endpoint":null}}`,
+		"evaluator moved":   `{"spec":{"evaluatorEndpoint":{"service":{"name":"reporting-evaluator-2"},"serverName":"reporting-evaluator-2.example-provider.svc"}}}`,
+		"evaluate revoked":  `{"spec":{"capabilities":["Collect"],"evaluatorEndpoint":null}}`,
 		"drained":           `{"spec":{"newRequests":"Disabled"}}`,
 		"labels":            `{"metadata":{"labels":{"owner":"platform"}}}`,
 	} {

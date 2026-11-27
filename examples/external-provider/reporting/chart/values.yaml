@@ -15,11 +15,12 @@ image:
   digest: ""
   pullPolicy: IfNotPresent
 
-# The source worker: the endpoint you register. It reads Namespaces from the
-# Kubernetes API with its own ServiceAccount (get on namespaces, nothing
-# else), stages results in memory and forwards every evaluation, unchanged,
-# to the evaluator. One replica: staged results live in its memory, so a
-# second replica would be asked for results it never staged.
+# The source worker: the source endpoint you register (spec.endpoint). It
+# reads Namespaces from the Kubernetes API with its own ServiceAccount (get
+# on namespaces, nothing else), stages results in memory and serves
+# collection only: it evaluates and forwards nothing. One replica: staged
+# results live in its memory, so a second replica would be asked for
+# results it never staged.
 worker:
   # Required: the host identities (exact DNS SANs of client certificates)
   # allowed to call, such as the identity of the Konstapel controller's
@@ -29,25 +30,26 @@ worker:
   # Konstapel controller's.
   hostNamespaces:
     - konstapel-system
-  # The DNS SAN of the worker's evaluator-client certificate, the one client
-  # the evaluator authorizes. Empty: <fullname>-worker.<namespace>.svc.
-  clientName: ""
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {memory: 128Mi}
 
-# The evaluator: Evaluate only. It has no source, no RBAC and no Kubernetes
-# API token, and its NetworkPolicy denies it all egress. By default only the
-# worker reaches it.
+# The evaluator: the evaluator endpoint you register
+# (spec.evaluatorEndpoint). Evaluate only, called by the host directly. It
+# has no source, no RBAC and no Kubernetes API token, and its NetworkPolicy
+# denies it all egress and admits only the host namespaces.
 evaluator:
-  # The DNS SAN of the evaluator's serving certificate, which the worker
-  # requires. Empty: <fullname>-evaluator.<namespace>.svc.
+  # The DNS SAN of the evaluator's serving certificate: the
+  # evaluatorEndpoint.serverName you register, which must differ from the
+  # worker's. Empty: <fullname>-evaluator.<namespace>.svc.
   serverName: ""
-  # Extra host identities allowed to call the evaluator directly, with
-  # hostNamespaces their namespaces: only for an Evaluate-only registration
-  # of the evaluator Service (replay without the worker). Empty by default.
+  # Required: the host identities (exact DNS SANs of client certificates)
+  # allowed to call the evaluator, such as the Konstapel controller's.
   authorizedHosts: []
-  hostNamespaces: []
+  # Namespaces whose Pods may reach the evaluator's protocol port: the
+  # Konstapel controller's.
+  hostNamespaces:
+    - konstapel-system
   replicaCount: 1
   resources:
     requests: {cpu: 10m, memory: 32Mi}
@@ -59,16 +61,13 @@ evaluator:
 # rotation is used without a restart. Empty uses the default in brackets.
 tls:
   # [<fullname>-worker-tls] The worker's serving certificate (server
-  # authentication) for the serverName you register; its ca.crt verifies
-  # the host client certificates.
+  # authentication) for the endpoint serverName you register; its ca.crt
+  # verifies the host client certificates.
   workerSecretName: ""
-  # [<fullname>-worker-client-tls] The worker's client certificate (client
-  # authentication) naming worker.clientName; its ca.crt verifies the
-  # evaluator's serving certificate.
-  workerClientSecretName: ""
   # [<fullname>-evaluator-tls] The evaluator's serving certificate (server
-  # authentication) naming evaluator.serverName; its ca.crt verifies the
-  # worker's client certificate (and any evaluator.authorizedHosts).
+  # authentication) naming evaluator.serverName, the evaluatorEndpoint
+  # serverName you register; its ca.crt verifies the host client
+  # certificates.
   evaluatorSecretName: ""
 
 ports:

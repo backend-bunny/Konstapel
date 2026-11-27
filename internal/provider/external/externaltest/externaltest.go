@@ -35,16 +35,20 @@ import (
 
 // Names and identities of the default fixture.
 const (
-	Provider      = "example-reporting"
-	ServerName    = "example-reporting.providers.svc"
-	ClientName    = "konstapel-controller.konstapel-system.svc"
-	Release       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	OtherRelease  = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	TrustConfig   = "example-reporting-ca"
-	ProviderNS    = "providers"
-	ServiceName   = "example-reporting"
-	ServicePort   = 8443
-	CheckKindName = "reporting.example.io/v1/Posture"
+	Provider   = "example-reporting"
+	ServerName = "example-reporting.providers.svc"
+	// EvaluatorServerName and EvaluatorServiceName are the default
+	// registration's separate evaluator endpoint.
+	EvaluatorServerName  = "example-reporting-evaluator.providers.svc"
+	EvaluatorServiceName = "example-reporting-evaluator"
+	ClientName           = "konstapel-controller.konstapel-system.svc"
+	Release              = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	OtherRelease         = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	TrustConfig          = "example-reporting-ca"
+	ProviderNS           = "providers"
+	ServiceName          = "example-reporting"
+	ServicePort          = 8443
+	CheckKindName        = "reporting.example.io/v1/Posture"
 )
 
 var serial atomic.Int64
@@ -170,7 +174,8 @@ type ServerOptions struct {
 	// CA issues the serving certificate and is the client trust, unless
 	// ClientTrust is set.
 	CA *CA
-	// ServerNames default to ServerName.
+	// ServerNames default to ServerName and EvaluatorServerName: one
+	// process serving both of the default registration's endpoints.
 	ServerNames []string
 	// ClientTrust is the CA bundle the provider trusts for clients.
 	ClientTrust []byte
@@ -189,7 +194,7 @@ func Serve(t testing.TB, o ServerOptions) *Server {
 		o.Description = Description()
 	}
 	if len(o.ServerNames) == 0 {
-		o.ServerNames = []string{ServerName}
+		o.ServerNames = []string{ServerName, EvaluatorServerName}
 	}
 	if o.ClientTrust == nil {
 		o.ClientTrust = o.CA.PEM
@@ -242,11 +247,11 @@ func Serve(t testing.TB, o ServerOptions) *Server {
 }
 
 // Rotate replaces the serving certificate with one issued by ca for
-// ServerName and reloads it.
+// ServerName and EvaluatorServerName and reloads it.
 func (s *Server) Rotate(ca *CA) {
 	s.t.Helper()
 	files := providerkit.SecretFiles(s.dir)
-	l := ca.Issue(s.t, x509.ExtKeyUsageServerAuth, ServerName)
+	l := ca.Issue(s.t, x509.ExtKeyUsageServerAuth, ServerName, EvaluatorServerName)
 	WriteFile(s.t, files.Certificate, l.Cert)
 	WriteFile(s.t, files.Key, l.Key)
 	if err := s.tls.Reload(); err != nil {
@@ -331,9 +336,14 @@ func Registration(name string, mutate ...func(*v1alpha1.AssessmentProvider)) *v1
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID("uid-" + name), Generation: 1},
 		Spec: v1alpha1.AssessmentProviderSpec{
 			Provider: v1alpha1.ExpectedProvider{Name: Provider, ReleaseDigest: Release},
-			Endpoint: v1alpha1.ProviderEndpoint{
+			Endpoint: &v1alpha1.ProviderEndpoint{
 				Service:     v1alpha1.ProviderServiceReference{Namespace: ProviderNS, Name: ServiceName, Port: ServicePort},
 				ServerName:  ServerName,
+				ServerTrust: v1alpha1.CATrust{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: TrustConfig}, Key: "ca.crt"},
+			},
+			EvaluatorEndpoint: &v1alpha1.ProviderEndpoint{
+				Service:     v1alpha1.ProviderServiceReference{Namespace: ProviderNS, Name: EvaluatorServiceName, Port: ServicePort},
+				ServerName:  EvaluatorServerName,
 				ServerTrust: v1alpha1.CATrust{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: TrustConfig}, Key: "ca.crt"},
 			},
 			Compatibility: v1alpha1.ProviderCompatibility{Protocol: v1alpha1.ProviderProtocolV1, ContractVersion: 1, EvaluatorVersion: 1, PayloadVersion: 1},

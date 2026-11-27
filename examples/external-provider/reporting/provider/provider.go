@@ -7,10 +7,10 @@
 //
 // The quickstart runs it as one process over a fixed in-memory source. The
 // reference chart (chart/, see docs/integration/external-provider-chart.md)
-// runs the same code as two deployments with separate identities: a source
-// worker that reads Namespaces from the Kubernetes API and forwards each
-// evaluation unchanged, and a credential-free evaluator that only evaluates
-// (Roles).
+// runs the same code as two deployments with separate identities, each its
+// own registered endpoint: a source worker that reads Namespaces from the
+// Kubernetes API and only collects, and a credential-free evaluator that
+// only evaluates (Roles).
 //
 // It is a demonstration of the protocol, not a supported provider: staging
 // lives in memory, so a restart loses unacknowledged results. A real
@@ -99,7 +99,10 @@ func Description() *providerv1.DescribeResponse {
 // contract, versions, limits and release; only their capabilities differ.
 func Describe(role Role, implementation string) *providerv1.DescribeResponse {
 	capabilities := []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE}
-	if role == RoleEvaluator {
+	switch role {
+	case RoleWorker:
+		capabilities = []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT}
+	case RoleEvaluator:
 		capabilities = []providerv1.Capability{providerv1.Capability_CAPABILITY_EVALUATE}
 	}
 	return &providerv1.DescribeResponse{

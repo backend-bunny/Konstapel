@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -32,23 +33,46 @@ func BuiltInObservation(ap *v1alpha1.AssessmentProvider, at time.Time) Observati
 		"provider %s is built into Konstapel; a registration never shadows it, and its endpoint is not contacted", ap.Spec.Provider.Name)}
 }
 
-// Probe connects to the registration's current revision within ctx's
-// deadline, describes it and closes the connection. It sends nothing but
-// Describe.
+// Probe connects to each endpoint of the registration's current revision,
+// the source endpoint first, within ctx's deadline, describes it against
+// that endpoint's expectation and closes the connection. It sends nothing
+// but Describe. The first failing endpoint is the observation's problem,
+// named in its message; the revision is usable only when every endpoint
+// it names is.
 func (d *Dialer) Probe(ctx context.Context, ap *v1alpha1.AssessmentProvider, now func() time.Time) Observation {
 	obs := Observation{Generation: ap.Generation}
-	conn, err := d.Connect(ctx, Expected(ap))
-	obs.At = now()
-	if err != nil {
-		p, ok := err.(*Problem)
-		if !ok {
-			p = unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s", bound(err.Error(), 512))
+	f := Expected(ap)
+	for _, role := range []EndpointRole{SourceEndpoint, EvaluatorEndpoint} {
+		ep := f.EndpointOf(role)
+		if ep == nil {
+			continue
 		}
-		obs.Problem = p
-		return obs
+		conn, err := d.connect(ctx, f, role)
+		if err != nil {
+			p, ok := err.(*Problem)
+			if !ok {
+				p = unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s", bound(err.Error(), 512))
+			}
+			named := *p
+			named.Message = fmt.Sprintf("%s endpoint %s: %s", role, ep.Address(), p.Message)
+			obs.At, obs.Problem = now(), &named
+			return obs
+		}
+		_ = conn.Close()
 	}
-	_ = conn.Close()
+	obs.At = now()
 	return obs
+}
+
+// endpoints describes the revision's endpoints for condition messages.
+func endpoints(f Frozen) string {
+	var out []string
+	for _, role := range []EndpointRole{SourceEndpoint, EvaluatorEndpoint} {
+		if ep := f.EndpointOf(role); ep != nil {
+			out = append(out, fmt.Sprintf("%s endpoint %s authenticated as %s", role, ep.Address(), ep.ServerName))
+		}
+	}
+	return strings.Join(out, "; ")
 }
 
 // Status is the registration's status after an observation: the
@@ -76,7 +100,7 @@ func Status(ap *v1alpha1.AssessmentProvider, obs Observation, conflicts []string
 	switch {
 	case p == nil:
 		set(v1alpha1.ProviderConditionAvailable, metav1.ConditionTrue, v1alpha1.ProviderReasonAvailable,
-			"%s authenticated as %s and described itself", f.Endpoint.Address(), f.Endpoint.ServerName)
+			"%s; each described itself", endpoints(f))
 		set(v1alpha1.ProviderConditionCompatible, metav1.ConditionTrue, v1alpha1.ProviderReasonCompatible,
 			"the endpoint serves %s release %s, protocol %s revision %d, evaluator %d, payload %d and %v",
 			f.Contract(), f.ReleaseDigest, f.Protocol, f.ProtocolRevision, f.EvaluatorVersion, f.PayloadVersion, f.Capabilities)
@@ -85,7 +109,7 @@ func Status(ap *v1alpha1.AssessmentProvider, obs Observation, conflicts []string
 			set(v1alpha1.ProviderConditionAvailable, metav1.ConditionUnknown, v1alpha1.ProviderReasonNotChecked, "%s", p.Message)
 		} else {
 			set(v1alpha1.ProviderConditionAvailable, metav1.ConditionTrue, v1alpha1.ProviderReasonAvailable,
-				"%s authenticated as %s and described itself", f.Endpoint.Address(), f.Endpoint.ServerName)
+				"every endpoint probed, up to the incompatible one, was authenticated and described itself")
 		}
 		set(v1alpha1.ProviderConditionCompatible, metav1.ConditionFalse, p.Reason, "%s", p.Message)
 	default:

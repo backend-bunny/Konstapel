@@ -57,7 +57,6 @@
       "properties": {
         "authorizedHosts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/dnsName"}},
         "hostNamespaces": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/namespace"}},
-        "clientName": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/dnsName"}]},
         "resources": {"$ref": "#/$defs/resources"}
       }
     },
@@ -78,7 +77,6 @@
       "additionalProperties": false,
       "properties": {
         "workerSecretName": {"$ref": "#/$defs/secretName"},
-        "workerClientSecretName": {"$ref": "#/$defs/secretName"},
         "evaluatorSecretName": {"$ref": "#/$defs/secretName"}
       }
     },

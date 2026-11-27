@@ -109,9 +109,14 @@ func TestLiveAssessmentProviderAPI(t *testing.T) {
 	registration := func(name string) *v1alpha1.AssessmentProvider {
 		return &v1alpha1.AssessmentProvider{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.AssessmentProviderSpec{
 			Provider: v1alpha1.ExpectedProvider{Name: "apr-reporting", ReleaseDigest: digest1},
-			Endpoint: v1alpha1.ProviderEndpoint{
+			Endpoint: &v1alpha1.ProviderEndpoint{
 				Service:     v1alpha1.ProviderServiceReference{Namespace: "apr-provider", Name: "apr-reporting", Port: 8443},
 				ServerName:  "apr-reporting.apr-provider.svc",
+				ServerTrust: v1alpha1.CATrust{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: "apr-reporting-ca"}},
+			},
+			EvaluatorEndpoint: &v1alpha1.ProviderEndpoint{
+				Service:     v1alpha1.ProviderServiceReference{Namespace: "apr-provider", Name: "apr-reporting-evaluator", Port: 8443},
+				ServerName:  "apr-reporting-evaluator.apr-provider.svc",
 				ServerTrust: v1alpha1.CATrust{ControllerNamespaceReference: v1alpha1.ControllerNamespaceReference{Name: "apr-reporting-ca"}},
 			},
 			Compatibility: v1alpha1.ProviderCompatibility{Protocol: v1alpha1.ProviderProtocolV1, ContractVersion: 1, EvaluatorVersion: 1, PayloadVersion: 1},
@@ -160,6 +165,10 @@ func TestLiveAssessmentProviderAPI(t *testing.T) {
 			p.Spec.Capabilities = []v1alpha1.AssessmentProviderCapability{"Remediate"}
 		}, "spec.capabilities"},
 		"no capability": {func(p *v1alpha1.AssessmentProvider) { p.Spec.Capabilities = nil }, "spec.capabilities"},
+		"evaluation without an evaluator endpoint": {func(p *v1alpha1.AssessmentProvider) { p.Spec.EvaluatorEndpoint = nil },
+			"evaluatorEndpoint is required exactly when Evaluate is allowed"},
+		"evaluation at the source server name": {func(p *v1alpha1.AssessmentProvider) { p.Spec.EvaluatorEndpoint.ServerName = p.Spec.Endpoint.ServerName },
+			"evaluatorEndpoint must name another serverName"},
 	} {
 		p := registration("apr-invalid")
 		c.edit(p)

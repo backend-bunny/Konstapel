@@ -1342,16 +1342,22 @@ The platform issues every certificate. You need three pieces:
 2. **The provider's server trust.** A ConfigMap in `konstapel-system` that
    holds the PEM roots of the provider's serving-certificate issuer, under
    `ca.crt` or the key the registration names. Reference it as the
-   registration's `spec.endpoint.serverTrust`. These roots alone verify the
-   provider, and system roots are never used. It is read on every
-   connection, so you can rotate it in place.
-3. **The provider's serving certificate.** Its extended key usage must be
-   server authentication, or it must have none. Its DNS SAN must equal the
-   registration's `spec.endpoint.serverName` exactly. The controller dials
-   `<service>.<namespace>.svc:<port>` from `spec.endpoint.service`, but it
-   authenticates only `serverName`. The provider trusts the issuer of
-   step 1 and authorizes its DNS name. How the provider is configured is up
-   to its own chart.
+   registration's `spec.endpoint.serverTrust`, and, for the evaluator, as
+   `spec.evaluatorEndpoint.serverTrust` (the same ConfigMap or another).
+   These roots alone verify the provider, and system roots are never used.
+   It is read on every connection, so you can rotate it in place.
+3. **The provider's serving certificates.** A provider has a source
+   endpoint (`spec.endpoint`, which serves Collect and Scan) and, when it
+   evaluates, a separate evaluator endpoint (`spec.evaluatorEndpoint`,
+   Evaluate only). The two have different Services and different server
+   names. Each serving certificate's extended key usage must be server
+   authentication, or it must have none. Its DNS SAN must equal that
+   endpoint's `serverName` exactly. The controller dials
+   `<service>.<namespace>.svc:<port>` from the endpoint's `service`, but it
+   authenticates only `serverName`, and it sends evaluation only to the
+   evaluator endpoint. The provider trusts the issuer of step 1 and
+   authorizes its DNS name at both endpoints. How the provider is configured
+   is up to its own chart.
 
 A registration whose trust is wrong reports `Available=False` with reason
 `TrustUnavailable` or `AuthenticationFailed`. One with an unusable client

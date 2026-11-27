@@ -21,11 +21,8 @@ import (
 )
 
 const (
-	release      = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	otherRelease = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	// The worker's client identity towards the evaluator, and the
-	// evaluator's serving identity.
-	workerClient  = "worker.reporting.example.test"
+	release = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	// evaluatorName is the evaluator endpoint's own serving identity.
 	evaluatorName = "evaluator.reporting.example.test"
 )
 
@@ -64,44 +61,23 @@ func start(t *testing.T, s provider.Service, dir, client string) string {
 	return lis.Addr().String()
 }
 
-// split runs the reference deployment in process: an evaluator of
-// evaluatorRelease, and a worker of release over the synthetic source that
-// forwards to evaluatorAddr (the evaluator's own address when empty). It
-// returns the worker's address, the host's material and the worker.
-func split(t *testing.T, evaluatorRelease, evaluatorAddr string) (string, string, *provider.Provider) {
+// split runs the reference deployment in process: a worker of release over
+// the synthetic source and an evaluator of evaluatorRelease, each its own
+// endpoint with its own serving identity, both authorizing the host. It
+// returns their addresses, the host's material for each and the worker.
+func split(t *testing.T, evaluatorRelease string) (worker, evaluator, workerHost, evaluatorHost string, p *provider.Provider) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := certs.Generate(filepath.Join(dir, "host"), certs.Options{}); err != nil {
+	if err := certs.Generate(filepath.Join(dir, "worker"), certs.Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := certs.Generate(filepath.Join(dir, "evaluator"), certs.Options{ServerName: evaluatorName, HostName: workerClient}); err != nil {
+	if err := certs.Generate(filepath.Join(dir, "evaluator"), certs.Options{ServerName: evaluatorName}); err != nil {
 		t.Fatal(err)
 	}
-	addr := start(t, provider.EvaluatorService(evaluatorRelease), filepath.Join(dir, "evaluator", "server"), workerClient)
-	if evaluatorAddr != "" {
-		addr = evaluatorAddr
-	}
-	mtls, err := providerkit.NewClientTLS(providerkit.SecretFiles(filepath.Join(dir, "evaluator", "host")), evaluatorName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	opts, err := providerkit.DialOptions(mtls, providerkit.TransportLimits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := grpc.NewClient(addr, opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	client, err := providerkit.NewClient(conn, provider.EvaluatorExpectation(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := provider.New(provider.Source())
-	worker := start(t, provider.WorkerService(release, p, &provider.Forward{Client: client, Implementation: release}),
-		filepath.Join(dir, "host", "server"), certs.HostName)
-	return worker, filepath.Join(dir, "host", "host"), p
+	evaluator = start(t, provider.EvaluatorService(evaluatorRelease), filepath.Join(dir, "evaluator", "server"), certs.HostName)
+	p = provider.New(provider.Source())
+	worker = start(t, provider.WorkerService(release, p), filepath.Join(dir, "worker", "server"), certs.HostName)
+	return worker, evaluator, filepath.Join(dir, "worker", "host"), filepath.Join(dir, "evaluator", "host"), p
 }
 
 func dial(t *testing.T, addr, hostDir, serverName string) *grpc.ClientConn {
@@ -114,13 +90,13 @@ func dial(t *testing.T, addr, hostDir, serverName string) *grpc.ClientConn {
 	return conn
 }
 
-// The host runs the quickstart's assessment against the worker alone: the
-// worker collects, and the evaluator, reached only by the worker, evaluates
-// with the same results as the combined process.
+// The host runs the quickstart's assessment at the two endpoints: the
+// worker collects and the evaluator, which the host calls directly,
+// evaluates, with the same results as the combined process.
 func TestSplitAssessment(t *testing.T) {
-	worker, hostDir, p := split(t, release, "")
+	worker, evaluator, workerHost, evaluatorHost, p := split(t, release)
 	var out bytes.Buffer
-	r, err := host.Run(context.Background(), dial(t, worker, hostDir, certs.ServerName), &out)
+	r, err := host.Run(context.Background(), dial(t, worker, workerHost, certs.ServerName), dial(t, evaluator, evaluatorHost, evaluatorName), &out)
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
@@ -186,38 +162,37 @@ func TestEvaluatorServesEvaluateOnly(t *testing.T) {
 	}
 }
 
-// A worker forwards only to an evaluator of its own release, and an
-// unreachable evaluator is an explicit unavailable evaluation; collection
-// is unaffected in both cases.
-func TestWorkerRefusesAnotherOrMissingEvaluator(t *testing.T) {
-	for name, tc := range map[string]struct {
-		evaluatorRelease, addr, want string
-	}{
-		"another release": {otherRelease, "", "not this worker's release"},
-		"unreachable":     {release, unreachable(t), "describe the evaluator"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			worker, hostDir, _ := split(t, tc.evaluatorRelease, tc.addr)
-			_, err := host.Run(context.Background(), dial(t, worker, hostDir, certs.ServerName), &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), "evaluate:") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("run: %v, want an evaluation failure mentioning %q", err, tc.want)
-			}
-			if got := providerkit.ReasonOf(err); got != providerv1.ErrorReason_ERROR_REASON_UNAVAILABLE {
-				t.Errorf("reason %s, want ERROR_REASON_UNAVAILABLE", got)
-			}
-		})
+// The worker serves collection only: it describes no evaluation, holds no
+// evaluator handler or client, and refuses an evaluation, so evaluation
+// never goes through it.
+func TestWorkerServesNoEvaluation(t *testing.T) {
+	s := provider.WorkerService(release, provider.New(provider.Source()))
+	if s.Handlers.Evaluator != nil || s.Handlers.Scanner != nil {
+		t.Fatalf("the worker has non-collection handlers: %+v", s.Handlers)
 	}
-}
-
-// unreachable is an address nothing listens on.
-func unreachable(t *testing.T) string {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if got := s.Description.GetCapabilities(); len(got) != 1 || got[0] != providerv1.Capability_CAPABILITY_COLLECT {
+		t.Fatalf("worker capabilities %v", got)
+	}
+	worker, _, workerHost, _, _ := split(t, release)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := providerkit.NewClient(dial(t, worker, workerHost, certs.ServerName), host.EvaluatorExpect, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := lis.Addr().String()
-	_ = lis.Close()
-	return addr
+	if _, err := client.Describe(ctx); providerkit.ReasonOf(err) != providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_CAPABILITY {
+		t.Fatalf("an evaluator expectation of the worker: %v, want ERROR_REASON_UNSUPPORTED_CAPABILITY", err)
+	}
+	raw := providerv1.NewAssessmentProviderClient(dial(t, worker, workerHost, certs.ServerName))
+	stream, err := raw.Evaluate(ctx)
+	if err == nil {
+		_ = stream.Send(&providerv1.EvaluateRequest{Part: &providerv1.EvaluateRequest_Start{Start: &providerv1.EvaluateStart{Header: host.EvaluatorExpect.Header()}}})
+		_ = stream.CloseSend()
+		_, err = stream.Recv()
+	}
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "does not serve [CAPABILITY_EVALUATE]") {
+		t.Fatalf("evaluate at the worker: %v, want the capability refused", err)
+	}
 }
 
 func TestParseRoleAndRelease(t *testing.T) {

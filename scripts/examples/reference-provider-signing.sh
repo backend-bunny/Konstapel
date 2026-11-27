@@ -76,7 +76,7 @@ documented=(
   "jq -se --arg builder \"\$BUILDER\" 'any(.[].payload | @base64d | fromjson; .predicate.runDetails.builder.id == \$builder)' chart-provenance.jsonl"
   'mkdir chart'
   'helm pull "oci://$CHART" "${PULL[@]}" --destination chart'
-  "IMAGE=\$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)"
+  "IMAGE=\$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' --set 'evaluator.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)"
   '[[ $IMAGE =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]'
   'cosign verify "${TRUST[@]}" "$IMAGE" > image-signature.json'
   "jq -e --arg digest \"\${IMAGE#*@}\" 'type == \"array\" and any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\" and .critical.image.\"docker-manifest-digest\" == \$digest)' image-signature.json"
@@ -284,7 +284,7 @@ package_chart() {
   [[ $(grep -c '^  digest: ""$' "$values") == 1 && $(grep -c '^  repository: localhost/konstapel-example-reporting$' "$values") == 1 ]] ||
     { echo "$chart_src/values.yaml: expected one default image repository and one empty digest" >&2; return 1; }
   sed -i -e "s|^  digest: \"\"\$|  digest: \"${3#*@}\"|" -e "s|^  repository: localhost/konstapel-example-reporting\$|  repository: ${3%@*}|" "$values"
-  helm lint --strict "$dir/src" --set 'worker.authorizedHosts[0]=probe.example.test' >/dev/null
+  helm lint --strict "$dir/src" --set 'worker.authorizedHosts[0]=probe.example.test' --set 'evaluator.authorizedHosts[0]=probe.example.test' >/dev/null
   helm package "$dir/src" --version "$2" --destination "$dir" >/dev/null
   echo "$dir/example-reporting-provider-$2.tgz"
 }
@@ -326,7 +326,7 @@ verify_release() { # CHART; prints the verified image
   mkdir chart
   helm pull "oci://$CHART" "${PULL[@]}" --destination chart
   step chart-image
-  IMAGE=$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)
+  IMAGE=$(helm template ref chart/*.tgz --set 'worker.authorizedHosts[0]=probe.example.test' --set 'evaluator.authorizedHosts[0]=probe.example.test' | sed -n 's/^ *image: //p' | sort -u)
   [[ $IMAGE =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]
   echo "image: $IMAGE"
   verify_image "$IMAGE"

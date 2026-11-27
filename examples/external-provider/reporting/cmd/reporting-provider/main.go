@@ -4,14 +4,13 @@
 // By default it is the quickstart's single process over the in-memory
 // source. The reference chart runs it twice, with separate identities:
 // -role worker reads Namespaces from the Kubernetes API (-source
-// kubernetes) and forwards every evaluation to -role evaluator, which only
-// evaluates. Both report the release digest the chart passes as
-// -implementation.
+// kubernetes) and only collects, and -role evaluator only evaluates. The
+// host calls each at its own registered endpoint. Both report the release
+// digest the chart passes as -implementation.
 package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -20,8 +19,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-
-	"google.golang.org/grpc"
 
 	"example.com/konstapel-reporting/certs"
 	"example.com/konstapel-reporting/provider"
@@ -36,9 +33,6 @@ func main() {
 	roleName := flag.String("role", string(provider.RoleCombined), "combined (the quickstart), worker or evaluator")
 	sourceName := flag.String("source", "synthetic", "combined and worker: synthetic (in memory) or kubernetes (Namespaces, with the Pod's ServiceAccount)")
 	implementation := flag.String("implementation", "", "worker and evaluator: the release digest (sha256:...) to report, the one the registration expects")
-	evaluatorAddr := flag.String("evaluator-addr", "", "worker: the evaluator's protocol address")
-	evaluatorName := flag.String("evaluator-server-name", "", "worker: the DNS SAN the evaluator's certificate must carry")
-	evaluatorTLS := flag.String("evaluator-tls-dir", "", "worker: directory holding the worker's client tls.crt, tls.key and the evaluator's ca.crt")
 	flag.Parse()
 	logger := log.New(os.Stderr, "reporting-provider: ", log.LstdFlags)
 	usage := func(format string, args ...any) {
@@ -60,10 +54,6 @@ func main() {
 	}
 	if role == provider.RoleEvaluator && *sourceName != "synthetic" {
 		usage("the evaluator reads no source; -source is for -role combined and worker")
-	}
-	forwarding := *evaluatorAddr != "" || *evaluatorName != "" || *evaluatorTLS != ""
-	if forwarding != (role == provider.RoleWorker) || role == provider.RoleWorker && (*evaluatorAddr == "" || *evaluatorName == "" || *evaluatorTLS == "") {
-		usage("-role worker needs -evaluator-addr, -evaluator-server-name and -evaluator-tls-dir; other roles take none of them")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -91,13 +81,7 @@ func main() {
 			service = provider.CombinedService(p)
 			break
 		}
-		forward, ready, closeConn, err := dialEvaluator(ctx, *evaluatorAddr, *evaluatorName, *evaluatorTLS, *implementation, logger)
-		if err != nil {
-			logger.Fatal(err)
-		}
-		defer closeConn()
-		cfg.Ready = ready
-		service = provider.WorkerService(*implementation, p, forward)
+		service = provider.WorkerService(*implementation, p)
 	}
 
 	if cfg.Listener, err = net.Listen("tcp", *listen); err != nil {
@@ -111,36 +95,4 @@ func main() {
 	if err := provider.Serve(ctx, service, cfg); err != nil {
 		logger.Fatal(err)
 	}
-}
-
-// dialEvaluator prepares the worker's mutual TLS client to the evaluator.
-// The client material is re-read like the serving material, so a rotated
-// client certificate or evaluator trust is used without a restart.
-func dialEvaluator(ctx context.Context, addr, serverName, tlsDir, implementation string, logger *log.Logger) (*provider.Forward, func() error, func(), error) {
-	mtls, err := providerkit.NewClientTLS(providerkit.SecretFiles(tlsDir), serverName)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("evaluator client TLS: %w", err)
-	}
-	go mtls.Watch(ctx, 0, func(err error) { logger.Printf("evaluator client tls reload rejected: %v", err) })
-	opts, err := providerkit.DialOptions(mtls, providerkit.TransportLimits{})
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	conn, err := grpc.NewClient(addr, opts...)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	client, err := providerkit.NewClient(conn, provider.EvaluatorExpectation(), nil)
-	if err != nil {
-		_ = conn.Close()
-		return nil, nil, nil, err
-	}
-	ready := func() error {
-		if err := mtls.Ready(); err != nil {
-			return errors.New("evaluator client material: " + err.Error())
-		}
-		return nil
-	}
-	logger.Printf("forwarding evaluations to %s (%s)", addr, serverName)
-	return &provider.Forward{Client: client, Implementation: implementation}, ready, func() { _ = conn.Close() }, nil
 }

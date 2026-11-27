@@ -66,7 +66,9 @@ func (w *world) serve(o externaltest.ServerOptions) *externaltest.Server {
 		o.CA = w.ca
 	}
 	s := externaltest.Serve(w.t, o)
+	// One process serves both of the default registration's endpoints.
 	w.addrs[externaltest.ServiceName] = s.Addr
+	w.addrs[externaltest.EvaluatorServiceName] = s.Addr
 	return s
 }
 
@@ -216,7 +218,7 @@ func TestConnectRejectsIncompatibleDescriptions(t *testing.T) {
 				// covered by the description check alone.
 				d := externaltest.Description()
 				tc.mutate(d)
-				err := external.Expected(ap).CheckDescription(d)
+				err := external.Expected(ap).CheckDescription(external.SourceEndpoint, d)
 				if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_PROTOCOL_VERSION") {
 					t.Fatalf("check %v", err)
 				}

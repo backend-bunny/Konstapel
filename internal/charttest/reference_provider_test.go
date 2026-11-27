@@ -38,7 +38,7 @@ func renderReference(t *testing.T, set ...string) ([]map[string]any, string, err
 }
 
 func referenceBase(extra ...string) []string {
-	return append([]string{"image.digest=" + digest, "worker.authorizedHosts[0]=" + referenceHost}, extra...)
+	return append([]string{"image.digest=" + digest, "worker.authorizedHosts[0]=" + referenceHost, "evaluator.authorizedHosts[0]=" + referenceHost}, extra...)
 }
 
 // podOf returns a Deployment's Pod spec and its one container.
@@ -73,10 +73,10 @@ func strs(v any) []string {
 func TestReferenceProviderChartPermissions(t *testing.T) {
 	for name, set := range map[string][]string{
 		"defaults": nil,
-		"direct evaluator": {"evaluator.authorizedHosts[0]=replay.konstapel.example.test", "evaluator.hostNamespaces[0]=konstapel-system",
+		"replay host": {"evaluator.authorizedHosts[1]=replay.konstapel.example.test", "evaluator.hostNamespaces={konstapel-system,konstapel-replay}",
 			"evaluator.replicaCount=2"},
-		"own names": {"worker.clientName=worker.example.test", "evaluator.serverName=evaluator.example.test",
-			"tls.workerSecretName=w", "tls.workerClientSecretName=wc", "tls.evaluatorSecretName=e", "worker.hostNamespaces={a,b}"},
+		"own names": {"evaluator.serverName=evaluator.example.test",
+			"tls.workerSecretName=w", "tls.evaluatorSecretName=e", "worker.hostNamespaces={a,b}", "evaluator.hostNamespaces={a,b}"},
 		"ports": {"ports.protocol=9443", "ports.health=9090"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -197,7 +197,8 @@ func referencePermissions(t *testing.T, docs []map[string]any, out string) {
 		}
 	}
 
-	// The worker reads the source and forwards; the evaluator reads none.
+	// The worker reads the source and forwards nothing; the evaluator reads
+	// none.
 	wpod, wc := podOf(t, docs, workerName)
 	wargs := strs(wc["args"])
 	for _, a := range []string{"-role=worker", "-source=kubernetes", "-authorized-hosts=" + referenceHost} {
@@ -205,8 +206,13 @@ func referencePermissions(t *testing.T, docs []map[string]any, out string) {
 			t.Errorf("worker args %v lack %s", wargs, a)
 		}
 	}
-	if wpod["automountServiceAccountToken"] != true || len(wpod["volumes"].([]any)) != 2 {
-		t.Errorf("worker pod %v", wpod)
+	if wpod["automountServiceAccountToken"] != true || len(wpod["volumes"].([]any)) != 1 {
+		t.Errorf("worker pod %v, want only its serving TLS Secret: it has no evaluator client", wpod)
+	}
+	for _, a := range wargs {
+		if strings.HasPrefix(a, "-evaluator-") {
+			t.Errorf("worker arg %s: the worker never forwards evaluation", a)
+		}
 	}
 	epod, ec := podOf(t, docs, evaluatorName)
 	eargs := strs(ec["args"])
@@ -237,8 +243,8 @@ func referencePermissions(t *testing.T, docs []map[string]any, out string) {
 		}
 	}
 
-	// The evaluator may open no connection at all and is reached only by
-	// the worker (and any explicitly listed host namespaces).
+	// The evaluator may open no connection at all and is reached only from
+	// the host namespaces, never from the worker.
 	np := find(docs, "NetworkPolicy", evaluatorName)
 	if np == nil || !reflect.DeepEqual(at(np, "spec", "policyTypes"), []any{"Ingress", "Egress"}) ||
 		!reflect.DeepEqual(at(np, "spec", "egress"), []any{}) {
@@ -248,10 +254,10 @@ func referencePermissions(t *testing.T, docs []map[string]any, out string) {
 		t.Errorf("evaluator NetworkPolicy selects %v", at(np, "spec", "podSelector"))
 	}
 	from := at(np, "spec", "ingress", 0, "from").([]any)
-	if at(from[0], "podSelector", "matchLabels", "app.kubernetes.io/component") != "worker" {
-		t.Errorf("evaluator ingress %v does not start with the worker", from)
+	if len(from) == 0 {
+		t.Errorf("evaluator ingress %v admits no host namespace", from)
 	}
-	for _, f := range from[1:] {
+	for _, f := range from {
 		if at(f, "namespaceSelector", "matchLabels", "kubernetes.io/metadata.name") == nil || at(f, "podSelector") != nil {
 			t.Errorf("evaluator ingress peer %v", f)
 		}
@@ -265,34 +271,34 @@ func referencePermissions(t *testing.T, docs []map[string]any, out string) {
 	}
 }
 
-// The evaluator authorizes exactly the worker's client identity, plus the
-// listed hosts for a direct registration; the worker verifies the
-// evaluator by its serving name.
+// The evaluator is the registration's separate evaluator endpoint
+// (add-external-assessment-providers design Decision 11): it authorizes
+// exactly the listed host identities, from the host namespaces, and never
+// the worker, which has no client identity for it.
 func TestReferenceProviderChartPeerNames(t *testing.T) {
 	docs, out, err := renderReference(t, referenceBase()...)
 	if err != nil {
 		t.Fatal(out)
 	}
-	_, wc := podOf(t, docs, workerName)
 	_, ec := podOf(t, docs, evaluatorName)
-	for _, a := range []string{"-evaluator-addr=" + evaluatorName + "." + referenceNS + ".svc:8443",
-		"-evaluator-server-name=" + evaluatorName + "." + referenceNS + ".svc", "-evaluator-tls-dir=/etc/example-reporting/evaluator-client-tls"} {
-		if !slices.Contains(strs(wc["args"]), a) {
-			t.Errorf("worker args lack %s", a)
-		}
+	if !slices.Contains(strs(ec["args"]), "-authorized-hosts="+referenceHost) {
+		t.Errorf("evaluator args %v, want exactly the host", ec["args"])
 	}
-	if !slices.Contains(strs(ec["args"]), "-authorized-hosts="+workerName+"."+referenceNS+".svc") {
-		t.Errorf("evaluator args %v", ec["args"])
+	np := find(docs, "NetworkPolicy", evaluatorName)
+	if ns := at(np, "spec", "ingress", 0, "from", 0, "namespaceSelector", "matchLabels", "kubernetes.io/metadata.name"); ns != "konstapel-system" {
+		t.Errorf("evaluator ingress from %v, want the host namespace", ns)
+	}
+	if strings.Contains(out, "client-tls") || strings.Contains(out, "evaluator-addr") {
+		t.Error("the render still wires a worker-to-evaluator client")
 	}
 
-	docs, out, err = renderReference(t, referenceBase("evaluator.authorizedHosts[0]=replay.konstapel.example.test",
-		"evaluator.hostNamespaces[0]=konstapel-system")...)
+	docs, out, err = renderReference(t, referenceBase("evaluator.authorizedHosts[1]=replay.konstapel.example.test")...)
 	if err != nil {
 		t.Fatal(out)
 	}
 	_, ec = podOf(t, docs, evaluatorName)
-	if !slices.Contains(strs(ec["args"]), "-authorized-hosts="+workerName+"."+referenceNS+".svc,replay.konstapel.example.test") {
-		t.Errorf("direct evaluator args %v", ec["args"])
+	if !slices.Contains(strs(ec["args"]), "-authorized-hosts="+referenceHost+",replay.konstapel.example.test") {
+		t.Errorf("evaluator args %v", ec["args"])
 	}
 }
 
@@ -303,18 +309,21 @@ func TestReferenceProviderChartRefusesUnsafeValues(t *testing.T) {
 		set  []string
 		want string
 	}{
-		"no digest":               {[]string{host}, "image.digest is required"},
-		"a tag":                   {[]string{host, "image.digest=latest"}, "/image/digest"},
-		"another algorithm":       {[]string{host, "image.digest=sha512:" + strings.Repeat("a", 64)}, "/image/digest"},
-		"repository with digest":  {[]string{host, "image.digest=" + digest, "image.repository=localhost/x@" + digest}, "/image/repository"},
-		"no authorized host":      {[]string{"image.digest=" + digest}, "worker.authorizedHosts is required"},
+		"no digest":                         {[]string{host}, "image.digest is required"},
+		"a tag":                             {[]string{host, "image.digest=latest"}, "/image/digest"},
+		"another algorithm":                 {[]string{host, "image.digest=sha512:" + strings.Repeat("a", 64)}, "/image/digest"},
+		"repository with digest":            {[]string{host, "image.digest=" + digest, "image.repository=localhost/x@" + digest}, "/image/repository"},
+		"no authorized host":                {[]string{"image.digest=" + digest}, "worker.authorizedHosts is required"},
+		"no evaluator host":                 {[]string{"image.digest=" + digest, host}, "evaluator.authorizedHosts is required"},
+		"evaluator without host namespaces": {referenceBase("evaluator.hostNamespaces={}"), "hostNamespaces"},
+		"evaluator at the worker's name": {referenceBase("evaluator.serverName=" + workerName + "." + referenceNS + ".svc"),
+			"evaluator.serverName must differ"},
+		"worker client identity":  {referenceBase("worker.clientName=worker.example.test"), "clientName"},
 		"wildcard host":           {[]string{"image.digest=" + digest, "worker.authorizedHosts[0]=*.example.test"}, "authorizedHosts"},
 		"probes on protocol port": {referenceBase("ports.health=8443"), "must differ"},
 		"unknown value":           {referenceBase("worker.serviceAccountName=default"), "serviceAccountName"},
 		"evaluator source":        {referenceBase("evaluator.source=kubernetes"), "source"},
 		"worker replicas":         {referenceBase("worker.replicaCount=2"), "replicaCount"},
-		"direct evaluator without namespaces": {referenceBase("evaluator.authorizedHosts[0]=replay.konstapel.example.test"),
-			"evaluator.hostNamespaces"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, out, err := renderReference(t, c.set...); err == nil || !strings.Contains(out, c.want) {

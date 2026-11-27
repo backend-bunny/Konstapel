@@ -781,6 +781,10 @@ spec:
     service: {namespace: lc-provider, name: lc-reporting, port: 8443}
     serverName: lc-reporting.lc-provider.svc
     serverTrust: {name: lc-reporting-ca}
+  evaluatorEndpoint:
+    service: {namespace: lc-provider, name: lc-reporting-evaluator, port: 8443}
+    serverName: lc-reporting-evaluator.lc-provider.svc
+    serverTrust: {name: lc-reporting-ca}
   compatibility: {protocol: konstapel.provider.v1, contractVersion: 1, evaluatorVersion: 1, payloadVersion: 1}
   capabilities: [Collect, Evaluate]`
 

@@ -30,15 +30,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "reporting.worker" -}}{{ include "reporting.fullname" . }}-worker{{- end }}
 {{- define "reporting.evaluator" -}}{{ include "reporting.fullname" . }}-evaluator{{- end }}
 
-{{- define "reporting.workerClientName" -}}
-{{- .Values.worker.clientName | default (printf "%s.%s.svc" (include "reporting.worker" .) .Release.Namespace) -}}
-{{- end }}
 {{- define "reporting.evaluatorServerName" -}}
 {{- .Values.evaluator.serverName | default (printf "%s.%s.svc" (include "reporting.evaluator" .) .Release.Namespace) -}}
 {{- end }}
 
 {{- define "reporting.workerSecret" -}}{{ .Values.tls.workerSecretName | default (printf "%s-tls" (include "reporting.worker" .)) }}{{- end }}
-{{- define "reporting.workerClientSecret" -}}{{ .Values.tls.workerClientSecretName | default (printf "%s-client-tls" (include "reporting.worker" .)) }}{{- end }}
 {{- define "reporting.evaluatorSecret" -}}{{ .Values.tls.evaluatorSecretName | default (printf "%s-tls" (include "reporting.evaluator" .)) }}{{- end }}
 
 {{/* The image, by digest only. */}}
@@ -54,11 +50,14 @@ app.kubernetes.io/component: {{ .component }}
 {{- if not .Values.worker.authorizedHosts -}}
 {{- fail "worker.authorizedHosts is required: name the host identities (client certificate DNS SANs) allowed to call the provider" -}}
 {{- end -}}
-{{- if and .Values.evaluator.authorizedHosts (not .Values.evaluator.hostNamespaces) -}}
-{{- fail "evaluator.authorizedHosts needs evaluator.hostNamespaces: the evaluator's NetworkPolicy admits only the worker otherwise" -}}
+{{- if not .Values.evaluator.authorizedHosts -}}
+{{- fail "evaluator.authorizedHosts is required: name the host identities allowed to call the evaluator endpoint you register; the worker never forwards evaluation" -}}
 {{- end -}}
-{{- if has (include "reporting.workerClientName" .) .Values.evaluator.authorizedHosts -}}
-{{- fail "evaluator.authorizedHosts must not repeat the worker's client identity, which the evaluator always authorizes" -}}
+{{- if not .Values.evaluator.hostNamespaces -}}
+{{- fail "evaluator.hostNamespaces is required: the evaluator's NetworkPolicy admits only the host namespaces" -}}
+{{- end -}}
+{{- if eq (include "reporting.evaluatorServerName" .) (printf "%s.%s.svc" (include "reporting.worker" .) .Release.Namespace) -}}
+{{- fail "evaluator.serverName must differ from the worker's: the evaluator endpoint has its own authenticated identity" -}}
 {{- end -}}
 {{- if eq (int .Values.ports.protocol) (int .Values.ports.health) -}}
 {{- fail "ports.protocol and ports.health must differ: probes never use the protocol port" -}}

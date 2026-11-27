@@ -69,11 +69,17 @@ func (e *providerEnv) address(ep external.Endpoint) string {
 	return e.addrs[ep.Address()]
 }
 
-// route makes the endpoint of registration ap's current revision listen at addr.
+// route makes both endpoints of registration ap's current revision listen
+// at addr: one process serving both server names.
 func (e *providerEnv) route(ap *v1alpha1.AssessmentProvider, addr string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.addrs[external.Expected(ap).Endpoint.Address()] = addr
+	f := external.Expected(ap)
+	for _, ep := range []*external.Endpoint{f.Endpoint, f.EvaluatorEndpoint} {
+		if ep != nil {
+			e.addrs[ep.Address()] = addr
+		}
+	}
 }
 
 func (e *providerEnv) serve(ap *v1alpha1.AssessmentProvider, o externaltest.ServerOptions) *externaltest.Server {
@@ -188,7 +194,9 @@ func TestAssessmentProviderProbeSelectsHealthyRegistrations(t *testing.T) {
 	if id := got.Status.Identity; id == nil || id.ReleaseDigest != externaltest.Release || id.Name != externaltest.Provider {
 		t.Fatalf("identity %+v", id)
 	}
-	if s.Calls.Load() != 1 || s.Describes.Load() != 1 {
+	// One Describe per endpoint (the source and the evaluator endpoint,
+	// both served here by one process), nothing else.
+	if s.Calls.Load() != 2 || s.Describes.Load() != 2 {
 		t.Fatalf("the probe sent %d calls, %d of them Describe", s.Calls.Load(), s.Describes.Load())
 	}
 	sel, serr := e.resolve(externalContract, v1alpha1.ProviderCapabilityCollect)
@@ -330,6 +338,7 @@ func TestAssessmentProviderAmbiguousRegistrations(t *testing.T) {
 	b := externaltest.Registration("reporting-b", func(ap *v1alpha1.AssessmentProvider) {
 		ap.Spec.Provider.ReleaseDigest = externaltest.OtherRelease
 		ap.Spec.Endpoint.Service.Name = "example-reporting-next"
+		ap.Spec.EvaluatorEndpoint.Service.Name = "example-reporting-next-evaluator"
 	})
 	e := newProviderEnv(t, a, b)
 	e.serve(a, externaltest.ServerOptions{})
@@ -370,6 +379,7 @@ func TestAssessmentProviderHealthyProvidersAreIndependent(t *testing.T) {
 		return externaltest.Registration(name, func(ap *v1alpha1.AssessmentProvider) {
 			ap.Spec.Provider.Name = provider
 			ap.Spec.Endpoint.Service.Name = provider
+			ap.Spec.EvaluatorEndpoint.Service.Name = provider + "-evaluator"
 		})
 	}
 	healthy, hanging, closed, wrong := externaltest.Registration("reporting"), named("hanging", "hanging-reporting"), named("closed", "closed-reporting"), named("wrong", "wrong-reporting")
