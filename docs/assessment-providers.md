@@ -919,6 +919,13 @@ used with, so a package alone re-evaluates to its closure evaluation
 
 - `capture` is a complete CaptureV2 document, unchanged and closed. The
   evaluation time is its `window.closed`, as before.
+- The inputs are frozen at the run's closure: when the closing run
+  evaluates its capture and writes `closed.json`, it records the limit it
+  read from the binding and the boundaries it passed, in that file. Export,
+  including an export repeated after a crash, takes them from there. A
+  binding edited later, a restarted controller with an empty continuity
+  tracker, or the clock cannot change them. A `closed.json` staged without
+  inputs is exported as payload 2, never completed from current state.
 - `maxEvidenceAge` is the effective limit the closure used, in the
   canonical `time.Duration` form. Another spelling, zero or a negative
   value is refused.
@@ -1377,7 +1384,7 @@ for signing destinations, are in
 | Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package. The C2P plugin converts it with the prototype provider | Read by the prototype and the C2P plugin |
 | Capture version 2 | The controller, in every release including this one | Read with evaluator 1, unchanged | Read |
 | Capture version 3 (envelope) | Nothing yet. The unwired external collection seam builds one with a `registration` | Read: in production, Kyverno payloads 2 and 3 only. A registered provider's capture only through its frozen registration's readers | Refused explicitly |
-| Kyverno payload 3 (frozen evaluation inputs, in an envelope) | Nothing yet: the controller writes payload 2 (`capture.write` 2) | Read, validated, converted and re-evaluated from its inputs | Refused explicitly: 0.3.0 refuses the envelope; the unreleased builds before it refuse payload 3 as `IncompatibleVersion` |
+| Kyverno payload 3 (frozen evaluation inputs, in an envelope) | Nothing yet. The controller has the writer, gated off: it writes payload 3 only when `capture.write` is 3, and the installed descriptor says 2 | Read, validated, converted and re-evaluated from its inputs | Refused explicitly: 0.3.0 refuses the envelope; the unreleased builds before it refuse payload 3 as `IncompatibleVersion` |
 | Descriptor, file roles and content record | Unchanged since 0.3.0 | Read | 0.3.0 reads them. 0.2.0 refuses the `coverage-summary`, `coverage-summary-text` and `supporting-*` roles 0.3.0 added as unknown roles |
 
 The file roles are a closed set, so a descriptor reader that predates a role
@@ -1448,8 +1455,10 @@ written by earlier releases would pass them too.
   descriptor, roles and content record as 0.3.0. No production code writes
   an envelope or payload 3. A rollback to 0.3.0 reads every package this
   build wrote.
-- **Payload 3 is read here and written nowhere.** A later release may write
-  it (`capture.write` 3) only after a release with these readers has
+- **Payload 3 is read here; its writer is gated off.** A closing run
+  freezes its evaluation inputs in `closed.json` at closure and writes them
+  into its package only when the Kyverno descriptor's `capture.write` is 3.
+  A later release may set that only after a release with these readers has
   shipped. A rollback from that release is supported only to a release that
   reads payload 3. 0.3.0 and the builds between refuse such packages
   explicitly ([Kyverno payload 3](#kyverno-payload-3-frozen-evaluation-inputs)),
@@ -1807,6 +1816,14 @@ The tests:
   another result. `TestReplayNeedsOnlyThePackage` replays a package moved
   away from its content root, with every cluster and proxy request
   trapped.
+- `TestRunFreezesEvaluationInputsAtClosure` closes a controller run whose
+  report is attributable only through its continuity boundary, crashes it
+  after export, edits the binding's limit and restarts the controller
+  without its tracker: the repeated export records the inputs frozen at
+  closure and re-evaluates to the closure evaluation.
+  `TestRunWritesPayload2UntilTheWriterIsEnabled` and
+  `TestClosureWithoutInputsIsNotCompletedFromCurrentState` cover the gate
+  and a closure staged without inputs.
 - `TestCaptureV3Validation`, `TestStoredEvaluationMustBeTheReevaluation`,
   `TestEarlierReadersRefuseEvaluationInputs` and
   `TestReplayCommandExitStatuses` cover the payload's rules, the

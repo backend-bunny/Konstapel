@@ -198,10 +198,12 @@ recorded by the version 3 envelope).
   and `konstapel replay` report the stored evaluation and the
   re-evaluation separately (exit 0 recomputed, 2 unavailable, 1 failed).
 - **Readers before writers.** The readers ship first, with the Kyverno
-  descriptor reading `[1 2 3]` and still writing 2. The writer freezes the
-  inputs at closure and writes payload 3 only when the descriptor's
-  `capture.write` is 3; that flip waits for a release with these readers
-  (a release decision, not this change's). Packages written earlier are
+  descriptor reading `[1 2 3]` and still writing 2. The writer
+  (`closedRun.Inputs`, `ExportRequest.Inputs`) freezes the inputs at
+  closure in every build and writes payload 3 only when the descriptor's
+  `capture.write` is 3 (`AssessmentRunReconciler.CaptureWrite` in tests);
+  that flip waits for a release with these readers (a release decision,
+  not this change's). Packages written earlier are
   never rewritten and remain retrieve-and-validate only.
 
 Alternative: let a C2P plugin fetch live evidence or implement its own evaluator.
