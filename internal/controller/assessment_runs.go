@@ -954,8 +954,10 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 		for i := range stale {
 			stale[i].Message = collector.RedactedInNamespace
 		}
+		// Results are attributed by the workloads frozen at start, never
+		// by the live ones.
 		np := collector.Projection{Namespace: p.Namespace, NamespaceUID: p.NamespaceUID}
-		cur.Reports = collector.ProjectReports(cur.Reports, &np)
+		cur.Reports = collector.ProjectReports(cur.Reports, c.Workloads, &np)
 		c.Projection = &np
 	}
 	// Record changes against the frozen scope; it never broadens or shrinks.

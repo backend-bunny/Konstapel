@@ -173,6 +173,33 @@ subjects, findings, private supporting evidence, or credentials through any outp
 - **THEN** all exported provider data contains only safely attributable authorized extracts
 - **AND** extraction provenance remains traceable without copying the sibling's data
 
+### Requirement: Namespace views attribute per result and disclose no sibling metadata
+
+A namespace projection SHALL attribute source results one by one using the
+frozen authorized namespace and workload identities, never live lookups. A
+result whose attribution is ambiguous SHALL remain unresolved and undisclosed
+in every namespace view. A projection SHALL NOT count or name sibling
+namespaces' source reports, and a namespace diagnostic SHALL carry only a
+stable reason code and its fixed bounded text.
+
+#### Scenario: A namespaced report holds another namespace's results
+
+- **WHEN** a report in one scope namespace holds results about workloads of two namespaces
+- **THEN** each namespace view contains exactly the results attributed to its frozen workloads
+- **AND** provenance names the source report only when the namespace may see it, and otherwise only by a sealed reference with no digest of or index into the report
+
+#### Scenario: A result's attribution is ambiguous
+
+- **WHEN** a result names a namespace with an identity that namespace never froze, names a frozen workload under another namespace's name, or lacks a namespace or UID
+- **THEN** the result is disclosed in no namespace view
+- **AND** no namespace projection records a count or reference of it, or of any sibling report
+
+#### Scenario: Content fails for a namespace package
+
+- **WHEN** a namespace package becomes a Diagnostic because of a content or export failure
+- **THEN** its diagnostic records a stable reason and that reason's fixed text
+- **AND** no other namespace's names or UIDs, cluster-scoped content details, or raw engine text appear in it
+
 ### Requirement: Existing lifecycle and capture compatibility remain intact
 
 Providers SHALL reuse Konstapel's durable scheduling, namespace authorization,

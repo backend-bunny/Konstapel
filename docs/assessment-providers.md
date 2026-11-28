@@ -1121,10 +1121,17 @@ refuses every non-Kyverno package capture
   `scope`, labels or annotations.
 - A result keeps only its policy, result, source, rule, timestamp,
   `cel.validationIndex` and in-scope resource references, with their source
-  types. Its provenance (`konstapelSource`) names its own source report,
-  report digest, result index and transformation. Only an exact extract
-  keeps its message. A resource-filtered result of a mixed-namespace report
-  loses its message, because the message may describe the sibling.
+  types. Only an exact extract keeps its message. A resource-filtered result
+  of a mixed-namespace report loses its message, because the message may
+  describe the sibling.
+- Every resource reference names a workload that the capture froze in the
+  namespace instance, under the namespace's name.
+- Provenance (`konstapelSource`) names only what the namespace may see. An
+  extract of a PolicyReport in the namespace itself names that report's UID,
+  digest and result index, and the transformation. An extract of any other
+  report names it only by its sealed reference (`sealed-sha256:<hex>`, the
+  extract's `metadata.uid`) and the transformation. It has no digest of the
+  report and no index into it.
 - Stale scopes keep their reasons, and their messages are redacted. The
   capture keeps no collection errors.
 - A binding-wide scope change is a configuration change or a watch
@@ -1132,8 +1139,9 @@ refuses every non-Kyverno package capture
   the controller's fixed restart text, or a stale reason with its message
   redacted.
 - Checks, engine policies and contributions belong to a projected subject.
-- A withheld result records only its source report UID and index, with the
-  fixed reason.
+- The projection counts only its own extracts. It has no `sourceReports`,
+  `withheld` or `withheldTotal`. Releases up to 0.3.0 wrote them, so they
+  still decode, but they counted and named sibling namespaces' reports.
 - Subjects, workloads, expected observations, scope changes (with their
   workloads), report extracts and resource references all name the
   projection's namespace instance.
@@ -1151,6 +1159,58 @@ anything is disclosed:
   reports any technical evidence.
 - The storage backend's `ValidatePackage` runs it before archiving, together
   with `ValidateNamespace` against the descriptor's scope.
+
+### Attribution, provenance and diagnostics
+
+These rules follow the owner decisions of 2026-11-27.
+
+**Per-result attribution.** `ProjectReports` attributes every report
+result on its own. It reads the result's resource references, or the
+report's `scope` when the result has none. It never uses the report's
+namespace or a live lookup. It decides against the frozen authorized
+namespace (name and UID) and the workloads the capture froze in it:
+
+| Reference | In the namespace's view |
+| --- | --- |
+| a frozen workload of the namespace, under its name | the namespace's |
+| another name, and no frozen workload of the namespace | another namespace's |
+| no namespace or no UID | unresolved |
+| the namespace's name, but an identity it never froze | unresolved |
+| a frozen workload of the namespace, under another name | unresolved |
+
+A result with an unresolved reference stays unresolved. It is disclosed in
+no namespace view, and nothing about it is recorded there. It stays in the
+binding package. A result whose references are all the namespace's is
+copied exactly. A result that also names another namespace keeps only the
+namespace's references, and it loses its message (`resource-filtered/v1`).
+Evaluation matches results to frozen workloads by UID, so an unresolved
+result was never evidence of a namespace's expected observation.
+
+**Provenance.** A namespace may see a PolicyReport in its own namespace.
+Its extract keeps that report's UID, digest and result index. Any other
+source, a sibling's report or a cluster-scoped one, is named by a sealed
+reference: `sealed-sha256:` and the SHA-256 of a fixed label, the report
+UID and the namespace UID. The platform recomputes it from the binding
+package to trace the extract. The namespace learns nothing about the
+report, and the same report seals differently in each namespace. No
+extract copies its source report.
+
+**Diagnostics.** A namespace Diagnostic package records a stable reason
+(`ContentUnavailable`, `ContentLost`, `ContentIncompatible`,
+`ContentMismatch`, or `ExportFailed` for anything else) and that reason's
+fixed text (`collector.NamespaceDiagnostic`), in `diagnostic.json` and in
+the descriptor. A content failure's own message names the binding's bundles,
+digests and subjects and wraps raw registry, engine and schema errors, so it
+stays on the platform-scoped run and the binding package. The storage
+backend refuses a namespace package whose diagnostic is not its reason's
+fixed text (`collector.ValidateNamespaceDiagnostic`). The fixed texts need
+no sanitizer. The controller's display sanitizer only normalizes
+characters, and it cannot remove names.
+
+The shared conformance harness adds two projection regressions:
+`extract re-adds sibling counts` and `extract copies the source report`.
+Each provider encodes them in its payload (`conformance.Leaker`), and the
+suite must report `projection` for each.
 
 Protected supporting evidence keeps its existing boundary. Only a
 binding-scope package carries it, and a namespace package's coverage shows
@@ -1175,13 +1235,23 @@ The tests are `TestCheck`,
 `TestStorageRefusesNamespacePackageOfAnotherScope`,
 `TestNamespaceExtractOfSharedSource`,
 `TestNamespaceExtractUnknownScopeFailsClosed`,
-`TestTamperedNamespaceExtractsAreRefused` and
-`TestFaultyExtractorIsCaughtByTheSharedCheck`. The existing projection
-tests (`TestProjectionExcludesSiblingData`,
-`TestNamespacePackageContainsOnlyItsScope`) are unchanged. The Kyverno
-extraction and everything the controller writes are unchanged, so today's
-namespace packages keep their bytes. The check refuses only what the
-extraction never produces.
+`TestTamperedNamespaceExtractsAreRefused`,
+`TestFaultyExtractorIsCaughtByTheSharedCheck`,
+`TestMixedNamespaceReportSplitsPerResult`,
+`TestAmbiguousResultsAppearInNoNamespaceView`,
+`TestSerializedProjectionHasNoSiblingCounts`,
+`TestProvenanceDoesNotEmbedTheReport`,
+`TestNamespaceDiagnosticIsSanitized` and
+`TestStorageRefusesUnsanitizedNamespaceDiagnostics`.
+
+Namespace packages differ from those of 0.3.0 and earlier in four ways.
+The projection no longer records `sourceReports`, `withheld` or
+`withheldTotal`. A diagnostic carries its fixed text. A result the frozen
+identities cannot resolve is left out. An extract of another namespace's
+report is sealed. A per-resource PolicyReport in the namespace about one of
+its frozen workloads projects exactly as before. A namespace run that
+closed under an earlier release and is exported after the upgrade fails
+closed (`ExportFailed`) when its projection still carries the old counts.
 
 ## Compatibility, retention and rollback
 

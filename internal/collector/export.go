@@ -127,11 +127,16 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 			}
 		}
 		kind = publication.KindDiagnostic
-		reason := "ExportFailed"
+		reason := ReasonExportFailed
 		if cf := (*ContentFailure)(nil); errors.As(err, &cf) {
 			reason = cf.Reason
 		}
 		diag = &publication.Diagnostic{Reason: reason, MissingExports: []publication.FileRole{publication.RoleAssessmentResults}, Message: truncate(err.Error(), 1024)}
+		if req.Scope.Kind == publication.ScopeNamespace {
+			// The failure text names the binding's content and wraps raw
+			// errors; a namespace sees only the stable reason's fixed text.
+			diag = NamespaceDiagnostic(reason)
+		}
 		if err := assessment.Write(filepath.Join(req.Out, "diagnostic.json"), diag); err != nil {
 			return publication.Descriptor{}, err
 		}

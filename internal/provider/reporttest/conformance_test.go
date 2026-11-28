@@ -235,3 +235,39 @@ func TestReportingConformance(t *testing.T) {
 func TestReportingConformanceCatchesRegressions(t *testing.T) {
 	conformance.RunMutations(t, suite{}, cases(t))
 }
+
+var _ conformance.Leaker = suite{}
+
+// WithSiblingCounts adds the count of every posture report of the input to
+// the extract.
+func (suite) WithSiblingCounts(input, extract json.RawMessage, _ projection.Scope) (json.RawMessage, bool, error) {
+	in, err := decodeInput(input)
+	if err != nil || len(in.Reports) == 0 {
+		return nil, false, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(extract, &m); err != nil {
+		return nil, false, err
+	}
+	m["sourceReports"] = len(in.Reports)
+	out, err := json.Marshal(m)
+	return out, true, err
+}
+
+// WithSourceCopy replaces the extract's posture reports with every source
+// report, whole.
+func (suite) WithSourceCopy(input, extract json.RawMessage, _ projection.Scope) (json.RawMessage, bool, error) {
+	in, err := decodeInput(input)
+	if err != nil {
+		return nil, false, err
+	}
+	ext, err := decodeInput(extract)
+	if err != nil {
+		return nil, false, err
+	}
+	copied := ext
+	copied.Reports = slices.Clone(in.Reports)
+	a, _ := json.Marshal(ext)
+	out, err := json.Marshal(copied)
+	return out, err == nil && string(a) != string(out), err
+}

@@ -688,15 +688,23 @@ projection:
   rule, validation index, timestamp, in-scope resource references).
   Report-level labels, summaries, annotations, and any other fields are
   dropped;
-- copies a result's message only when all of its resources are in the
-  namespace (`exact`). A mixed-scope result keeps only its in-scope references
-  and loses its message (`resource-filtered/v1`);
-- withholds results whose resources lack a namespace or UID, recording only
-  the source report UID and result index;
-- records each extract's source report UID, report SHA-256, and original
-  result index under `konstapelSource`. Evaluation and OSCAL subjects
-  reference that original index, so team evidence stays traceable to the
-  cluster-wide report without disclosing it.
+- attributes every result on its own, by its resource references, against
+  the namespace's frozen name, UID and workloads, never by the report's
+  namespace or a live lookup;
+- copies a result's message only when all of its resources are the
+  namespace's (`exact`). A mixed-scope result keeps only the namespace's
+  references and loses its message (`resource-filtered/v1`);
+- leaves out, in every namespace view, a result with a reference that lacks
+  a namespace or UID, names the namespace with an identity it never froze,
+  or names a frozen workload under another name. Nothing about it is
+  recorded, and the projection counts no source reports;
+- records provenance under `konstapelSource` that names only what the
+  namespace may see. An extract of a report in the namespace keeps its UID,
+  SHA-256 and original result index, which evaluation and OSCAL subjects
+  reference. Any other report is named only by a sealed reference
+  (`sealed-sha256:`), which the platform recomputes from the binding
+  package. See [attribution, provenance and
+  diagnostics](../assessment-providers.md#attribution-provenance-and-diagnostics).
 
 ## Capture revisions, correlation, and engine limits
 

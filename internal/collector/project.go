@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,41 +27,42 @@ const (
 	// ObserverDiscontinuity is the detail of the watch discontinuity the
 	// controller records when another process resumes a capture.
 	ObserverDiscontinuity = "controller restart or leader change; earlier observations are not continuous"
-	// withheldUnattributable is the reason of every withheld result.
-	withheldUnattributable = "result resources lack namespace or UID; scope cannot be established"
+	// SealedSourcePrefix starts the opaque reference that stands in for a
+	// source report the namespace may not see (sealedSource).
+	SealedSourcePrefix = "sealed-sha256:"
 )
 
-// Projection records how a capture was projected to one namespace.
+// Projection records how a capture was projected to one namespace. It
+// counts only what the namespace may see: its own extracts.
 type Projection struct {
-	Namespace     string     `json:"namespace"`
-	NamespaceUID  string     `json:"namespaceUID"`
-	SourceReports int        `json:"sourceReports"`
+	Namespace    string `json:"namespace"`
+	NamespaceUID string `json:"namespaceUID"`
+	// SourceReports, Withheld and WithheldTotal are what earlier releases
+	// recorded: every source report of the collection, and the source
+	// report UID and index of every unattributable result, including
+	// sibling namespaces' reports. They remain only so that those captures
+	// still decode. No projection writes them, and ValidateProjection
+	// refuses one that carries them (owner decision 2026-11-27: no sibling
+	// report counts or metadata).
+	SourceReports int        `json:"sourceReports,omitempty"`
 	Extracts      int        `json:"extracts"`
 	Withheld      []Withheld `json:"withheld,omitempty"`
-	// WithheldTotal counts every withheld result; Withheld is bounded.
-	WithheldTotal int `json:"withheldTotal,omitempty"`
+	WithheldTotal int        `json:"withheldTotal,omitempty"`
 }
 
-// Withheld is a source result excluded because its scope could not be
-// established. Only its source identity is recorded, never its content.
+// Withheld is an earlier release's record of an unattributable source
+// result (see Projection). Projections no longer record one.
 type Withheld struct {
 	Report string `json:"report"`
 	Index  int    `json:"resultIndex"`
 	Reason string `json:"reason"`
 }
 
-// maxWithheld bounds the recorded withheld results.
-const maxWithheld = 100
-
 // Project returns the capture restricted to one namespace instance. Subjects,
 // checks, workloads, expected observations, and scope changes outside it are
-// dropped. Each report result is rebuilt from allowlisted fields: in-scope
-// results are copied exactly; mixed-scope results keep only in-scope resource
-// references and lose their message; results without an attributable
-// resource are withheld. Every extract records its source report UID and
-// digest, original result index, and transformation. Free-text messages of
-// stale scopes and configuration changes are dropped because they may name
-// other namespaces.
+// dropped. ProjectReports attributes and rebuilds the report results against
+// the namespace's frozen workloads. Free-text messages of stale scopes and
+// configuration changes are dropped because they may name other namespaces.
 func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 	if err := validateOpen(c); err != nil {
 		return CaptureV2{}, err
@@ -109,8 +109,7 @@ func Project(c CaptureV2, namespaceUID string) (CaptureV2, error) {
 	}
 
 	p := Projection{Namespace: ns, NamespaceUID: namespaceUID}
-	out.Reports = ProjectReports(c.Reports, &p)
-	slices.SortFunc(p.Withheld, func(a, b Withheld) int { return cmp.Or(cmp.Compare(a.Report, b.Report), cmp.Compare(a.Index, b.Index)) })
+	out.Reports = ProjectReports(c.Reports, out.Workloads, &p)
 	out.Projection = &p
 	return out, validateOpen(out)
 }
@@ -126,16 +125,99 @@ func validateOpen(c CaptureV2) error {
 	return c.Validate()
 }
 
-// ProjectReports rebuilds reports as namespace extracts for p.Namespace (see
-// Project), adding to p's source, extract, and withheld counts. It works
-// without the rest of the capture, so a run whose namespace left scope can
-// still project new reports for the frozen namespace.
-func ProjectReports(reports []assessment.Object, p *Projection) []assessment.Object {
+// Attribution of a resource reference to one namespace instance
+// (attribute).
+type attribution int
+
+const (
+	// attributedHere: the reference names a workload the capture froze in
+	// the namespace instance, under the namespace's frozen name.
+	attributedHere attribution = iota
+	// attributedElsewhere: the reference names neither the namespace nor
+	// one of its frozen workloads.
+	attributedElsewhere
+	// unresolved: the reference lacks a namespace or UID, or its namespace
+	// and its workload identity disagree with the frozen scope. It stays
+	// unresolved, and its result is disclosed in no namespace view.
+	unresolved
+)
+
+// frozenIdentities are the workload UIDs the capture froze in the
+// namespace instance, with the namespace name each was frozen under.
+func frozenIdentities(workloads []Workload, namespaceUID string) map[string]string {
+	out := map[string]string{}
+	for _, w := range workloads {
+		if w.NamespaceUID == namespaceUID && w.UID != "" {
+			out[w.UID] = w.Namespace
+		}
+	}
+	return out
+}
+
+// attribute attributes one resource reference to the namespace instance
+// named ns, whose frozen workloads are frozen. It reads only the reference
+// and the frozen scope, never the cluster.
+func attribute(ref map[string]any, ns string, frozen map[string]string) attribution {
+	uid, refNS := assessment.Str(ref["uid"]), assessment.Str(ref["namespace"])
+	if uid == "" || refNS == "" {
+		return unresolved
+	}
+	frozenNS, isFrozen := frozen[uid]
+	switch {
+	case isFrozen && refNS == ns && frozenNS == ns:
+		return attributedHere
+	case !isFrozen && refNS != ns:
+		return attributedElsewhere
+	}
+	// The namespace's name with an identity it never froze, or one of its
+	// frozen identities under another name.
+	return unresolved
+}
+
+// sealedSource is the opaque reference of a source report that the
+// namespace may not see: a digest of the report UID and the namespace
+// instance. The platform, which holds the binding package, recomputes it
+// to trace the extract. The namespace learns nothing about the report, and
+// the same report seals differently in every namespace.
+func sealedSource(reportUID, namespaceUID string) string {
+	return SealedSourcePrefix + assessment.Hash([]byte("konstapel-extract-source/v1\x00"+reportUID+"\x00"+namespaceUID))
+}
+
+// ProjectReports rebuilds reports as namespace extracts for the namespace
+// instance p names, and adds the extracts to p's count. It attributes
+// every result on its own, by its resource references (or its report's
+// scope), against workloads: the capture's frozen workloads. A run whose
+// namespace left scope therefore still projects new reports for the
+// frozen namespace, and no live lookup decides what a namespace sees.
+//
+//   - A reference is the namespace's when it names a workload frozen in
+//     the namespace instance, under the namespace's frozen name.
+//   - A result is unresolved when any of its references lacks a namespace
+//     or UID, names the namespace with an identity it never froze, or names
+//     one of its frozen workloads under another name. An unresolved result
+//     is disclosed in no namespace view, and nothing about it is recorded.
+//   - A result whose references are all the namespace's is copied exactly
+//     from allowlisted fields. A result that also names other namespaces
+//     keeps only the namespace's references and loses its message, which
+//     may describe the sibling (resource-filtered). Any other result is
+//     another namespace's.
+//
+// Each extract records its provenance under SourceField, naming only what
+// the namespace may see. A PolicyReport in the namespace itself is the
+// namespace's own: the extract keeps its UID, report digest and result
+// index. Any other source report (another namespace's, or cluster-scoped)
+// is named only by its sealed reference (sealedSource), with no digest or
+// index, and its extract never copies the report.
+func ProjectReports(reports []assessment.Object, workloads []Workload, p *Projection) []assessment.Object {
 	out := []assessment.Object{}
-	p.SourceReports += len(reports)
+	frozen := frozenIdentities(workloads, p.NamespaceUID)
 	for _, report := range reports {
 		uid := assessment.Str(assessment.At(report, "metadata", "uid"))
-		digest := assessment.Digest(report)
+		own := assessment.Str(assessment.At(report, "metadata", "namespace")) == p.Namespace
+		ref := uid
+		if !own {
+			ref = sealedSource(uid, p.NamespaceUID)
+		}
 		results, _ := report["results"].([]any)
 		var kept []any
 		for i, raw := range results {
@@ -147,34 +229,37 @@ func ProjectReports(reports []assessment.Object, p *Projection) []assessment.Obj
 				}
 			}
 			var inScope []any
-			attributable := len(refs) > 0
-			for _, ref := range refs {
-				m := assessment.Map(ref)
-				if m == nil || assessment.Str(m["uid"]) == "" || assessment.Str(m["namespace"]) == "" {
-					attributable = false
+			resolved := len(refs) > 0
+			for _, x := range refs {
+				m := assessment.Map(x)
+				if m == nil {
+					resolved = false
 					break
 				}
-				if assessment.Str(m["namespace"]) == p.Namespace {
+				switch attribute(m, p.Namespace, frozen) {
+				case attributedHere:
 					inScope = append(inScope, assessment.Object{"apiVersion": m["apiVersion"], "kind": m["kind"], "namespace": m["namespace"], "name": m["name"], "uid": m["uid"]})
+				case unresolved:
+					resolved = false
+				}
+				if !resolved {
+					break
 				}
 			}
-			if !attributable {
-				p.WithheldTotal++
-				if len(p.Withheld) < maxWithheld {
-					p.Withheld = append(p.Withheld, Withheld{Report: uid, Index: i, Reason: withheldUnattributable})
-				}
-				continue
-			}
-			if len(inScope) == 0 {
-				continue // entirely another namespace's result
+			if !resolved || len(inScope) == 0 {
+				continue // unresolved, or entirely another namespace's result
 			}
 			transform := TransformExact
 			if len(inScope) != len(refs) {
 				transform = TransformResourceFiltered
 			}
+			src := assessment.Object{"report": ref, "transformation": transform}
+			if own {
+				src["reportSha256"] = assessment.Digest(report)
+				src["resultIndex"] = i
+			}
 			e := assessment.Object{"policy": r["policy"], "result": r["result"], "source": r["source"], "rule": r["rule"], "timestamp": r["timestamp"],
-				"resources": inScope,
-				SourceField: assessment.Object{"report": uid, "reportSha256": digest, "resultIndex": i, "transformation": transform}}
+				"resources": inScope, SourceField: src}
 			if idx := assessment.At(r, "properties", "cel.validationIndex"); idx != nil {
 				e["properties"] = assessment.Object{"cel.validationIndex": idx}
 			}
@@ -194,11 +279,10 @@ func ProjectReports(reports []assessment.Object, p *Projection) []assessment.Obj
 		p.Extracts += len(kept)
 		out = append(out, assessment.Object{
 			"apiVersion": report["apiVersion"], "kind": report["kind"],
-			"metadata": assessment.Object{"uid": uid, "namespace": p.Namespace},
+			"metadata": assessment.Object{"uid": ref, "namespace": p.Namespace},
 			"results":  kept,
 		})
 	}
-	slices.SortFunc(p.Withheld, func(a, b Withheld) int { return cmp.Or(cmp.Compare(a.Report, b.Report), cmp.Compare(a.Index, b.Index)) })
 	return out
 }
 
@@ -214,16 +298,20 @@ func ProjectReports(reports []assessment.Object, p *Projection) []assessment.Obj
 //     labels or annotations
 //   - every result carries only the extract fields with their source types,
 //     at least one resource reference with only reference fields, and
-//     complete provenance whose report is the extract's own; only an exact
-//     extract keeps its message, and properties keep only
-//     cel.validationIndex
+//     provenance whose report is the extract's own: an own report's UID,
+//     digest, index and transformation, or a sealed reference and the
+//     transformation only; only an exact extract keeps its message, and
+//     properties keep only cel.validationIndex
+//   - every resource reference names a workload the capture froze in the
+//     namespace instance, under the namespace's name
 //   - stale scopes keep their reason, never their message, and the capture
 //     has no collection errors
 //   - binding-wide scope changes are configuration changes or watch
 //     discontinuities that name no namespace or workload and carry no free
 //     text
 //   - checks, engine policies and contributions belong to a projected subject
-//   - withheld results record only their source identity
+//   - the projection counts nothing but its own extracts: no source report
+//     count and no withheld results, which would describe siblings' reports
 //
 // The namespaces the extract names are those of its subjects, workloads,
 // expected observations, scope changes, extracts and resource references.
@@ -298,16 +386,15 @@ func ValidateProjection(c CaptureV2) error {
 			workload(item+".current", *ch.Current)
 		}
 	}
+	frozen := frozenIdentities(c.Workloads, p.NamespaceUID)
 	for i, report := range c.Reports {
-		items = append(items, validateExtract(fmt.Sprintf("reports[%d]", i), report, fail)...)
+		items = append(items, validateExtract(fmt.Sprintf("reports[%d]", i), report, p, frozen, fail)...)
 	}
-	if len(p.Withheld) > maxWithheld || p.WithheldTotal < len(p.Withheld) {
-		fail("the withheld results are not bounded and counted")
+	if p.SourceReports != 0 || len(p.Withheld) > 0 || p.WithheldTotal != 0 {
+		fail("the projection counts or names source reports beyond its own extracts")
 	}
-	for i, w := range p.Withheld {
-		if w.Reason != withheldUnattributable {
-			fail("projection.withheld[%d] records more than its source identity", i)
-		}
+	if extracts := countExtracts(c.Reports); p.Extracts != extracts {
+		fail("the projection's extract count is not its extracts")
 	}
 	if err := projection.Check(projection.Scope{Name: p.Namespace, UID: p.NamespaceUID}, items); err != nil {
 		errs = append(errs, err)
@@ -365,9 +452,23 @@ func onlyFields(m map[string]any, allowed map[string]bool) bool {
 	return true
 }
 
-// validateExtract checks one report extract against the allowlist and
-// returns the namespaces it names.
-func validateExtract(item string, report map[string]any, fail func(string, ...any)) []projection.Disclosure {
+// countExtracts counts the extracted results of reports.
+func countExtracts(reports []assessment.Object) int {
+	n := 0
+	for _, r := range reports {
+		results, _ := r["results"].([]any)
+		n += len(results)
+	}
+	return n
+}
+
+// Provenance an extract may record (ProjectReports): an own report's, or a
+// sealed source's.
+var sealedProvenanceFields = fieldSet("report", "transformation")
+
+// validateExtract checks one report extract against the allowlist and the
+// namespace's frozen workloads, and returns the namespaces it names.
+func validateExtract(item string, report map[string]any, p *Projection, frozen map[string]string, fail func(string, ...any)) []projection.Disclosure {
 	if !onlyFields(report, extractFields) {
 		fail("%s is not a namespace extract: it keeps a source report field", item)
 	}
@@ -423,8 +524,14 @@ func validateExtract(item string, report map[string]any, fail func(string, ...an
 			_, shaIsString := src["reportSha256"].(string)
 			srcReport, reportIsString := src["report"].(string)
 			transform := src["transformation"]
-			if len(src) != len(provenanceFields) || !onlyFields(src, provenanceFields) || !indexOK || index < 0 || !shaIsString || !reportIsString || srcReport != uid ||
-				transform != TransformExact && transform != TransformResourceFiltered {
+			validTransform := transform == TransformExact || transform == TransformResourceFiltered
+			if strings.HasPrefix(srcReport, SealedSourcePrefix) {
+				// A source the namespace may not see: no digest of it, no
+				// index into it, nothing but its sealed reference.
+				if len(src) != len(sealedProvenanceFields) || !onlyFields(src, sealedProvenanceFields) || !validSeal(srcReport) || srcReport != uid || !validTransform {
+					fail("%s provenance of a sealed source is not its sealed reference and transformation", at)
+				}
+			} else if len(src) != len(provenanceFields) || !onlyFields(src, provenanceFields) || !indexOK || index < 0 || !shaIsString || !reportIsString || srcReport != uid || !validTransform {
 				fail("%s provenance is not its source report, digest, index and transformation", at)
 			}
 			if _, present := r["message"]; present && transform != TransformExact {
@@ -449,10 +556,20 @@ func validateExtract(item string, report map[string]any, fail func(string, ...an
 				}
 			}
 			ns, _ := m["namespace"].(string)
+			if m != nil && attribute(m, p.Namespace, frozen) != attributedHere {
+				fail("%s is not a workload the capture froze in the namespace", ref)
+			}
 			items = append(items, projection.Disclosure{Item: ref, Namespace: ns})
 		}
 	}
 	return items
+}
+
+// validSeal reports whether s is a sealed reference: the prefix and a
+// SHA-256 in lowercase hex.
+func validSeal(s string) bool {
+	h, ok := strings.CutPrefix(s, SealedSourcePrefix)
+	return ok && len(h) == 64 && strings.IndexFunc(h, func(r rune) bool { return !('0' <= r && r <= '9' || 'a' <= r && r <= 'f') }) < 0
 }
 
 // ValidateProjectedEvaluation checks that an evaluation discloses only its

@@ -465,3 +465,39 @@ func TestKyvernoHonorsTheExplicitEvaluationTime(t *testing.T) {
 		t.Fatal("a zero evaluation time was accepted")
 	}
 }
+
+var _ conformance.Leaker = adapter{}
+
+// WithSiblingCounts re-adds the count of every source report, as releases
+// up to 0.3.0 recorded it in the projection.
+func (a adapter) WithSiblingCounts(input, extract json.RawMessage, _ projection.Scope) (json.RawMessage, bool, error) {
+	in, _, err := a.load(input)
+	if err != nil {
+		return nil, false, err
+	}
+	ext, age, err := a.load(extract)
+	if err != nil || ext.Projection == nil || len(in.Reports) == 0 {
+		return nil, false, err
+	}
+	p := *ext.Projection
+	p.SourceReports = len(in.Reports)
+	ext.Projection = &p
+	out, err := inline(ext, age)
+	return out, true, err
+}
+
+// WithSourceCopy replaces each report extract with its whole source
+// report.
+func (a adapter) WithSourceCopy(input, extract json.RawMessage, _ projection.Scope) (json.RawMessage, bool, error) {
+	in, _, err := a.load(input)
+	if err != nil {
+		return nil, false, err
+	}
+	ext, age, err := a.load(extract)
+	if err != nil || len(ext.Reports) == 0 {
+		return nil, false, err
+	}
+	ext.Reports = slices.Clone(in.Reports)
+	out, err := inline(ext, age)
+	return out, true, err
+}
