@@ -176,6 +176,10 @@ type ServerOptions struct {
 	ClientTrust []byte
 	// AuthorizedClients default to ClientName.
 	AuthorizedClients []string
+	// Handlers serve the description's capabilities. Nil serves Describe
+	// only: every other call fails, as probing and selection never make
+	// one.
+	Handlers *providerkit.Handlers
 }
 
 // Serve starts a provider endpoint on loopback.
@@ -203,7 +207,11 @@ func Serve(t testing.TB, o ServerOptions) *Server {
 	if s.tls, err = providerkit.NewServerTLS(files, o.AuthorizedClients); err != nil {
 		t.Fatal(err)
 	}
-	kit, err := providerkit.NewServer(o.Description, providerkit.Handlers{Collector: refuse{}, Results: refuse{}, Scanner: refuse{}, Evaluator: refuse{}})
+	h := providerkit.Handlers{Collector: refuse{}, Results: refuse{}, Scanner: refuse{}, Evaluator: refuse{}}
+	if o.Handlers != nil {
+		h = *o.Handlers
+	}
+	kit, err := providerkit.NewServer(o.Description, h)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,14 +4,14 @@
   "message": "konstapel.provider.v1.GetRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     },
     "operationId": "operation-1"
   },
   "expect": "ERROR_REASON_UNSUPPORTED_CAPABILITY",
-  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEgtvcGVyYXRpb24tMQ=="
+  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAEEgtvcGVyYXRpb24tMQ=="
 }

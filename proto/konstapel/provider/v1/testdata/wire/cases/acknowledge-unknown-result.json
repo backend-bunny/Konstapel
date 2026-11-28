@@ -4,16 +4,16 @@
   "message": "konstapel.provider.v1.AcknowledgeRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     },
     "resultId": "result-2",
-    "sizeBytes": "14",
-    "sha256": "sha256:486a8f07711a55700e1ed31c536217c17f3135cc6340b4830bcb4f87bbc7072a"
+    "sizeBytes": "163",
+    "sha256": "sha256:7266571145f5029170bbac5705203981e39ae01d197a3d6254371a0cbfb24dc9"
   },
   "expect": "ERROR_REASON_NOT_FOUND",
-  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEghyZXN1bHQtMhgOIkdzaGEyNTY6NDg2YThmMDc3MTFhNTU3MDBlMWVkMzFjNTM2MjE3YzE3ZjMxMzVjYzYzNDBiNDgzMGJjYjRmODdiYmM3MDcyYQ=="
+  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAEEghyZXN1bHQtMhijASJHc2hhMjU2OjcyNjY1NzExNDVmNTAyOTE3MGJiYWM1NzA1MjAzOTgxZTM5YWUwMWQxOTdhM2Q2MjU0MzcxYTBjYmZiMjRkYzk="
 }

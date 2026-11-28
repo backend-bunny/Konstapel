@@ -198,7 +198,7 @@ func TestConnectRejectsIncompatibleDescriptions(t *testing.T) {
 	}{
 		{"another provider", func(d *providerv1.DescribeResponse) { d.Provider.Name = "other-reporting" }, v1alpha1.ProviderReasonProviderMismatch},
 		{"another contract version", func(d *providerv1.DescribeResponse) { d.Provider.Version = 2 }, v1alpha1.ProviderReasonUnsupportedContractVersion},
-		{"another protocol revision", func(d *providerv1.DescribeResponse) { d.ProtocolVersions = []uint32{2} }, v1alpha1.ProviderReasonUnsupportedProtocolVersion},
+		{"another protocol revision", func(d *providerv1.DescribeResponse) { d.ProtocolVersions = []uint32{1} }, v1alpha1.ProviderReasonUnsupportedProtocolVersion},
 		{"another evaluator", func(d *providerv1.DescribeResponse) { d.EvaluatorVersion = 2 }, v1alpha1.ProviderReasonUnsupportedEvaluatorVersion},
 		{"another payload", func(d *providerv1.DescribeResponse) {
 			d.Payload = &providerv1.PayloadCompatibility{Write: 2, Read: []uint32{1, 2}}

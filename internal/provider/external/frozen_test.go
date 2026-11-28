@@ -26,7 +26,7 @@ func TestFrozenEncoding(t *testing.T) {
 	}
 	const want = `{"registration":"reporting","uid":"uid-reporting","revision":3,"provider":"example-reporting","contractVersion":1,` +
 		`"releaseDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","protocol":"konstapel.provider.v1",` +
-		`"protocolRevision":1,"evaluatorVersion":1,"payloadVersion":1,"capabilities":["Collect","Evaluate"],` +
+		`"protocolRevision":2,"evaluatorVersion":1,"payloadVersion":1,"capabilities":["Collect","Evaluate"],` +
 		`"endpoint":{"namespace":"providers","service":"example-reporting","port":8443,"serverName":"example-reporting.providers.svc",` +
 		`"trustConfigMap":"example-reporting-ca","trustKey":"ca.crt"}}`
 	if string(b) != want {

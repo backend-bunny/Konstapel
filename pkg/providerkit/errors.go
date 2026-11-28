@@ -19,7 +19,16 @@ import (
 type Error struct {
 	Reason  providerv1.ErrorReason
 	Message string
+	// cause is the context error a status without a detail stands for:
+	// a peer ending the call on its own deadline or cancellation.
+	cause error
 }
+
+// Unwrap returns the context error of a DeadlineExceeded or Canceled status
+// without a detail, so errors.Is(err, context.DeadlineExceeded) holds when
+// the provider ended the call on the propagated deadline just before the
+// host's own context did.
+func (e *Error) Unwrap() error { return e.cause }
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Reason, e.Message)
@@ -103,7 +112,8 @@ func toStatus(err error) error {
 
 // fromStatus converts a failed call's status to an *Error. A status without
 // exactly one ErrorDetail keeps its code in the message and has reason
-// ERROR_REASON_UNSPECIFIED; a context error is returned as such.
+// ERROR_REASON_UNSPECIFIED, and a DeadlineExceeded or Canceled one also
+// matches its context error; a context error is returned as such.
 func fromStatus(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
@@ -122,8 +132,15 @@ func fromStatus(ctx context.Context, err error) error {
 		}
 	}
 	if len(reasons) != 1 {
-		return &Error{Reason: providerv1.ErrorReason_ERROR_REASON_UNSPECIFIED,
+		e := &Error{Reason: providerv1.ErrorReason_ERROR_REASON_UNSPECIFIED,
 			Message: fmt.Sprintf("%s: %s", st.Code(), st.Message())}
+		switch st.Code() {
+		case codes.DeadlineExceeded:
+			e.cause = context.DeadlineExceeded
+		case codes.Canceled:
+			e.cause = context.Canceled
+		}
+		return e
 	}
 	return &Error{Reason: reasons[0], Message: st.Message()}
 }

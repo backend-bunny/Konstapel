@@ -1,7 +1,9 @@
 // Package provider is a tiny synthetic reporting provider built only on the
 // public Konstapel provider kit. It collects existing "evidence" (namespace
-// labels) from a source, stages each result until the host acknowledges it,
-// and evaluates one check kind, RequiredLabel, over a frozen payload.
+// labels) from a source for the namespace subjects of the host's frozen
+// inventory, stages each result as a CollectionResult until the host
+// acknowledges it, and evaluates one check kind, RequiredLabel, over a
+// frozen payload.
 //
 // The quickstart runs it as one process over a fixed in-memory source. The
 // reference chart (chart/, see docs/integration/external-provider-chart.md)
@@ -24,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	providerv1 "github.com/backend-bunny/Konstapel/pkg/providerapi/v1"
@@ -113,17 +117,12 @@ func Describe(role Role, implementation string) *providerv1.DescribeResponse {
 	}
 }
 
-// payload is version 1 of the provider's evidence payload.
-type payload struct {
-	Cluster    string             `json:"cluster"`
-	Namespaces []payloadNamespace `json:"namespaces"`
-}
-
-type payloadNamespace struct {
-	Name     string            `json:"name"`
-	UID      string            `json:"uid"`
-	Labels   map[string]string `json:"labels"`
-	Observed time.Time         `json:"observed"`
+// details is version 1 of the provider's evidence details: one namespace's
+// name and labels. It is the only part of a staged CollectionResult in the
+// provider's own format.
+type details struct {
+	Name   string            `json:"name"`
+	Labels map[string]string `json:"labels"`
 }
 
 type staged struct {
@@ -152,29 +151,42 @@ func (p *Provider) Handlers() providerkit.Handlers {
 	return providerkit.Handlers{Collector: p, Results: p, Evaluator: Evaluator{}}
 }
 
-// Collect reads the source for the frozen scope. Only namespaces whose name
-// and UID both match the scope are returned; every other scope namespace is
-// a limitation, never an empty pass. A source that cannot be read fails the
-// collection: nothing is staged.
+// Collect reads the source for the namespace subjects of the frozen
+// inventory. A namespace whose name and UID both match its subject is one
+// evidence item, attributed to that subject and every check the inventory
+// expects for it. Every other subject is a limitation, never an empty pass:
+// a namespace the source lacks or knows under another UID, and every
+// workload subject, which this provider does not assess. A source that
+// cannot be read fails the collection: nothing is staged.
 func (p *Provider) Collect(ctx context.Context, req *providerv1.CollectRequest) (*providerv1.ResultReference, error) {
 	now := p.now().UTC().Truncate(time.Second)
-	out := payload{Cluster: req.GetScope().GetCluster(), Namespaces: []payloadNamespace{}}
-	var limitations []string
-	for _, ns := range req.GetScope().GetNamespaces() {
-		src, ok, err := p.source.Namespace(ctx, ns.GetName())
-		switch {
-		case err != nil:
-			return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_UNAVAILABLE, "read namespace %s: %v", ns.GetName(), err)
-		case !ok:
-			limitations = append(limitations, "namespace "+ns.GetName()+" is not in "+p.source.String())
-			continue
-		case src.UID != ns.GetUid():
-			limitations = append(limitations, "namespace "+ns.GetName()+" has another uid in "+p.source.String())
+	out := &providerv1.CollectionResult{}
+	limit := func(subject, message string) {
+		out.Limitations = append(out.Limitations, &providerv1.SubjectLimitation{Subject: subject, Message: message})
+	}
+	for _, s := range req.GetInventory().GetSubjects() {
+		if s.GetResource() != providerkit.NamespaceResource {
+			limit(s.GetUid(), s.GetResource()+" "+s.GetName()+" is not assessed: this provider reads namespaces only")
 			continue
 		}
-		out.Namespaces = append(out.Namespaces, payloadNamespace{Name: ns.GetName(), UID: src.UID, Labels: src.Labels, Observed: now})
+		src, ok, err := p.source.Namespace(ctx, s.GetName())
+		switch {
+		case err != nil:
+			return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_UNAVAILABLE, "read namespace %s: %v", s.GetName(), err)
+		case !ok:
+			limit(s.GetUid(), "namespace "+s.GetName()+" is not in "+p.source.String())
+			continue
+		case src.UID != s.GetUid():
+			limit(s.GetUid(), "namespace "+s.GetName()+" has another uid in "+p.source.String())
+			continue
+		}
+		e, err := namespaceEvidence(s, src, now)
+		if err != nil {
+			return nil, err
+		}
+		out.Evidence = append(out.Evidence, e)
 	}
-	data, err := json.Marshal(out)
+	data, err := protojson.Marshal(out)
 	if err != nil {
 		return nil, err
 	}
@@ -189,12 +201,28 @@ func (p *Provider) Collect(ctx context.Context, req *providerv1.CollectRequest) 
 		SizeBytes:      uint64(len(data)),
 		Sha256:         providerkit.Digest(data),
 		ExpiresAt:      timestamppb.New(now.Add(Handoff)),
-		Limitations:    limitations,
 	}
 	p.mu.Lock()
 	p.staged[ref.GetResultId()] = staged{ref: ref, data: data}
 	p.mu.Unlock()
 	return ref, nil
+}
+
+// namespaceEvidence is one namespace's evidence item.
+func namespaceEvidence(s *providerv1.InventorySubject, ns Namespace, observed time.Time) (*providerv1.Evidence, error) {
+	raw, err := json.Marshal(details{Name: s.GetName(), Labels: ns.Labels})
+	if err != nil {
+		return nil, err
+	}
+	d := &structpb.Struct{}
+	if err := protojson.Unmarshal(raw, d); err != nil {
+		return nil, err
+	}
+	e := &providerv1.Evidence{Id: "namespace/" + s.GetName(), Observed: timestamppb.New(observed), Details: d}
+	for _, c := range s.GetChecks() {
+		e.Attributions = append(e.Attributions, &providerv1.Attribution{Subject: s.GetUid(), Check: c})
+	}
+	return e, nil
 }
 
 // Result returns a staged result's reference and bytes.
@@ -233,15 +261,32 @@ func (p *Provider) Staged() int {
 type Evaluator struct{}
 
 // Evaluate evaluates every RequiredLabel check for every scope namespace,
-// reading only the start and the payload.
+// reading only the start and the payload: the CollectionResult the host
+// captured.
 func (Evaluator) Evaluate(_ context.Context, start *providerv1.EvaluateStart, data []byte) (*providerkit.Evaluation, error) {
-	var in payload
-	if err := json.Unmarshal(data, &in); err != nil {
-		return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_INVALID_REQUEST, "payload is not version %d: %v", PayloadVersion, err)
+	res, err := providerkit.ParseCollectionResult(data, nil)
+	if err != nil {
+		return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_INVALID_REQUEST, "payload is not a CollectionResult: %v", err)
 	}
-	byName := map[string]payloadNamespace{}
-	for _, ns := range in.Namespaces {
-		byName[ns.Name] = ns
+	type found struct {
+		labels   map[string]string
+		observed time.Time
+	}
+	// byPair is each (namespace uid, check) the payload attributes evidence
+	// to.
+	byPair := map[[2]string]found{}
+	for _, e := range res.GetEvidence() {
+		raw, err := protojson.Marshal(e.GetDetails())
+		var d details
+		if err == nil {
+			err = json.Unmarshal(raw, &d)
+		}
+		if err != nil {
+			return nil, providerkit.Errorf(providerv1.ErrorReason_ERROR_REASON_INVALID_REQUEST, "evidence %s details are not version %d: %v", e.GetId(), PayloadVersion, err)
+		}
+		for _, a := range e.GetAttributions() {
+			byPair[[2]string{a.GetSubject(), a.GetCheck()}] = found{labels: d.Labels, observed: e.GetObserved().AsTime()}
+		}
 	}
 	at := start.GetEvaluationTime().AsTime()
 	var obs []*providerv1.Observation
@@ -254,18 +299,16 @@ func (Evaluator) Evaluate(_ context.Context, start *providerv1.EvaluateStart, da
 		}
 		for _, ns := range start.GetScope().GetNamespaces() {
 			o := &providerv1.Observation{Subject: ns.GetName(), Check: check.GetName()}
-			got, ok := byName[ns.GetName()]
+			got, ok := byPair[[2]string{ns.GetUid(), check.GetName()}]
 			switch {
 			case !ok:
 				o.State = providerv1.EvidenceState_EVIDENCE_STATE_MISSING
-			case got.UID != ns.GetUid():
-				o.State = providerv1.EvidenceState_EVIDENCE_STATE_UNRESOLVED
-			case got.Observed.After(at):
+			case got.observed.After(at):
 				o.State = providerv1.EvidenceState_EVIDENCE_STATE_REJECTED
 			default:
 				o.State = providerv1.EvidenceState_EVIDENCE_STATE_ATTRIBUTABLE
-				o.Evaluated = timestamppb.New(got.Observed)
-				if _, has := got.Labels[def.Label]; has {
+				o.Evaluated = timestamppb.New(got.observed)
+				if _, has := got.labels[def.Label]; has {
 					o.Raw, o.Outcome = "present", providerv1.Outcome_OUTCOME_PASS
 				} else {
 					o.Raw, o.Outcome = "absent", providerv1.Outcome_OUTCOME_FAIL

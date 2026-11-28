@@ -4,10 +4,10 @@
   "message": "konstapel.provider.v1.CollectRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-scanning",
-        "version": 2
+        "version": 4
       }
     },
     "scope": {
@@ -20,8 +20,33 @@
       ]
     },
     "payloadVersion": 3,
-    "deadline": "2026-11-26T12:00:00Z"
+    "deadline": "2026-11-26T12:00:00Z",
+    "inventory": {
+      "subjects": [
+        {
+          "uid": "ns-a-uid",
+          "namespaceUid": "ns-a-uid",
+          "resource": "/v1/namespaces",
+          "name": "team-a",
+          "revision": "rev-ns-a",
+          "checks": [
+            "posture"
+          ]
+        },
+        {
+          "uid": "workload-a-uid",
+          "namespaceUid": "ns-a-uid",
+          "resource": "apps/v1/deployments",
+          "name": "web",
+          "revision": "rev-web",
+          "checks": [
+            "posture"
+          ]
+        }
+      ],
+      "supplements": "SUPPLEMENTS_NONE"
+    }
   },
   "expect": "ERROR_REASON_PROVIDER_MISMATCH",
-  "wire": "ChgIARIUChBleGFtcGxlLXNjYW5uaW5nEAISIQoLY2x1c3Rlci11aWQSEgoGdGVhbS1hEghucy1hLXVpZCADKgYIwL6g2AY="
+  "wire": "ChgIAhIUChBleGFtcGxlLXNjYW5uaW5nEAQSIQoLY2x1c3Rlci11aWQSEgoGdGVhbS1hEghucy1hLXVpZCADKgYIwL6g2AYyiwEKPwoIbnMtYS11aWQSCG5zLWEtdWlkGg4vdjEvbmFtZXNwYWNlcyIGdGVhbS1hKghyZXYtbnMtYTIHcG9zdHVyZQpGCg53b3JrbG9hZC1hLXVpZBIIbnMtYS11aWQaE2FwcHMvdjEvZGVwbG95bWVudHMiA3dlYioHcmV2LXdlYjIHcG9zdHVyZRAB"
 }

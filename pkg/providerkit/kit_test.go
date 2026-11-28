@@ -30,7 +30,15 @@ var (
 	testAt    = time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
 	testWant  = Compatibility{Provider: "example-reporting", ContractVersion: 2, PayloadVersion: 3, EvaluatorVersion: 5,
 		Capabilities: []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE}}
+	// testInventory is the scope's namespace and one workload in it.
+	testInventory = &providerv1.Inventory{Supplements: providerv1.Supplements_SUPPLEMENTS_NONE, Subjects: []*providerv1.InventorySubject{
+		{Uid: "ns-a-uid", NamespaceUid: "ns-a-uid", Resource: NamespaceResource, Name: "team-a", Revision: "rev-ns", Checks: []string{"posture"}},
+		{Uid: "w1", NamespaceUid: "ns-a-uid", Resource: "apps/v1/deployments", Name: "web", Revision: "rev-w1", Checks: []string{"posture"}},
+	}}
 )
+
+// testResult is a well-formed staged CollectionResult.
+const testResult = `{"evidence":[{"id":"e1","attributions":[{"subject":"w1","check":"posture"}],"observed":"2026-11-26T11:59:00Z","details":{"verdict":"PASSED"}}]}`
 
 func testDescription(caps ...providerv1.Capability) *providerv1.DescribeResponse {
 	if len(caps) == 0 {
@@ -38,7 +46,7 @@ func testDescription(caps ...providerv1.Capability) *providerv1.DescribeResponse
 	}
 	return &providerv1.DescribeResponse{
 		Provider:         &providerv1.ProviderContract{Name: "example-reporting", Version: 2},
-		ProtocolVersions: []uint32{1}, EvaluatorVersion: 5,
+		ProtocolVersions: []uint32{ProtocolVersion}, EvaluatorVersion: 5,
 		Payload:      &providerv1.PayloadCompatibility{Write: 3, Read: []uint32{2, 3}},
 		Capabilities: caps,
 		Checks:       []*providerv1.CheckKind{{Kind: "reporting.example.io/v1/Posture"}},
@@ -154,7 +162,7 @@ func attributable(subject string) *providerv1.Observation {
 }
 
 func TestReportingRoundTrip(t *testing.T) {
-	const payload = `{"reports":[{"image":"sha256:abc","verdict":"PASSED"}]}`
+	const payload = testResult
 	f := newFake(testDescription(), payload)
 	f.observations = []*providerv1.Observation{attributable("w1"), attributable("w2"),
 		{Subject: "w3", Check: "posture", State: providerv1.EvidenceState_EVIDENCE_STATE_MISSING}}
@@ -167,10 +175,11 @@ func TestReportingRoundTrip(t *testing.T) {
 	if _, err := c.Describe(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Limits(); got.GetMaxChunkBytes() != 4 || got.GetMaxResultBytes() != DefaultMaxResultBytes || got.GetMaxObservations() != DefaultMaxObservations {
+	if got := c.Limits(); got.GetMaxChunkBytes() != 4 || got.GetMaxResultBytes() != DefaultMaxResultBytes || got.GetMaxObservations() != DefaultMaxObservations ||
+		got.GetMaxSubjects() != DefaultMaxSubjects || got.GetMaxEvidence() != DefaultMaxEvidence {
 		t.Fatalf("negotiated limits %v", got)
 	}
-	ref, err := c.Collect(ctx, testScope, []byte(`{"subjects":[]}`), testAt)
+	ref, err := c.Collect(ctx, testScope, testInventory, testAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +277,7 @@ func TestIncompatibleDescriptionBlocksEveryCall(t *testing.T) {
 	ctx := context.Background()
 	_, err = c.Describe(ctx)
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_EVALUATOR_VERSION)
-	_, err = c.Collect(ctx, testScope, nil, testAt)
+	_, err = c.Collect(ctx, testScope, testInventory, testAt)
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_EVALUATOR_VERSION)
 	if got := strings.Join(rec.get(), ","); got != "Describe,Describe" {
 		t.Fatalf("calls %s: no payload request may follow an incompatible description", got)
@@ -337,7 +346,7 @@ func TestServerRejectsEvaluationStreams(t *testing.T) {
 
 func TestServerChecksHandlerOutputs(t *testing.T) {
 	ctx := context.Background()
-	collect := &providerv1.CollectRequest{Header: testWant.Header(), Scope: testScope, PayloadVersion: 3, Deadline: timestamppb.New(testAt)}
+	collect := &providerv1.CollectRequest{Header: testWant.Header(), Scope: testScope, Inventory: testInventory, PayloadVersion: 3, Deadline: timestamppb.New(testAt)}
 	for name, mutate := range map[string]func(*providerv1.ResultReference){
 		"other payload version": func(r *providerv1.ResultReference) { r.PayloadVersion = 2 },
 		"other provider": func(r *providerv1.ResultReference) {
@@ -467,10 +476,10 @@ func TestClientRefusesProtocolViolations(t *testing.T) {
 
 	other := good()
 	other.PayloadVersion = 2
-	_, err := client(&rogue{ref: other}).Collect(ctx, testScope, nil, testAt)
+	_, err := client(&rogue{ref: other}).Collect(ctx, testScope, testInventory, testAt)
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_INVALID_RESPONSE)
 
-	_, err = client(&rogue{plain: true}).Collect(ctx, testScope, nil, testAt)
+	_, err = client(&rogue{plain: true}).Collect(ctx, testScope, testInventory, testAt)
 	wantReason(t, err, providerv1.ErrorReason_ERROR_REASON_UNSPECIFIED)
 	if err == nil || !strings.Contains(err.Error(), "FailedPrecondition") {
 		t.Fatalf("a status without a detail keeps its code: %v", err)
@@ -488,6 +497,9 @@ func TestClientRefusesProtocolViolations(t *testing.T) {
 		"too long":  {[]*providerv1.ReadResultResponse{chunk(0, payload[:4]), chunk(4, payload[4:8]), chunk(8, payload[8:12]), chunk(12, payload[12:]), chunk(14, []byte("{}"))}, providerv1.ErrorReason_ERROR_REASON_DIGEST_MISMATCH},
 		"truncated": {[]*providerv1.ReadResultResponse{chunk(0, payload[:4])}, providerv1.ErrorReason_ERROR_REASON_DIGEST_MISMATCH},
 		"altered":   {[]*providerv1.ReadResultResponse{chunk(0, []byte(`{"re`)), chunk(4, []byte(`port`)), chunk(8, []byte(`s":[`)), chunk(12, []byte(`0}`))}, providerv1.ErrorReason_ERROR_REASON_DIGEST_MISMATCH},
+		// Intact bytes that are not a CollectionResult ("reports" is no
+		// field of it) are refused too.
+		"not a collection result": {[]*providerv1.ReadResultResponse{chunk(0, payload[:4]), chunk(4, payload[4:8]), chunk(8, payload[8:12]), chunk(12, payload[12:])}, providerv1.ErrorReason_ERROR_REASON_INVALID_RESPONSE},
 	} {
 		got, err := client(&rogue{chunks: tc.chunks}).ReadResult(ctx, good())
 		if ReasonOf(err) != tc.reason {
@@ -518,16 +530,20 @@ func TestNewServerRequiresDeclaredHandlers(t *testing.T) {
 	if _, err := NewServer(d, Handlers{Collector: f, Results: f}); err == nil {
 		t.Fatal("a scan capability without a Scanner was accepted")
 	}
-	d.ProtocolVersions = []uint32{2}
-	if _, err := NewServer(d, Handlers{Collector: f, Results: f, Scanner: f}); ReasonOf(err) != providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION {
-		t.Fatalf("a description without revision 1: %v", err)
+	// The kit serves its own revision only: not without it, and not
+	// besides another one, which would accept that revision's requests.
+	for _, versions := range [][]uint32{{1}, {3}, {1, ProtocolVersion}, {ProtocolVersion, 3}} {
+		d.ProtocolVersions = versions
+		if _, err := NewServer(d, Handlers{Collector: f, Results: f, Scanner: f}); ReasonOf(err) != providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION {
+			t.Fatalf("a description listing revisions %v: %v", versions, err)
+		}
 	}
 }
 
 func TestNegotiateLimitsNeverRaisesAHostBound(t *testing.T) {
-	host := &providerv1.Limits{MaxResultBytes: 1 << 20, MaxChunkBytes: 1 << 16, MaxObservations: 10}
-	got := NegotiateLimits(host, &providerv1.Limits{MaxResultBytes: 1 << 30, MaxChunkBytes: 1 << 10, MaxObservations: 0})
-	want := &providerv1.Limits{MaxResultBytes: 1 << 20, MaxChunkBytes: 1 << 10, MaxObservations: 10}
+	host := &providerv1.Limits{MaxResultBytes: 1 << 20, MaxChunkBytes: 1 << 16, MaxObservations: 10, MaxSubjects: 5, MaxEvidence: 0}
+	got := NegotiateLimits(host, &providerv1.Limits{MaxResultBytes: 1 << 30, MaxChunkBytes: 1 << 10, MaxObservations: 0, MaxSubjects: 50, MaxEvidence: 7})
+	want := &providerv1.Limits{MaxResultBytes: 1 << 20, MaxChunkBytes: 1 << 10, MaxObservations: 10, MaxSubjects: 5, MaxEvidence: 7}
 	if !proto.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

@@ -1,0 +1,1191 @@
+{
+  "name": "konstapel/provider/v1/provider.proto",
+  "package": "konstapel.provider.v1",
+  "dependency": [
+    "google/protobuf/timestamp.proto"
+  ],
+  "messageType": [
+    {
+      "name": "ErrorDetail",
+      "field": [
+        {
+          "name": "reason",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_ENUM",
+          "typeName": ".konstapel.provider.v1.ErrorReason",
+          "jsonName": "reason"
+        }
+      ]
+    },
+    {
+      "name": "ProviderContract",
+      "field": [
+        {
+          "name": "name",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "name"
+        },
+        {
+          "name": "version",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "version"
+        }
+      ]
+    },
+    {
+      "name": "RequestHeader",
+      "field": [
+        {
+          "name": "protocol_version",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "protocolVersion"
+        },
+        {
+          "name": "provider",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ProviderContract",
+          "jsonName": "provider"
+        }
+      ]
+    },
+    {
+      "name": "DescribeRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        }
+      ]
+    },
+    {
+      "name": "PayloadCompatibility",
+      "field": [
+        {
+          "name": "write",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "write"
+        },
+        {
+          "name": "read",
+          "number": 2,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_UINT32",
+          "jsonName": "read"
+        }
+      ]
+    },
+    {
+      "name": "CheckKind",
+      "field": [
+        {
+          "name": "kind",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "kind"
+        },
+        {
+          "name": "parameter_schema",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "parameterSchema"
+        }
+      ]
+    },
+    {
+      "name": "Limits",
+      "field": [
+        {
+          "name": "max_result_bytes",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "maxResultBytes"
+        },
+        {
+          "name": "max_chunk_bytes",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "maxChunkBytes"
+        },
+        {
+          "name": "max_observations",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "maxObservations"
+        }
+      ]
+    },
+    {
+      "name": "DescribeResponse",
+      "field": [
+        {
+          "name": "provider",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ProviderContract",
+          "jsonName": "provider"
+        },
+        {
+          "name": "protocol_versions",
+          "number": 2,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_UINT32",
+          "jsonName": "protocolVersions"
+        },
+        {
+          "name": "evaluator_version",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "evaluatorVersion"
+        },
+        {
+          "name": "payload",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.PayloadCompatibility",
+          "jsonName": "payload"
+        },
+        {
+          "name": "capabilities",
+          "number": 5,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_ENUM",
+          "typeName": ".konstapel.provider.v1.Capability",
+          "jsonName": "capabilities"
+        },
+        {
+          "name": "checks",
+          "number": 6,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.CheckKind",
+          "jsonName": "checks"
+        },
+        {
+          "name": "limits",
+          "number": 7,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Limits",
+          "jsonName": "limits"
+        },
+        {
+          "name": "implementation",
+          "number": 8,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "implementation"
+        }
+      ]
+    },
+    {
+      "name": "Namespace",
+      "field": [
+        {
+          "name": "name",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "name"
+        },
+        {
+          "name": "uid",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "uid"
+        }
+      ]
+    },
+    {
+      "name": "Scope",
+      "field": [
+        {
+          "name": "cluster",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "cluster"
+        },
+        {
+          "name": "namespaces",
+          "number": 2,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Namespace",
+          "jsonName": "namespaces"
+        }
+      ]
+    },
+    {
+      "name": "ResultReference",
+      "field": [
+        {
+          "name": "result_id",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "resultId"
+        },
+        {
+          "name": "provider",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ProviderContract",
+          "jsonName": "provider"
+        },
+        {
+          "name": "payload_version",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "payloadVersion"
+        },
+        {
+          "name": "size_bytes",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "sizeBytes"
+        },
+        {
+          "name": "sha256",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "sha256"
+        },
+        {
+          "name": "expires_at",
+          "number": 6,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "expiresAt"
+        },
+        {
+          "name": "limitations",
+          "number": 7,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_STRING",
+          "jsonName": "limitations"
+        }
+      ]
+    },
+    {
+      "name": "CollectRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "scope",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Scope",
+          "jsonName": "scope"
+        },
+        {
+          "name": "inventory",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "inventory"
+        },
+        {
+          "name": "payload_version",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "payloadVersion"
+        },
+        {
+          "name": "deadline",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "deadline"
+        }
+      ]
+    },
+    {
+      "name": "CollectResponse",
+      "field": [
+        {
+          "name": "result",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ResultReference",
+          "jsonName": "result"
+        }
+      ]
+    },
+    {
+      "name": "ScanKey",
+      "field": [
+        {
+          "name": "run_uid",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "runUid"
+        },
+        {
+          "name": "registration_uid",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "registrationUid"
+        },
+        {
+          "name": "registration_revision",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_INT64",
+          "jsonName": "registrationRevision"
+        },
+        {
+          "name": "input_digest",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "inputDigest"
+        }
+      ]
+    },
+    {
+      "name": "Operation",
+      "field": [
+        {
+          "name": "operation_id",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "operationId"
+        },
+        {
+          "name": "key",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ScanKey",
+          "jsonName": "key"
+        },
+        {
+          "name": "state",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_ENUM",
+          "typeName": ".konstapel.provider.v1.OperationState",
+          "jsonName": "state"
+        },
+        {
+          "name": "attempt",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "attempt"
+        },
+        {
+          "name": "max_attempts",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "maxAttempts"
+        },
+        {
+          "name": "result",
+          "number": 6,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ResultReference",
+          "jsonName": "result"
+        },
+        {
+          "name": "message",
+          "number": 7,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "message"
+        },
+        {
+          "name": "created_at",
+          "number": 8,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "createdAt"
+        },
+        {
+          "name": "updated_at",
+          "number": 9,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "updatedAt"
+        }
+      ]
+    },
+    {
+      "name": "StartRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "key",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ScanKey",
+          "jsonName": "key"
+        },
+        {
+          "name": "scope",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Scope",
+          "jsonName": "scope"
+        },
+        {
+          "name": "input",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "input"
+        },
+        {
+          "name": "payload_version",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "payloadVersion"
+        },
+        {
+          "name": "deadline",
+          "number": 6,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "deadline"
+        }
+      ]
+    },
+    {
+      "name": "StartResponse",
+      "field": [
+        {
+          "name": "operation",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Operation",
+          "jsonName": "operation"
+        }
+      ]
+    },
+    {
+      "name": "GetRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "operation_id",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "operationId"
+        }
+      ]
+    },
+    {
+      "name": "GetResponse",
+      "field": [
+        {
+          "name": "operation",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Operation",
+          "jsonName": "operation"
+        }
+      ]
+    },
+    {
+      "name": "CancelRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "operation_id",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "operationId"
+        }
+      ]
+    },
+    {
+      "name": "CancelResponse",
+      "field": [
+        {
+          "name": "operation",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Operation",
+          "jsonName": "operation"
+        }
+      ]
+    },
+    {
+      "name": "ReadResultRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "result_id",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "resultId"
+        },
+        {
+          "name": "offset",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "offset"
+        }
+      ]
+    },
+    {
+      "name": "ReadResultResponse",
+      "field": [
+        {
+          "name": "offset",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "offset"
+        },
+        {
+          "name": "data",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "data"
+        }
+      ]
+    },
+    {
+      "name": "AcknowledgeRequest",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "result_id",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "resultId"
+        },
+        {
+          "name": "size_bytes",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "sizeBytes"
+        },
+        {
+          "name": "sha256",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "sha256"
+        }
+      ]
+    },
+    {
+      "name": "AcknowledgeResponse"
+    },
+    {
+      "name": "ContentReference",
+      "field": [
+        {
+          "name": "bundle",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "bundle"
+        },
+        {
+          "name": "manifest_digest",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "manifestDigest"
+        }
+      ]
+    },
+    {
+      "name": "CheckDefinition",
+      "field": [
+        {
+          "name": "kind",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "kind"
+        },
+        {
+          "name": "name",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "name"
+        },
+        {
+          "name": "definition",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "definition"
+        },
+        {
+          "name": "parameters",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "jsonName": "parameters"
+        }
+      ]
+    },
+    {
+      "name": "EvaluateStart",
+      "field": [
+        {
+          "name": "header",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.RequestHeader",
+          "jsonName": "header"
+        },
+        {
+          "name": "evaluator_version",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "evaluatorVersion"
+        },
+        {
+          "name": "payload_version",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "payloadVersion"
+        },
+        {
+          "name": "payload_size_bytes",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT64",
+          "jsonName": "payloadSizeBytes"
+        },
+        {
+          "name": "payload_sha256",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "payloadSha256"
+        },
+        {
+          "name": "evaluation_time",
+          "number": 6,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "evaluationTime"
+        },
+        {
+          "name": "scope",
+          "number": 7,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Scope",
+          "jsonName": "scope"
+        },
+        {
+          "name": "content",
+          "number": 8,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ContentReference",
+          "jsonName": "content"
+        },
+        {
+          "name": "checks",
+          "number": 9,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.CheckDefinition",
+          "jsonName": "checks"
+        }
+      ]
+    },
+    {
+      "name": "EvaluateRequest",
+      "field": [
+        {
+          "name": "start",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.EvaluateStart",
+          "oneofIndex": 0,
+          "jsonName": "start"
+        },
+        {
+          "name": "payload_chunk",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BYTES",
+          "oneofIndex": 0,
+          "jsonName": "payloadChunk"
+        }
+      ],
+      "oneofDecl": [
+        {
+          "name": "part"
+        }
+      ]
+    },
+    {
+      "name": "Observation",
+      "field": [
+        {
+          "name": "subject",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "subject"
+        },
+        {
+          "name": "check",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "check"
+        },
+        {
+          "name": "state",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_ENUM",
+          "typeName": ".konstapel.provider.v1.EvidenceState",
+          "jsonName": "state"
+        },
+        {
+          "name": "raw",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_STRING",
+          "jsonName": "raw"
+        },
+        {
+          "name": "outcome",
+          "number": 5,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_ENUM",
+          "typeName": ".konstapel.provider.v1.Outcome",
+          "jsonName": "outcome"
+        },
+        {
+          "name": "not_applicable",
+          "number": 6,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_BOOL",
+          "jsonName": "notApplicable"
+        },
+        {
+          "name": "evaluated",
+          "number": 7,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".google.protobuf.Timestamp",
+          "jsonName": "evaluated"
+        }
+      ]
+    },
+    {
+      "name": "ObservationBatch",
+      "field": [
+        {
+          "name": "observations",
+          "number": 1,
+          "label": "LABEL_REPEATED",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.Observation",
+          "jsonName": "observations"
+        }
+      ]
+    },
+    {
+      "name": "EvaluationSummary",
+      "field": [
+        {
+          "name": "provider",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ProviderContract",
+          "jsonName": "provider"
+        },
+        {
+          "name": "evaluator_version",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "evaluatorVersion"
+        },
+        {
+          "name": "observation_count",
+          "number": 3,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "observationCount"
+        },
+        {
+          "name": "stale_scopes",
+          "number": 4,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_UINT32",
+          "jsonName": "staleScopes"
+        }
+      ]
+    },
+    {
+      "name": "EvaluateResponse",
+      "field": [
+        {
+          "name": "observations",
+          "number": 1,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.ObservationBatch",
+          "oneofIndex": 0,
+          "jsonName": "observations"
+        },
+        {
+          "name": "summary",
+          "number": 2,
+          "label": "LABEL_OPTIONAL",
+          "type": "TYPE_MESSAGE",
+          "typeName": ".konstapel.provider.v1.EvaluationSummary",
+          "oneofIndex": 0,
+          "jsonName": "summary"
+        }
+      ],
+      "oneofDecl": [
+        {
+          "name": "part"
+        }
+      ]
+    }
+  ],
+  "enumType": [
+    {
+      "name": "Capability",
+      "value": [
+        {
+          "name": "CAPABILITY_UNSPECIFIED",
+          "number": 0
+        },
+        {
+          "name": "CAPABILITY_COLLECT",
+          "number": 1
+        },
+        {
+          "name": "CAPABILITY_SCAN",
+          "number": 2
+        },
+        {
+          "name": "CAPABILITY_EVALUATE",
+          "number": 3
+        }
+      ]
+    },
+    {
+      "name": "ErrorReason",
+      "value": [
+        {
+          "name": "ERROR_REASON_UNSPECIFIED",
+          "number": 0
+        },
+        {
+          "name": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
+          "number": 1
+        },
+        {
+          "name": "ERROR_REASON_PROVIDER_MISMATCH",
+          "number": 2
+        },
+        {
+          "name": "ERROR_REASON_UNSUPPORTED_CONTRACT_VERSION",
+          "number": 3
+        },
+        {
+          "name": "ERROR_REASON_UNSUPPORTED_PAYLOAD_VERSION",
+          "number": 4
+        },
+        {
+          "name": "ERROR_REASON_UNSUPPORTED_EVALUATOR_VERSION",
+          "number": 5
+        },
+        {
+          "name": "ERROR_REASON_UNSUPPORTED_CAPABILITY",
+          "number": 6
+        },
+        {
+          "name": "ERROR_REASON_INVALID_REQUEST",
+          "number": 7
+        },
+        {
+          "name": "ERROR_REASON_LIMIT_EXCEEDED",
+          "number": 8
+        },
+        {
+          "name": "ERROR_REASON_OPERATION_CONFLICT",
+          "number": 9
+        },
+        {
+          "name": "ERROR_REASON_NOT_FOUND",
+          "number": 10
+        },
+        {
+          "name": "ERROR_REASON_RESULT_EXPIRED",
+          "number": 11
+        },
+        {
+          "name": "ERROR_REASON_DIGEST_MISMATCH",
+          "number": 12
+        },
+        {
+          "name": "ERROR_REASON_UNAVAILABLE",
+          "number": 13
+        },
+        {
+          "name": "ERROR_REASON_INVALID_RESPONSE",
+          "number": 14
+        }
+      ]
+    },
+    {
+      "name": "OperationState",
+      "value": [
+        {
+          "name": "OPERATION_STATE_UNSPECIFIED",
+          "number": 0
+        },
+        {
+          "name": "OPERATION_STATE_PENDING",
+          "number": 1
+        },
+        {
+          "name": "OPERATION_STATE_RUNNING",
+          "number": 2
+        },
+        {
+          "name": "OPERATION_STATE_SUCCEEDED",
+          "number": 3
+        },
+        {
+          "name": "OPERATION_STATE_FAILED",
+          "number": 4
+        },
+        {
+          "name": "OPERATION_STATE_CANCELING",
+          "number": 5
+        },
+        {
+          "name": "OPERATION_STATE_CANCELED",
+          "number": 6
+        },
+        {
+          "name": "OPERATION_STATE_UNCERTAIN",
+          "number": 7
+        }
+      ]
+    },
+    {
+      "name": "EvidenceState",
+      "value": [
+        {
+          "name": "EVIDENCE_STATE_UNSPECIFIED",
+          "number": 0
+        },
+        {
+          "name": "EVIDENCE_STATE_ATTRIBUTABLE",
+          "number": 1
+        },
+        {
+          "name": "EVIDENCE_STATE_MISSING",
+          "number": 2
+        },
+        {
+          "name": "EVIDENCE_STATE_REJECTED",
+          "number": 3
+        },
+        {
+          "name": "EVIDENCE_STATE_UNRESOLVED",
+          "number": 4
+        }
+      ]
+    },
+    {
+      "name": "Outcome",
+      "value": [
+        {
+          "name": "OUTCOME_UNSPECIFIED",
+          "number": 0
+        },
+        {
+          "name": "OUTCOME_PASS",
+          "number": 1
+        },
+        {
+          "name": "OUTCOME_FAIL",
+          "number": 2
+        },
+        {
+          "name": "OUTCOME_ERROR",
+          "number": 3
+        },
+        {
+          "name": "OUTCOME_SKIP",
+          "number": 4
+        },
+        {
+          "name": "OUTCOME_UNKNOWN",
+          "number": 5
+        }
+      ]
+    }
+  ],
+  "service": [
+    {
+      "name": "AssessmentProvider",
+      "method": [
+        {
+          "name": "Describe",
+          "inputType": ".konstapel.provider.v1.DescribeRequest",
+          "outputType": ".konstapel.provider.v1.DescribeResponse"
+        },
+        {
+          "name": "Collect",
+          "inputType": ".konstapel.provider.v1.CollectRequest",
+          "outputType": ".konstapel.provider.v1.CollectResponse"
+        },
+        {
+          "name": "Start",
+          "inputType": ".konstapel.provider.v1.StartRequest",
+          "outputType": ".konstapel.provider.v1.StartResponse"
+        },
+        {
+          "name": "Get",
+          "inputType": ".konstapel.provider.v1.GetRequest",
+          "outputType": ".konstapel.provider.v1.GetResponse"
+        },
+        {
+          "name": "Cancel",
+          "inputType": ".konstapel.provider.v1.CancelRequest",
+          "outputType": ".konstapel.provider.v1.CancelResponse"
+        },
+        {
+          "name": "ReadResult",
+          "inputType": ".konstapel.provider.v1.ReadResultRequest",
+          "outputType": ".konstapel.provider.v1.ReadResultResponse",
+          "serverStreaming": true
+        },
+        {
+          "name": "Acknowledge",
+          "inputType": ".konstapel.provider.v1.AcknowledgeRequest",
+          "outputType": ".konstapel.provider.v1.AcknowledgeResponse"
+        },
+        {
+          "name": "Evaluate",
+          "inputType": ".konstapel.provider.v1.EvaluateRequest",
+          "outputType": ".konstapel.provider.v1.EvaluateResponse",
+          "clientStreaming": true,
+          "serverStreaming": true
+        }
+      ]
+    }
+  ],
+  "options": {
+    "goPackage": "github.com/backend-bunny/Konstapel/pkg/providerapi/v1;providerv1"
+  },
+  "syntax": "proto3"
+}

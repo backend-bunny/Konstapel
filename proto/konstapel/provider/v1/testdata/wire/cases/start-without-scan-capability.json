@@ -4,10 +4,10 @@
   "message": "konstapel.provider.v1.StartRequest",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     },
     "key": {
@@ -30,5 +30,5 @@
     "deadline": "2026-11-26T12:00:00Z"
   },
   "expect": "ERROR_REASON_UNSUPPORTED_CAPABILITY",
-  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEmYKB3J1bi11aWQSEHJlZ2lzdHJhdGlvbi11aWQYASJHc2hhMjU2OjdiMTZiNjE2NDI4NzljNjViN2VlMTJlMjQ0NWJhMDJmY2QxNTVjYmQ2ODNjZWU5ZmI2MDBiNTE0N2ZmM2Y0YmMaIQoLY2x1c3Rlci11aWQSEgoGdGVhbS1hEghucy1hLXVpZCIWeyJjaGVja3MiOlsicG9zdHVyZSJdfSgDMgYIwL6g2AY="
+  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAEEmYKB3J1bi11aWQSEHJlZ2lzdHJhdGlvbi11aWQYASJHc2hhMjU2OjdiMTZiNjE2NDI4NzljNjViN2VlMTJlMjQ0NWJhMDJmY2QxNTVjYmQ2ODNjZWU5ZmI2MDBiNTE0N2ZmM2Y0YmMaIQoLY2x1c3Rlci11aWQSEgoGdGVhbS1hEghucy1hLXVpZCIWeyJjaGVja3MiOlsicG9zdHVyZSJdfSgDMgYIwL6g2AY="
 }

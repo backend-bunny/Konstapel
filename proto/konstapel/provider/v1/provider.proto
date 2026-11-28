@@ -13,7 +13,7 @@
 //      package name (konstapel.provider.v1); a breaking change is a new
 //      package. RequestHeader.protocol_version is the revision of this
 //      major the caller speaks, and DescribeResponse.protocol_versions are
-//      the revisions the provider serves. This definition is revision 1.
+//      the revisions the provider serves. This definition is revision 2.
 //   2. Provider contract version: the provider's capability contract,
 //      selected by bundles as "<name>/v<version>" (ProviderContract). It is
 //      the host's provider descriptor version.
@@ -27,6 +27,16 @@
 //
 // An unsupported version in any dimension is rejected with that
 // dimension's ErrorReason. It is never adapted, defaulted or ignored.
+//
+// Revisions. Revision 2 adds the host-frozen Inventory every Collect
+// carries and makes a staged result a CollectionResult, the host-readable
+// attribution envelope in which only evidence details are opaque. Its
+// messages are additive, but a revision 1 peer would silently ignore them
+// (protobuf keeps unknown fields and its readers never see them), so the
+// revision is what makes them mandatory: a revision 2 host and provider
+// speak revision 2 only, and each rejects the other revision with
+// ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION before any payload is sent.
+// Revision 1's opaque CollectRequest.inventory (field 3) is removed.
 //
 // Errors. A failed call returns a gRPC status whose details carry exactly
 // one ErrorDetail naming the reason. Clients branch on the ErrorReason,
@@ -45,6 +55,7 @@ syntax = "proto3";
 
 package konstapel.provider.v1;
 
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/backend-bunny/Konstapel/pkg/providerapi/v1;providerv1";
@@ -163,7 +174,7 @@ message ProviderContract {
 // version.
 message RequestHeader {
   // protocol_version is the revision of this major version the caller
-  // speaks. This definition is revision 1.
+  // speaks. This definition is revision 2.
   uint32 protocol_version = 1;
   // provider is the contract the caller expects to reach.
   ProviderContract provider = 2;
@@ -204,6 +215,11 @@ message Limits {
   uint32 max_chunk_bytes = 2;
   // max_observations bounds the observations one evaluation returns.
   uint32 max_observations = 3;
+  // max_subjects bounds the subjects of one collection: the inventory's
+  // subjects, and separately the supplements its result reports.
+  uint32 max_subjects = 4;
+  // max_evidence bounds the evidence items of one result.
+  uint32 max_evidence = 5;
 }
 
 message DescribeResponse {
@@ -243,7 +259,9 @@ message Scope {
 }
 
 // ResultReference identifies one immutable staged result: a payload of the
-// provider's payload version, UTF-8 JSON encoding one object.
+// provider's payload version, UTF-8 JSON encoding one object. The staged
+// result of a collection or scan is a CollectionResult in its proto3 JSON
+// mapping.
 message ResultReference {
   // result_id is the provider's opaque identifier of the staged bytes.
   string result_id = 1;
@@ -264,19 +282,131 @@ message ResultReference {
 }
 
 message CollectRequest {
+  // Field 3 was revision 1's opaque, provider-specific inventory input.
+  reserved 3;
   RequestHeader header = 1;
   // scope is the host-frozen scope to collect for.
   Scope scope = 2;
-  // inventory is optional provider-specific frozen inventory input (UTF-8
-  // JSON object), such as the subjects the host expects. It never selects
-  // credentials, identities, commands or images.
-  bytes inventory = 3;
   // payload_version is the payload version the host will store; it must be
   // the provider's payload.write.
   uint32 payload_version = 4;
   // deadline is the collection's deadline. The enclosing assessment
   // deadline is authoritative; a provider never extends it.
   google.protobuf.Timestamp deadline = 5;
+  // inventory is the host-frozen inventory to collect for: the
+  // collection's denominator. Required.
+  Inventory inventory = 6;
+}
+
+// Supplements says whether a provider may supplement the inventory with
+// subjects it discovers itself.
+enum Supplements {
+  SUPPLEMENTS_UNSPECIFIED = 0;
+  // Only inventory subjects. A supplement is out of scope.
+  SUPPLEMENTS_NONE = 1;
+  // Parts of an inventory workload (for example its containers or images)
+  // may be reported as supplements of that workload. A supplement adds
+  // observations of its own; it never changes the inventory's
+  // expectations, and evidence attributed to it never completes one.
+  SUPPLEMENTS_WITHIN_WORKLOADS = 2;
+}
+
+// Inventory is the host-derived inventory of a collection, frozen before
+// dispatch. The provider never defines it: its expected (subject, check)
+// pairs are the denominator evidence is attributed against, and a result
+// can neither add to them, narrow them nor replace them. It projects
+// identities, revisions and expectations only, never object data.
+message Inventory {
+  // subjects are the namespaces and workload instances evidence is
+  // expected for, at least one, each uid once.
+  repeated InventorySubject subjects = 1;
+  // supplements says whether supplements are allowed.
+  Supplements supplements = 2;
+}
+
+// InventorySubject is one Kubernetes object instance of the inventory.
+message InventorySubject {
+  // uid is the object's metadata.uid, its stable instance identity.
+  string uid = 1;
+  // namespace_uid is the uid of the scope namespace the subject is in; a
+  // namespace subject is its own namespace.
+  string namespace_uid = 2;
+  // resource is "<group>/<version>/<resource>", with an empty group for
+  // the core group: "/v1/namespaces" for a namespace subject, for example
+  // "apps/v1/deployments" for a workload.
+  string resource = 3;
+  // name is the object's name.
+  string name = 4;
+  // revision is the host's revision of the object state checks can read
+  // (for a workload, a digest of its spec, labels and annotations; never
+  // its resourceVersion). Evidence about another state is not this
+  // subject's.
+  string revision = 5;
+  // checks are the names of the run's checks expected for the subject, at
+  // least one, each once: the subject's expected observations.
+  repeated string checks = 6;
+}
+
+// CollectionResult is the staged result of a collection or scan, the
+// host-readable attribution envelope: evidence items attributed to
+// inventory subjects and checks, and the supplements and limitations the
+// provider reports. Only Evidence.details is source-specific. It is staged
+// as its proto3 JSON mapping, one UTF-8 JSON object without surrounding
+// whitespace, so a host capture keeps exactly the staged bytes; a reader
+// rejects unknown fields.
+message CollectionResult {
+  repeated Evidence evidence = 1;
+  repeated Supplement supplements = 2;
+  repeated SubjectLimitation limitations = 3;
+}
+
+// Evidence is one evidence item.
+message Evidence {
+  // id is the provider's identifier of the item, unique in the result.
+  string id = 1;
+  // attributions are the subjects and checks the item is evidence for, at
+  // least one, each pair once. The host withholds the whole item when any
+  // of them is outside the inventory.
+  repeated Attribution attributions = 2;
+  // observed is when the source evaluated or observed what the item
+  // records.
+  google.protobuf.Timestamp observed = 3;
+  // details are the item's source-specific details (one JSON object) in
+  // the provider's payload version. The host never interprets them.
+  google.protobuf.Struct details = 4;
+}
+
+// Attribution names one expected observation an item is evidence for.
+message Attribution {
+  // subject is an inventory subject's uid or a supplement's id.
+  string subject = 1;
+  // check is the name of a check expected for the subject (for a
+  // supplement, for its parent).
+  string check = 2;
+}
+
+// Supplement is a subject the provider discovered under an inventory
+// workload, only when the inventory allows supplements.
+message Supplement {
+  // id is the provider's identifier, unique in the result and never an
+  // inventory uid.
+  string id = 1;
+  // parent is the uid of the inventory workload subject it is part of.
+  string parent = 2;
+  // kind and name describe it, for example "container" and its name.
+  string kind = 3;
+  string name = 4;
+}
+
+// SubjectLimitation is what the provider could not collect for a subject.
+// It is never a finding and never a pass.
+message SubjectLimitation {
+  // subject is an inventory subject's uid or a supplement's id.
+  string subject = 1;
+  // check is the check it concerns; empty for every check of the subject.
+  string check = 2;
+  // message is a bounded human-readable reason.
+  string message = 3;
 }
 
 message CollectResponse {

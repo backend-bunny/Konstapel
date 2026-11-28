@@ -4,7 +4,7 @@
   "message": "konstapel.provider.v1.DescribeRequest",
   "value": {
     "header": {
-      "protocolVersion": 2,
+      "protocolVersion": 1,
       "provider": {
         "name": "example-other",
         "version": 7
@@ -12,5 +12,5 @@
     }
   },
   "expect": "ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION",
-  "wire": "ChUIAhIRCg1leGFtcGxlLW90aGVyEAc="
+  "wire": "ChUIARIRCg1leGFtcGxlLW90aGVyEAc="
 }

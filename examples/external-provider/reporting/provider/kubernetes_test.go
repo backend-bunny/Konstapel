@@ -14,6 +14,7 @@ import (
 
 	"example.com/konstapel-reporting/certs"
 	"example.com/konstapel-reporting/provider"
+	"github.com/backend-bunny/Konstapel/pkg/providerkit"
 )
 
 // fakeAPI serves Namespace gets the way the API server does, and records
@@ -154,7 +155,18 @@ func TestCollectFailsWhenTheSourceFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := ref.GetLimitations(); len(got) != 1 || got[0] != "namespace team-c is not in the Kubernetes API" {
-		t.Errorf("limitations %q", got)
+	_, data, err := p.Result(context.Background(), ref.GetResultId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := providerkit.ParseCollectionResult(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.GetLimitations(); len(got) != 1 || got[0].GetSubject() != "uid-c" || got[0].GetMessage() != "namespace team-c is not in the Kubernetes API" {
+		t.Errorf("limitations %v", got)
+	}
+	if got := res.GetEvidence(); len(got) != 1 || got[0].GetAttributions()[0].GetSubject() != "uid-a" {
+		t.Errorf("evidence %v", got)
 	}
 }

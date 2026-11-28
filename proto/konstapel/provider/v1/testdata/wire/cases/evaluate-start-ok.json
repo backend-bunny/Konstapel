@@ -4,10 +4,10 @@
   "message": "konstapel.provider.v1.EvaluateStart",
   "value": {
     "header": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "provider": {
         "name": "example-reporting",
-        "version": 2
+        "version": 4
       }
     },
     "evaluatorVersion": 5,
@@ -39,5 +39,5 @@
     ]
   },
   "expect": "OK",
-  "wire": "ChkIARIVChFleGFtcGxlLXJlcG9ydGluZxACEAUYAiAOKkdzaGEyNTY6NDg2YThmMDc3MTFhNTU3MDBlMWVkMzFjNTM2MjE3YzE3ZjMxMzVjYzYzNDBiNDgzMGJjYjRmODdiYmM3MDcyYTIGCMC+oNgGOiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWRCUgoHZXhhbXBsZRJHc2hhMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTFKPgofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIHcG9zdHVyZRoSeyJ2ZXJkaWN0IjoicGFzcyJ9"
+  "wire": "ChkIAhIVChFleGFtcGxlLXJlcG9ydGluZxAEEAUYAiAOKkdzaGEyNTY6NDg2YThmMDc3MTFhNTU3MDBlMWVkMzFjNTM2MjE3YzE3ZjMxMzVjYzYzNDBiNDgzMGJjYjRmODdiYmM3MDcyYTIGCMC+oNgGOiEKC2NsdXN0ZXItdWlkEhIKBnRlYW0tYRIIbnMtYS11aWRCUgoHZXhhbXBsZRJHc2hhMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTFKPgofcmVwb3J0aW5nLmV4YW1wbGUuaW8vdjEvUG9zdHVyZRIHcG9zdHVyZRoSeyJ2ZXJkaWN0IjoicGFzcyJ9"
 }

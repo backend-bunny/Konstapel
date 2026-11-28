@@ -838,12 +838,50 @@ provider's payload:
 ```
 
 Every field is required, and no other field is accepted, so a field added
-later needs a new version instead of being ignored. A Kyverno envelope holds
+later needs a new version instead of being ignored. The one exception is
+`registration`, which was added within version 3 before any release wrote or
+read an envelope (below). A Kyverno envelope holds
 payload 2 only: a complete CaptureV2 document, decoded strictly and
 validated with `CaptureV2.Validate`. Kyverno payload 1 exists only as a
 version 1 document. Another provider's payload is that provider's to decode
 and validate. The reporting adapter, for example, decodes its payload
 strictly and checks the payload's own version.
+
+A registered external provider's envelope also records its frozen
+registration: what interpreting the capture needs beyond the provider
+contract, payload and evaluator versions.
+
+```json
+{
+  "version": 3,
+  "provider": "example-reporting/v1",
+  "payloadVersion": 1,
+  "evaluatorVersion": 1,
+  "registration": {"name": "example-reporting", "uid": "...", "revision": 3,
+    "releaseDigest": "sha256:...", "protocol": "konstapel.provider.v1", "protocolRevision": 2},
+  "payload": {"evidence": ["..."]}
+}
+```
+
+Every field of `registration` is required. It holds identities only, never
+endpoint configuration or credentials. It is required exactly for a
+registered provider: the built-in registry refuses any capture that records
+one, and the readers of a registered provider (`external.Frozen.CaptureReaders`)
+refuse a capture without it, or one frozen to another registration UID,
+revision or release (`TestRegisteredCaptureIdentity`). It was added to
+version 3, not as a version 4
+([external providers design Decision 10](../openspec/changes/add-external-assessment-providers/design.md#10-frozen-registration-identity-in-the-capture-envelope)),
+because no retained capture can depend on the earlier shape:
+
+- 0.3.0 and earlier read versions 1 and 2 only, so they refuse every version
+  3 document, with or without the field;
+- nothing writes an envelope, and no saved capture is version 3;
+- the builds before the field decode the envelope strictly, so they refuse
+  it as an unknown field (`TestEarlierReadersRefuseRegisteredCaptures`).
+
+`collector.EncodeEnvelope` writes an envelope that keeps the payload's bytes
+exactly. An external provider's staged result therefore keeps its digest
+in the capture.
 
 ### Reading a capture
 
@@ -854,12 +892,15 @@ its [selection reason](#selection). It rejects:
 
 - a document without a version, or with a version other than 1, 2 or 3
 - a version 1 or 2 document with an envelope field (`provider`,
-  `payloadVersion`, `evaluatorVersion` or `payload`). Older readers would
+  `payloadVersion`, `evaluatorVersion`, `registration` or `payload`). Older readers would
   ignore the field and read the document as Kyverno's
 - an envelope with a missing or unknown field, an empty provider (never
   the registry default), a version below 1, or a payload that is not a
   JSON object
 - a provider that is not installed, or a payload version it does not read
+- a `registration` that is incomplete or read by readers of built-in
+  providers only, and, for readers of registered providers, a registered
+  provider's capture without one or with another registration
 - a Kyverno envelope payload that is not exactly a valid CaptureV2
 
 `ReadCapture` does not decode a legacy document. `CaptureDocument.V2()`
@@ -905,7 +946,7 @@ These are refused:
   },
   {
     "capture": "version 2 with an evaluatorVersion",
-    "error": "unsupported capture: a version 2 capture has no provider, payload or evaluator fields; a provider-discriminated capture is version 3"
+    "error": "unsupported capture: a version 2 capture has no provider, payload, evaluator or registration fields; a provider-discriminated capture is version 3"
   },
   {
     "capture": "envelope of konstapel-reporttest/v1",
@@ -1158,7 +1199,7 @@ for signing destinations, are in
 | --- | --- | --- | --- |
 | Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package. The C2P plugin converts it with the prototype provider | Read by the prototype and the C2P plugin |
 | Capture version 2 | The controller, in every release including this one | Read with evaluator 1, unchanged | Read |
-| Capture version 3 (envelope) | Nothing yet | Read: in production, Kyverno payload 2 only | Refused explicitly |
+| Capture version 3 (envelope) | Nothing yet. The unwired external collection seam builds one with a `registration` | Read: in production, Kyverno payload 2 only. A registered provider's capture only through its frozen registration's readers | Refused explicitly |
 | Descriptor, file roles and content record | Unchanged since 0.3.0 | Read | 0.3.0 reads them. 0.2.0 refuses the `coverage-summary`, `coverage-summary-text` and `supporting-*` roles 0.3.0 added as unknown roles |
 
 The file roles are a closed set, so a descriptor reader that predates a role

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -212,4 +213,150 @@ func checkObservations(obs []*providerv1.Observation, max uint32) error {
 		}
 	}
 	return nil
+}
+
+// NamespaceResource is the resource of a namespace subject.
+const NamespaceResource = "/v1/namespaces"
+
+// CheckInventory checks a Collect request's inventory against its scope
+// and the subject bound: at least one and at most maxSubjects subjects of
+// the scope's namespaces, each UID once, with a resource, name, revision
+// and unique expected checks. A namespace subject is a scope namespace:
+// its own namespace, with the scope's name for that UID. More subjects
+// than the bound is ERROR_REASON_LIMIT_EXCEEDED; any other violation is
+// ERROR_REASON_INVALID_REQUEST. Revision 2 requires an inventory.
+func CheckInventory(inv *providerv1.Inventory, scope *providerv1.Scope, maxSubjects uint32) error {
+	if inv == nil {
+		return invalidRequest("collect has no inventory: revision %d collects only against a host-frozen inventory", ProtocolVersion)
+	}
+	switch inv.GetSupplements() {
+	case providerv1.Supplements_SUPPLEMENTS_NONE, providerv1.Supplements_SUPPLEMENTS_WITHIN_WORKLOADS:
+	default:
+		return invalidRequest("inventory supplements %d must be SUPPLEMENTS_NONE or SUPPLEMENTS_WITHIN_WORKLOADS", inv.GetSupplements())
+	}
+	subjects := inv.GetSubjects()
+	switch {
+	case len(subjects) == 0:
+		return invalidRequest("inventory has no subject")
+	case uint64(len(subjects)) > uint64(maxSubjects):
+		return Errorf(providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED, "inventory has %d subjects, more than %d", len(subjects), maxSubjects)
+	}
+	namespaces := map[string]string{}
+	for _, n := range scope.GetNamespaces() {
+		namespaces[n.GetUid()] = n.GetName()
+	}
+	seen := map[string]bool{}
+	for i, s := range subjects {
+		where := fmt.Sprintf("inventory subject %d", i)
+		ns, inScope := namespaces[s.GetNamespaceUid()]
+		switch {
+		case s.GetUid() == "" || len(s.GetUid()) > MaxTextBytes:
+			return invalidRequest("%s must have a uid of at most %d bytes", where, MaxTextBytes)
+		case seen[s.GetUid()]:
+			return invalidRequest("%s repeats a uid", where)
+		case !inScope:
+			return invalidRequest("%s is not in a namespace of the scope", where)
+		case !resourcePattern.MatchString(s.GetResource()):
+			return invalidRequest("%s resource %q must be group/version/resource", where, bound(s.GetResource(), 80))
+		case s.GetName() == "" || len(s.GetName()) > MaxNameBytes:
+			return invalidRequest("%s must have a name of at most %d bytes", where, MaxNameBytes)
+		case s.GetRevision() == "" || len(s.GetRevision()) > MaxTextBytes:
+			return invalidRequest("%s must have a revision of at most %d bytes", where, MaxTextBytes)
+		case s.GetResource() == NamespaceResource && (s.GetUid() != s.GetNamespaceUid() || s.GetName() != ns):
+			return invalidRequest("%s is a namespace subject other than its scope namespace", where)
+		case len(s.GetChecks()) == 0 || len(s.GetChecks()) > MaxSubjectChecks:
+			return invalidRequest("%s must expect between 1 and %d checks", where, MaxSubjectChecks)
+		}
+		seen[s.GetUid()] = true
+		checks := map[string]bool{}
+		for _, c := range s.GetChecks() {
+			if c == "" || len(c) > MaxTextBytes || checks[c] {
+				return invalidRequest("%s has an empty, overlong or repeated check", where)
+			}
+			checks[c] = true
+		}
+	}
+	return nil
+}
+
+// ParseCollectionResult decodes a staged result, a CollectionResult in its
+// proto3 JSON mapping, and checks its structure within l (nil: the kit
+// defaults): one JSON object without surrounding whitespace, no unknown
+// field, at most l.max_evidence evidence items and
+// limitations and l.max_subjects supplements, unique item and supplement
+// identifiers, at least one unique attribution per item with a valid
+// observation time, and bounded text. It does not check attribution
+// against an inventory, which is the host's. More items than a bound is
+// ERROR_REASON_LIMIT_EXCEEDED; any other violation is
+// ERROR_REASON_INVALID_RESPONSE.
+func ParseCollectionResult(data []byte, l *providerv1.Limits) (*providerv1.CollectionResult, error) {
+	l = NegotiateLimits(l, nil)
+	if uint64(len(data)) > l.GetMaxResultBytes() {
+		return nil, Errorf(providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED, "result of %d bytes is more than %d", len(data), l.GetMaxResultBytes())
+	}
+	// Without surrounding whitespace, a capture keeps exactly the staged
+	// bytes: a JSON reader does not keep it.
+	if len(data) == 0 || data[0] != '{' || data[len(data)-1] != '}' || !jsonObject(data) {
+		return nil, invalidResponse("result is not one JSON object without surrounding whitespace")
+	}
+	r := &providerv1.CollectionResult{}
+	if err := (protojson.UnmarshalOptions{RecursionLimit: 64}).Unmarshal(data, r); err != nil {
+		return nil, invalidResponse("result is not a CollectionResult: %s", bound(err.Error(), 256))
+	}
+	switch {
+	case uint64(len(r.GetEvidence())) > uint64(l.GetMaxEvidence()):
+		return nil, Errorf(providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED, "result has %d evidence items, more than %d", len(r.GetEvidence()), l.GetMaxEvidence())
+	case uint64(len(r.GetLimitations())) > uint64(l.GetMaxEvidence()):
+		return nil, Errorf(providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED, "result has %d limitations, more than %d", len(r.GetLimitations()), l.GetMaxEvidence())
+	case uint64(len(r.GetSupplements())) > uint64(l.GetMaxSubjects()):
+		return nil, Errorf(providerv1.ErrorReason_ERROR_REASON_LIMIT_EXCEEDED, "result has %d supplements, more than %d", len(r.GetSupplements()), l.GetMaxSubjects())
+	}
+	text := func(s string) bool { return s != "" && len(s) <= MaxTextBytes }
+	ids := map[string]bool{}
+	for i, e := range r.GetEvidence() {
+		switch {
+		case !text(e.GetId()) || ids[e.GetId()]:
+			return nil, invalidResponse("evidence %d has an empty, overlong or repeated id", i)
+		case len(e.GetAttributions()) == 0 || len(e.GetAttributions()) > MaxAttributions:
+			return nil, invalidResponse("evidence %d must have between 1 and %d attributions", i, MaxAttributions)
+		case e.GetObserved() == nil || e.GetObserved().CheckValid() != nil:
+			return nil, invalidResponse("evidence %d has no valid observation time", i)
+		}
+		ids[e.GetId()] = true
+		pairs := map[[2]string]bool{}
+		for j, a := range e.GetAttributions() {
+			key := [2]string{a.GetSubject(), a.GetCheck()}
+			if !text(a.GetSubject()) || !text(a.GetCheck()) || pairs[key] {
+				return nil, invalidResponse("evidence %d attribution %d has an empty, overlong or repeated subject and check", i, j)
+			}
+			pairs[key] = true
+		}
+	}
+	supplements := map[string]bool{}
+	for i, s := range r.GetSupplements() {
+		switch {
+		case !text(s.GetId()) || supplements[s.GetId()]:
+			return nil, invalidResponse("supplement %d has an empty, overlong or repeated id", i)
+		case !text(s.GetParent()) || !text(s.GetKind()) || len(s.GetName()) > MaxTextBytes:
+			return nil, invalidResponse("supplement %d must name its parent and kind, and a name of at most %d bytes", i, MaxTextBytes)
+		}
+		supplements[s.GetId()] = true
+	}
+	for i, lim := range r.GetLimitations() {
+		if !text(lim.GetSubject()) || len(lim.GetCheck()) > MaxTextBytes || !text(lim.GetMessage()) {
+			return nil, invalidResponse("limitation %d must name a subject and a message of at most %d bytes", i, MaxTextBytes)
+		}
+	}
+	return r, nil
+}
+
+// bound truncates s to at most n bytes on a rune boundary.
+func bound(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && n < len(s) && s[n]&0xC0 == 0x80 {
+		n--
+	}
+	return s[:n] + "..."
 }

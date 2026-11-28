@@ -197,14 +197,14 @@ type tlsHandlers struct {
 }
 
 func newTLSHandlers(desc *providerv1.DescribeResponse) *tlsHandlers {
-	return &tlsHandlers{ref: &referenceHandlers{desc: desc, staged: map[string][]byte{"result-1": []byte(`{"evidence":"staged"}`)}},
+	return &tlsHandlers{ref: &referenceHandlers{desc: desc, staged: map[string][]byte{"result-1": []byte(testResult)}},
 		started: make(chan struct{}, 4), blocked: make(chan context.Context, 4)}
 }
 
 func (h *tlsHandlers) Collect(ctx context.Context, req *providerv1.CollectRequest) (*providerv1.ResultReference, error) {
 	h.collects.Add(1)
 	h.mu.Lock()
-	h.inventory = slicesClone(req.GetInventory())
+	h.inventory, _ = proto.Marshal(req.GetInventory())
 	h.mu.Unlock()
 	if h.block {
 		h.started <- struct{}{}
@@ -222,6 +222,14 @@ func (h *tlsHandlers) lastInventory() []byte {
 }
 
 func slicesClone(b []byte) []byte { return append([]byte(nil), b...) }
+
+// canaryInventory carries the canary in a subject's revision, so a
+// plaintext inventory would show it on the wire.
+func canaryInventory() *providerv1.Inventory {
+	inv := proto.CloneOf(testInventory)
+	inv.Subjects[1].Revision = "marker-" + canary
+	return inv
+}
 
 func (h *tlsHandlers) Result(ctx context.Context, id string) (*providerv1.ResultReference, []byte, error) {
 	return h.ref.Result(ctx, id)
@@ -406,7 +414,7 @@ func wantCode(t *testing.T, err error, code codes.Code) {
 }
 
 func canaryCollect() *providerv1.CollectRequest {
-	return &providerv1.CollectRequest{Header: testWant.Header(), Scope: testScope, Inventory: []byte(`{"marker":"` + canary + `"}`),
+	return &providerv1.CollectRequest{Header: testWant.Header(), Scope: testScope, Inventory: canaryInventory(),
 		PayloadVersion: testWant.PayloadVersion, Deadline: timestamppb.New(testAt.Add(time.Minute))}
 }
 
@@ -422,7 +430,7 @@ func TestMutualTLSServesAuthorizedPeers(t *testing.T) {
 	}
 	c := f.client(conn)
 	ctx := timeout(t, 5*time.Second)
-	ref, err := c.Collect(ctx, testScope, []byte(`{"marker":"`+canary+`"}`), testAt.Add(time.Minute))
+	ref, err := c.Collect(ctx, testScope, canaryInventory(), testAt.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +438,7 @@ func TestMutualTLSServesAuthorizedPeers(t *testing.T) {
 		t.Fatal("the authorized provider did not receive the request")
 	}
 	data, err := c.ReadResult(ctx, ref)
-	if err != nil || string(data) != `{"evidence":"staged"}` {
+	if err != nil || string(data) != testResult {
 		t.Fatalf("read %q: %v", data, err)
 	}
 	ev, err := c.Evaluate(ctx, EvaluateInput{PayloadVersion: 3, EvaluatorVersion: 5, Payload: data, At: testAt, Scope: testScope})
@@ -1060,7 +1068,8 @@ func TestTransportBoundsMessages(t *testing.T) {
 	chunks := &providerv1.Limits{MaxChunkBytes: 1024}
 	small := TransportLimits{MaxMessageBytes: 64 << 10, Protocol: chunks}
 	large := TransportLimits{MaxMessageBytes: 2 << 20}
-	big := []byte(`{"pad":"` + strings.Repeat("x", 100<<10) + `"}`)
+	big := canaryInventory()
+	big.Subjects[1].Revision = strings.Repeat("x", 100<<10)
 	t.Run("oversized request reaches no handler", func(t *testing.T) {
 		f := newFixture(t, small)
 		conn := f.dial(large)
@@ -1308,7 +1317,7 @@ func TestCancellationAndDeadlineReachTheHandler(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.Collect(ctx, testScope, nil, testAt)
+		_, err := c.Collect(ctx, testScope, testInventory, testAt)
 		done <- err
 	}()
 	<-f.h.started

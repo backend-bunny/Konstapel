@@ -86,9 +86,12 @@ func NewServer(desc *providerv1.DescribeResponse, h Handlers) (*Server, error) {
 	if err := ValidateDescription(desc); err != nil {
 		return nil, err
 	}
-	if !slices.Contains(desc.GetProtocolVersions(), ProtocolVersion) {
+	// Listing another revision would accept that revision's requests,
+	// which the kit cannot serve: a revision 1 host would collect without
+	// an inventory and read results as opaque payloads.
+	if !slices.Equal(desc.GetProtocolVersions(), []uint32{ProtocolVersion}) {
 		return nil, Errorf(providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_PROTOCOL_VERSION,
-			"this kit serves protocol revision %d; the description lists %v", ProtocolVersion, desc.GetProtocolVersions())
+			"this kit serves protocol revision %d only; the description lists %v", ProtocolVersion, desc.GetProtocolVersions())
 	}
 	missing := func(c providerv1.Capability, ok bool) error {
 		if slices.Contains(desc.GetCapabilities(), c) && !ok {
@@ -150,8 +153,8 @@ func (s *Server) collect(ctx context.Context, req *providerv1.CollectRequest) (*
 	if err := errors.Join(checkScope(req.GetScope()), checkTime("collect deadline", req.GetDeadline())); err != nil {
 		return nil, err
 	}
-	if len(req.GetInventory()) > 0 && !jsonObject(req.GetInventory()) {
-		return nil, invalidRequest("collect inventory must be one JSON object")
+	if err := CheckInventory(req.GetInventory(), req.GetScope(), s.limits.GetMaxSubjects()); err != nil {
+		return nil, err
 	}
 	ref, err := s.h.Collector.Collect(ctx, req)
 	if err != nil {
@@ -271,6 +274,11 @@ func (s *Server) staged(ctx context.Context, h *providerv1.RequestHeader, id str
 		return nil, nil, invalidResponse("result %s has payload version %d, which this provider does not read", id, ref.GetPayloadVersion())
 	case uint64(len(data)) != ref.GetSizeBytes() || Digest(data) != ref.GetSha256():
 		return nil, nil, Errorf(providerv1.ErrorReason_ERROR_REASON_DIGEST_MISMATCH, "staged bytes of result %s do not match its reference", id)
+	}
+	// No byte of a staged result that is not a well-formed
+	// CollectionResult is sent.
+	if _, err := ParseCollectionResult(data, s.limits); err != nil {
+		return nil, nil, err
 	}
 	return ref, data, nil
 }

@@ -178,6 +178,8 @@ func limitsTable() string {
 		{"`Limits.max_result_bytes`", mib(DefaultMaxResultBytes), "`DefaultMaxResultBytes`: one staged result, and one evaluated payload"},
 		{"`Limits.max_chunk_bytes`", mib(uint64(DefaultMaxChunkBytes)), "`DefaultMaxChunkBytes`: the data of one `ReadResultResponse` or `EvaluateRequest.payload_chunk`, and the encoded observations of one `ObservationBatch`"},
 		{"`Limits.max_observations`", fmt.Sprint(DefaultMaxObservations), "`DefaultMaxObservations`: the observations of one evaluation"},
+		{"`Limits.max_subjects`", fmt.Sprint(DefaultMaxSubjects), "`DefaultMaxSubjects`: the subjects of one inventory, and separately the supplements of one result"},
+		{"`Limits.max_evidence`", fmt.Sprint(DefaultMaxEvidence), "`DefaultMaxEvidence`: the evidence items of one result, and separately its subject limitations"},
 		{"gRPC message, either direction", mib(DefaultMaxMessageBytes), fmt.Sprintf("`TransportLimits.MaxMessageBytes` (`DefaultMaxMessageBytes`); at least %s and one chunk plus its envelope", kib(minMessageBytes))},
 		{"Received bytes of one call", "largest bounded transfer plus one message", "`TransportLimits.MaxStreamBytes`: a full result or payload in chunks, or a full evaluation's observations"},
 		{"Concurrent calls per connection", fmt.Sprint(DefaultMaxConcurrentStreams), "`TransportLimits.MaxConcurrentStreams` (`DefaultMaxConcurrentStreams`), server side"},
@@ -185,6 +187,9 @@ func limitsTable() string {
 		{"Call metadata", kib(maxHeaderListBytes), "Fixed header-list bound, both sides"},
 		{"Limitations per result", fmt.Sprint(MaxLimitations), "`MaxLimitations`"},
 		{"Identifier, limitation, operation message or raw outcome", fmt.Sprintf("%d bytes", MaxTextBytes), "`MaxTextBytes`"},
+		{"Inventory subject name", fmt.Sprintf("%d bytes", MaxNameBytes), "`MaxNameBytes`, a Kubernetes object name"},
+		{"Expected checks per inventory subject", fmt.Sprint(MaxSubjectChecks), "`MaxSubjectChecks`"},
+		{"Attributions per evidence item", fmt.Sprint(MaxAttributions), "`MaxAttributions`"},
 		{"One mounted TLS file", mib(maxTLSFileBytes), fmt.Sprintf("Fixed; at most %d certificates", maxTLSFileCertificates)},
 		{"TLS file reload interval", DefaultReloadInterval.String(), "`DefaultReloadInterval` (`MutualTLS.Watch`)"},
 	}

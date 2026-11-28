@@ -131,7 +131,12 @@ type Dialer struct {
 	// server name never depends on it.
 	Address func(Endpoint) string
 	// Limits are the transport bounds; zero fields take the kit defaults.
+	// Limits.Protocol are also the host's protocol bounds, of which the
+	// client applies the stricter and the provider's.
 	Limits providerkit.TransportLimits
+	// Registration reads a registration as it is now, for work frozen to
+	// it to continue (Collect). Probing does not need it.
+	Registration RegistrationReader
 }
 
 // Connection is an authenticated provider endpoint whose description
@@ -190,7 +195,7 @@ func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
 	if err != nil {
 		return nil, unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s", bound(err.Error(), 512))
 	}
-	client, err := providerkit.NewClient(conn, f.Compatibility(), nil)
+	client, err := providerkit.NewClient(conn, f.Compatibility(), d.Limits.Protocol)
 	if err != nil {
 		// The API validates registrations; this is the host's own check.
 		_ = conn.Close()
