@@ -101,6 +101,13 @@ func savedV2(t *testing.T) collector.CaptureV2 {
 // the controller's continuous export does.
 func exportSnapshot(t *testing.T, c collector.CaptureV2, ev collector.Evaluation) exported {
 	t.Helper()
+	return exportWith(t, c, ev, nil)
+}
+
+// exportWith exports like exportSnapshot, recording the closure's frozen
+// evaluation inputs when they are given (Kyverno payload 3).
+func exportWith(t *testing.T, c collector.CaptureV2, ev collector.Evaluation, inputs *collector.EvaluationInputs) exported {
+	t.Helper()
 	root := repoRoot(t)
 	nsUIDs := []string{}
 	var rules []string
@@ -118,7 +125,7 @@ func exportSnapshot(t *testing.T, c collector.CaptureV2, ev collector.Evaluation
 	out := filepath.Join(t.TempDir(), "package")
 	d, err := collector.Export(context.Background(), collector.ExportRequest{Root: root, Out: out, Run: run,
 		Scope:                publication.Scope{Kind: publication.ScopeBinding, ClusterID: run.ClusterID, BindingUID: run.BindingUID, NamespaceUIDs: nsUIDs, Revision: "scope-1"},
-		BindingConfiguration: "binding-config-1", Capture: c, Evaluation: ev})
+		BindingConfiguration: "binding-config-1", Capture: c, Evaluation: ev, Inputs: inputs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +609,8 @@ func TestConversionPathImportsNoClusterOrRegistryClient(t *testing.T) {
 	root := repoRoot(t)
 	forbidden := []string{"net", "os/exec", "k8s.io/client-go", "sigs.k8s.io/controller-runtime", "oras.land", "github.com/google/go-containerregistry",
 		"github.com/backend-bunny/Konstapel/internal/bundle/"}
-	for _, f := range []string{"cmd/konstapel-provider/main.go", "internal/provider/c2p/c2p.go", "internal/collector/c2p.go", "internal/collector/export.go", "internal/assessment/provider.go"} {
+	for _, f := range []string{"cmd/konstapel-provider/main.go", "internal/provider/c2p/c2p.go", "internal/collector/c2p.go", "internal/collector/export.go", "internal/assessment/provider.go",
+		"internal/provider/c2p/replay.go", "internal/collector/reevaluation.go", "cmd/konstapel/replay.go"} {
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, f), nil, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)

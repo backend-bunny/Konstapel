@@ -110,9 +110,10 @@ scoped frozen snapshot evaluated by the same evaluator as current controller
 status; Generate creates no Kubernetes objects. Kubernetes access remains in the
 collector, so offline replay requires neither a running cluster nor an image
 registry. Replay converts the evaluation a package stored at closure after
-validating it against its capture; it is not a re-evaluation, because packages
-do not yet record every evaluation input
-([replay](docs/assessment-providers.md#replay-is-retrieval-not-re-evaluation)).
+validating it against its capture. Only a package whose capture records every
+evaluation input (Kyverno payload 3) is also re-evaluated, from those inputs
+alone; earlier packages report re-evaluation as unavailable
+([replay](docs/assessment-providers.md#replay-retrieval-and-re-evaluation)).
 
 ## Provider capabilities and scope
 

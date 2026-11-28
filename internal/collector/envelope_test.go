@@ -51,9 +51,9 @@ func (r readers) CheckEvaluator(contract string, v int) error {
 
 const posture = "example-posture/v1"
 
-// installedReaders mirrors this build: Kyverno reads its payloads 1 and 2
-// with evaluator 1, and another provider reads its own payload 1.
-var installedReaders = readers{LegacyProvider: {[]int{1, 2}, 1}, posture: {[]int{1}, 1}}
+// installedReaders mirrors this build: Kyverno reads its payloads 1, 2
+// and 3 with evaluator 1, and another provider reads its own payload 1.
+var installedReaders = readers{LegacyProvider: {[]int{1, 2, 3}, 1}, posture: {[]int{1}, 1}}
 
 // The saved legacy captures, pinned by digest: a retained capture is never
 // rewritten to suit a reader.
@@ -285,7 +285,7 @@ func TestCaptureBoundaryRejectsWhatItDoesNotSupport(t *testing.T) {
 			if doc.Header != (CaptureHeader{}) || doc.Payload != nil {
 				t.Fatalf("a rejected capture still returned %+v", doc.Header)
 			}
-			if _, err := readCaptureV2(raw); err == nil {
+			if _, err := readKyvernoCapture(raw); err == nil {
 				t.Fatal("package verification reads it as a CaptureV2")
 			}
 		})
@@ -310,7 +310,7 @@ func TestOtherProvidersPayloadsStayTheirs(t *testing.T) {
 	if _, err := doc.V2(); !errors.Is(err, ErrUnsupportedCapture) {
 		t.Fatalf("another provider's payload read as a CaptureV2: %v", err)
 	}
-	if _, err := readCaptureV2(raw); err == nil {
+	if _, err := readKyvernoCapture(raw); err == nil {
 		t.Fatal("package verification reads another provider's payload as a CaptureV2")
 	}
 }

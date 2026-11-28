@@ -11,6 +11,7 @@ import (
 
 	"github.com/backend-bunny/Konstapel/internal/assessment"
 	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/provider"
 	"github.com/backend-bunny/Konstapel/internal/provider/installed"
 	"github.com/backend-bunny/Konstapel/internal/provider/kyverno"
 )
@@ -132,5 +133,45 @@ func earlierReaders(t *testing.T) []earlierReader {
 		refused("CaptureV2.Validate", v2.Validate()),
 		refused("CaptureV2.Evaluate", evaluateErr),
 		refused("assessment.Reconcile", reconcileErr),
+	}
+}
+
+// earlierReadersOfPayload3 is what every reader before payload 3 does with
+// one: the readers of 0.3.0 and earlier, the envelope readers of the
+// unreleased builds before it (the Kyverno descriptor read payloads 1 and
+// 2), and this build's own payload 2 reader. Each refuses it; none reads
+// it as payload 2 and ignores the inputs.
+func earlierReadersOfPayload3(t *testing.T) []earlierReader {
+	t.Helper()
+	raw := payload3(t)
+	refused := func(reader string, err error) earlierReader {
+		if err == nil {
+			t.Errorf("%s accepts a payload 3", reader)
+			return earlierReader{Reader: reader}
+		}
+		return earlierReader{Reader: reader, Error: err.Error()}
+	}
+	var v2 collector.CaptureV2
+	if err := json.Unmarshal(raw, &v2); err != nil {
+		t.Fatal(err)
+	}
+	_, versionErr := collector.CaptureVersion(raw)
+	d := kyverno.Descriptor()
+	d.Capture = provider.CaptureCompatibility{Write: collector.CaptureV2Version, Read: []int{1, collector.CaptureV2Version}}
+	earlier, err := provider.New(kyverno.Contract, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, envelopeErr := collector.ReadCapture(raw, earlier)
+	doc, err := collector.ReadCapture(raw, installed.Registry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, v2Err := doc.V2()
+	return []earlierReader{
+		refused("collector.CaptureVersion (0.3.0)", versionErr),
+		refused("CaptureV2.Validate (0.3.0)", v2.Validate()),
+		refused("collector.ReadCapture with Kyverno capture.read [1 2] (builds before payload 3)", envelopeErr),
+		refused("CaptureDocument.V2 (this build)", v2Err),
 	}
 }

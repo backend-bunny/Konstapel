@@ -42,21 +42,22 @@ func documentedExamples(t *testing.T) map[string]any {
 		{Name: "disallow-privileged-containers", Kind: kyverno.CheckKind}}})
 	captures, rejectedCaptures := captureExamples(t)
 	return map[string]any{
-		"kyverno-descriptor":             kyverno.Descriptor(),
-		"reporttest-descriptor":          reporttest.Descriptor(),
-		"installed-contracts":            r.Contracts(),
-		"rejected-selection":             rejected,
-		"unknown-provider":               unknown,
-		"kyverno-collection-requests":    collectionRequests(t),
-		"kyverno-collection-pages":       collectionPages(t),
-		"reporttest-collection-requests": reportingRequests(t),
-		"collection-limits":              documentedLimits(),
-		"capability-matrix":              capabilityMatrix(t),
-		"controller-role-writes":         controllerRoleWrites(t),
-		"capture-headers":                captures,
-		"capture-rejections":             rejectedCaptures,
-		"retained-interpretations":       retainedInterpretations(t),
-		"earlier-release-readers":        earlierReaders(t),
+		"kyverno-descriptor":               kyverno.Descriptor(),
+		"reporttest-descriptor":            reporttest.Descriptor(),
+		"installed-contracts":              r.Contracts(),
+		"rejected-selection":               rejected,
+		"unknown-provider":                 unknown,
+		"kyverno-collection-requests":      collectionRequests(t),
+		"kyverno-collection-pages":         collectionPages(t),
+		"reporttest-collection-requests":   reportingRequests(t),
+		"collection-limits":                documentedLimits(),
+		"capability-matrix":                capabilityMatrix(t),
+		"controller-role-writes":           controllerRoleWrites(t),
+		"capture-headers":                  captures,
+		"capture-rejections":               rejectedCaptures,
+		"retained-interpretations":         retainedInterpretations(t),
+		"earlier-release-readers":          earlierReaders(t),
+		"earlier-readers-of-frozen-inputs": earlierReadersOfPayload3(t),
 	}
 }
 

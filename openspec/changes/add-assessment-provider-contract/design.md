@@ -130,16 +130,17 @@ never rewrites an already published package to replay it.
 **Package replay versus semantic re-evaluation (owner decision 2026-11-27).**
 Retrieving and validating the evaluation stored at closure is distinct from
 re-evaluating frozen inputs to reproduce equivalent semantic results, and the
-first is not proof of the second. Continuous packages today support only the
-first: replay (`collector.ReadSnapshot`, `Snapshot.Validate`,
+first is not proof of the second. Packages written before Kyverno payload 3
+support only the first: replay (`collector.ReadSnapshot`, `Snapshot.Validate`,
 `SnapshotProvider`) converts `evaluation.json` after checking it is an
 evaluation of `capture.json`. The deterministic-evaluation requirement stays as
-specified and is not yet met for packages (task 4.5). No package format is
-added merely to regenerate identical serialized output.
+specified; task 4.5 meets it for packages that record their evaluation
+inputs (below). No package format is added merely to regenerate identical
+serialized output.
 
-*Proposal: package inputs for semantic re-evaluation (not implemented).* A
-package lacks these inputs of `kyverno.Evaluate(EvaluationInput{Capture,
-Boundaries, MaxEvidenceAge}, at)`:
+*Package inputs for semantic re-evaluation (owner decision 2026-11-28, task
+4.5).* A package written before this decision lacks these inputs of
+`kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`:
 
 - `Boundaries`: per frozen workload, the host continuity boundary used at
   closure (`collector.Boundary`: `workloadUID`, `stateSha256`, `since`). The
@@ -150,16 +151,58 @@ Boundaries, MaxEvidenceAge}, at)`:
   descriptor records only an opaque `bindingConfiguration` revision, and
   `nextExpiry` is a derived output that is absent when nothing is attributable.
 
-Already present and not part of the proposal: the evaluation time
-(`window.closed`), the capture and its scope changes and discontinuities, the
-engine policies applicability reads, the content record, and the evaluator
-version (implied for legacy version 2, recorded by the version 3 envelope).
-These inputs change semantics that legacy readers would ignore, so they need
-an explicit version boundary rather than optional JSON fields, and readers
-ship before writers: a release that reads and re-evaluates the new form, while
-still converting the stored evaluation of every retained form, must be
-released before any controller writes it. Packages written earlier are never
-rewritten and remain retrieve-and-validate only.
+Already present: the evaluation time (`window.closed`), the capture and its
+scope changes and discontinuities, the engine policies applicability reads,
+the content record, and the evaluator version (implied for legacy version 2,
+recorded by the version 3 envelope).
+
+- **Format: Kyverno payload 3 (`collector.CaptureV3`).** A closed CaptureV2,
+  unchanged, plus `evaluationInputs` (`maxEvidenceAge` in canonical
+  `time.Duration` form and `boundaries`, exactly those the closure
+  evaluation was given), only inside a version 3 envelope with evaluator 1.
+  The evaluation semantics do not change, so the evaluator version does not.
+- **Capture payload, not the package descriptor.** The inputs are the
+  Kyverno evaluator's, and only capture readers interpret them; the
+  reporting payload already carries its own `maxEvidenceAge`. Every package
+  reader (retention, downloads, signing) reads the descriptor and needs
+  none of this, so a descriptor change would break them on rollback for no
+  gain. The envelope's `registration` (external providers, #398) is
+  untouched: payload 3 is the Kyverno provider's.
+- **Explicit boundary: a payload version.** Optional fields would be
+  ignored by readers that then evaluate with other inputs. 0.3.0 and
+  earlier refuse the version 3 envelope; the unreleased builds that read
+  envelopes check the payload version against the Kyverno descriptor's
+  `capture.read` (`[1 2]`) and refuse payload 3 as `IncompatibleVersion`;
+  this build's `CaptureDocument.V2()` refuses it, so structural readers use
+  `KyvernoCapture()` and re-evaluation `Frozen()`.
+- **Freeze point: the run's closure.** The inputs are recorded at the
+  instant the closing run computes its closure evaluation and writes
+  `closed.json` (window close, `AssessmentRunReconciler.collect`): the
+  boundaries passed to that evaluation and the limit read from the binding
+  then. Earlier is wrong, because the binding's limit and the tracker can
+  change during the window and the closure uses their values at closure.
+  Later (export, `finish`) is wrong, because export repeats from
+  `closed.json` after a crash, when the binding may have changed and the
+  restarted controller's tracker no longer holds the boundaries. So they
+  are frozen with the closure in `closed.json` and exported from there;
+  a `closed.json` without them is exported as payload 2, never completed
+  from current state.
+- **Replay never substitutes.** `CaptureV3.Reevaluate` takes no limit,
+  boundaries or time. Package readers (`collector.ReadSnapshot`,
+  `s3store.ValidatePackage`, the C2P plugin) require a payload 3's stored
+  `evaluation.json` to equal its re-evaluation exactly, and export refuses
+  to record inputs that do not reproduce the evaluation it writes. A
+  package without inputs is never recomputed: re-evaluation is
+  `ErrReevaluationUnavailable`, and its stored evaluation is still
+  retrieved, validated and converted exactly as before. `c2p.ReplayPackage`
+  and `konstapel replay` report the stored evaluation and the
+  re-evaluation separately (exit 0 recomputed, 2 unavailable, 1 failed).
+- **Readers before writers.** The readers ship first, with the Kyverno
+  descriptor reading `[1 2 3]` and still writing 2. The writer freezes the
+  inputs at closure and writes payload 3 only when the descriptor's
+  `capture.write` is 3; that flip waits for a release with these readers
+  (a release decision, not this change's). Packages written earlier are
+  never rewritten and remain retrieve-and-validate only.
 
 Alternative: let a C2P plugin fetch live evidence or implement its own evaluator.
 That makes offline replay depend on external state and risks divergent controller

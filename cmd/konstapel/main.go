@@ -40,6 +40,11 @@ func dispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	if len(args) > 0 && args[0] == "preview" {
 		return runPreview(ctx, args[1:], stdin, stdout, stderr)
 	}
+	// replay has its own exit statuses too: re-evaluated, unavailable or
+	// failed.
+	if len(args) > 0 && args[0] == "replay" {
+		return runReplay(args[1:], stdout, stderr)
+	}
 	if err := run(args); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -56,7 +61,7 @@ var (
 
 func run(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: konstapel controller|download-server|evidence|preview|generate|deliver|convert|acceptance|validate [flags]")
+		return fmt.Errorf("usage: konstapel controller|download-server|evidence|preview|replay|generate|deliver|convert|acceptance|validate [flags]")
 	}
 	command := args[0]
 	if command == "controller" {

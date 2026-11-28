@@ -146,7 +146,7 @@ against `kyverno.Descriptor()`:
       "parameters": {"source": "Content"}
     }
   ],
-  "capture": {"write": 2, "read": [1, 2]},
+  "capture": {"write": 2, "read": [1, 2, 3]},
   "reads": [
     {
       "group": "wgpolicyk8s.io",
@@ -820,9 +820,17 @@ version of the pinned plugin:
 | 3 | The envelope `collector.CaptureEnvelope` | Recorded in the envelope |
 
 Evaluator 1 is the 0.3.0 Kyverno semantics: `assessment.Reconcile` for
-payload 1 and `CaptureV2.Evaluate` for payload 2. Versions 1 and 2 predate
-provider discrimination, so their identity is implied by the version and
-never read from the document.
+payload 1 and `CaptureV2.Evaluate` for payloads 2 and 3. Versions 1 and 2
+predate provider discrimination, so their identity is implied by the version
+and never read from the document.
+
+The Kyverno provider's payload versions:
+
+| Payload | Holds | Document |
+| --- | --- | --- |
+| 1 | The prototype's `assessment.Capture` | Version 1 only |
+| 2 | `collector.CaptureV2` | Version 2, or a version 3 envelope |
+| 3 | `collector.CaptureV3`: a CaptureV2 and the evaluation inputs frozen at the run's closure ([Kyverno payload 3](#kyverno-payload-3-frozen-evaluation-inputs)) | A version 3 envelope only |
 
 The envelope names its provider, payload and evaluator, and carries the
 provider's payload:
@@ -883,6 +891,91 @@ because no retained capture can depend on the earlier shape:
 exactly. An external provider's staged result therefore keeps its digest
 in the capture.
 
+### Kyverno payload 3: frozen evaluation inputs
+
+`kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`
+needs two inputs that a CaptureV2 does not hold: the host's continuity
+boundaries for the frozen workload states, and the binding's effective
+evidence-age limit. Payload 3 records both next to the capture they were
+used with, so a package alone re-evaluates to its closure evaluation
+([Replay: retrieval and re-evaluation](#replay-retrieval-and-re-evaluation)):
+
+```json
+{
+  "version": 3,
+  "provider": "konstapel-kyverno/v1",
+  "payloadVersion": 3,
+  "evaluatorVersion": 1,
+  "payload": {
+    "version": 3,
+    "capture": {"version": 2, "cluster": "...", "window": {"started": "...", "closed": "..."}, "expected": ["..."]},
+    "evaluationInputs": {
+      "maxEvidenceAge": "2h0m0s",
+      "boundaries": [{"workloadUID": "...", "stateSha256": "...", "since": "..."}]
+    }
+  }
+}
+```
+
+- `capture` is a complete CaptureV2 document, unchanged and closed. The
+  evaluation time is its `window.closed`, as before.
+- `maxEvidenceAge` is the effective limit the closure used, in the
+  canonical `time.Duration` form. Another spelling, zero or a negative
+  value is refused.
+- `boundaries` are exactly the boundaries the closure evaluation was
+  given: at most one per frozen workload, only for the state the capture
+  froze, each with a time. It is `[]` when the host had none, never
+  absent. A boundary for another workload or state is refused, so a
+  namespace package cannot disclose a sibling workload through it.
+- The payload is decoded strictly at both levels. The stored
+  `evaluation.json` must be exactly the re-evaluation of these inputs
+  (`collector.ReadSnapshot`); export refuses to record inputs that do not
+  reproduce the evaluation it writes.
+
+The inputs live in the capture's payload, not in the package descriptor.
+They are inputs of the Kyverno evaluator, and only a capture reader can
+interpret them. The reporting payload already carries its own
+`maxEvidenceAge` the same way. A payload version is the boundary that the
+readers which interpret a capture already check. The descriptor is read by
+every package reader, including retention, downloads and signing, which
+need none of this; a descriptor change would break those readers on
+rollback for no gain. The `registration` of an external provider's envelope
+is unaffected: payload 3 is the Kyverno provider's, and an envelope of
+another provider never carries it.
+
+It is a new payload version, not optional fields, because a reader that
+ignored the inputs would evaluate the capture with others:
+
+- 0.3.0 and earlier read capture documents 1 and 2 only, so they refuse
+  the version 3 envelope that carries payload 3.
+- The unreleased builds that read envelopes check the payload version
+  against the Kyverno descriptor's `capture.read` (`[1 2]`), so they refuse
+  payload 3 as `IncompatibleVersion`.
+- In this build, `CaptureDocument.V2()` refuses a payload 3. Structural
+  readers (package verification, content use, namespace projection) read
+  its CaptureV2 with `KyvernoCapture()`, and re-evaluation reads its inputs
+  with `Frozen()`.
+
+Given a payload 3 of the saved CaptureV2 with the chart's 2h limit and no
+boundaries, they report (`TestDocumentedExamples`,
+`TestEarlierReadersRefuseEvaluationInputs`):
+
+<!-- verified: earlier-readers-of-frozen-inputs -->
+```json
+[
+  {"reader": "collector.CaptureVersion (0.3.0)", "error": "unsupported capture version 3"},
+  {"reader": "CaptureV2.Validate (0.3.0)", "error": "capture version 3 is not 2"},
+  {
+    "reader": "collector.ReadCapture with Kyverno capture.read [1 2] (builds before payload 3)",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 3, evaluator 1): IncompatibleVersion: konstapel-kyverno/v1 reads capture versions [1 2], not 3"
+  },
+  {
+    "reader": "CaptureDocument.V2 (this build)",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 3, evaluator 1) records frozen evaluation inputs; it is not read as a konstapel-kyverno/v1 payload 2 (CaptureV2), which would ignore them"
+  }
+]
+```
+
 ### Reading a capture
 
 `collector.ReadCapture(raw, registry)` is the boundary. It returns the
@@ -902,6 +995,7 @@ its [selection reason](#selection). It rejects:
   providers only, and, for readers of registered providers, a registered
   provider's capture without one or with another registration
 - a Kyverno envelope payload that is not exactly a valid CaptureV2
+  (payload 2) or CaptureV3 (payload 3)
 
 `ReadCapture` does not decode a legacy document. `CaptureDocument.V2()`
 decodes it exactly as every earlier reader did, with `encoding/json`, which
@@ -931,6 +1025,10 @@ envelope of the saved CaptureV2 read as (`TestDocumentedExamples`):
   {
     "capture": "Kyverno envelope of testdata/assessments/kyverno-1.19.2-background/capture.json",
     "header": {"version": 3, "provider": "konstapel-kyverno/v1", "payloadVersion": 2, "evaluatorVersion": 1}
+  },
+  {
+    "capture": "Kyverno payload 3 of testdata/assessments/kyverno-1.19.2-background/capture.json and its frozen inputs",
+    "header": {"version": 3, "provider": "konstapel-kyverno/v1", "payloadVersion": 3, "evaluatorVersion": 1}
   }
 ]
 ```
@@ -953,8 +1051,12 @@ These are refused:
     "error": "unsupported capture: capture version 3 (konstapel-reporttest/v1 payload 1, evaluator 1): UnknownProvider: provider konstapel-reporttest/v1 is not installed (installed: konstapel-kyverno/v1)"
   },
   {
-    "capture": "envelope of Kyverno payload 3",
-    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 3, evaluator 1): IncompatibleVersion: konstapel-kyverno/v1 reads capture versions [1 2], not 3"
+    "capture": "envelope of Kyverno payload 4",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 4, evaluator 1): IncompatibleVersion: konstapel-kyverno/v1 reads capture versions [1 2 3], not 4"
+  },
+  {
+    "capture": "envelope of Kyverno payload 3 holding a CaptureV2",
+    "error": "unsupported capture: capture version 3 (konstapel-kyverno/v1 payload 3, evaluator 1): json: unknown field \"cluster\""
   },
   {
     "capture": "envelope of Kyverno evaluator 2",
@@ -988,16 +1090,20 @@ The guarantees and their tests:
 
 | Reader | Reads |
 | --- | --- |
-| Storage backend validation before archiving (`s3store.ValidatePackage`) | Through `ReadCapture` and `CheckEvaluator` with the production registry. Only Kyverno captures have package verification, so another installed provider's capture is refused, not archived unverified. A version 1 capture is accepted as before: only in a binding-scope package, without engine-policy verification. Payload 2, legacy or envelope, gets engine-policy verification and, in a namespace package, projection checks. |
-| Engine-policy verification (`collector.VerifyPackage`) | Kyverno payload 2, legacy or envelope. Anything else is an explicit error. It used to decode any capture as a CaptureV2. |
+| Storage backend validation before archiving (`s3store.ValidatePackage`) | Through `ReadCapture` and `CheckEvaluator` with the production registry. Only Kyverno captures have package verification, so another installed provider's capture is refused, not archived unverified. A version 1 capture is accepted as before: only in a binding-scope package, without engine-policy verification. Payload 2, legacy or envelope, gets engine-policy verification and, in a namespace package, projection checks, exactly as before. Payload 3 gets the same checks on its CaptureV2, and its frozen inputs must re-evaluate to the stored `evaluation.json`. |
+| Engine-policy verification (`collector.VerifyPackage`) | Kyverno payload 2, legacy or envelope, or payload 3 (its CaptureV2). Anything else is an explicit error. It used to decode any capture as a CaptureV2. |
 | Controller staging (`capture.json` and `closed.json` of a run in progress) | Unchanged: CaptureV2 only. `CaptureV2.Validate` refuses any other version. Staging is an `emptyDir`, so with the chart a staged capture never outlives the controller version that wrote it. |
 | Prototype `konstapel convert` | Version 1 only. It refuses any other version before converting, and `assessment.Reconcile` refuses it too. |
-| C2P plugin (`konstapel-provider`) | Through `ReadCapture` and `CheckEvaluator` with the production registry ([C2P conversion](#c2p-conversion)). Version 1 goes to the prototype provider. Kyverno payload 2, legacy or envelope, is converted with the package's `evaluation.json`. Anything else is an explicit error. |
+| C2P plugin (`konstapel-provider`) | Through `ReadCapture` and `CheckEvaluator` with the production registry ([C2P conversion](#c2p-conversion)). Version 1 goes to the prototype provider. Kyverno payload 2, legacy or envelope, or payload 3 is converted with the package's `evaluation.json`; a payload 3's must be the re-evaluation of its inputs. Anything else is an explicit error. |
+| Package replay (`c2p.ReplayPackage`, `konstapel replay`) | The package's own files, through `ReadCapture` and `ReadSnapshot` with the production registry ([Replay](#replay-retrieval-and-re-evaluation)). Payload 3 is re-evaluated from its inputs. Payload 2 returns the stored evaluation with re-evaluation `Unavailable`. Anything else is an explicit error. |
 
 `TestStorageValidationOfCapturePackages` validates binding and namespace
 packages: legacy ones unchanged, with their bytes kept; Kyverno envelope
 ones with the same descriptor meaning; and refuses unknown providers,
 payloads, evaluators and versions.
+`TestStorageValidationOfFrozenInputPackages` validates binding and
+namespace payload 3 packages, and refuses one whose recorded inputs do not
+reproduce its stored evaluation.
 `TestPackageVerificationReadsBothForms` checks that an envelope's payload
 is verified against the packaged content like a legacy capture, and
 `TestPackageCaptureRefusesProvidersWithoutVerification` covers an
@@ -1050,8 +1156,9 @@ explicit content failure that makes the package a Diagnostic:
   another name for a frozen digest is a `ContentMismatch`.
 
 Replay reads a retained package alone. It retrieves and validates the
-evaluation stored at closure; it does not re-evaluate
-([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
+evaluation stored at closure, and re-evaluates only a package that records
+its evaluation inputs
+([Replay: retrieval and re-evaluation](#replay-retrieval-and-re-evaluation)).
 `collector.PackageContent(dir,
 descriptor)` returns the members packaged under their recorded paths,
 verified against the descriptor's record (`VerifyContent`). It never reads
@@ -1269,7 +1376,8 @@ for signing destinations, are in
 | --- | --- | --- | --- |
 | Capture version 1 | The prototype `konstapel convert` only | Read with evaluator 1, only in a binding-scope package. The C2P plugin converts it with the prototype provider | Read by the prototype and the C2P plugin |
 | Capture version 2 | The controller, in every release including this one | Read with evaluator 1, unchanged | Read |
-| Capture version 3 (envelope) | Nothing yet. The unwired external collection seam builds one with a `registration` | Read: in production, Kyverno payload 2 only. A registered provider's capture only through its frozen registration's readers | Refused explicitly |
+| Capture version 3 (envelope) | Nothing yet. The unwired external collection seam builds one with a `registration` | Read: in production, Kyverno payloads 2 and 3 only. A registered provider's capture only through its frozen registration's readers | Refused explicitly |
+| Kyverno payload 3 (frozen evaluation inputs, in an envelope) | Nothing yet: the controller writes payload 2 (`capture.write` 2) | Read, validated, converted and re-evaluated from its inputs | Refused explicitly: 0.3.0 refuses the envelope; the unreleased builds before it refuse payload 3 as `IncompatibleVersion` |
 | Descriptor, file roles and content record | Unchanged since 0.3.0 | Read | 0.3.0 reads them. 0.2.0 refuses the `coverage-summary`, `coverage-summary-text` and `supporting-*` roles 0.3.0 added as unknown roles |
 
 The file roles are a closed set, so a descriptor reader that predates a role
@@ -1284,8 +1392,8 @@ the boundary with the production registry, and evaluated with the evaluator
 their version implies (`assessment.Reconcile` for version 1 and
 `CaptureV2.Evaluate` for version 2, with the chart's 2h maximum evidence
 age and no continuity boundaries), they give (`TestDocumentedExamples`).
-The reader supplies the age and the boundaries; the capture does not record
-them ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)):
+The reader supplies the age and the boundaries; these captures do not record
+them ([Replay](#replay-retrieval-and-re-evaluation)):
 
 <!-- verified: retained-interpretations -->
 ```json
@@ -1304,6 +1412,11 @@ them ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evalu
   }
 ]
 ```
+
+These retained captures record no evaluation inputs, so the chart default
+above is the reader's choice, not theirs. Their packages are never
+re-evaluated: replay reports re-evaluation as `Unavailable` and keeps their
+stored evaluation ([Replay](#replay-retrieval-and-re-evaluation)).
 
 The digests are the same pins `TestLegacyCapturesReadUnchanged` checks. A
 change to the Kyverno evaluation that changes these results needs a new
@@ -1333,7 +1446,15 @@ written by earlier releases would pass them too.
 - **This build writes nothing new.** The controller still writes capture
   version 2 (`kyverno.Descriptor().capture.write`), with the same
   descriptor, roles and content record as 0.3.0. No production code writes
-  an envelope. A rollback to 0.3.0 reads every package this build wrote.
+  an envelope or payload 3. A rollback to 0.3.0 reads every package this
+  build wrote.
+- **Payload 3 is read here and written nowhere.** A later release may write
+  it (`capture.write` 3) only after a release with these readers has
+  shipped. A rollback from that release is supported only to a release that
+  reads payload 3. 0.3.0 and the builds between refuse such packages
+  explicitly ([Kyverno payload 3](#kyverno-payload-3-frozen-evaluation-inputs)),
+  never re-evaluate them with other inputs, and never drop them. Packages
+  written earlier are never rewritten to add inputs.
 - **The envelope is read here and written nowhere.** A later release may
   write it only after a release with these readers has shipped (readers
   before writers). A rollback from that release is supported only to a
@@ -1425,9 +1546,9 @@ the capture's content role and `RunContent.Resolve`:
   evaluates as the case without evidence.
 - The retained capture, replayed after that removal and without a
   cluster, evaluates exactly as the collection it retained. The harness
-  supplies the case's evidence-age limit to that evaluation; a package
-  does not record it
-  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
+  supplies the case's evidence-age limit to that evaluation; a conformance
+  capture does not record it (a Kyverno payload 3 package does:
+  [Replay: retrieval and re-evaluation](#replay-retrieval-and-re-evaluation)).
 - Replayed with the run's content unavailable, it fails as unavailable
   content (`conformance.ErrContentUnavailable` wrapping the
   `ContentUnavailable` failure) and returns nothing.
@@ -1486,10 +1607,10 @@ the time they pass.
   `at`, summarized by `collector.Tally`. The current projection passes the
   current assessment boundary. A closing run passes the closure it freezes.
   Re-evaluating a retained capture passes its frozen closure
-  (`CaptureV2.Evaluate`). Package replay does not re-evaluate: it converts
-  the evaluation stored at closure, because a package lacks the boundaries
-  and the evidence-age limit
-  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)). A zero time,
+  (`CaptureV2.Evaluate`). Package replay converts the evaluation stored at
+  closure and re-evaluates only a package that records the boundaries and
+  the evidence-age limit, with exactly those
+  ([Replay: retrieval and re-evaluation](#replay-retrieval-and-re-evaluation)). A zero time,
   a time before the window started or one before a recorded scope change is
   refused, never replaced by another time.
 - `reporttest.Evaluate(Input, at)` is the test-only reporting evaluator;
@@ -1551,9 +1672,11 @@ controller freezes both before export. A package retains them as
   one of three paths:
   - No capture (`generate`, `deliver`, `acceptance`), or a version 1
     capture, goes to the prototype `assessment.Provider`, unchanged.
-  - Kyverno payload 2, legacy or envelope, goes to `SnapshotProvider`. It
-    reads the `evaluation.json` beside the capture, decodes it strictly
-    and validates it as `Export` does (`collector.ReadSnapshot`).
+  - Kyverno payload 2, legacy or envelope, or payload 3 goes to
+    `SnapshotProvider`. It reads the `evaluation.json` beside the capture,
+    decodes it strictly and validates it as `Export` does
+    (`collector.ReadSnapshot`). For payload 3 that evaluation must also be
+    the re-evaluation of the recorded inputs.
   - Any other capture is an `ErrUnsupportedCapture` that names the
     capture. This includes another installed provider's capture, an
     evaluator that is not installed and an unknown version. No OSCAL is
@@ -1568,62 +1691,88 @@ controller freezes both before export. A package retains them as
   `acceptance` reach a cluster, through their own client.
 - **Local only.** Every path reads local files only. It uses no cluster,
   registry, content cache, scanner or clock. Conversion reads the frozen
-  evaluation and does not re-evaluate, so the replay's wall clock changes
-  nothing.
+  evaluation. A payload 3 is re-evaluated at its recorded closure with its
+  recorded inputs only, so the replay's wall clock changes nothing.
 
-### Replay is retrieval, not re-evaluation
+### Replay: retrieval and re-evaluation
 
-Replaying a continuous package means two checks and one conversion:
+Replaying a continuous package gives two separate results:
 
-1. **Retrieve** the evaluation stored at closure (`evaluation.json`) and
-   the capture it was made of (`capture.json`), read through the capture
-   boundary with the recorded evaluator (`collector.ReadSnapshot`).
-2. **Validate** that the evaluation is one evaluation of that capture
-   (`Snapshot.Validate`, above) and that the package content verifies
-   (`collector.PackageContent`).
-3. **Convert** that stored evaluation, unchanged.
+1. **The stored evaluation.** Retrieve the evaluation made at closure
+   (`evaluation.json`) and the capture it was made of (`capture.json`),
+   read through the capture boundary with the recorded evaluator, and
+   validate that the evaluation is one evaluation of that capture
+   (`collector.ReadSnapshot`, `Snapshot.Validate`) and that the package
+   content verifies. Conversion converts this evaluation, unchanged.
+   Every continuous package supports it.
+2. **The re-evaluation.** Evaluate the frozen inputs again:
+   `kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`
+   with the capture, the boundaries and the limit the package records and
+   `at` its `window.closed`. Only a package with a Kyverno payload 3
+   capture records every input
+   ([Kyverno payload 3](#kyverno-payload-3-frozen-evaluation-inputs)). Its
+   re-evaluation must equal the stored evaluation exactly: the same
+   observations, states, outcomes, attribution, evaluation times, summaries
+   and next expiry. A package where it does not is refused.
 
-Replay does not run `kyverno.Evaluate` again. A valid replay shows that the
-package holds a consistent closure evaluation and converts it. It does
-**not** show that re-evaluating the frozen inputs gives semantically
-equivalent results: the package lacks inputs that evaluation needs. This
-means the deterministic-evaluation requirement
-([Pure evaluators](#pure-evaluators)) is not yet met for packages. It is
-recorded as open task 4.5 of `add-assessment-provider-contract`.
+Replay never substitutes the current binding configuration, the current
+time or reconstructed continuity for an input the package does not record.
+A package without the inputs, which is every package written before payload
+3, is **not re-evaluated**. Its re-evaluation is reported as `Unavailable`
+(`collector.ErrReevaluationUnavailable`), and its stored evaluation is still
+retrieved, validated and converted as before.
 
-What `kyverno.Evaluate(EvaluationInput{Capture, Boundaries, MaxEvidenceAge}, at)`
-needs, and what a continuous package holds:
+What `kyverno.Evaluate` needs, and where a package holds it:
 
-| Input | In the package? | Evidence |
+| Input | Payload 2 package (every earlier package) | Payload 3 package |
 | --- | --- | --- |
-| `Capture`: frozen scope, expected inventory, workload states, scope changes and watch discontinuities, reports, engine policies | Yes, `capture.json` | `collector.CaptureV2` |
-| `at`, the closure boundary | Yes, `capture.json` `window.closed` (also the descriptor `window`) | `CaptureV2.Evaluate` passes `Window.Closed` |
-| Evaluator version | Implied for a legacy version 2 capture (evaluator 1). A version 3 envelope records it | `CaptureDocument.CheckEvaluator` |
-| Content the evaluator reads | Yes. Applicability reads the capture's `enginePolicies`. The package also carries the content tree and its record | `linuxOnly` in `internal/collector/freshness.go` |
-| `Boundaries`, the host's continuity boundaries for each workload state | **No** | The controller reads them from its in-memory tracker (`AssessmentRunReconciler.boundaries`). Neither `capture.json`, `evaluation.json` nor `closed.json` records them |
-| `MaxEvidenceAge`, the binding's evidence-age limit | **No** | Read from the binding at closure (`bindingMaxEvidenceAge`). The descriptor's `revisions.bindingConfiguration` is an opaque revision, not the setting |
+| `Capture`: frozen scope, expected inventory, workload states, scope changes and watch discontinuities, reports, engine policies | `capture.json` | `capture.json` `payload.capture` |
+| `at`, the closure boundary | `window.closed` (also the descriptor `window`) | `payload.capture.window.closed` |
+| Evaluator version | Implied (evaluator 1) for a legacy document; recorded by an envelope | Recorded by the envelope |
+| Content the evaluator reads | The capture's `enginePolicies`, plus the packaged content and its record | The same |
+| `Boundaries`, the host's continuity boundaries for each workload state | **Not recorded.** The controller read them from its in-memory tracker (`AssessmentRunReconciler.boundaries`) | `payload.evaluationInputs.boundaries` |
+| `MaxEvidenceAge`, the binding's effective evidence-age limit | **Not recorded.** Read from the binding at closure (`bindingMaxEvidenceAge`); `revisions.bindingConfiguration` is an opaque revision | `payload.evaluationInputs.maxEvidenceAge` |
 
-`TestPackageLacksReevaluationInputs` (`internal/provider/c2p`) checks the
-two gaps on an exported package. No JSON file in it has a `since`,
-`boundaries` or `maxEvidenceAge` key. A run that starts after its
-workloads' reports were evaluated, on a host that observed the workloads
-continuously from before then, is attributable at closure. Re-evaluating
-the package without the host's boundaries rejects that evidence. A
-different evidence-age limit also changes the result. With the boundaries
-and the limit supplied from outside the package, re-evaluation reproduces
-the closure evaluation exactly. Replay still converts the stored
-evaluation.
+`evaluation.json`'s `nextExpiry` is the earliest attributable evaluation plus
+the limit, so the limit can sometimes be inferred from it. That is an output,
+absent when nothing is attributable, and never read as an input.
 
-`evaluation.json`'s `nextExpiry` is the earliest attributable evaluation
-plus the limit, so the limit can sometimes be inferred from it. That is an
-output, absent when nothing is attributable, and not a recorded input.
-Re-evaluation must not depend on it.
+The API keeps the two results apart. `c2p.ReplayPackage(dir)` returns a
+`c2p.Replay` with `Stored` (always) and, separately, a `Status`
+(`Recomputed` or `Unavailable`) with either `Recomputed` and the `Inputs`
+used, or the `Reason` re-evaluation is unavailable. It verifies the
+descriptor inventory first and reads only the package's files.
 
-Byte-identical output is not the goal. A new package format is not
-justified just to regenerate identical serialized OSCAL. It is justified
-only to carry the missing inputs above, for semantic re-evaluation. The
-proposal is in the change's design (decision 3, "Package inputs for semantic
-re-evaluation"). Under it, readers ship before writers.
+`konstapel replay --package DIR` prints the same as JSON, and its exit
+status says which result it has:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Re-evaluated: the frozen inputs reproduce the stored evaluation |
+| 2 | Re-evaluation unavailable: the package records no inputs. Its stored evaluation was retrieved and validated |
+| 1 | Invalid flags, or a package that cannot be read, validated or re-evaluated, or whose re-evaluation differs |
+
+For a package written by this build (payload 2), abridged:
+
+```json
+{
+  "capture": {"version": 2, "provider": "konstapel-kyverno/v1", "payloadVersion": 2, "evaluatorVersion": 1},
+  "evaluatedAt": "...",
+  "stored": {"source": "evaluation.json", "evidence": {"completeness": "Incomplete", "expected": 30, "attributable": 28}, "outcomes": {"pass": 24, "fail": 4}},
+  "reevaluation": {
+    "status": "Unavailable",
+    "reason": "re-evaluation unavailable: capture version 2 (konstapel-kyverno/v1 payload 2, evaluator 1) records no frozen evaluation inputs (continuity boundaries and maxEvidenceAge); its stored evaluation can be retrieved, not recomputed"
+  }
+}
+```
+
+A payload 3 package reports `"status": "Recomputed"` with its
+`maxEvidenceAge`, the number of `boundaries`, `"equivalent": true` and the
+recomputed `evidence` and `outcomes`.
+
+Byte-identical output is not the goal. Payload 3 exists to carry the missing
+inputs for semantic re-evaluation, not to regenerate identical serialized
+OSCAL.
 
 The tests:
 
@@ -1638,14 +1787,31 @@ The tests:
   converted. The normalized subjects of the package's
   `assessment-results.json` match those results, and an envelope converts
   identically.
-- `TestReplayKeepsTheRetainedInterpretation` re-evaluates the retained
-  capture at its closure and gets the retained evaluation. A later time
-  changes freshness, but not the conversion. The test supplies the
-  evidence-age limit itself, and its capture needs no continuity
-  boundaries. It does not show that a package alone is enough for
-  re-evaluation.
-- `TestPackageLacksReevaluationInputs` pins the missing inputs
-  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
+- `TestReplayKeepsTheRetainedInterpretation` re-evaluates a payload 2
+  package's capture at its closure, with a limit the test supplies, and
+  gets the retained evaluation. A later time changes freshness, but not the
+  conversion.
+- `TestPackageRecordsReevaluationInputs` checks that a payload 3 package
+  records both inputs and re-evaluates from its files alone to its closure
+  evaluation, observation by observation, while conversion is unchanged.
+  Without the boundaries, the same capture's reports would be rejected.
+- `TestEarlierPackagesReevaluationUnavailable` checks that a package
+  without the inputs records none, reports re-evaluation `Unavailable`,
+  and still retrieves and converts its stored evaluation.
+- `TestReplayUsesTheFrozenEvidenceAge` covers freshness and a binding
+  changed after the run: evidence older than the frozen limit is rejected
+  at closure and on replay, while the binding's new limit would give
+  another result. `TestReplayUsesTheFrozenContinuity` covers a workload
+  changed during the window, a workload first observed at the window start
+  and continuously observed ones; reconstructed continuity would give
+  another result. `TestReplayNeedsOnlyThePackage` replays a package moved
+  away from its content root, with every cluster and proxy request
+  trapped.
+- `TestCaptureV3Validation`, `TestStoredEvaluationMustBeTheReevaluation`,
+  `TestEarlierReadersRefuseEvaluationInputs` and
+  `TestReplayCommandExitStatuses` cover the payload's rules, the
+  reproduction check on read and on export, the earlier readers' refusals
+  and the command.
 - `TestDispatchKeepsThePrototype` and `TestDispatchRefusesWhatItCannotConvert`
   cover the other two dispatch paths.
 - `TestPluginBinaryIsLocalAndConvertsLikeTheDispatch` builds the plugin
@@ -1969,7 +2135,8 @@ of every retained version stay installed:
 - the bundle descriptor's `compatibility.provider` value (`name/vN`)
 - the capture versions recorded in packages: the document versions 1, 2
   and 3, the identity that versions 1 and 2 imply, the envelope's fields,
-  and each provider's payload versions and evaluator versions
+  and each provider's payload versions (Kyverno 1, 2 and 3) and evaluator
+  versions
 - the package descriptor, its closed set of file roles and its content
   record, unchanged by this change
 - the conformance case format `konstapel.provider-conformance/v1`
@@ -2027,9 +2194,10 @@ provider's contract.
   producer, through its own change. Trivy integration is deferred by the
   owner and must prove digest/owner correlation, evaluation time, filtering
   and missing evidence against real reports.
-- No semantic re-evaluation of a retained package. Replay converts the
-  evaluation stored at closure. The package does not record the continuity
-  boundaries or the evidence-age limit
-  ([Replay is retrieval, not re-evaluation](#replay-is-retrieval-not-re-evaluation)).
+- No semantic re-evaluation of a package written before Kyverno payload 3,
+  and no production writer of payload 3 yet. Those packages do not record
+  the continuity boundaries or the evidence-age limit; replay converts their
+  stored evaluation and reports re-evaluation as unavailable
+  ([Replay: retrieval and re-evaluation](#replay-retrieval-and-re-evaluation)).
 - No runtime plugin loading, provider CRD, marketplace, scanner
   orchestration, mixed-provider binding, or new outcome or exception API.

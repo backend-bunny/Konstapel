@@ -196,6 +196,8 @@ type CaptureDocument struct {
 	// v2 is a decoded and validated envelope payload 2 of the Kyverno
 	// provider; a legacy CaptureV2 is decoded by V2 when asked for.
 	v2 *CaptureV2
+	// v3 is a decoded and validated Kyverno payload 3 (CaptureV3).
+	v3 *CaptureV3
 }
 
 // ReadCapture is the capture compatibility boundary. It identifies the
@@ -216,8 +218,8 @@ type CaptureDocument struct {
 //     readers without RegistrationReaders (a built-in provider's reader),
 //     or refused by their CheckRegistration (another registration, or a
 //     registered provider's capture without one)
-//   - a Kyverno envelope payload that is not exactly a valid CaptureV2 of
-//     the header's payload version
+//   - a Kyverno envelope payload that is not exactly a valid CaptureV2
+//     (payload 2) or CaptureV3 (payload 3) of the header's payload version
 //
 // A legacy document is not decoded here: V2 decodes it exactly as readers
 // before the envelope did, so retained captures keep their bytes and their
@@ -268,8 +270,13 @@ func (d CaptureDocument) CheckEvaluator(readers CaptureReaders) error {
 
 // V2 returns the capture's Kyverno payload 2, from either a legacy version
 // 2 document or an envelope. Any other capture is an error, never an empty
-// CaptureV2.
+// CaptureV2. That includes payload 3: it records evaluation inputs that a
+// payload 2 reader would ignore (KyvernoCapture, Frozen).
 func (d CaptureDocument) V2() (CaptureV2, error) {
+	if d.Header.Provider == LegacyProvider && d.Header.PayloadVersion == CaptureV3Version {
+		return CaptureV2{}, fmt.Errorf("%w: %s records frozen evaluation inputs; it is not read as a %s payload %d (CaptureV2), which would ignore them",
+			ErrUnsupportedCapture, d.Header, LegacyProvider, CaptureV2Version)
+	}
 	if d.Header.Provider != LegacyProvider || d.Header.PayloadVersion != CaptureV2Version {
 		return CaptureV2{}, fmt.Errorf("%w: %s is not a %s payload %d (CaptureV2)", ErrUnsupportedCapture, d.Header, LegacyProvider, CaptureV2Version)
 	}
@@ -287,10 +294,11 @@ func (d CaptureDocument) V2() (CaptureV2, error) {
 	return c, nil
 }
 
-// readCaptureV2 reads a Kyverno payload 2 document, legacy or envelope,
-// for the collector's own package verification. It checks no installed
-// provider: the collector owns this payload.
-func readCaptureV2(raw []byte) (CaptureV2, error) {
+// readKyvernoCapture reads the CaptureV2 of a Kyverno payload 2 document,
+// legacy or envelope, or of a payload 3, for the collector's own package
+// verification. It checks no installed provider: the collector owns these
+// payloads.
+func readKyvernoCapture(raw []byte) (CaptureV2, error) {
 	h, payload, err := readHeader(raw)
 	if err != nil {
 		return CaptureV2{}, err
@@ -299,7 +307,7 @@ func readCaptureV2(raw []byte) (CaptureV2, error) {
 	if err := d.decodeEnvelope(); err != nil {
 		return CaptureV2{}, err
 	}
-	return d.V2()
+	return d.KyvernoCapture()
 }
 
 // readHeader identifies a capture document. It returns the provider payload:
@@ -357,26 +365,40 @@ func readEnvelope(raw []byte) (CaptureHeader, json.RawMessage, error) {
 
 // decodeEnvelope decodes and validates a Kyverno envelope payload. The
 // envelope is new, so unlike a legacy document its payload is decoded
-// strictly: it must be exactly a valid CaptureV2 of the header's payload
-// version. Kyverno payload 1 exists only as a legacy version 1 document.
-// Other providers' payloads are theirs to decode.
+// strictly: it must be exactly a valid CaptureV2 (payload 2) or CaptureV3
+// (payload 3) of the header's payload version. Kyverno payload 1 exists only
+// as a legacy version 1 document. Other providers' payloads are theirs to
+// decode.
 func (d *CaptureDocument) decodeEnvelope() error {
 	h := d.Header
 	if h.Legacy() || h.Provider != LegacyProvider {
 		return nil
 	}
-	if h.PayloadVersion != CaptureV2Version {
+	switch h.PayloadVersion {
+	case CaptureV2Version:
+		var c CaptureV2
+		if err := decodeStrict(d.Payload, &c); err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrUnsupportedCapture, h, err)
+		}
+		// Validate also requires the payload's own version to be 2.
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
+		}
+		d.v2 = &c
+	case CaptureV3Version:
+		var p CaptureV3
+		if err := decodeStrict(d.Payload, &p); err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrUnsupportedCapture, h, err)
+		}
+		// Validate also requires the payload's own version to be 3 and
+		// the inputs to belong to the capture.
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
+		}
+		d.v3 = &p
+	default:
 		return fmt.Errorf("%w: %s: %s payload %d is read only as a legacy version %d document", ErrUnsupportedCapture, h, LegacyProvider, h.PayloadVersion, h.PayloadVersion)
 	}
-	var c CaptureV2
-	if err := decodeStrict(d.Payload, &c); err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrUnsupportedCapture, h, err)
-	}
-	// Validate also requires the payload's own version to be 2.
-	if err := c.Validate(); err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrUnsupportedCapture, h, err)
-	}
-	d.v2 = &c
 	return nil
 }
 

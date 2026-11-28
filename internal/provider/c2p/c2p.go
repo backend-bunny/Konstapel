@@ -8,9 +8,12 @@
 //   - no capture (generate, deliver, acceptance) or a version 1 prototype
 //     capture: the prototype provider, assessment.Provider, unchanged. It
 //     renders the vendored content locally and reconciles the capture.
-//   - a Kyverno payload 2 capture, legacy or envelope, with its package's
-//     evaluation file beside it: collector.SnapshotProvider, the conversion
-//     continuous export dispatches to in process.
+//   - a Kyverno payload 2 capture, legacy or envelope, or a payload 3
+//     envelope, with its package's evaluation file beside it:
+//     collector.SnapshotProvider, the conversion continuous export
+//     dispatches to in process. It converts the stored closure evaluation;
+//     for a payload 3 that evaluation must also be the re-evaluation of the
+//     recorded inputs (collector.ReadSnapshot).
 //   - anything else, including another installed provider: an explicit
 //     error. No OSCAL is guessed for it and it is never read as Kyverno's.
 //
@@ -86,7 +89,7 @@ func (p *Provider) dispatch(path string) (policy.Provider, error) {
 	switch {
 	case h.Provider == collector.LegacyProvider && h.PayloadVersion == prototypePayload:
 		return &assessment.Provider{}, nil
-	case h.Provider == collector.LegacyProvider && h.PayloadVersion == collector.CaptureV2Version:
+	case doc.Continuous():
 		ev, err := os.ReadFile(filepath.Join(filepath.Dir(path), collector.EvaluationFile))
 		if err != nil {
 			return nil, fmt.Errorf("a %s capture is converted with its package's %s: %w", h, collector.EvaluationFile, err)
