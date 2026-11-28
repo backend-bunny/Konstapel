@@ -63,11 +63,14 @@ scripts/environment.sh create "$kubeconfig" "$out/environment" > "$out/environme
 sha256sum "$out/environment/helm-manifest.yaml" | cut -d' ' -f1 > "$out/environment/helm-manifest.sha256"
 rm -f "$out/environment/helm-manifest.yaml"
 
-# Every policy an official bundle delivers (bundles/*/definition.json);
+# Every policy an official bundle delivers (bundles/*/definition.json and the
+# released definitions kept under bundles/*/released/);
 # TestPermissionMatrixCoversDeliveredPolicies fails when this set changes.
 policies=(content/upstream/kyverno/disallow-privileged-containers/disallow-privileged-containers.yaml
   content/linux-hardening/variants/disallow-privilege-escalation.yaml content/linux-hardening/variants/disallow-capabilities-strict.yaml
-  content/linux-hardening/variants/require-run-as-nonroot.yaml content/linux-hardening/variants/restrict-seccomp-strict.yaml)
+  content/linux-hardening/variants/require-run-as-nonroot.yaml content/linux-hardening/variants/restrict-seccomp-strict.yaml
+  content/linux-hardening/variants/require-drop-all-capabilities.yaml content/linux-hardening/variants/restrict-added-capabilities.yaml
+  content/linux-hardening/variants/restrict-pod-seccomp-profile.yaml content/linux-hardening/variants/require-container-seccomp-profile.yaml)
 names=()
 for mode in Audit Deny; do
   ns=kpm-${mode,,}

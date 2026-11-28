@@ -27,8 +27,8 @@ package controller
 //     outage reports ContentUnavailable, delivers nothing new and marks kept
 //     policies stale; a revoked credential fails a cold fetch and the rotated
 //     one recovers it without a restart; trust revocation and recovery.
-//   - TestLiveBundlesHardening builds bundles/konstapel-linux-hardening from
-//     this checkout, signs it with a per-run in-memory test key and serves it
+//   - TestLiveBundlesHardening builds the released konstapel-linux-hardening
+//     0.1.0 definition from this checkout, signs it with a per-run in-memory test key and serves it
 //     from the same kind of disposable registry: a controller at 0.1.0 (below
 //     the bundle's minimum) reports it Incompatible and delivers nothing; a
 //     controller at the declared minimum delivers all five policies in Deny
@@ -663,8 +663,11 @@ func TestLiveBundlesOrganization(t *testing.T) {
 }
 
 const (
-	bhBundle     = "konstapel-linux-hardening"
-	bhDefinition = "../../bundles/" + bhBundle + "/definition.json"
+	bhBundle = "konstapel-linux-hardening"
+	// bhDefinition is the released 0.1.0 definition, whose five policies
+	// this test delivers. The split 0.2.0 revision's live matrix is
+	// split-hardening-policy-validations tasks 3.1 and 3.3.
+	bhDefinition = "../../bundles/" + bhBundle + "/released/0.1.0.json"
 	// bhBuilder is the test builder identity the per-run provenance names.
 	bhBuilder = "https://ci.example.test/konstapel/hardening-acceptance@refs/heads/main"
 	// bhBelowMinimum is the last controller release without OCI bundle

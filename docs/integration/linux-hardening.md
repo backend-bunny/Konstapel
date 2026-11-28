@@ -346,6 +346,11 @@ check is recorded as missing evidence, never as a pass, and makes the run
 `Incomplete`. Fixing the failure brings back evidence for both validations
 at the next background scan.
 
+These missing results remain for the vendored bundle and for
+`konstapel-linux-hardening` 0.1.0. To get an independent result for every
+validation, select the OCI revision 0.2.0, which splits both checks
+([Independently reported revision](#independently-reported-revision-oci-020)).
+
 **Applicability: explicit Windows and an omitted OS.**
 
 | Workload declares | The four Linux checks | Counted as |
@@ -396,6 +401,67 @@ Neither kind substitutes for the other.
    keep appearing in background evidence until they are fixed or replaced.
 
 To roll back, set `mode: Audit` again. Assessment history stays unchanged.
+
+## Independently reported revision (OCI 0.2.0)
+
+`konstapel-linux-hardening` 0.2.0 replaces each two-validation check with two
+single-validation policies, so Kyverno reports every validation on its own
+(change `split-hardening-policy-validations`). The new policies keep the
+original expressions, variables, matching, operations and Windows guard;
+`testdata/linux-hardening/split/` shows that each original result is the
+conjunction of its pair. Version 0.2.0 is the next version of
+`bundles/konstapel-linux-hardening/definition.json`
+([Policy bundles](../policy-bundles.md#next-version-020-independently-reported-checks)).
+It is not published yet, and publishing it needs separate release
+authorization.
+
+**You get independent outcomes only if you select it.** The owner decided on
+2026-11-27 to keep the vendored bundle stable. The vendored content, its
+`content/SHA256SUMS` and its digest
+(`sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71`)
+do not change and still ship the original five policies, and so does the
+published 0.1.0 artifact. A profile pinning either one keeps the original
+identities and the missing sibling results described above. To get
+independent outcomes, pin a profile to the verified 0.2.0 digest once it is
+published. `internal/bundle` tests that the vendored digest, and the content
+digest of the released 0.1.0, are byte-unchanged.
+
+**Identity mapping.** The 0.2.0 check IDs map to the old ones as follows.
+`content/linux-hardening/split/variants.json` (`identities`) is the
+machine-readable source, and `internal/hardening` tests it against the
+policies.
+
+| 0.1.0 / vendored check | validation | 0.2.0 check (validation index 0) |
+| --- | --- | --- |
+| `disallow-privileged-containers` | 0 | `disallow-privileged-containers` (unchanged) |
+| `disallow-privilege-escalation` | 0 | `disallow-privilege-escalation` (unchanged) |
+| `disallow-capabilities-strict` | 0 `drop-all` | `require-drop-all-capabilities` |
+| `disallow-capabilities-strict` | 1 `add-net-bind-service-only` | `restrict-added-capabilities` |
+| `require-run-as-nonroot` | 0 | `require-run-as-nonroot` (unchanged) |
+| `restrict-seccomp-strict` | 0 `pod-profile-type` | `restrict-pod-seccomp-profile` |
+| `restrict-seccomp-strict` | 1 `container-profile-type` | `require-container-seccomp-profile` |
+
+The full bundle still has seven validations, now in seven policies instead of
+five. Each new check keeps all of its original check's statements
+(`content/linux-hardening/split/component-definition.json`, partial evidence
+only), and mapping both checks of a pair to a control does not add control
+credit. The old IDs do not exist in 0.2.0. A profile that names
+`disallow-capabilities-strict` or `restrict-seccomp-strict` must name both
+replacements instead, or it covers only part of the original check.
+Acceptances recorded against an old identity do not transfer to the new ones.
+
+**Example.** `docs/examples/bundles/linux-hardening-0.2.0.yaml` is a profile
+that selects all seven 0.2.0 checks, with an Audit binding. Its digest is a
+placeholder until 0.2.0 is published and verified; a test keeps its policy
+list equal to the 0.2.0 definition. Do not use it to replace an enforcing
+binding in place: new identities do not inherit the old readiness. The staged
+overlapping-binding migration is change task 2.1.
+
+**Retained runs are unchanged.** A retained package replays only against its
+own frozen content, which is the frozen OCI member or the vendored content
+its capture records. Current vendored or OCI content is never substituted
+for it. Saved captures and rendered fixtures still name the vendored digest
+and keep their original identities and missing observations.
 
 ## NIST Moderate mappings
 

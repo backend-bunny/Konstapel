@@ -291,7 +291,8 @@ func TestCoverageReportFromFrozenMember(t *testing.T) {
 	e.step(name)
 	run := e.run(name)
 
-	raw, err := os.ReadFile("../../bundles/konstapel-linux-hardening/definition.json")
+	// The released 0.1.0 definition: an old pinned package stays readable.
+	raw, err := os.ReadFile("../../bundles/konstapel-linux-hardening/released/0.1.0.json")
 	if err != nil {
 		t.Fatal(err)
 	}

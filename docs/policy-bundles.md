@@ -8,7 +8,10 @@ resolves it centrally and verifies it before use.
 > **Status.** Two official bundles are released, signed and verifiable:
 > [`konstapel-privileged-containers` 0.1.0](#first-official-release-konstapel-privileged-containers-010)
 > and `konstapel-linux-hardening` 0.1.0 (requires Konstapel 0.2.0 or later;
-> see [Second bundle](#second-bundle-konstapel-linux-hardening)). The controller resolves, verifies and
+> see [Second bundle](#second-bundle-konstapel-linux-hardening)). Its next
+> version, 0.2.0, reports each hardening validation independently; it is
+> prepared but not published ([Next version 0.2.0](#next-version-020-independently-reported-checks)).
+> The controller resolves, verifies and
 > caches bundles by digest and serves them to profiles when central bundle
 > sources are enabled (off by default; see [charts](charts.md)); assessment
 > runs export from the frozen content of the bundles their policies were
@@ -156,7 +159,9 @@ fixtures pass. The bundle is published as [0.1.0](#first-official-release-konsta
 
 ### Second bundle: `konstapel-linux-hardening`
 
-`bundles/konstapel-linux-hardening/definition.json` (version `0.1.0`) assembles
+The released 0.1.0 definition, kept byte-identical to the
+`bundle/konstapel-linux-hardening/v0.1.0` tag at
+`bundles/konstapel-linux-hardening/released/0.1.0.json`, assembles
 the Linux workload hardening bundle by build-time reference to sources other
 changes own; it adds no policy and copies nothing into `bundles/`. It ships five
 logical checks, each with one rule and check ID equal to its policy name:
@@ -177,7 +182,7 @@ Two Component Definitions ship: the first loop's AC-6 mapping and the
 hardening change's bounded AC-6/CM-6/CM-7 mappings (partial technical evidence
 only), over the same pinned NIST catalog and Moderate profile.
 
-`internal/bundle/hardening_test.go` builds it twice (identical digests), runs
+`internal/bundle/hardening_test.go` builds it, and its next version, twice (identical digests), runs
 `ValidateContent`, and compares the policy inventory, rule and check IDs, variant
 sources and digests, scope, mappings and shipped suites against the hardening
 change's accepted inputs written out in the test, so an omitted or extra policy,
@@ -185,12 +190,82 @@ a Windows scope or a mistyped check ID fails. The pinned Kyverno CLI runs every
 shipped suite on the unpacked payload. `bundles/official-sources.yaml` carries
 its own publisher rule, as the release workflow requires one per name.
 
-Build and inspect locally from a clean checkout (nothing is published):
+Build and inspect locally from a clean checkout (nothing is published). This
+builds the current definition, which is now the next version
+([0.2.0](#next-version-020-independently-reported-checks)); 0.1.0 is built
+from its tag:
 
 ```sh
 devbox run -- scripts/bundles/package.sh konstapel-linux-hardening /tmp/hardening-bundle
 jq . /tmp/hardening-bundle/package.json
 ```
+
+#### Next version 0.2.0: independently reported checks
+
+`bundles/konstapel-linux-hardening/definition.json` is now version `0.2.0`, the
+single-validation revision from the `split-hardening-policy-validations` change.
+Kyverno stops at the first failing validation of a policy, so 0.1.0 reports
+nothing for the second validation of `disallow-capabilities-strict` or
+`restrict-seccomp-strict` once the first one fails. 0.2.0 ships seven
+policies with one validation each instead of five:
+`disallow-privileged-containers`, `disallow-privilege-escalation`,
+`require-drop-all-capabilities`, `restrict-added-capabilities`,
+`require-run-as-nonroot`, `restrict-pod-seccomp-profile` and
+`require-container-seccomp-profile`. The validations themselves are
+unchanged. The [identity mapping](integration/linux-hardening.md#independently-reported-revision-oci-020)
+lists the old ID behind each new check ID; its machine-readable source is
+`content/linux-hardening/split/variants.json`.
+
+What ships:
+
+- The four split variants (role `policy`), the revision's inventory
+  `content/linux-hardening/split/variants.json` and its component definition
+  `content/linux-hardening/split/component-definition.json`. That
+  component definition replaces the 0.1.0 one as the OSCAL entry point, and
+  each new check keeps every statement of its original check.
+- The superseded combined variants. They ship with role `upstream`, as
+  derivation sources only, never as policies. Every file the split inventory
+  references is then in the package.
+- The split CLI suites at `tests/linux-hardening/split/`. They run the
+  original and both replacements on every resource. Everything 0.1.0 ships
+  that is not superseded also ships.
+- Compatibility is unchanged: minimum Konstapel `0.2.0`, provider
+  `konstapel-kyverno/v1`, scope `linux`.
+
+**The vendored bundle does not change.** The owner decided on 2026-11-27 to
+ship the split only through this separately versioned OCI bundle. The
+vendored content, `content/SHA256SUMS` and the vendored digest
+(`sha256:39dcd9f643a36ab2302f1959c8fa5089e91c11977f427359aa315606354bba71`)
+stay byte-unchanged. Saved captures and rendered fixtures pin that digest,
+and the revision's files have their own `content/linux-hardening/split/SHA256SUMS`.
+To get independent outcomes, users must explicitly pin a profile to the
+0.2.0 digest; see the example
+`docs/examples/bundles/linux-hardening-0.2.0.yaml`. A vendored or 0.1.0 pin
+keeps the original identities and their missing sibling results. Retained
+runs replay only against their own frozen content, never against current
+content.
+
+**0.1.0 stays readable.** 0.1.0 is immutable and is not rebuilt or
+republished. The retained definition still builds from this tree to the
+published content digest
+`sha256:fa46e726523e4625a065519da71c6211876cdb860044d4841514aa76657d2542`.
+Test coverage:
+
+- `TestHardeningReleasedContentIsUnchanged` checks that content digest.
+- `TestHardeningRevisionLeavesVendoredContentUnchanged` pins the vendored
+  digest and checks that the saved fixtures still name it.
+- The cache round trip stores 0.1.0 and 0.2.0 side by side.
+- The frozen-member coverage test, the coverage documentation and
+  `TestLiveBundlesHardening` use the released 0.1.0 definition.
+
+**Not yet verified for 0.2.0, and therefore not releasable:**
+
+- Live delivery and the outcome matrix (change tasks 3.1 and 3.3).
+- The staged migration (2.1) and exception reacceptance (2.2).
+
+Build it locally with the `bundles:package` command above. Publishing needs
+separate release authorization through the `bundle-release` workflow, which
+then creates the `bundle/konstapel-linux-hardening/v0.2.0` tag.
 
 #### Minimum controller release
 
@@ -3384,7 +3459,7 @@ fails, never skips, when the registry cannot be reached.
 | Cold-cache failure | The controller restarts with an empty cache while the registry is paused; a new `Deny` binding is created; the registry returns | The profile reports `ContentUnavailable`; kept policies stay but every binding is `EngineReady=False/StaleRevision` (not reported healthy); the new binding gets no policy and a privileged Pod is admitted there; after the registry returns everything resolves with the same policies |
 | Credential rotation | The credential Secret's password is revoked and the controller restarts with an empty cache, then the Secret is rotated to another registry user without a restart | A revoked credential fails a cold fetch (`ContentUnavailable`) while applied policies stay (stale); the rotated credential is read within the refresh interval and used (the registry log shows the new user) and the same policies become ready |
 | Trust revocation and recovery | The key Secret and rule move to another key, then back | `ContentUnavailable (Untrusted)`, applied policies stay (stale) and keep enforcing, a new binding gets nothing; restoring trust recovers all of them with the same policies |
-| Linux hardening bundle, below its minimum | `bundles/konstapel-linux-hardening` built from the checkout at `HEAD`, signed and attested with a per-run in-memory test key (`bundletest.Signer`; no key file) and pushed to a disposable TLS + htpasswd registry; a public-key rule with a provenance rule; the controller version set to `0.1.0`; a profile of all five policies pinned by digest and a `Deny` binding | The verified content is `ContentUnavailable (Incompatible)` with "requires Konstapel 0.2.0 or later"; nothing is delivered and privileged and root Pods are admitted |
+| Linux hardening bundle, below its minimum | The released `konstapel-linux-hardening` 0.1.0 definition (`bundles/konstapel-linux-hardening/released/0.1.0.json`) built from the checkout at `HEAD`, signed and attested with a per-run in-memory test key (`bundletest.Signer`; no key file) and pushed to a disposable TLS + htpasswd registry; a public-key rule with a provenance rule; the controller version set to `0.1.0`; a profile of all five policies pinned by digest and a `Deny` binding | The verified content is `ContentUnavailable (Incompatible)` with "requires Konstapel 0.2.0 or later"; nothing is delivered and privileged and root Pods are admitted |
 | Linux hardening bundle, Deny and Audit | The controller restarted with an empty cache at the bundle's declared minimum (`0.2.0`); the same `Deny` binding and an `Audit` binding | Both bindings are ready with all five policies, each the binding mode's rendering annotated with the bundle name and digest, and binding status names the digest. Under `Deny` a compliant Pod is admitted, a privileged Pod is rejected by the privileged policy and each of the four hardening violations is rejected by its own policy only; under `Audit` all of them are admitted, repeatedly |
 | Cleanup | Every test removes its bindings, profiles, namespaces, sources objects and registry container, then asserts that each is gone and no managed policy of its bindings remains; after the cluster is deleted the task asserts that no cluster and no container labelled for it remain | The group leaves nothing behind on success or failure (a leftover fails the run) |
 

@@ -55,13 +55,20 @@ func loadPermissionMatrix(t *testing.T) permissionMatrix {
 	return m
 }
 
-// deliveredPolicyPaths lists every policy file an official bundle delivers.
+// deliveredPolicyPaths lists every policy file an official bundle delivers:
+// the current definitions and the released ones kept beside them, which
+// pinned profiles still deliver.
 func deliveredPolicyPaths(t *testing.T) []string {
 	t.Helper()
 	defs, err := filepath.Glob(filepath.Join(repoRoot, "bundles/*/definition.json"))
 	if err != nil || len(defs) == 0 {
 		t.Fatalf("bundle definitions: %v %v", defs, err)
 	}
+	released, err := filepath.Glob(filepath.Join(repoRoot, "bundles/*/released/*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defs = append(defs, released...)
 	var paths []string
 	for _, d := range defs {
 		raw, err := os.ReadFile(d)

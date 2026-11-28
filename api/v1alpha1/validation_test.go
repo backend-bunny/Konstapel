@@ -149,3 +149,34 @@ func requireSpecScenario(t *testing.T, file, scenario string) {
 	}
 	t.Errorf("%s: scenario %q is not in the compliance-targeting spec", file, scenario)
 }
+
+// The documented profile and binding selecting konstapel-linux-hardening
+// 0.2.0 (docs/examples/bundles) are valid creations; internal/bundle keeps
+// its policy list equal to the 0.2.0 definition.
+func TestLinuxHardeningRevisionExample(t *testing.T) {
+	crds := crdtest.Load(t, "../../config/crd/bases")
+	raw, err := os.ReadFile("../../docs/examples/bundles/linux-hardening-0.2.0.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := strings.Split(string(raw), "\n---\n")
+	if len(docs) != 2 {
+		t.Fatalf("want a profile and a binding, got %d documents", len(docs))
+	}
+	for i, want := range []string{"ComplianceProfile", "ComplianceBinding"} {
+		o := obj(t, docs[i])
+		if o["kind"] != want {
+			t.Fatalf("document %d is %v, want %s", i, o["kind"], want)
+		}
+		if errs := crds[want].Validate(o); len(errs) > 0 {
+			t.Fatalf("%s rejected: %v", want, errs.ToAggregate())
+		}
+		var typed any = &v1alpha1.ComplianceProfile{}
+		if want == "ComplianceBinding" {
+			typed = &v1alpha1.ComplianceBinding{}
+		}
+		if err := yaml.UnmarshalStrict([]byte(docs[i]), typed); err != nil {
+			t.Fatalf("%s does not decode into Go type: %v", want, err)
+		}
+	}
+}
