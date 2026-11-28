@@ -43,7 +43,10 @@ gates. OpenSpec planning completion does not mean a feature has shipped.
   descriptor and registry, selection checks, the conformance harness, the
   test-only provider boundary and the
   [provider-authoring recipe](assessment-providers.md#authoring-a-provider)
-  with its Devbox commands. Kyverno is the only supported provider.
+  with its Devbox commands, and
+  [package replay](assessment-providers.md#replay-retrieval-and-re-evaluation)
+  (`konstapel replay`: the stored evaluation and, for packages that record
+  their inputs, its re-evaluation). Kyverno is the only supported provider.
 - [External provider protocol](integration/external-provider-protocol.md):
   the `konstapel.provider.v1` reference (RPCs, versions, errors, limits,
   result transfer, transport and identity), and the

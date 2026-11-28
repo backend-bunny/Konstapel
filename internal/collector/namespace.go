@@ -40,9 +40,10 @@ type NamespaceExtractors map[PayloadRef]projection.Extractor
 // header. The extract is checked by projection.Check before it is
 // returned.
 //
-// A Kyverno payload 2 capture is projected by Project and checked by
-// ValidateProjection. Its extract keeps the header, and V2 returns the
-// projected capture. Any other payload is projected by its extractor in
+// A Kyverno payload 2 or 3 capture is projected by Project and checked by
+// ValidateProjection. Its extract keeps the header, and KyvernoCapture
+// returns the projected capture; a payload 3 keeps the boundaries of the
+// projected workloads only. Any other payload is projected by its extractor in
 // others. A payload without one is refused (ErrNamespaceProjection), and so
 // is a Kyverno version 1 capture, which predates namespace projection.
 func (d CaptureDocument) ProjectNamespace(ns projection.Scope, others NamespaceExtractors) (CaptureDocument, error) {
@@ -50,7 +51,7 @@ func (d CaptureDocument) ProjectNamespace(ns projection.Scope, others NamespaceE
 		return CaptureDocument{}, fmt.Errorf("%w: the scope names no namespace instance", ErrNamespaceProjection)
 	}
 	if d.kyverno() {
-		c, err := d.V2()
+		c, err := d.KyvernoCapture()
 		if err != nil {
 			return CaptureDocument{}, err
 		}
@@ -60,6 +61,19 @@ func (d CaptureDocument) ProjectNamespace(ns projection.Scope, others NamespaceE
 		}
 		if err := validateNamespaceV2(p, ns); err != nil {
 			return CaptureDocument{}, err
+		}
+		if d.v3 != nil {
+			// The frozen inputs follow the projection: only the boundaries
+			// of the namespace's own frozen workloads are kept.
+			v3 := CaptureV3{Version: CaptureV3Version, Capture: p, EvaluationInputs: d.v3.EvaluationInputs.project(p)}
+			if err := v3.Validate(); err != nil {
+				return CaptureDocument{}, fmt.Errorf("%w: %s: %w", ErrNamespaceProjection, d.Header, err)
+			}
+			raw, err := json.Marshal(v3)
+			if err != nil {
+				return CaptureDocument{}, err
+			}
+			return CaptureDocument{Header: d.Header, Payload: raw, v3: &v3}, nil
 		}
 		raw, err := json.Marshal(p)
 		if err != nil {
@@ -83,7 +97,7 @@ func (d CaptureDocument) ProjectNamespace(ns projection.Scope, others NamespaceE
 }
 
 // ValidateNamespace checks that the capture is an extract for ns, so it
-// may be disclosed in that namespace's package. A Kyverno payload 2 capture
+// may be disclosed in that namespace's package. A Kyverno payload 2 or 3 capture
 // must be a projection to ns that ValidateProjection accepts. Any other
 // payload is read back by its extractor in others and checked by
 // projection.Check. A payload without an extractor is refused.
@@ -92,7 +106,9 @@ func (d CaptureDocument) ValidateNamespace(ns projection.Scope, others Namespace
 		return fmt.Errorf("%w: the scope names no namespace instance", ErrNamespaceProjection)
 	}
 	if d.kyverno() {
-		c, err := d.V2()
+		// A payload 3's boundaries name only its own frozen workloads
+		// (CaptureV3.Validate), so the projection check covers them.
+		c, err := d.KyvernoCapture()
 		if err != nil {
 			return err
 		}
@@ -106,9 +122,9 @@ func (d CaptureDocument) ValidateNamespace(ns projection.Scope, others Namespace
 }
 
 // kyverno reports whether the capture is the collector's own Kyverno
-// payload 2.
+// payload 2 or 3.
 func (d CaptureDocument) kyverno() bool {
-	return d.Header.Provider == LegacyProvider && d.Header.PayloadVersion == CaptureV2Version
+	return d.Continuous()
 }
 
 func (d CaptureDocument) extractor(others NamespaceExtractors) (projection.Extractor, error) {

@@ -92,7 +92,7 @@ func KyvernoContentUse(c CaptureV2) ContentUse {
 // ContentUse is the content the capture assesses, by its installed
 // provider's role:
 //
-//   - Kyverno payload 2, legacy or envelope: its applied content
+//   - Kyverno payload 2, legacy or envelope, or payload 3: its applied content
 //     (KyvernoContentUse).
 //   - Kyverno payload 1, the prototype's capture: refused. It predates
 //     content sets and is read only against its package's vendored
@@ -106,10 +106,10 @@ func KyvernoContentUse(c CaptureV2) ContentUse {
 func (d CaptureDocument) ContentUse(roles ContentRoles) (ContentUse, error) {
 	h := d.Header
 	if h.Provider == LegacyProvider {
-		if h.PayloadVersion != CaptureV2Version {
+		if !d.Continuous() {
 			return ContentUse{}, fmt.Errorf("%w: %s predates run content sets; it is read only against its package's vendored content", ErrUnsupportedCapture, h)
 		}
-		c, err := d.V2()
+		c, err := d.KyvernoCapture()
 		if err != nil {
 			return ContentUse{}, err
 		}

@@ -84,15 +84,22 @@ func (s Snapshot) Validate() error {
 }
 
 // ReadSnapshot is a retained snapshot read through the capture boundary:
-// doc must be a Kyverno payload 2 capture (legacy or envelope) recorded
-// under an installed evaluator, and evaluation the strict JSON of its
-// evaluation. Anything else is an explicit error, never an empty snapshot
-// or one read with other semantics.
+// doc must be a Kyverno payload 2 (legacy or envelope) or payload 3 capture
+// recorded under an installed evaluator, and evaluation the strict JSON of
+// its evaluation. Anything else is an explicit error, never an empty
+// snapshot or one read with other semantics.
+//
+// The snapshot is the stored closure evaluation: retrieved and validated,
+// not recomputed. A payload 3 also records the closure's evaluation inputs,
+// and its stored evaluation must be exactly their re-evaluation
+// (CaptureV3.Reevaluate); a package whose inputs do not reproduce its
+// stored evaluation is refused. Earlier payloads record no inputs, so their
+// stored evaluation is only validated against its capture.
 func ReadSnapshot(doc CaptureDocument, readers CaptureReaders, evaluation []byte) (Snapshot, error) {
 	if err := doc.CheckEvaluator(readers); err != nil {
 		return Snapshot{}, err
 	}
-	c, err := doc.V2()
+	c, err := doc.KyvernoCapture()
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -103,6 +110,13 @@ func ReadSnapshot(doc CaptureDocument, readers CaptureReaders, evaluation []byte
 	s := Snapshot{Capture: c, Evaluation: ev}
 	if err := s.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("frozen snapshot: %w", err)
+	}
+	switch again, err := doc.Reevaluate(readers); {
+	case errors.Is(err, ErrReevaluationUnavailable):
+	case err != nil:
+		return Snapshot{}, fmt.Errorf("frozen snapshot: re-evaluating the frozen inputs: %w", err)
+	case !SameEvaluation(again, ev):
+		return Snapshot{}, fmt.Errorf("frozen snapshot: %s is not the re-evaluation of the capture's frozen evaluation inputs", EvaluationFile)
 	}
 	return s, nil
 }

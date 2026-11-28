@@ -649,11 +649,13 @@ This is the comparison delivery uses to decide a policy is current.
 - **Always present:** `capture.json`, `evaluation.json` (per-observation states
   and reasons), `summary.json`, and `descriptor.json`. The descriptor is
   verified against the directory before `Export` returns. `evaluation.json`
-  is the evaluation made at closure. A package does not record the host's
-  continuity boundaries or the binding's `maxEvidenceAge`, so replay
-  retrieves and validates that evaluation rather than re-evaluating the
-  capture
-  ([replay is retrieval, not re-evaluation](../assessment-providers.md#replay-is-retrieval-not-re-evaluation)).
+  is the evaluation made at closure. A package written by this release does
+  not record the host's continuity boundaries or the binding's
+  `maxEvidenceAge`, so replay retrieves and validates that evaluation and
+  reports re-evaluation as unavailable. A package whose capture is a Kyverno
+  payload 3 records both, and replay also re-evaluates it from its files
+  alone (`konstapel replay`;
+  [replay: retrieval and re-evaluation](../assessment-providers.md#replay-retrieval-and-re-evaluation)).
 - **Control coverage summary.** With an `ExportRequest.Coverage` producer
   (the assessment controller always sets one), the package also carries
   `coverage.json` and `coverage.txt` with the roles above, and the producer

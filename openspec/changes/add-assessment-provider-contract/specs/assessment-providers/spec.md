@@ -140,6 +140,24 @@ unsupported compatibility SHALL fail explicitly rather than select new semantics
 - **THEN** current freshness can change while replay preserves the retained interpretation
 - **AND** the replay process's current wall clock does not rewrite history
 
+#### Scenario: A package re-evaluates from its frozen inputs
+
+- **WHEN** a continuous package records its capture's evaluation inputs (Kyverno payload 3: the continuity boundaries and effective maxEvidenceAge frozen at the run's closure)
+- **THEN** re-evaluating that package alone at its recorded closure reproduces the stored closure evaluation's normalized outcomes, attribution and completeness
+- **AND** replay uses only the recorded inputs, never the current binding configuration, the current time or reconstructed continuity
+- **AND** a package whose recorded inputs do not reproduce its stored evaluation is refused
+
+#### Scenario: A package without frozen inputs is not recomputed
+
+- **WHEN** a package written before the inputs were recorded is replayed
+- **THEN** re-evaluation is reported as unavailable explicitly in the API, CLI and documentation
+- **AND** its stored evaluation is still retrieved, validated and converted, distinguished from a recomputation, and it verifies exactly as before
+
+#### Scenario: Older readers refuse recorded evaluation inputs
+
+- **WHEN** a reader that predates the recorded inputs reads such a capture
+- **THEN** it refuses the capture explicitly instead of ignoring the inputs
+
 ### Requirement: Provider results preserve independent assessment dimensions
 
 Evaluation SHALL preserve raw source outcomes, normalized check outcomes,

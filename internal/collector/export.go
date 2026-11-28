@@ -53,6 +53,14 @@ type ExportRequest struct {
 	BindingConfiguration string
 	Capture              CaptureV2
 	Evaluation           Evaluation
+	// Inputs, when set, are the evaluation inputs frozen at the run's
+	// closure: the capture is then written as a Kyverno payload 3 envelope
+	// that records them, and Evaluation must be exactly their
+	// re-evaluation at the closure (CaptureV3.Reevaluate). Without them
+	// the capture is the version 2 document, exactly as before. No
+	// production writer sets them until a release that reads payload 3
+	// has shipped (readers before writers).
+	Inputs *EvaluationInputs
 	// Coverage, when set, produces the package's control coverage summary
 	// (coverage.json and coverage.txt) once its kind and content are
 	// known. Without it the package is exactly as before.
@@ -65,6 +73,32 @@ type ExportRequest struct {
 	// supporting-evidence files (supporting.go). Only a Binding-scope
 	// package may carry them.
 	Supporting *SupportingFiles
+}
+
+// writeSnapshot writes the package's capture and evaluation. With frozen
+// inputs the capture is a payload 3 envelope, written only when the inputs
+// reproduce the evaluation: a package never records inputs its stored
+// evaluation was not made with.
+func writeSnapshot(req ExportRequest) error {
+	if err := assessment.Write(filepath.Join(req.Out, EvaluationFile), req.Evaluation); err != nil {
+		return err
+	}
+	if req.Inputs == nil {
+		return assessment.Write(filepath.Join(req.Out, CaptureFile), req.Capture)
+	}
+	p := CaptureV3{Version: CaptureV3Version, Capture: req.Capture, EvaluationInputs: *req.Inputs}
+	again, err := p.Reevaluate()
+	if err != nil {
+		return fmt.Errorf("evaluation inputs: %w", err)
+	}
+	if !SameEvaluation(again, req.Evaluation) {
+		return errors.New("evaluation inputs: the frozen inputs do not reproduce the closure evaluation")
+	}
+	raw, err := EncodeCaptureV3(p, LegacyEvaluatorVersion)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(req.Out, CaptureFile), append(raw, '\n'), 0o644)
 }
 
 // Export writes a package for an evaluated capture. When valid OSCAL can be
@@ -99,10 +133,8 @@ func Export(ctx context.Context, req ExportRequest) (publication.Descriptor, err
 	if err := (Snapshot{Capture: req.Capture, Evaluation: req.Evaluation}).Validate(); err != nil {
 		return publication.Descriptor{}, fmt.Errorf("evaluation: %w", err)
 	}
-	for name, v := range map[string]any{"capture.json": req.Capture, "evaluation.json": req.Evaluation} {
-		if err := assessment.Write(filepath.Join(req.Out, name), v); err != nil {
-			return publication.Descriptor{}, err
-		}
+	if err := writeSnapshot(req); err != nil {
+		return publication.Descriptor{}, err
 	}
 	// Supporting files first: the OSCAL results reference the copies.
 	if err := writeSupporting(req); err != nil {

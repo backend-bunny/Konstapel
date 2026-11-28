@@ -42,9 +42,12 @@ func Descriptor() provider.Descriptor {
 			// delivery does not render parameters yet, so any are rejected.
 			Parameters: provider.ParameterContract{Source: provider.ParametersFromContent},
 		}},
-		// The prototype's single-policy capture (1) and the controller's
-		// CaptureV2 (2) are both read; the controller writes 2.
-		Capture: provider.CaptureCompatibility{Write: collector.CaptureV2Version, Read: []int{1, collector.CaptureV2Version}},
+		// The prototype's single-policy capture (1), the controller's
+		// CaptureV2 (2) and CaptureV3 (3, a CaptureV2 with its frozen
+		// evaluation inputs, in an envelope only) are read; the controller
+		// writes 2. Readers ship before writers: 3 is written only after a
+		// release that reads it has shipped.
+		Capture: provider.CaptureCompatibility{Write: collector.CaptureV2Version, Read: []int{1, collector.CaptureV2Version, collector.CaptureV3Version}},
 		// The collector reads namespaced PolicyReports only. Workload and
 		// namespace listing is host-owned; ValidatingPolicy writes belong to
 		// delivery (capability.Delivery), not to evidence collection.

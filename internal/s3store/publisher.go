@@ -582,8 +582,9 @@ func isPreconditionFailed(err error) bool {
 // descriptor and exact file inventory (no traversal, symlinks, or extra
 // files), a capture this build's installed providers read
 // (collector.ReadCapture), OSCAL schemas and reference closure for
-// assessment packages, engine-policy verification for controller (v2)
-// captures, every packaged bundle against the descriptor's content record,
+// assessment packages, engine-policy verification for controller (payload
+// 2 and 3) captures, re-evaluation of a payload 3's frozen inputs to its
+// stored evaluation, every packaged bundle against the descriptor's content record,
 // and namespace projection for namespace-scope packages.
 func ValidatePackage(dir string) (publication.Descriptor, error) {
 	d, err := publication.LoadDescriptor(dir)
@@ -624,7 +625,19 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		if capture, err = packageCapture(raw, installed.Registry()); err != nil {
 			return d, err
 		}
-		v2 = capture.Header.PayloadVersion == collector.CaptureV2Version
+		v2 = capture.Continuous()
+	}
+	if v2 && capture.Header.PayloadVersion == collector.CaptureV3Version {
+		// A package that records its evaluation inputs must re-evaluate,
+		// from them alone, to its stored evaluation. Earlier packages
+		// record none and are validated exactly as before.
+		ev, err := os.ReadFile(filepath.Join(dir, collector.EvaluationFile))
+		if err != nil {
+			return d, err
+		}
+		if _, err := collector.ReadSnapshot(capture, installed.Registry(), ev); err != nil {
+			return d, err
+		}
 	}
 	if d.PackageKind == publication.KindAssessment {
 		schema := filepath.Join(dir, "content/schemas/oscal-1.1.3.json")
@@ -657,7 +670,7 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		if err := capture.ValidateNamespace(ns, nil); err != nil {
 			return d, fmt.Errorf("namespace scope: %w", err)
 		}
-		c, err := capture.V2()
+		c, err := capture.KyvernoCapture()
 		if err != nil {
 			return d, err
 		}
@@ -700,7 +713,7 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 // reader of the same build can replay what it published. Package
 // verification is provider-specific and exists only for the Kyverno
 // provider's captures (a legacy version 1 or 2 document, or a Kyverno
-// envelope of payload 2): any other installed provider's capture is refused
+// envelope of payload 2 or 3): any other installed provider's capture is refused
 // rather than archived unverified.
 func packageCapture(raw []byte, readers collector.CaptureReaders) (collector.CaptureDocument, error) {
 	c, err := collector.ReadCapture(raw, readers)

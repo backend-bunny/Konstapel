@@ -100,8 +100,11 @@ func TestKyvernoCaptureVersionsMatchCollector(t *testing.T) {
 			accepted = append(accepted, v)
 		}
 	}
-	if !slices.Equal(accepted, d.Capture.Read) || d.Capture.Write != collector.CaptureV2Version {
-		t.Fatalf("collector reads %v writes %d; descriptor %+v", accepted, collector.CaptureV2Version, d.Capture)
+	// The legacy documents carry payloads 1 and 2; payload 3 exists only
+	// in an envelope, so the version dispatch of the earlier releases
+	// never accepts it.
+	if want := append(slices.Clone(accepted), collector.CaptureV3Version); !slices.Equal(want, d.Capture.Read) || d.Capture.Write != collector.CaptureV2Version {
+		t.Fatalf("collector reads documents %v and payload %d, writes %d; descriptor %+v", accepted, collector.CaptureV3Version, collector.CaptureV2Version, d.Capture)
 	}
 	r := installed.Registry()
 	for _, v := range accepted {
@@ -109,8 +112,11 @@ func TestKyvernoCaptureVersionsMatchCollector(t *testing.T) {
 			t.Errorf("default provider cannot read capture %d: %v", v, err)
 		}
 	}
-	if err := r.CheckCapture("", 3); err == nil {
-		t.Error("capture 3 accepted")
+	if err := r.CheckCapture("", collector.CaptureV3Version); err != nil {
+		t.Errorf("default provider cannot read payload 3: %v", err)
+	}
+	if err := r.CheckCapture("", 4); err == nil {
+		t.Error("capture 4 accepted")
 	}
 }
 

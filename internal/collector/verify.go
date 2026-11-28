@@ -344,14 +344,15 @@ func VerifyContent(dir string, rc *publication.RunContent) error {
 // VerifyPackage re-verifies an assessment package's engine policies from its
 // own content: the capture's policies and checks must re-render from the
 // packaged, digest-pinned sources. The capture must be the Kyverno payload 2
-// (CaptureV2), as a legacy version 2 document or an envelope; any other
-// capture is an explicit error.
+// (CaptureV2), as a legacy version 2 document or an envelope, or a payload 3
+// envelope, whose CaptureV2 is verified; any other capture is an explicit
+// error.
 func VerifyPackage(dir string) error {
 	raw, err := os.ReadFile(filepath.Join(dir, "capture.json"))
 	if err != nil {
 		return err
 	}
-	c, err := readCaptureV2(raw)
+	c, err := readKyvernoCapture(raw)
 	if err != nil {
 		return err
 	}

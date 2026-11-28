@@ -79,7 +79,7 @@ func TestProductionRegistryRejectsUnsupportedCaptures(t *testing.T) {
 		"test-only provider":        {env("konstapel-reporttest/v1", 1, 1), provider.ReasonUnknownProvider},
 		"unknown provider":          {env("example-scanner/v1", 1, 1), provider.ReasonUnknownProvider},
 		"another Kyverno contract":  {env("konstapel-kyverno/v2", 2, 1), provider.ReasonIncompatibleVersion},
-		"unknown Kyverno payload":   {env(kyverno.Contract, 3, 1), provider.ReasonIncompatibleVersion},
+		"unknown Kyverno payload":   {env(kyverno.Contract, 4, 1), provider.ReasonIncompatibleVersion},
 		"malformed contract":        {env("./konstapel-provider", 2, 1), provider.ReasonInvalidSelection},
 		"no provider, not defaults": {env("", 2, 1), ""},
 	} {
@@ -100,6 +100,27 @@ func TestProductionRegistryRejectsUnsupportedCaptures(t *testing.T) {
 	if err := doc.CheckEvaluator(r); !errors.As(err, &serr) || serr.Reason != provider.ReasonIncompatibleVersion {
 		t.Fatalf("evaluator 2 accepted by the production registry: %v", err)
 	}
+}
+
+// payload3 is the version 3 envelope of a Kyverno payload 3: the saved
+// CaptureV2 and the inputs of an evaluation with the chart's 2h limit and
+// no continuity boundaries.
+func payload3(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "testdata/assessments/kyverno-1.19.2-background/capture.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c collector.CaptureV2
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	b, err := collector.EncodeCaptureV3(collector.CaptureV3{Version: collector.CaptureV3Version, Capture: c,
+		EvaluationInputs: collector.FreezeEvaluationInputs(retainedMaxEvidenceAge, []collector.Boundary{})}, kyverno.EvaluatorVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // documentedCapture is one capture of the guide's capture examples.
@@ -145,11 +166,13 @@ func captureExamples(t *testing.T) (read, rejected []documentedCapture) {
 		read = append(read, readAll(path, b))
 	}
 	read = append(read, readAll("Kyverno envelope of "+v2, env(kyverno.Contract, 2, 1)))
+	read = append(read, readAll("Kyverno payload 3 of "+v2+" and its frozen inputs", payload3(t)))
 	rejected = []documentedCapture{
 		readAll("version 4", []byte(`{"version":4}`)),
 		readAll("version 2 with an evaluatorVersion", append(raw[:len(raw)-2:len(raw)-2], []byte(`,"evaluatorVersion":2}`)...)),
 		readAll("envelope of konstapel-reporttest/v1", env("konstapel-reporttest/v1", 1, 1)),
-		readAll("envelope of Kyverno payload 3", env(kyverno.Contract, 3, 1)),
+		readAll("envelope of Kyverno payload 4", env(kyverno.Contract, 4, 1)),
+		readAll("envelope of Kyverno payload 3 holding a CaptureV2", env(kyverno.Contract, 3, 1)),
 		readAll("envelope of Kyverno evaluator 2", env(kyverno.Contract, 2, 2)),
 	}
 	return read, rejected
