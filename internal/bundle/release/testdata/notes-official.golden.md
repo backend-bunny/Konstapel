@@ -82,13 +82,14 @@ The archive carries its license and notice texts; they are part of the signed co
 
 ## Verify it yourself
 
-Both commands check the exact digest and fail if the signer is not exactly this workflow identity:
+These commands check the exact digest and fail if the signer is not exactly this workflow identity. Cosign v3's `cosign verify` also accepts attestations as signatures, so the `jq` line requires the `cosign sign` image-signature payload for exactly this digest:
 
 ```sh
 ref=ghcr.io/backend-bunny/bundles/konstapel-privileged-containers@sha256:fac58c648281fc47cce010cc201c18b60a35b6dfdd1b8e0773c5a73c28a2785e
 cosign verify "$ref" \
   --certificate-identity 'https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' > signature.json
+jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json > /dev/null
 cosign verify-attestation "$ref" --type slsaprovenance1 \
   --certificate-identity 'https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'

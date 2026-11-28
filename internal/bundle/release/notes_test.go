@@ -127,6 +127,8 @@ func TestRenderedNotesContent(t *testing.T) {
 		// The exact digest, copyable verification of both proofs under the exact identity.
 		"ref=" + ref,
 		"cosign verify \"$ref\"",
+		// Cosign v3 verifies attestations as signatures: the payload check is required.
+		"> signature.json\njq -e --arg digest \"${ref#*@}\" 'type == \"array\" and any(.[]; .critical.type == \"https://sigstore.dev/cosign/sign/v1\" and .critical.image.\"docker-manifest-digest\" == $digest)' signature.json",
 		"cosign verify-attestation \"$ref\" --type slsaprovenance1",
 		"--certificate-identity '" + notesIdentity + "'",
 		"--certificate-oidc-issuer '" + notesIssuer + "'",

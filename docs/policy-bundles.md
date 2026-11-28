@@ -2108,7 +2108,9 @@ What it shows:
   bundlerelease mirror -from ghcr.io/backend-bunny/bundles/konstapel-privileged-containers \
     -to "$MIRROR/org/konstapel-privileged-containers" -digest "$digest"
   bundlerelease verify-release -sources mirror-sources.yaml -name konstapel-privileged-containers -digest "$digest"
-  cosign verify "$MIRROR/org/konstapel-privileged-containers@$digest" --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+  ref="$MIRROR/org/konstapel-privileged-containers@$digest"
+  cosign verify "$ref" --certificate-identity "$id" --certificate-oidc-issuer "$iss" > signature.json
+  jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json > /dev/null
   cosign verify-attestation "$MIRROR/org/konstapel-privileged-containers@$digest" --type slsaprovenance1 --certificate-identity "$id" --certificate-oidc-issuer "$iss"
   ```
 
@@ -3894,7 +3896,8 @@ that passed against the frozen bytes with their digests; the license and notice
 files; the build tools; and copyable verification commands for the exact digest:
 
 ```sh
-cosign verify "$ref" --certificate-identity '<workflow identity>' --certificate-oidc-issuer '<issuer>'
+cosign verify "$ref" --certificate-identity '<workflow identity>' --certificate-oidc-issuer '<issuer>' > signature.json
+jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json > /dev/null
 cosign verify-attestation "$ref" --type slsaprovenance1 --certificate-identity '<workflow identity>' --certificate-oidc-issuer '<issuer>'
 ```
 
@@ -3950,7 +3953,8 @@ credentials, with the pinned Cosign v3.1.3 and the production verifier:
 ref=ghcr.io/backend-bunny/bundles/konstapel-privileged-containers@sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8
 id=https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
 iss=https://token.actions.githubusercontent.com
-cosign verify "$ref" --certificate-identity "$id" --certificate-oidc-issuer "$iss"
+cosign verify "$ref" --certificate-identity "$id" --certificate-oidc-issuer "$iss" > signature.json
+jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json > /dev/null
 cosign verify-attestation "$ref" --type slsaprovenance1 --certificate-identity "$id" --certificate-oidc-issuer "$iss"
 bundlerelease verify-release -name konstapel-privileged-containers -digest sha256:1a2ca25a4856868170fc0059e0e1c8721c6543d9c28c5f07520ba8cdd91f88f8
 ```
