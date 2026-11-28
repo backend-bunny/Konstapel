@@ -122,14 +122,23 @@ func loadNIST(root string) (*nistContent, error) {
 //     maps an undeclared rule;
 //   - every rule is a vendored policy (policies maps rule -> manifest path).
 func ValidateDefinition(root, rel string, policies map[string]string) (*oscal.ComponentDefinition, []Mapping, error) {
+	return ValidateDefinitionFor(root, rel, policies, ProviderID)
+}
+
+// ValidateDefinitionFor is ValidateDefinition for the content of another
+// provider: the Check_Id of every rule must be in the validation component
+// titled provider, the provider name of the bundle's contract. Reporting-only
+// check content (add-assessment-provider-contract Decision 8) uses the same
+// closure and mapping rules under its own provider's name.
+func ValidateDefinitionFor(root, rel string, policies map[string]string, provider string) (*oscal.ComponentDefinition, []Mapping, error) {
 	nist, err := loadNIST(root)
 	if err != nil {
 		return nil, nil, err
 	}
-	return validateDefinition(root, rel, policies, nist)
+	return validateDefinition(root, rel, policies, nist, provider)
 }
 
-func validateDefinition(root, rel string, policies map[string]string, nist *nistContent) (*oscal.ComponentDefinition, []Mapping, error) {
+func validateDefinition(root, rel string, policies map[string]string, nist *nistContent, providerID string) (*oscal.ComponentDefinition, []Mapping, error) {
 	path := filepath.Join(root, rel)
 	if e := Schema(path, filepath.Join(root, "content/schemas/oscal-1.1.3.json")); e != nil {
 		return nil, nil, fmt.Errorf("schema %s: %w", rel, e)
@@ -148,7 +157,7 @@ func validateDefinition(root, rel string, policies map[string]string, nist *nist
 	provider := false
 	var out []Mapping
 	for _, comp := range *env.Definition.Components {
-		if comp.Type == "validation" && comp.Title == ProviderID {
+		if comp.Type == "validation" && comp.Title == providerID {
 			provider = true
 			if comp.Props != nil {
 				for _, p := range *comp.Props {
@@ -213,7 +222,7 @@ func validateDefinition(root, rel string, policies map[string]string, nist *nist
 		}
 	}
 	if !provider {
-		return nil, nil, fmt.Errorf("%s: missing validation provider %s", rel, ProviderID)
+		return nil, nil, fmt.Errorf("%s: missing validation provider %s", rel, providerID)
 	}
 	if len(out) == 0 {
 		return nil, nil, fmt.Errorf("%s: missing bounded mapping", rel)
@@ -234,7 +243,7 @@ func validateDefinition(root, rel string, policies map[string]string, nist *nist
 		case !mapped[rule]:
 			return nil, nil, fmt.Errorf("%s: rule %s is not mapped to any statement", rel, rule)
 		case !checks[rule]:
-			return nil, nil, fmt.Errorf("%s: rule %s has no Check_Id in %s", rel, rule, ProviderID)
+			return nil, nil, fmt.Errorf("%s: rule %s has no Check_Id in %s", rel, rule, providerID)
 		case policies[rule] == "":
 			return nil, nil, fmt.Errorf("%s: rule %s is not a vendored policy", rel, rule)
 		}
@@ -286,7 +295,7 @@ func MappingsOf(root string, set ContentSet) (map[string][]Mapping, error) {
 	out := map[string][]Mapping{}
 	owner := map[string]string{}
 	for _, rel := range set.Definitions {
-		_, ms, err := validateDefinition(root, rel, set.Policies, nist)
+		_, ms, err := validateDefinition(root, rel, set.Policies, nist, ProviderID)
 		if err != nil {
 			return nil, err
 		}

@@ -17,8 +17,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Supported declarative content: the one installed provider contract and the
-// ValidatingPolicy API it evaluates. Bundle data cannot name another provider.
+// Supported declarative content. Under providerContract (EngineContract) a
+// policy document is a ValidatingPolicy of policyAPIVersion; under any other
+// contract it is a reporting-only check definition (ParseCheckDefinition).
+// Whether that contract can be selected is decided by provider selection,
+// never by bundle data.
 const (
 	providerContract = assessment.ProviderID + "/v1"
 	policyAPIVersion = "policies.kyverno.io/v1"
@@ -170,7 +173,10 @@ func requiredLocal(v any, key string, out *[]string) {
 // payload: no network or registry access. It does not re-verify file digests
 // (VerifyPayload does) and never applies or runs any packaged content.
 //
-// Checked: only the installed provider contract; each declared OSCAL entry
+// Checked: the policy documents of the descriptor's provider contract (a
+// ValidatingPolicy for EngineContract; a strict reporting-only check
+// definition, without a content parameter schema, for any other); each
+// declared OSCAL entry
 // point exists, is valid against the schema for its declared version, and
 // states that version (authored component definitions use C2P-compatible
 // 1.1.3, official NIST documents keep their own); every import and source
@@ -178,8 +184,9 @@ func requiredLocal(v any, key string, out *[]string) {
 // or YAML key repeats; the NIST catalog and Moderate profile are present and
 // consistent; the component definitions' control, statement and rule
 // references close and use only Moderate controls (through the existing
-// prototype validation); the descriptor's logical checks equal the mapped
-// rules; and every policy is a ValidatingPolicy named as the descriptor says.
+// prototype validation, under the validation component titled with the
+// contract's provider name); the descriptor's logical checks equal the mapped
+// rules; and every policy document is named as the descriptor says.
 func ValidateContent(d *Descriptor, payload fs.FS) error {
 	return validateContent(d, payload, "")
 }
@@ -196,8 +203,10 @@ func ValidateContentDir(d *Descriptor, dir string) error {
 // validateContent reads payload; root, when set, is the same payload on disk
 // for the path-based OSCAL validation, otherwise it is materialized.
 func validateContent(d *Descriptor, payload fs.FS, root string) error {
-	if d.Compatibility.Provider != providerContract {
-		return fmt.Errorf("compatibility.provider %q: only %q is installed", d.Compatibility.Provider, providerContract)
+	engine := d.Compatibility.Provider == providerContract
+	providerName, _, ok := strings.Cut(d.Compatibility.Provider, "/")
+	if !ok || !providerPat.MatchString(d.Compatibility.Provider) {
+		return fmt.Errorf("compatibility.provider %q must look like name/vN", d.Compatibility.Provider)
 	}
 	read := func(p string) ([]byte, error) {
 		b, err := fs.ReadFile(payload, p)
@@ -297,11 +306,24 @@ func validateContent(d *Descriptor, payload fs.FS, root string) error {
 			fail("%s: %v", p.Path, err)
 			continue
 		}
-		if obj["apiVersion"] != policyAPIVersion || obj["kind"] != policyKind {
-			fail("%s: only %s %s is supported, found %v %v", p.Path, policyAPIVersion, policyKind, obj["apiVersion"], obj["kind"])
-		}
-		if name, _ := assessment.At(obj, "metadata", "name").(string); name != p.Name {
-			fail("%s: descriptor names the policy %q but metadata.name is %q", p.Path, p.Name, name)
+		if engine {
+			if obj["apiVersion"] != policyAPIVersion || obj["kind"] != policyKind {
+				fail("%s: only %s %s is supported, found %v %v", p.Path, policyAPIVersion, policyKind, obj["apiVersion"], obj["kind"])
+			}
+			if name, _ := assessment.At(obj, "metadata", "name").(string); name != p.Name {
+				fail("%s: descriptor names the policy %q but metadata.name is %q", p.Path, p.Name, name)
+			}
+		} else {
+			if av, _ := obj["apiVersion"].(string); av == policyAPIVersion || strings.HasPrefix(av, engineGroup+"/") {
+				fail("%s: %v %v is engine policy content; under %s each policy must be a reporting-only check definition", p.Path, obj["apiVersion"], obj["kind"], d.Compatibility.Provider)
+			} else if def, err := ParseCheckDefinition(raw); err != nil {
+				fail("%s: %v", p.Path, err)
+			} else if def.Metadata.Name != p.Name {
+				fail("%s: descriptor names the policy %q but metadata.name is %q", p.Path, p.Name, def.Metadata.Name)
+			}
+			if p.ParameterSchema != "" {
+				fail("policy %q: a reporting-only check definition declares no parameter schema; its check kind's descriptor schema is its parameter contract", p.Name)
+			}
 		}
 		for _, c := range p.Checks {
 			if c.CheckID != c.RuleID {
@@ -309,7 +331,7 @@ func validateContent(d *Descriptor, payload fs.FS, root string) error {
 			}
 			rules[c.RuleID] = p.Path
 		}
-		if p.ParameterSchema != "" {
+		if engine && p.ParameterSchema != "" {
 			if _, err := compileParameterSchema(p, payload); err != nil {
 				fail("%v", err)
 			}
@@ -330,7 +352,7 @@ func validateContent(d *Descriptor, payload fs.FS, root string) error {
 	}
 	mapped := map[string]bool{}
 	for _, rel := range componentDefs {
-		_, ms, err := assessment.ValidateDefinition(root, rel, rules)
+		_, ms, err := assessment.ValidateDefinitionFor(root, rel, rules, providerName)
 		if err != nil {
 			fail("%v", err)
 			continue
