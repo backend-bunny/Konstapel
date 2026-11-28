@@ -18,7 +18,7 @@ the parts implemented so far:
 - [signing recovery](#signing-recovery): a platform administrator's
   attributed EvidenceSigningRequest that finishes the signed publication of
   a run that ended `SigningFailed`, with its retained archive and original
-  signing intent ([`add-evidence-signing-recovery`](../../openspec/changes/add-evidence-signing-recovery/proposal.md)).
+  signing intent ([`add-evidence-signing-recovery`](../../openspec/changes/archive/2026-11-27-add-evidence-signing-recovery/proposal.md)).
 
 The signing change's own tasks are
 [archived](../../openspec/changes/archive/2026-11-14-add-evidence-signing/tasks.md).

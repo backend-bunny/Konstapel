@@ -73,5 +73,21 @@ permission, or Taskfile task.
 
 ## 6. Final checks
 
-- [ ] 6.1 Run `task check`, the generated CRD/RBAC/chart freshness checks, the affected acceptance groups, `openspec validate add-evidence-signing-recovery --strict`, `openspec validate --specs --strict`, and `python3 -I scripts/agents/select-task.py --check` through Devbox; keep sanitized evidence, and remove task-owned keys, Secrets, RustFS containers and volumes, clusters, and processes.
+- [x] 6.1 Run `task check`, the generated CRD/RBAC/chart freshness checks, the affected acceptance groups, `openspec validate add-evidence-signing-recovery --strict`, `openspec validate --specs --strict`, and `python3 -I scripts/agents/select-task.py --check` through Devbox; keep sanitized evidence, and remove task-owned keys, Secrets, RustFS containers and volumes, clusters, and processes.
   <!-- agent: tier=standard risk=low reason="Run established validation and cleanup" -->
+  Evidence: `devbox run -- task check` passed every package except one known
+  flake, `pkg/providerkit` `TestHandshakeTimeoutClosesStalledConnections/trickle`.
+  That case got a connection reset instead of EOF at 302ms, inside its 2s bound,
+  and passed when its package was rerun standalone (`-count=5` for the case, then
+  the full package). The steps after `go test`, namely the external-provider
+  example, `scripts/ci` unit tests, promtool rule tests and `policies:test`, were
+  rerun and passed. `internal/controller` passed in 836s under the 30m timeout,
+  which was not changed. The freshness checks (`scripts/generate.sh --check`,
+  `scripts/charts/check.sh`) passed inside `lint`. `openspec validate
+  add-evidence-signing-recovery --strict`, `openspec validate --specs --strict`
+  and `python3 -I scripts/agents/select-task.py --check` passed. The storage,
+  recovery and admission acceptance groups ran in CI on this PR, not locally,
+  and their sanitized evidence is the `acceptance-evidence-<group>` artifacts
+  staged by `stage-evidence.py`. CI's `scripts/acceptance.sh` proved teardown of
+  each disposable cluster and every container labelled for it. No local keys,
+  Secrets, RustFS containers, clusters or processes were created.
