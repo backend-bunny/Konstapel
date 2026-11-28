@@ -57,6 +57,8 @@ checked-in official rule. Both read anonymously.
 ID=https://github.com/backend-bunny/Konstapel/.github/workflows/bundle-release.yml@refs/heads/main
 ISS=https://token.actions.githubusercontent.com
 cosign verify "$REF@$DIGEST" --certificate-identity "$ID" --certificate-oidc-issuer "$ISS" > "$W/cosign-verify.json"
+ref="$REF@$DIGEST"
+jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' "$W/cosign-verify.json" > /dev/null
 cosign verify-attestation "$REF@$DIGEST" --type slsaprovenance1 \
   --certificate-identity "$ID" --certificate-oidc-issuer "$ISS" > "$W/cosign-attestation.json"
 go run ./cmd/bundlerelease verify-release -name "$BUNDLE" -digest "$DIGEST" | tee "$W/verify-release.txt"

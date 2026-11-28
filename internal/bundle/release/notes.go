@@ -232,15 +232,20 @@ func RenderNotes(in NotesInput) (string, error) {
 	}
 	w("\n")
 
-	w("## Verify it yourself\n\nBoth commands check the exact digest and fail if the signer is not exactly this workflow identity:\n\n")
+	w("## Verify it yourself\n\nThese commands check the exact digest and fail if the signer is not exactly this workflow identity. Cosign v3's `cosign verify` also accepts attestations as signatures, so the `jq` line requires the `cosign sign` image-signature payload for exactly this digest:\n\n")
 	w("```sh\nref=%s\n", ref)
-	w("cosign verify \"$ref\" \\\n  --certificate-identity '%s' \\\n  --certificate-oidc-issuer '%s'\n", rc.Signer.Identity, rc.Signer.Issuer)
+	w("cosign verify \"$ref\" \\\n  --certificate-identity '%s' \\\n  --certificate-oidc-issuer '%s' > signature.json\n", rc.Signer.Identity, rc.Signer.Issuer)
+	w("%s\n", signatureCheck)
 	w("cosign verify-attestation \"$ref\" --type slsaprovenance1 \\\n  --certificate-identity '%s' \\\n  --certificate-oidc-issuer '%s'\n```\n\n", rc.Signer.Identity, rc.Signer.Issuer)
 	w("Cosign checks the signatures and who made them; it does not check what the provenance says. The Konstapel verifier (run it from a checkout of this repository at or after the source commit) also checks the attested builder, source repository and commit, bundle name and version, the content and test materials, and that the archive matches its manifest:\n\n")
 	w("```sh\ndevbox run -- go run ./cmd/bundlerelease verify-release -name %s -digest %s\n```\n\n", d.Name, v.Digest)
 	w("Referrers were listed through the %s.\n", referrersSource(v.ReferrersSource))
 	return b.String(), nil
 }
+
+// signatureCheck is the payload check of scripts/image/verify-signature-payload.sh,
+// verbatim (scripts/ci/test_image_signature_payload.py fails on drift).
+const signatureCheck = `jq -e --arg digest "${ref#*@}" 'type == "array" and any(.[]; .critical.type == "https://sigstore.dev/cosign/sign/v1" and .critical.image."docker-manifest-digest" == $digest)' signature.json > /dev/null`
 
 func sorted(in []string) []string {
 	out := append([]string(nil), in...)

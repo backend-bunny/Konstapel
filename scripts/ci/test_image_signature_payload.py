@@ -131,6 +131,27 @@ class UsageTests(unittest.TestCase):
         line = f"jq -e --arg digest \"${{IMAGE#*@}}\" '{script_filter()}' signature.json"
         self.assertIn(line, (ROOT / "docs/images.md").read_text())
 
+    def test_bundle_verification_docs_require_the_signature_payload(self):
+        # Each `cosign verify` of a bundle is saved and followed by the verbatim
+        # filter on that file; the generated release notes (notes.go) likewise.
+        for rel in ("docs/policy-bundles.md", "docs/integration/bundle-audit-walkthrough.md",
+                    "internal/bundle/release/notes.go"):
+            text = (ROOT / rel).read_text()
+            self.assertIn(script_filter(), text, rel)
+            if rel.endswith(".go"):
+                # The notes print the check (a verbatim const) right after the verify.
+                m = re.search(r'cosign verify \\"\$ref\\".*?> signature\.json.*?\n\tw\("%s\\n", signatureCheck\)\n\tw\("cosign verify-attestation', text, re.S)
+                self.assertTrue(m, rel)
+                continue
+            lines = text.splitlines()
+            verifies = [i for i, l in enumerate(lines)
+                        if re.search(r'^\s*(?:w\(")?cosign verify(?![-\w])', l)]
+            self.assertTrue(verifies, rel)
+            for i in verifies:
+                window = "\n".join(lines[i:i + 3])
+                self.assertIn("jq -e --arg digest", window, f"{rel}:{i + 1}")
+                self.assertIn(script_filter(), window, f"{rel}:{i + 1}")
+
     def test_job_summary_uses_the_same_filter(self):
         self.assertEqual(summary.SIGNATURE_FILTER, script_filter())
 
