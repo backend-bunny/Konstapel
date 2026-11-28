@@ -1,5 +1,7 @@
-# The evaluator: Evaluate only, with no source, no RBAC, no Kubernetes API
-# token and (networkpolicy.yaml) no egress.
+# The evaluator: the registration's evaluator endpoint
+# (spec.evaluatorEndpoint). Evaluate only, called by the host directly, with
+# no source, no RBAC, no Kubernetes API token and (networkpolicy.yaml) no
+# egress.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,7 +36,7 @@ spec:
             - -listen=:{{ .Values.ports.protocol }}
             - -health-listen=:{{ .Values.ports.health }}
             - -tls-dir=/etc/example-reporting/tls
-            - -authorized-hosts={{ join "," (prepend .Values.evaluator.authorizedHosts (include "reporting.workerClientName" .)) }}
+            - -authorized-hosts={{ join "," .Values.evaluator.authorizedHosts }}
           ports:
             - {name: protocol, containerPort: {{ .Values.ports.protocol }}, protocol: TCP}
             - {name: health, containerPort: {{ .Values.ports.health }}, protocol: TCP}

@@ -57,7 +57,7 @@ func TestQuickstartAssessment(t *testing.T) {
 	}
 	defer conn.Close()
 	var out bytes.Buffer
-	r, err := host.Run(context.Background(), conn, &out)
+	r, err := host.Run(context.Background(), conn, conn, &out)
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
@@ -102,7 +102,7 @@ func TestWrongServerNameIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_, err = host.Run(context.Background(), conn, &bytes.Buffer{})
+	_, err = host.Run(context.Background(), conn, conn, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "authentication handshake failed") {
 		t.Fatalf("run with the wrong server name: %v, want a handshake failure", err)
 	}
@@ -117,7 +117,7 @@ func TestUnauthorizedHostIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	r, err := host.Run(context.Background(), conn, &bytes.Buffer{})
+	r, err := host.Run(context.Background(), conn, conn, &bytes.Buffer{})
 	if err == nil {
 		t.Fatalf("unauthorized host completed a run: %+v", r)
 	}

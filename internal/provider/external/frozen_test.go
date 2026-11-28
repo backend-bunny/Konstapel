@@ -28,7 +28,9 @@ func TestFrozenEncoding(t *testing.T) {
 		`"releaseDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","protocol":"konstapel.provider.v1",` +
 		`"protocolRevision":2,"evaluatorVersion":1,"payloadVersion":1,"capabilities":["Collect","Evaluate"],` +
 		`"endpoint":{"namespace":"providers","service":"example-reporting","port":8443,"serverName":"example-reporting.providers.svc",` +
-		`"trustConfigMap":"example-reporting-ca","trustKey":"ca.crt"}}`
+		`"trustConfigMap":"example-reporting-ca","trustKey":"ca.crt"},` +
+		`"evaluatorEndpoint":{"namespace":"providers","service":"example-reporting-evaluator","port":8443,` +
+		`"serverName":"example-reporting-evaluator.providers.svc","trustConfigMap":"example-reporting-ca","trustKey":"ca.crt"}}`
 	if string(b) != want {
 		t.Fatalf("encoding\n%s\nwant\n%s", b, want)
 	}
@@ -98,22 +100,22 @@ func TestFrozenWorkContinuesOnlyOnItsRegistration(t *testing.T) {
 // another implementation or compatibility.
 func TestFrozenWorkChecksTheDescribedImplementation(t *testing.T) {
 	f := external.Expected(externaltest.Registration("reporting"))
-	if err := f.CheckDescription(externaltest.Description()); err != nil {
+	if err := f.CheckDescription(external.SourceEndpoint, externaltest.Description()); err != nil {
 		t.Fatal(err)
 	}
 	d := externaltest.Description()
 	d.Implementation = externaltest.OtherRelease
-	if got := frozenReason(t, f.CheckDescription(d)); got != external.FrozenImplementationChanged {
+	if got := frozenReason(t, f.CheckDescription(external.SourceEndpoint, d)); got != external.FrozenImplementationChanged {
 		t.Fatal(got)
 	}
 	d = externaltest.Description()
 	d.EvaluatorVersion = 2
-	if err := f.CheckDescription(d); err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_EVALUATOR_VERSION") {
+	if err := f.CheckDescription(external.SourceEndpoint, d); err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_EVALUATOR_VERSION") {
 		t.Fatalf("evaluator: %v", err)
 	}
 	d = externaltest.Description()
 	d.Capabilities = []providerv1.Capability{providerv1.Capability_CAPABILITY_EVALUATE}
-	if err := f.CheckDescription(d); err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_CAPABILITY") {
+	if err := f.CheckDescription(external.SourceEndpoint, d); err == nil || !strings.Contains(err.Error(), "UNSUPPORTED_CAPABILITY") {
 		t.Fatalf("capability: %v", err)
 	}
 }

@@ -13,13 +13,15 @@ package controller
 //     each ServiceAccount); the evaluator Pod has no API token, and from
 //     its network namespace no connection reaches the API server, while
 //     the same probe from the worker's does;
-//   - the provider works through the worker alone: Describe reports the
-//     image digest as the release, Collect reads the live Namespaces, and
-//     Evaluate runs in the evaluator, which the host itself cannot call;
+//   - the two registered endpoints (design Decision 11): the host collects
+//     at the worker, which reads the live Namespaces and refuses Evaluate,
+//     and evaluates at the evaluator, which it calls directly and which
+//     refuses Collect; both report the image digest as the release, so
+//     evaluator isolation does not depend on the worker forwarding;
 //   - TLS rotation without a restart: a new worker serving certificate,
 //     host trust rotated to another CA (the old host identity is refused
 //     and its established connection closed, the new one is accepted) and
-//     a new evaluator serving certificate, still used by the worker.
+//     a new evaluator serving certificate, served to the host.
 // No private key is written to the evidence. Run through
 // scripts/targeting-live.sh (acceptance group "providers").
 
@@ -297,17 +299,15 @@ func TestLiveReferenceProviderChart(t *testing.T) {
 	workerDNS, evaluatorDNS := refWorker+"."+refNS+".svc", refEvaluator+"."+refNS+".svc"
 	ca := newRefCA(t, "reference provider live CA")
 	workerServing := ca.issue(t, workerDNS, x509.ExtKeyUsageServerAuth)
-	workerClient := ca.issue(t, workerDNS, x509.ExtKeyUsageClientAuth)
 	evaluatorServing := ca.issue(t, evaluatorDNS, x509.ExtKeyUsageServerAuth)
 	hostLeaf := ca.issue(t, refHost, x509.ExtKeyUsageClientAuth)
 	host := refMaterial{cert: hostLeaf.cert, key: hostLeaf.key, trust: ca.pem}
 	l.refSecret(refWorker+"-tls", workerServing, ca.pem)
-	l.refSecret(refWorker+"-client-tls", workerClient, ca.pem)
 	l.refSecret(refEvaluator+"-tls", evaluatorServing, ca.pem)
 
 	out, err := l.helm("install", refRelease, "../../examples/external-provider/reporting/chart", "--namespace", refNS,
 		"--set", "image.repository="+repository, "--set", "image.digest="+release, "--set", "image.pullPolicy=Never",
-		"--set", "worker.authorizedHosts[0]="+refHost, "--wait", "--timeout", "5m")
+		"--set", "worker.authorizedHosts[0]="+refHost, "--set", "evaluator.authorizedHosts[0]="+refHost, "--wait", "--timeout", "5m")
 	t.Cleanup(func() { _, _ = l.helm("uninstall", refRelease, "--namespace", refNS, "--wait", "--timeout", "2m") })
 	if err != nil {
 		t.Fatalf("helm install: %v\n%s\n%s", err, out, l.podDiagnostics(refNS))
@@ -329,46 +329,39 @@ func TestLiveReferenceProviderChart(t *testing.T) {
 	// Provider logs (no key material) for the evidence, before teardown.
 	t.Cleanup(func() { l.refLogs(kc) })
 
-	// The provider through the worker alone.
-	both := refCompat(providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE)
+	// The two endpoints, each called as the host: the worker serves
+	// Collect only and the evaluator Evaluate only, the same release.
+	collectOnly := refCompat(providerv1.Capability_CAPABILITY_COLLECT)
 	evaluateOnly := refCompat(providerv1.Capability_CAPABILITY_EVALUATE)
 	worker, evaluator := "svc/"+refWorker, "svc/"+refEvaluator
-	if err := l.refCall(worker, workerDNS, host, func(conn *grpc.ClientConn) error {
-		d, err := refDescribe(conn, both)
-		if err != nil {
+	for _, e := range []struct {
+		target, serverName string
+		want               providerkit.Compatibility
+		serves             providerv1.Capability
+	}{{worker, workerDNS, collectOnly, providerv1.Capability_CAPABILITY_COLLECT}, {evaluator, evaluatorDNS, evaluateOnly, providerv1.Capability_CAPABILITY_EVALUATE}} {
+		if err := l.refCall(e.target, e.serverName, host, func(conn *grpc.ClientConn) error {
+			d, err := refDescribe(conn, e.want)
+			if err == nil && (d.GetImplementation() != release || !slices.Equal(d.GetCapabilities(), []providerv1.Capability{e.serves})) {
+				err = fmt.Errorf("description %v, want release %s serving %s only", d, release, e.serves)
+			}
 			return err
+		}); err != nil {
+			t.Fatalf("%s as the host: %v", e.target, err)
 		}
-		if d.GetImplementation() != release {
-			return fmt.Errorf("the worker reports implementation %q, not the image digest %s", d.GetImplementation(), release)
-		}
-		l.refAssess(conn, uids, "initial")
-		return nil
-	}); err != nil {
-		t.Fatalf("the worker: %v", err)
 	}
-
-	// The evaluator serves Evaluate only, the same release, and only to the
-	// worker: the host's own identity is refused in the handshake.
-	wc := refMaterial{cert: workerClient.cert, key: workerClient.key, trust: ca.pem}
-	if err := l.refCall(evaluator, evaluatorDNS, wc, func(conn *grpc.ClientConn) error {
-		ed, err := refDescribe(conn, evaluateOnly)
-		if err == nil && (ed.GetImplementation() != release || !slices.Equal(ed.GetCapabilities(), []providerv1.Capability{providerv1.Capability_CAPABILITY_EVALUATE})) {
-			err = fmt.Errorf("description %v", ed)
+	// Neither endpoint serves the other's capability: evaluation never goes
+	// through the worker, and the evaluator reads no source.
+	for _, e := range []struct {
+		target, serverName string
+		want               providerkit.Compatibility
+	}{{worker, workerDNS, evaluateOnly}, {evaluator, evaluatorDNS, collectOnly}} {
+		err := l.refCall(e.target, e.serverName, host, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, e.want); return err })
+		if providerkit.ReasonOf(err) != providerv1.ErrorReason_ERROR_REASON_UNSUPPORTED_CAPABILITY {
+			t.Fatalf("%s described for %v: %v, want ERROR_REASON_UNSUPPORTED_CAPABILITY", e.target, e.want.Capabilities, err)
 		}
-		return err
-	}); err != nil {
-		t.Fatalf("the evaluator as the worker: %v", err)
+		l.record("capability refused by "+e.target, map[string]any{"error": err.Error()})
 	}
-	var refused error
-	l.eventually("the evaluator refuses the host", func() (bool, string) {
-		err := l.refCall(evaluator, evaluatorDNS, host, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, evaluateOnly); return err })
-		if err == nil {
-			t.Fatal("the host reached the evaluator directly; only the worker is authorized")
-		}
-		refused = err
-		return refRefused(err), err.Error()
-	})
-	l.record("host refused by the evaluator", map[string]any{"error": refused.Error()})
+	l.refAssess(worker, workerDNS, evaluator, evaluatorDNS, host, uids, "initial")
 
 	pods := func(component string) []corev1.Pod {
 		var list corev1.PodList
@@ -416,39 +409,31 @@ func TestLiveReferenceProviderChart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer established.Close()
-	if _, err := refDescribe(established, both); err != nil {
+	if _, err := refDescribe(established, collectOnly); err != nil {
 		t.Fatalf("describe before the trust rotation: %v", err)
 	}
 	l.refSecret(refWorker+"-tls", rotated, ca2.pem)
 	start := time.Now()
 	l.eventually("the worker trusts only the rotated host CA", func() (bool, string) {
-		oldErr := l.refCall(worker, workerDNS, host, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, both); return err })
-		newErr := l.refCall(worker, workerDNS, host2, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, both); return err })
+		oldErr := l.refCall(worker, workerDNS, host, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, collectOnly); return err })
+		newErr := l.refCall(worker, workerDNS, host2, func(conn *grpc.ClientConn) error { _, err := refDescribe(conn, collectOnly); return err })
 		return refRefused(oldErr) && newErr == nil, fmt.Sprintf("old host %v, new host %v", oldErr, newErr)
 	})
-	_, closed := refDescribe(established, both)
+	_, closed := refDescribe(established, collectOnly)
 	if closed == nil {
 		t.Error("a connection established under the old trust still works after the rotation")
 	}
 	l.record("host trust rotated", map[string]any{"after": time.Since(start).Round(time.Second).String(), "established": fmt.Sprint(closed)})
-	if err := l.refCall(worker, workerDNS, host2, func(conn *grpc.ClientConn) error {
-		l.refAssess(conn, uids, "after host trust rotation")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// The evaluator's own trust still names the first CA: assess with a
+	// host identity of each CA where each endpoint trusts it.
+	l.refAssess(worker, workerDNS, evaluator, evaluatorDNS, host2, uids, "after host trust rotation", host)
 
-	// 3. A new evaluator serving certificate: served without a restart and
-	// used by the worker's forwarding client.
+	// 3. A new evaluator serving certificate: served to the host without a
+	// restart.
 	evaluatorRotated := ca.issue(t, evaluatorDNS, x509.ExtKeyUsageServerAuth)
 	l.refSecret(refEvaluator+"-tls", evaluatorRotated, ca.pem)
-	waitServed("the evaluator serves its rotated certificate", evaluator, evaluatorDNS, wc, evaluatorRotated.serial)
-	if err := l.refCall(worker, workerDNS, host2, func(conn *grpc.ClientConn) error {
-		l.refAssess(conn, uids, "after evaluator rotation")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	waitServed("the evaluator serves its rotated certificate", evaluator, evaluatorDNS, host, evaluatorRotated.serial)
+	l.refAssess(worker, workerDNS, evaluator, evaluatorDNS, host2, uids, "after evaluator rotation", host)
 
 	for _, c := range []string{"worker", "evaluator"} {
 		for _, p := range pods(c) {
@@ -652,15 +637,14 @@ func (l *live) refEgress(kc kubernetes.Interface, workload string) {
 	}
 }
 
-// refAssess runs one assessment through the worker: Collect over the live
-// Namespaces and a missing one, ReadResult, Acknowledge and Evaluate.
-func (l *live) refAssess(conn grpc.ClientConnInterface, uids map[string]string, step string) {
+// refAssess runs one assessment as the host, at each endpoint on its own
+// (design Decision 11): Collect over the live Namespaces and a missing one,
+// ReadResult and Acknowledge at the worker, then Evaluate of the result at
+// the evaluator. evaluatorHost is the host identity the evaluator trusts
+// when it differs from host's.
+func (l *live) refAssess(worker, workerDNS, evaluator, evaluatorDNS string, host refMaterial, uids map[string]string, step string, evaluatorHost ...refMaterial) {
 	t := l.t
 	t.Helper()
-	c, err := providerkit.NewClient(conn, refCompat(providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	call := func() (context.Context, context.CancelFunc) { return context.WithTimeout(l.ctx, 30*time.Second) }
 	scope := &providerv1.Scope{Cluster: "live", Namespaces: []*providerv1.Namespace{
 		{Name: "erl-team-a", Uid: uids["erl-team-a"]}, {Name: "erl-team-b", Uid: uids["erl-team-b"]},
@@ -672,37 +656,62 @@ func (l *live) refAssess(conn grpc.ClientConnInterface, uids map[string]string, 
 		inv.Subjects = append(inv.Subjects, &providerv1.InventorySubject{Uid: ns.GetUid(), NamespaceUid: ns.GetUid(),
 			Resource: providerkit.NamespaceResource, Name: ns.GetName(), Revision: "live", Checks: []string{"namespace-owner"}})
 	}
-	ctx, cancel := call()
-	defer cancel()
-	deadline, _ := ctx.Deadline()
-	ref, err := c.Collect(ctx, scope, inv, deadline)
-	if err != nil {
-		t.Fatalf("%s: collect: %v", step, err)
+	var ref *providerv1.ResultReference
+	var payload []byte
+	if err := l.refCall(worker, workerDNS, host, func(conn *grpc.ClientConn) error {
+		c, err := providerkit.NewClient(conn, refCompat(providerv1.Capability_CAPABILITY_COLLECT), nil)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := call()
+		defer cancel()
+		deadline, _ := ctx.Deadline()
+		if ref, err = c.Collect(ctx, scope, inv, deadline); err != nil {
+			return fmt.Errorf("collect: %w", err)
+		}
+		var res *providerv1.CollectionResult
+		if payload, res, err = c.ReadCollection(ctx, ref); err != nil {
+			return fmt.Errorf("read result: %w", err)
+		}
+		if got := res.GetLimitations(); len(got) != 1 || got[0].GetSubject() != "00000000-0000-4000-8000-000000000000" ||
+			got[0].GetMessage() != "namespace erl-missing is not in the Kubernetes API" {
+			t.Errorf("%s: limitations %v", step, got)
+		}
+		if got := res.GetEvidence(); len(got) != 2 {
+			t.Errorf("%s: evidence %v, want the two live namespaces", step, got)
+		}
+		if err := c.Acknowledge(ctx, ref); err != nil {
+			return fmt.Errorf("acknowledge: %w", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("%s at the worker: %v", step, err)
 	}
-	payload, res, err := c.ReadCollection(ctx, ref)
-	if err != nil {
-		t.Fatalf("%s: read result: %v", step, err)
-	}
-	if got := res.GetLimitations(); len(got) != 1 || got[0].GetSubject() != "00000000-0000-4000-8000-000000000000" ||
-		got[0].GetMessage() != "namespace erl-missing is not in the Kubernetes API" {
-		t.Errorf("%s: limitations %v", step, got)
-	}
-	if got := res.GetEvidence(); len(got) != 2 {
-		t.Errorf("%s: evidence %v, want the two live namespaces", step, got)
-	}
-	if err := c.Acknowledge(ctx, ref); err != nil {
-		t.Fatalf("%s: acknowledge: %v", step, err)
-	}
-	def, _ := json.Marshal(map[string]string{"label": "owner"})
-	ev, err := c.Evaluate(ctx, providerkit.EvaluateInput{PayloadVersion: 1, EvaluatorVersion: 1, Payload: payload, At: time.Now().UTC().Add(time.Second),
-		Scope: scope, Content: []*providerv1.ContentReference{{Bundle: "live", ManifestDigest: providerkit.Digest([]byte("live"))}},
-		Checks: []*providerv1.CheckDefinition{{Kind: refCheckKind, Name: "namespace-owner", Definition: def}}})
-	if err != nil {
-		t.Fatalf("%s: evaluate: %v", step, err)
+	eh := host
+	if len(evaluatorHost) > 0 {
+		eh = evaluatorHost[0]
 	}
 	got := map[string]string{}
-	for _, o := range ev.Observations {
-		got[o.GetSubject()] = o.GetState().String() + " " + o.GetOutcome().String()
+	if err := l.refCall(evaluator, evaluatorDNS, eh, func(conn *grpc.ClientConn) error {
+		c, err := providerkit.NewClient(conn, refCompat(providerv1.Capability_CAPABILITY_EVALUATE), nil)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := call()
+		defer cancel()
+		def, _ := json.Marshal(map[string]string{"label": "owner"})
+		ev, err := c.Evaluate(ctx, providerkit.EvaluateInput{PayloadVersion: 1, EvaluatorVersion: 1, Payload: payload, At: time.Now().UTC().Add(time.Second),
+			Scope: scope, Content: []*providerv1.ContentReference{{Bundle: "live", ManifestDigest: providerkit.Digest([]byte("live"))}},
+			Checks: []*providerv1.CheckDefinition{{Kind: refCheckKind, Name: "namespace-owner", Definition: def}}})
+		if err != nil {
+			return fmt.Errorf("evaluate: %w", err)
+		}
+		for _, o := range ev.Observations {
+			got[o.GetSubject()] = o.GetState().String() + " " + o.GetOutcome().String()
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("%s at the evaluator: %v", step, err)
 	}
 	want := map[string]string{
 		"erl-team-a":  "EVIDENCE_STATE_ATTRIBUTABLE OUTCOME_PASS",

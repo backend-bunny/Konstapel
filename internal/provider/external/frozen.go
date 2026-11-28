@@ -44,14 +44,20 @@ type Frozen struct {
 	PayloadVersion   int32                     `json:"payloadVersion"`
 	// Capabilities are the capabilities the revision allows, sorted.
 	Capabilities []v1alpha1.AssessmentProviderCapability `json:"capabilities"`
-	Endpoint     Endpoint                                `json:"endpoint"`
+	// Endpoint is the revision's source endpoint, which serves Collect and
+	// Scan; nil when the revision allows neither.
+	Endpoint *Endpoint `json:"endpoint,omitempty"`
+	// EvaluatorEndpoint is the revision's separate evaluator endpoint,
+	// which serves Evaluate; nil when the revision does not allow it.
+	// Evaluation never goes to Endpoint (design Decision 11).
+	EvaluatorEndpoint *Endpoint `json:"evaluatorEndpoint,omitempty"`
 }
 
-// Endpoint is a revision's endpoint configuration: the Service, the server
-// name the provider's certificate must carry, and the serverTrust
-// ConfigMap in the controller namespace whose current roots authenticate
-// it. The trust ConfigMap's contents are read at each connection, so its
-// rotation applies to frozen work too; which ConfigMap is frozen.
+// Endpoint is one endpoint of a revision: the Service, the server name the
+// provider's certificate must carry, and the serverTrust ConfigMap in the
+// controller namespace whose current roots authenticate it. The trust
+// ConfigMap's contents are read at each connection, so its rotation
+// applies to frozen work too; which ConfigMap is frozen.
 type Endpoint struct {
 	Namespace      string `json:"namespace"`
 	Service        string `json:"service"`
@@ -75,11 +81,41 @@ func (f Frozen) Allows(c v1alpha1.AssessmentProviderCapability) bool {
 	return slices.Contains(f.Capabilities, c)
 }
 
-// Compatibility is the kit expectation of the frozen identity.
-func (f Frozen) Compatibility() providerkit.Compatibility {
-	caps := make([]providerv1.Capability, 0, len(f.Capabilities))
+// EndpointRole names one of a registration's endpoints.
+type EndpointRole string
+
+const (
+	// SourceEndpoint is spec.endpoint: Collect and Scan, with their result
+	// transfer and acknowledgement.
+	SourceEndpoint EndpointRole = "source"
+	// EvaluatorEndpoint is spec.evaluatorEndpoint: Evaluate.
+	EvaluatorEndpoint EndpointRole = "evaluator"
+)
+
+// endpointCapabilities are the capabilities each endpoint serves.
+var endpointCapabilities = map[EndpointRole][]v1alpha1.AssessmentProviderCapability{
+	SourceEndpoint:    {v1alpha1.ProviderCapabilityCollect, v1alpha1.ProviderCapabilityScan},
+	EvaluatorEndpoint: {v1alpha1.ProviderCapabilityEvaluate},
+}
+
+// EndpointOf is the frozen endpoint of a role, or nil.
+func (f Frozen) EndpointOf(role EndpointRole) *Endpoint {
+	if role == EvaluatorEndpoint {
+		return f.EvaluatorEndpoint
+	}
+	return f.Endpoint
+}
+
+// Compatibility is the kit expectation of one endpoint: the frozen
+// identity and the allowed capabilities that endpoint serves. A client
+// with it sends nothing outside them, so a source endpoint's client never
+// sends Evaluate and an evaluator endpoint's client never sends Collect.
+func (f Frozen) Compatibility(role EndpointRole) providerkit.Compatibility {
+	var caps []providerv1.Capability
 	for _, c := range f.Capabilities {
-		caps = append(caps, protoCapability(c))
+		if slices.Contains(endpointCapabilities[role], c) {
+			caps = append(caps, protoCapability(c))
+		}
 	}
 	return providerkit.Compatibility{Provider: f.Provider, ContractVersion: uint32(f.ContractVersion),
 		PayloadVersion: uint32(f.PayloadVersion), EvaluatorVersion: uint32(f.EvaluatorVersion), Capabilities: caps}
@@ -90,10 +126,6 @@ func (f Frozen) Compatibility() providerkit.Compatibility {
 // serves it is what probing observes.
 func Expected(ap *v1alpha1.AssessmentProvider) Frozen {
 	s := ap.Spec
-	key := s.Endpoint.ServerTrust.Key
-	if key == "" {
-		key = DefaultTrustKey
-	}
 	caps := slices.Clone(s.Capabilities)
 	slices.Sort(caps)
 	caps = slices.Compact(caps)
@@ -102,10 +134,20 @@ func Expected(ap *v1alpha1.AssessmentProvider) Frozen {
 		Provider: s.Provider.Name, ContractVersion: s.Compatibility.ContractVersion, ReleaseDigest: s.Provider.ReleaseDigest,
 		Protocol: s.Compatibility.Protocol, ProtocolRevision: int32(providerkit.ProtocolVersion),
 		EvaluatorVersion: s.Compatibility.EvaluatorVersion, PayloadVersion: s.Compatibility.PayloadVersion,
-		Capabilities: caps,
-		Endpoint: Endpoint{Namespace: s.Endpoint.Service.Namespace, Service: s.Endpoint.Service.Name, Port: s.Endpoint.Service.Port,
-			ServerName: s.Endpoint.ServerName, TrustConfigMap: s.Endpoint.ServerTrust.Name, TrustKey: key},
+		Capabilities: caps, Endpoint: endpointOf(s.Endpoint), EvaluatorEndpoint: endpointOf(s.EvaluatorEndpoint),
 	}
+}
+
+func endpointOf(e *v1alpha1.ProviderEndpoint) *Endpoint {
+	if e == nil {
+		return nil
+	}
+	key := e.ServerTrust.Key
+	if key == "" {
+		key = DefaultTrustKey
+	}
+	return &Endpoint{Namespace: e.Service.Namespace, Service: e.Service.Name, Port: e.Service.Port,
+		ServerName: e.ServerName, TrustConfigMap: e.ServerTrust.Name, TrustKey: key}
 }
 
 // FrozenReason is a bounded reason frozen work cannot continue.
@@ -166,11 +208,12 @@ func (f Frozen) Continue(current *v1alpha1.AssessmentProvider, need v1alpha1.Ass
 	return nil
 }
 
-// CheckDescription checks a description against the frozen identity: the
-// kit's compatibility dimensions and the implementation. A compatible
-// endpoint that reports another implementation is FrozenImplementationChanged.
-func (f Frozen) CheckDescription(d *providerv1.DescribeResponse) error {
-	if err := providerkit.CheckCompatibility(f.Compatibility(), d); err != nil {
+// CheckDescription checks one endpoint's description against the frozen
+// identity: the kit's compatibility dimensions for that endpoint and the
+// implementation. A compatible endpoint that reports another
+// implementation is FrozenImplementationChanged.
+func (f Frozen) CheckDescription(role EndpointRole, d *providerv1.DescribeResponse) error {
+	if err := providerkit.CheckCompatibility(f.Compatibility(role), d); err != nil {
 		return err
 	}
 	if d.GetImplementation() != f.ReleaseDigest {

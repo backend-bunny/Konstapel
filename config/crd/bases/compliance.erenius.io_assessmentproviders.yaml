@@ -59,9 +59,16 @@ spec:
           spec:
             description: |-
               AssessmentProviderSpec is the administrator's registration. The provider
-              name, release digest and compatibility are immutable; the endpoint, trust,
-              capabilities and newRequests can change, and each change is a new
+              name, release digest and compatibility are immutable; the endpoints,
+              trust, capabilities and newRequests can change, and each change is a new
               configuration revision (metadata.generation) that only new work uses.
+
+              Collection and scans go to the source endpoint, evaluation to the
+              separate evaluator endpoint (add-external-assessment-providers design
+              Decision 11), each authenticated on its own. Registration checks the
+              identities of two Services; that their workloads are separate, and that
+              the evaluator holds no source credential or network access, is the
+              platform's installation boundary, as the release digest is.
             properties:
               capabilities:
                 description: |-
@@ -121,8 +128,100 @@ spec:
                 - protocol
                 type: object
               endpoint:
-                description: endpoint is the Service, server name and trust of the
-                  provider.
+                description: |-
+                  endpoint is the source endpoint: the Service, server name and trust
+                  of the provider's source-reading worker. Collect and Scan, with their
+                  result transfer and acknowledgement, go here and only here. Required
+                  exactly when capabilities include Collect or Scan.
+                properties:
+                  serverName:
+                    description: |-
+                      serverName is the DNS name the provider's serving certificate must
+                      carry as a DNS subject alternative name: the one server name the
+                      controller authorizes, whatever address it connects to. Common
+                      names, URIs, IP addresses and wildcard names in the certificate never
+                      match it. It is explicit, never derived from the Service, and a
+                      lowercase RFC 1123 DNS name without a wildcard, trailing dot or IP
+                      address. A URI (for example SPIFFE) server identity, if one is ever
+                      supported, will be a separate optional field; serverName stays a DNS
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: serverName must be a DNS name, not an IP address
+                      rule: '!self.matches(''^[0-9.]+$'')'
+                  serverTrust:
+                    description: |-
+                      serverTrust names the ConfigMap in the controller namespace whose PEM
+                      roots alone verify the provider's serving certificate; system roots
+                      are never used. Rotatable: replace the roots, or point at another
+                      ConfigMap.
+                    properties:
+                      key:
+                        default: ca.crt
+                        description: key is the ConfigMap data key holding PEM certificates.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      name:
+                        description: name of the object in the controller namespace.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is rejected when set; it exists so that a cross-namespace
+                          reference is an explicit API error rather than a silently dropped field.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: references resolve in the controller namespace only;
+                        namespace must not be set
+                      rule: '!has(self.__namespace__)'
+                  service:
+                    description: service is the Service in front of the provider.
+                    properties:
+                      name:
+                        description: name of the Service (a DNS-1035 label).
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        description: namespace of the Service (a DNS label).
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      port:
+                        description: port is the Service port serving the protocol.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                    required:
+                    - name
+                    - namespace
+                    - port
+                    type: object
+                required:
+                - serverName
+                - serverTrust
+                - service
+                type: object
+              evaluatorEndpoint:
+                description: |-
+                  evaluatorEndpoint is the evaluator endpoint: the Service, server name
+                  and trust of the provider's evaluator, which holds no source
+                  credential and has no source network access. Evaluate goes here and
+                  only here, never to the source endpoint. Required exactly when
+                  capabilities include Evaluate; its Service and serverName differ from
+                  endpoint's.
                 properties:
                   serverName:
                     description: |-
@@ -215,7 +314,7 @@ spec:
                 - Disabled
                 type: string
               provider:
-                description: provider is the identity the endpoint must report.
+                description: provider is the identity the endpoints must report.
                 properties:
                   name:
                     description: |-
@@ -249,7 +348,6 @@ spec:
             required:
             - capabilities
             - compatibility
-            - endpoint
             - provider
             type: object
             x-kubernetes-validations:
@@ -260,6 +358,22 @@ spec:
             - message: provider.releaseDigest is immutable; register a new release
                 as a new AssessmentProvider
               rule: self.provider.releaseDigest == oldSelf.provider.releaseDigest
+            - message: endpoint (the source endpoint) is required exactly when Collect
+                or Scan is allowed
+              rule: has(self.endpoint) == self.capabilities.exists(c, c == 'Collect'
+                || c == 'Scan')
+            - message: evaluatorEndpoint is required exactly when Evaluate is allowed;
+                evaluation never goes to the source endpoint
+              rule: has(self.evaluatorEndpoint) == ('Evaluate' in self.capabilities)
+            - message: 'evaluatorEndpoint must name another serverName than endpoint:
+                the evaluator has its own authenticated identity'
+              rule: '!has(self.endpoint) || !has(self.evaluatorEndpoint) || self.endpoint.serverName
+                != self.evaluatorEndpoint.serverName'
+            - message: 'evaluatorEndpoint must name another Service than endpoint:
+                the evaluator runs behind its own Service'
+              rule: '!has(self.endpoint) || !has(self.evaluatorEndpoint) || self.endpoint.service.__namespace__
+                != self.evaluatorEndpoint.service.__namespace__ || self.endpoint.service.name
+                != self.evaluatorEndpoint.service.name'
           status:
             description: |-
               AssessmentProviderStatus is written only by the Konstapel controller

@@ -150,20 +150,37 @@ type Connection struct {
 // Close closes the connection.
 func (c *Connection) Close() error { return c.conn.Close() }
 
-// Connect reaches f's endpoint: it reads the current roots of f's trust
-// ConfigMap and the controller's current credentials, authenticates the
-// server as f's server name over mutual TLS 1.3, describes it within ctx's
-// deadline, and checks the description against f, its implementation
-// included. Nothing is sent before the server is authenticated. Every
+// Connect reaches f's source endpoint (Collect and Scan); ConnectEvaluator
+// reaches its evaluator endpoint (Evaluate). Each reads the current roots
+// of that endpoint's trust ConfigMap and the controller's current
+// credentials, authenticates the server as that endpoint's server name
+// over mutual TLS 1.3, describes it within ctx's deadline, and checks the
+// description against f for that endpoint, its implementation included.
+// The connection's client allows only that endpoint's capabilities: a
+// source connection never sends Evaluate, an evaluator connection never
+// sends Collect. Nothing is sent before the server is authenticated. Every
 // failure is a *Problem; no fallback weakens a check.
 func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
+	return d.connect(ctx, f, SourceEndpoint)
+}
+
+// ConnectEvaluator reaches f's evaluator endpoint; see Connect.
+func (d *Dialer) ConnectEvaluator(ctx context.Context, f Frozen) (*Connection, error) {
+	return d.connect(ctx, f, EvaluatorEndpoint)
+}
+
+func (d *Dialer) connect(ctx context.Context, f Frozen, role EndpointRole) (*Connection, error) {
+	ep := f.EndpointOf(role)
+	if ep == nil {
+		return nil, unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "revision %d of registration %s has no %s endpoint", f.Revision, f.Registration, role)
+	}
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "connecting needs a deadline")
 	}
 	if d.Trust == nil {
 		return nil, unavailable(v1alpha1.ProviderReasonTrustUnavailable, "no trust reader is configured")
 	}
-	trust, err := d.Trust(ctx, f.Endpoint.TrustConfigMap, f.Endpoint.TrustKey)
+	trust, err := d.Trust(ctx, ep.TrustConfigMap, ep.TrustKey)
 	if err != nil {
 		return nil, unavailable(v1alpha1.ProviderReasonTrustUnavailable, "%s", bound(err.Error(), 512))
 	}
@@ -171,7 +188,7 @@ func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
 	if err != nil {
 		return nil, unavailable(v1alpha1.ProviderReasonClientCredentialsUnavailable, "%s", bound(err.Error(), 512))
 	}
-	m, err := providerkit.NewClientTLSFrom(material{cert: cert, key: key, trust: trust}, f.Endpoint.ServerName)
+	m, err := providerkit.NewClientTLSFrom(material{cert: cert, key: key, trust: trust}, ep.ServerName)
 	if err != nil {
 		// The kit names the trust bundle in every trust problem; any other
 		// material problem is the controller's own certificate or key.
@@ -185,9 +202,9 @@ func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
 	if err != nil {
 		return nil, unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s", bound(err.Error(), 512))
 	}
-	addr := f.Endpoint.Address()
+	addr := ep.Address()
 	if d.Address != nil {
-		addr = d.Address(f.Endpoint)
+		addr = d.Address(*ep)
 	}
 	var seen dialed
 	opts = append(opts, grpc.WithContextDialer(seen.dial), grpc.WithChainUnaryInterceptor(seen.intercept))
@@ -195,7 +212,7 @@ func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
 	if err != nil {
 		return nil, unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s", bound(err.Error(), 512))
 	}
-	client, err := providerkit.NewClient(conn, f.Compatibility(), d.Limits.Protocol)
+	client, err := providerkit.NewClient(conn, f.Compatibility(role), d.Limits.Protocol)
 	if err != nil {
 		// The API validates registrations; this is the host's own check.
 		_ = conn.Close()
@@ -208,13 +225,13 @@ func (d *Dialer) Connect(ctx context.Context, f Frozen) (*Connection, error) {
 	}
 	if err != nil {
 		_ = conn.Close()
-		return nil, classify(ctx, err, f, &seen)
+		return nil, classify(ctx, err, *ep, &seen)
 	}
 	return &Connection{Client: client, Description: desc, conn: conn}, nil
 }
 
 // classify turns a Describe failure into a Problem.
-func classify(ctx context.Context, err error, f Frozen, seen *dialed) *Problem {
+func classify(ctx context.Context, err error, ep Endpoint, seen *dialed) *Problem {
 	var fe *FrozenError
 	if errors.As(err, &fe) {
 		p := incompatible(v1alpha1.ProviderReasonReleaseMismatch, "%s", fe.Message)
@@ -240,7 +257,7 @@ func classify(ctx context.Context, err error, f Frozen, seen *dialed) *Problem {
 	case providerv1.ErrorReason_ERROR_REASON_UNSPECIFIED:
 		// A transport failure: no protocol answer at all.
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			return unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s did not answer within the deadline", f.Endpoint.Address())
+			return unavailable(v1alpha1.ProviderReasonEndpointUnavailable, "%s did not answer within the deadline", ep.Address())
 		}
 		if code := seen.code(); code == codes.Unauthenticated || (code == codes.Unavailable && seen.answered()) {
 			// The endpoint answered, but no mutually authenticated TLS 1.3

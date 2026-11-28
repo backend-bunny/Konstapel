@@ -1,7 +1,9 @@
 // Package host is the quickstart's stand-in for the Konstapel controller: it
 // dials a provider over mutual TLS and drives one reporting assessment
 // through the public kit's Client, Describe, Collect, ReadResult,
-// Acknowledge and Evaluate, the way the host does.
+// Acknowledge and Evaluate, the way the host does. Like the host, it
+// collects at the source endpoint and evaluates at the evaluator endpoint;
+// the quickstart's single process is both.
 package host
 
 import (
@@ -17,15 +19,27 @@ import (
 	"github.com/backend-bunny/Konstapel/pkg/providerkit"
 )
 
-// Expect is what the quickstart's "registration" expects of the endpoint.
-// Each field is checked separately against Describe.
-var Expect = providerkit.Compatibility{
-	Provider:         "example-reporting",
-	ContractVersion:  1,
-	PayloadVersion:   1,
-	EvaluatorVersion: 1,
-	Capabilities:     []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT, providerv1.Capability_CAPABILITY_EVALUATE},
-}
+// Expect is what the quickstart's "registration" expects of the source
+// endpoint, and EvaluatorExpect of the evaluator endpoint. Each field is
+// checked separately against that endpoint's Describe, and each client
+// sends nothing outside its capability: evaluation never goes to the
+// source endpoint.
+var (
+	Expect = providerkit.Compatibility{
+		Provider:         "example-reporting",
+		ContractVersion:  1,
+		PayloadVersion:   1,
+		EvaluatorVersion: 1,
+		Capabilities:     []providerv1.Capability{providerv1.Capability_CAPABILITY_COLLECT},
+	}
+	EvaluatorExpect = providerkit.Compatibility{
+		Provider:         "example-reporting",
+		ContractVersion:  1,
+		PayloadVersion:   1,
+		EvaluatorVersion: 1,
+		Capabilities:     []providerv1.Capability{providerv1.Capability_CAPABILITY_EVALUATE},
+	}
+)
 
 // Scope is the frozen scope the quickstart assesses. team-c is not in the
 // provider's synthetic source, so its evidence is missing.
@@ -80,9 +94,15 @@ type Report struct {
 // Timeout is each call's deadline. Every protocol call must carry one.
 const Timeout = 10 * time.Second
 
-// Run drives one assessment over conn and prints each step to out.
-func Run(ctx context.Context, conn grpc.ClientConnInterface, out io.Writer) (*Report, error) {
-	client, err := providerkit.NewClient(conn, Expect, nil)
+// Run drives one assessment, collecting over source and evaluating over
+// evaluator (the same connection for the quickstart's single process), and
+// prints each step to out.
+func Run(ctx context.Context, source, evaluator grpc.ClientConnInterface, out io.Writer) (*Report, error) {
+	client, err := providerkit.NewClient(source, Expect, nil)
+	if err != nil {
+		return nil, err
+	}
+	evaluatorClient, err := providerkit.NewClient(evaluator, EvaluatorExpect, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +161,7 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, out io.Writer) (*Re
 
 	def, _ := json.Marshal(map[string]string{"label": "owner"})
 	cctx, cancel = call()
-	ev, err := client.Evaluate(cctx, providerkit.EvaluateInput{
+	ev, err := evaluatorClient.Evaluate(cctx, providerkit.EvaluateInput{
 		PayloadVersion:   Expect.PayloadVersion,
 		EvaluatorVersion: Expect.EvaluatorVersion,
 		Payload:          r.Payload,

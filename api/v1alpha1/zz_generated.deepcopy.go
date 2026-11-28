@@ -88,7 +88,16 @@ func (in *AssessmentProviderList) DeepCopyObject() runtime.Object {
 func (in *AssessmentProviderSpec) DeepCopyInto(out *AssessmentProviderSpec) {
 	*out = *in
 	out.Provider = in.Provider
-	out.Endpoint = in.Endpoint
+	if in.Endpoint != nil {
+		in, out := &in.Endpoint, &out.Endpoint
+		*out = new(ProviderEndpoint)
+		**out = **in
+	}
+	if in.EvaluatorEndpoint != nil {
+		in, out := &in.EvaluatorEndpoint, &out.EvaluatorEndpoint
+		*out = new(ProviderEndpoint)
+		**out = **in
+	}
 	out.Compatibility = in.Compatibility
 	if in.Capabilities != nil {
 		in, out := &in.Capabilities, &out.Capabilities

@@ -92,10 +92,10 @@ type ProviderServiceReference struct {
 	Port int32 `json:"port"`
 }
 
-// ProviderEndpoint is where and how the controller reaches the provider:
-// mutual TLS to the Service, with an explicit server name and trust. No
-// assessment payload is sent before the server is authenticated, TLS
-// verification is never disabled, and there is no plaintext mode.
+// ProviderEndpoint is where and how the controller reaches one endpoint of
+// the provider: mutual TLS to the Service, with an explicit server name and
+// trust. No assessment payload is sent before the server is authenticated,
+// TLS verification is never disabled, and there is no plaintext mode.
 type ProviderEndpoint struct {
 	// service is the Service in front of the provider.
 	// +required
@@ -180,19 +180,42 @@ type ProviderCompatibility struct {
 }
 
 // AssessmentProviderSpec is the administrator's registration. The provider
-// name, release digest and compatibility are immutable; the endpoint, trust,
-// capabilities and newRequests can change, and each change is a new
+// name, release digest and compatibility are immutable; the endpoints,
+// trust, capabilities and newRequests can change, and each change is a new
 // configuration revision (metadata.generation) that only new work uses.
+//
+// Collection and scans go to the source endpoint, evaluation to the
+// separate evaluator endpoint (add-external-assessment-providers design
+// Decision 11), each authenticated on its own. Registration checks the
+// identities of two Services; that their workloads are separate, and that
+// the evaluator holds no source credential or network access, is the
+// platform's installation boundary, as the release digest is.
 // +kubebuilder:validation:XValidation:rule="self.provider.name == oldSelf.provider.name && self.compatibility == oldSelf.compatibility",message="provider.name and compatibility are immutable; register an incompatible release as a new AssessmentProvider"
 // +kubebuilder:validation:XValidation:rule="self.provider.releaseDigest == oldSelf.provider.releaseDigest",message="provider.releaseDigest is immutable; register a new release as a new AssessmentProvider"
+// +kubebuilder:validation:XValidation:rule="has(self.endpoint) == self.capabilities.exists(c, c == 'Collect' || c == 'Scan')",message="endpoint (the source endpoint) is required exactly when Collect or Scan is allowed"
+// +kubebuilder:validation:XValidation:rule="has(self.evaluatorEndpoint) == ('Evaluate' in self.capabilities)",message="evaluatorEndpoint is required exactly when Evaluate is allowed; evaluation never goes to the source endpoint"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || !has(self.evaluatorEndpoint) || self.endpoint.serverName != self.evaluatorEndpoint.serverName",message="evaluatorEndpoint must name another serverName than endpoint: the evaluator has its own authenticated identity"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || !has(self.evaluatorEndpoint) || self.endpoint.service.__namespace__ != self.evaluatorEndpoint.service.__namespace__ || self.endpoint.service.name != self.evaluatorEndpoint.service.name",message="evaluatorEndpoint must name another Service than endpoint: the evaluator runs behind its own Service"
 type AssessmentProviderSpec struct {
-	// provider is the identity the endpoint must report.
+	// provider is the identity the endpoints must report.
 	// +required
 	Provider ExpectedProvider `json:"provider"`
 
-	// endpoint is the Service, server name and trust of the provider.
-	// +required
-	Endpoint ProviderEndpoint `json:"endpoint"`
+	// endpoint is the source endpoint: the Service, server name and trust
+	// of the provider's source-reading worker. Collect and Scan, with their
+	// result transfer and acknowledgement, go here and only here. Required
+	// exactly when capabilities include Collect or Scan.
+	// +optional
+	Endpoint *ProviderEndpoint `json:"endpoint,omitempty"`
+
+	// evaluatorEndpoint is the evaluator endpoint: the Service, server name
+	// and trust of the provider's evaluator, which holds no source
+	// credential and has no source network access. Evaluate goes here and
+	// only here, never to the source endpoint. Required exactly when
+	// capabilities include Evaluate; its Service and serverName differ from
+	// endpoint's.
+	// +optional
+	EvaluatorEndpoint *ProviderEndpoint `json:"evaluatorEndpoint,omitempty"`
 
 	// compatibility is the protocol, contract, evaluator and payload the
 	// endpoint must serve. Immutable.
@@ -269,15 +292,18 @@ type ObservedProviderIdentity struct {
 // availability and compatibility, never an assessment's findings, and their
 // messages never carry credentials, keys or certificate contents.
 const (
-	// ProviderConditionAvailable is True when the controller reached the
-	// Service, authenticated the provider over mutual TLS with the
-	// registration's server name and trust, and the endpoint described
-	// itself within the probe deadline.
+	// ProviderConditionAvailable is True when the controller reached each
+	// of the registration's endpoints (the source endpoint and the
+	// evaluator endpoint), authenticated each over mutual TLS with its own
+	// server name and trust, and each described itself within the probe
+	// deadline. A failing endpoint is named in the message.
 	ProviderConditionAvailable = "Available"
-	// ProviderConditionCompatible is True when the description matches the
-	// registration in every dimension: provider name, release digest,
-	// protocol, contract, evaluator and payload versions and the allowed
-	// capabilities. It is Unknown while the endpoint is not available.
+	// ProviderConditionCompatible is True when each endpoint's description
+	// matches the registration in every dimension: provider name, release
+	// digest, protocol, contract, evaluator and payload versions, and the
+	// allowed capabilities of that endpoint (Collect and Scan at the source
+	// endpoint, Evaluate at the evaluator endpoint). It is Unknown while an
+	// endpoint is not available.
 	ProviderConditionCompatible = "Compatible"
 	// ProviderConditionReady is True when new work may select the
 	// registration: it is available, compatible, newRequests is Enabled and

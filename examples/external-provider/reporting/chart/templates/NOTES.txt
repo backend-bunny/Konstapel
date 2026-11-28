@@ -1,10 +1,11 @@
 The example reporting provider (test/demo only, not supported) is installed:
 
-  worker (register this endpoint): {{ include "reporting.worker" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}
-  evaluator (reached by the worker): {{ include "reporting.evaluator" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}
+  worker (spec.endpoint: Collect): {{ include "reporting.worker" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}
+  evaluator (spec.evaluatorEndpoint: Evaluate): {{ include "reporting.evaluator" . }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.protocol }}, serverName {{ include "reporting.evaluatorServerName" . }}
   release digest both report: {{ .Values.image.digest }}
 
 Nothing was registered. A Konstapel administrator registers the provider with
-an AssessmentProvider naming example-reporting, that release digest, the
+an AssessmentProvider naming example-reporting and that release digest, the
 worker Service and the serverName of {{ include "reporting.workerSecret" . }}
-(docs/integration/external-provider-chart.md).
+as spec.endpoint, and the evaluator Service and serverName as
+spec.evaluatorEndpoint (docs/integration/external-provider-chart.md).

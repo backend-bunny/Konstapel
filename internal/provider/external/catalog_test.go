@@ -255,8 +255,13 @@ func TestCatalogProvidersAreIndependent(t *testing.T) {
 
 func equalFrozen(a, b external.Frozen) bool {
 	return a.Registration == b.Registration && a.UID == b.UID && a.Revision == b.Revision && a.Contract() == b.Contract() &&
-		a.ReleaseDigest == b.ReleaseDigest && a.Endpoint == b.Endpoint && slices.Equal(a.Capabilities, b.Capabilities) &&
+		a.ReleaseDigest == b.ReleaseDigest && equalEndpoint(a.Endpoint, b.Endpoint) && equalEndpoint(a.EvaluatorEndpoint, b.EvaluatorEndpoint) &&
+		slices.Equal(a.Capabilities, b.Capabilities) &&
 		a.EvaluatorVersion == b.EvaluatorVersion && a.PayloadVersion == b.PayloadVersion && a.Protocol == b.Protocol && a.ProtocolRevision == b.ProtocolRevision
+}
+
+func equalEndpoint(a, b *external.Endpoint) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 // A registration being deleted is not selected for new work.
