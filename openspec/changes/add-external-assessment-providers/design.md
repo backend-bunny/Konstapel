@@ -122,12 +122,14 @@ group 6 (owner decision 2026-11-27): the same signed bundle payload, verificatio
 and closure as every other provider, with compatibility judged against the
 selectable contracts through the same `Registry.Select` gating the targeting
 resolver uses, the external `Catalog` contributing registered contracts. This
-change defines no content format or allowlist of its own. Because
-`content.Compatibility.Revision()` covers the provider allowlist and is part of
-every bundle acceptance key, feeding registrations into it would force
-re-acceptance of every bundle on registration changes; how to avoid that is an
-open question recorded in that change's Decision 8, and registered contracts are
-not fed into the allowlist before it is answered.
+change defines no content format or allowlist of its own. By owner decision
+2026-11-28 (that change's Decision 8, option a), registered contracts are
+validated during selection and are not part of any bundle acceptance key:
+registration changes requeue the bindings whose content names that provider and
+never cause a bundle to be verified again. A registered provider's check kinds
+and parameter schemas come from its endpoint's description of the frozen
+release; they are checked against the run's definitions when work is
+dispatched (3.1), never reused for another release.
 
 Transfer only authorized scope; source-specific extraction happens in the
 provider, with host validation before summaries, package export or diagnostics.
@@ -228,9 +230,9 @@ detect a missing workload.
 The host builds the inventory at run start from targeting, the listed
 workloads and the reporting-only check definitions of the shared content
 extension (provider-contract group 6). Which resources each check expects
-evidence for must come from that content, never from provider reports.
-Group 6's tasks do not yet say that its check definitions carry it, so 3.1
-depends on that change adding it (an open item for the content owner). The
+evidence for must come from that content, never from provider reports: each
+check definition declares them as `spec.resources` (that change's Decision 8,
+reconciled 2026-11-28). The
 derivation is wiring (task 3.1); the collection seam takes the inventory as
 input. The inventory travels in the Collect request, so one
 message bound applies. An inventory larger than the negotiated bounds is not
