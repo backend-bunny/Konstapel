@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1200,7 +1201,8 @@ func TestCallsNeedDeadlines(t *testing.T) {
 }
 
 func TestHandshakeTimeoutClosesStalledConnections(t *testing.T) {
-	f := newFixture(t, TransportLimits{HandshakeTimeout: 300 * time.Millisecond})
+	const bound = 300 * time.Millisecond
+	f := newFixture(t, TransportLimits{HandshakeTimeout: bound})
 	hello := clientHello(t)
 	for name, send := range map[string]func(net.Conn){
 		"silent": func(net.Conn) {},
@@ -1224,14 +1226,26 @@ func TestHandshakeTimeoutClosesStalledConnections(t *testing.T) {
 			start := time.Now()
 			send(c)
 			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-			_, err = io.Copy(io.Discard, c)
-			if elapsed := time.Since(start); err != nil || elapsed > 2*time.Second {
-				t.Fatalf("connection closed after %s (%v); want the 300ms handshake bound", elapsed, err)
+			n, err := io.Copy(io.Discard, c)
+			elapsed := time.Since(start)
+			// The server closes with a FIN, or with a RST when trickled
+			// bytes are still unread or arrive after the close; either
+			// way the connection ended. A read deadline is not a close.
+			if !connectionClosed(err) || elapsed > 2*time.Second {
+				t.Fatalf("connection closed after %s (%v); want the %s handshake bound", elapsed, err, bound)
+			}
+			// The server's deadline starts at accept, which follows the
+			// dial; the margin covers clock granularity only.
+			if elapsed < bound-50*time.Millisecond {
+				t.Fatalf("connection closed after %s, before the %s handshake bound", elapsed, bound)
+			}
+			if n != 0 {
+				t.Fatalf("the server sent %d bytes before the handshake", n)
+			}
+			if f.srv.calls.Load() != 0 {
+				t.Fatal("a stalled connection reached the provider")
 			}
 		})
-	}
-	if f.srv.calls.Load() != 0 {
-		t.Fatal("a stalled connection reached the provider")
 	}
 	t.Run("client", func(t *testing.T) {
 		// A server that accepts and never answers holds the host for
@@ -1258,6 +1272,14 @@ func TestHandshakeTimeoutClosesStalledConnections(t *testing.T) {
 			t.Fatalf("the call waited %s for a silent server", elapsed)
 		}
 	})
+}
+
+// connectionClosed reports whether a read's error means the peer
+// closed the connection: an orderly EOF (io.Copy reports nil), a reset,
+// a broken pipe, or a closed socket. A timeout is not a close.
+func connectionClosed(err error) bool {
+	return err == nil || errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed)
 }
 
 // clientHello captures a TLS 1.3 ClientHello's bytes.
