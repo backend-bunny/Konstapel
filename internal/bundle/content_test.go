@@ -54,7 +54,7 @@ func TestContentRejections(t *testing.T) {
 		mutate func(*Descriptor, fstest.MapFS)
 		want   string
 	}{
-		"other provider":         {func(d *Descriptor, f fstest.MapFS) { d.Compatibility.Provider = "evil-exec/v1" }, "only \"konstapel-kyverno/v1\""},
+		"other provider":         {func(d *Descriptor, f fstest.MapFS) { d.Compatibility.Provider = "evil-exec/v1" }, "is engine policy content; under evil-exec/v1"},
 		"unknown schema version": {func(d *Descriptor, f fstest.MapFS) { d.OSCAL[0].Version = "1.9.0" }, "is not in the archive"},
 		"declared version differs from document": {func(d *Descriptor, f fstest.MapFS) {
 			d.OSCAL[1].Version = "1.1.3" // the catalog is 1.2.3
