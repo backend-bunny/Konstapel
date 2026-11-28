@@ -13,8 +13,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/backend-bunny/Konstapel/internal/provider/projection"
+	"github.com/backend-bunny/Konstapel/internal/publication"
 )
 
 // ErrNamespaceProjection marks a capture that has no namespace projection:
@@ -136,6 +138,48 @@ func validateNamespaceV2(c CaptureV2, ns projection.Scope) error {
 	}
 	if p := c.Projection; p.NamespaceUID != ns.UID || ns.Name != "" && p.Namespace != ns.Name {
 		return fmt.Errorf("%w: the projection is to another namespace than its scope", projection.ErrDisclosure)
+	}
+	return nil
+}
+
+// namespaceDiagnostics are the only diagnostic texts a namespace package
+// carries, one per stable reason code (owner decision 2026-11-27). A
+// content failure's own message names the binding's bundles, digests and
+// subjects and wraps raw registry, engine and schema errors, so it stays on
+// the platform-scoped run and its binding package.
+var namespaceDiagnostics = map[string]string{
+	ReasonContentUnavailable:  "the run's assessment content was unavailable, so no assessment results were produced",
+	ReasonContentLost:         "the run's frozen assessment content was lost before export, so no assessment results were produced",
+	ReasonContentIncompatible: "the run's assessment content cannot be exported by this controller, so no assessment results were produced",
+	ReasonContentMismatch:     "the run's assessment content does not match its evidence, so no assessment results were produced",
+	ReasonExportFailed:        "the evidence package could not be produced",
+}
+
+// ReasonExportFailed is the diagnostic reason of an export that failed for
+// any reason but content.
+const ReasonExportFailed = "ExportFailed"
+
+// NamespaceDiagnostic is the diagnostic a namespace package records for a
+// failure with reason: the reason when it is one of the stable codes
+// (ReasonExportFailed otherwise) and that code's fixed text, never the
+// failure's own message.
+func NamespaceDiagnostic(reason string) *publication.Diagnostic {
+	if _, ok := namespaceDiagnostics[reason]; !ok {
+		reason = ReasonExportFailed
+	}
+	return &publication.Diagnostic{Reason: reason, MissingExports: []publication.FileRole{publication.RoleAssessmentResults}, Message: namespaceDiagnostics[reason]}
+}
+
+// ValidateNamespaceDiagnostic checks that a namespace package's diagnostic,
+// if it has one, is exactly NamespaceDiagnostic of its reason. The refusal
+// never repeats the diagnostic's text.
+func ValidateNamespaceDiagnostic(d *publication.Diagnostic) error {
+	if d == nil {
+		return nil
+	}
+	want := NamespaceDiagnostic(d.Reason)
+	if d.Reason != want.Reason || d.Message != want.Message || !slices.Equal(d.MissingExports, want.MissingExports) {
+		return fmt.Errorf("%w: the diagnostic is not the fixed text of a stable reason", projection.ErrDisclosure)
 	}
 	return nil
 }

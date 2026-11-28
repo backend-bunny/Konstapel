@@ -24,6 +24,26 @@ func ExportedPackage(t *testing.T) (string, publication.Descriptor) {
 // capture.
 func NamespacePackage(t *testing.T) (string, publication.Descriptor) {
 	t.Helper()
+	dir, d := namespacePackage(t, nil)
+	if d.PackageKind != publication.KindAssessment {
+		t.Fatalf("%+v", d.Diagnostic)
+	}
+	return dir, d
+}
+
+// NamespaceDiagnosticPackage is a namespace-scope Diagnostic package of a
+// projected capture whose run content failed with failure.
+func NamespaceDiagnosticPackage(t *testing.T, failure *ContentFailure) (string, publication.Descriptor) {
+	t.Helper()
+	dir, d := namespacePackage(t, &RunContent{Failure: failure})
+	if d.PackageKind != publication.KindDiagnostic {
+		t.Fatalf("not a diagnostic package: %+v", d)
+	}
+	return dir, d
+}
+
+func namespacePackage(t *testing.T, content *RunContent) (string, publication.Descriptor) {
+	t.Helper()
 	c, _ := mixedCapture(t)
 	p, err := Project(c, "uid-shop-dev")
 	if err != nil {
@@ -34,10 +54,10 @@ func NamespacePackage(t *testing.T) (string, publication.Descriptor) {
 		Scope: publication.Scope{Kind: publication.ScopeNamespace, ClusterID: run.ClusterID, BindingUID: run.BindingUID,
 			Request:       &publication.RequestRef{Namespace: "shop-dev", Name: "r", UID: "req-1", NamespaceUID: "uid-shop-dev"},
 			NamespaceUIDs: []string{"uid-shop-dev"}, Revision: "s"},
-		Capture: p, Evaluation: evaluate(t, p, nil, maxAge)}
+		Capture: p, Evaluation: evaluate(t, p, nil, maxAge), Content: content}
 	d, err := Export(context.Background(), req)
-	if err != nil || d.PackageKind != publication.KindAssessment {
-		t.Fatalf("%v %+v", err, d.Diagnostic)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return req.Out, d
 }

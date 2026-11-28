@@ -17,17 +17,22 @@ import (
 
 const sibling = "SIBLING-SECRET"
 
-// mixedCapture has one report holding results for shop-dev and shop-prod,
-// a result spanning both namespaces, and a result without resource identity.
+// mixedCapture has one shop-dev report holding results for shop-dev and
+// shop-prod, a result spanning both namespaces, and a result without
+// resource identity.
 func mixedCapture(t *testing.T) (CaptureV2, Expected) {
 	c := freshCapture(t)
 	at := c.Window.Started.Add(time.Minute)
 	var dev, prod Expected
 	for _, e := range c.Expected {
-		switch e.NamespaceUID {
-		case "uid-shop-dev":
+		if e.NamespaceUID == "uid-shop-dev" {
 			dev = e
-		case "uid-shop-prod":
+		}
+	}
+	// prod's check is not dev's, so a result that also names dev's
+	// workload is no evidence of dev's check.
+	for _, e := range c.Expected {
+		if e.NamespaceUID == "uid-shop-prod" && e.Check.EnginePolicy != dev.Check.EnginePolicy {
 			prod = e
 		}
 	}
@@ -41,13 +46,13 @@ func mixedCapture(t *testing.T) (CaptureV2, Expected) {
 	both["message"] = sibling + " shared finding"
 	both["resources"] = []any{
 		assessment.Object{"apiVersion": "v1", "kind": "Pod", "namespace": "shop-prod", "name": "web", "uid": prod.Workload.UID},
-		assessment.Object{"apiVersion": "v1", "kind": "Pod", "namespace": "shop-dev", "name": "other", "uid": "pod-dev-other"},
+		assessment.Object{"apiVersion": "v1", "kind": "Pod", "namespace": "shop-dev", "name": "web", "uid": dev.Workload.UID},
 	}
 	opaque := result(dev.Check.EnginePolicy, dev.Check.Index, dev.Workload.UID, "fail", at)
 	opaque["resources"] = []any{assessment.Object{"name": "web"}} // no namespace or UID
 	opaque["message"] = sibling + " unattributable"
-	report := assessment.Object{"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "ClusterPolicyReport",
-		"metadata": assessment.Object{"uid": "mixed-report", "labels": assessment.Object{"team": sibling}},
+	report := assessment.Object{"apiVersion": "wgpolicyk8s.io/v1alpha2", "kind": "PolicyReport",
+		"metadata": assessment.Object{"uid": "mixed-report", "namespace": "shop-dev", "labels": assessment.Object{"team": sibling}},
 		"summary":  assessment.Object{"fail": 2, "note": sibling},
 		"results":  []any{prodRes, devRes, both, opaque}}
 	devRes["annotations"] = assessment.Object{"leak": sibling}
@@ -70,7 +75,7 @@ func TestProjectionExcludesSiblingData(t *testing.T) {
 	if err := ValidateProjection(p); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Subjects) != 1 || len(p.Expected) != 1 || len(p.Workloads) != 1 || p.Projection.Extracts != 2 || p.Projection.WithheldTotal != 1 {
+	if len(p.Subjects) != 1 || len(p.Expected) != 1 || len(p.Workloads) != 1 || p.Projection.Extracts != 2 || p.Projection.SourceReports != 0 || p.Projection.WithheldTotal != 0 || p.Projection.Withheld != nil {
 		t.Fatalf("projection %+v subjects %d expected %d", p.Projection, len(p.Subjects), len(p.Expected))
 	}
 	results := p.Reports[0]["results"].([]any)
@@ -84,7 +89,7 @@ func TestProjectionExcludesSiblingData(t *testing.T) {
 	if src := assessment.Map(filtered[SourceField]); src["transformation"] != TransformResourceFiltered || src["resultIndex"] != 2 || filtered["message"] != nil {
 		t.Fatalf("filtered extract %v", filtered)
 	}
-	if refs := filtered["resources"].([]any); len(refs) != 1 || assessment.Map(refs[0])["uid"] != "pod-dev-other" {
+	if refs := filtered["resources"].([]any); len(refs) != 1 || assessment.Map(refs[0])["uid"] != dev.Workload.UID {
 		t.Fatalf("filtered extract kept %v", refs)
 	}
 	// The team's evidence stays attributable and traces to the source index.

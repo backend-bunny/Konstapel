@@ -672,6 +672,24 @@ func ValidatePackage(dir string) (publication.Descriptor, error) {
 		if err := collector.ValidateProjectedEvaluation(c, ev); err != nil {
 			return d, fmt.Errorf("namespace scope: %w", err)
 		}
+		// A namespace diagnostic is the fixed text of its stable reason,
+		// in the descriptor and in diagnostic.json alike.
+		if err := collector.ValidateNamespaceDiagnostic(d.Diagnostic); err != nil {
+			return d, fmt.Errorf("namespace scope: %w", err)
+		}
+		if d.PackageKind == publication.KindDiagnostic {
+			var file publication.Diagnostic
+			raw, err := os.ReadFile(filepath.Join(dir, "diagnostic.json"))
+			if err == nil {
+				err = json.Unmarshal(raw, &file)
+			}
+			if err != nil {
+				return d, fmt.Errorf("namespace scope: diagnostic: %w", err)
+			}
+			if err := collector.ValidateNamespaceDiagnostic(&file); err != nil {
+				return d, fmt.Errorf("namespace scope: diagnostic.json: %w", err)
+			}
+		}
 	}
 	return d, nil
 }

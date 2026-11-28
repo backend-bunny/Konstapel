@@ -53,7 +53,7 @@ func projectedDev(t *testing.T) (CaptureV2, CaptureV2) {
 	w.StateSHA256 = "changed"
 	tr.Workload(at, w, false)
 	np := Projection{Namespace: p.Projection.Namespace, NamespaceUID: p.Projection.NamespaceUID}
-	p.Reports = ProjectReports(c.Reports, &np)
+	p.Reports = ProjectReports(c.Reports, p.Workloads, &np)
 	p.Projection = &np
 	return c, p
 }
@@ -114,6 +114,19 @@ func TestValidateProjectionRefusesEveryLeak(t *testing.T) {
 	src := func(c *CaptureV2) map[string]any { return res(c, 0)[SourceField].(map[string]any) }
 	ref := func(c *CaptureV2) map[string]any { return res(c, 0)["resources"].([]any)[0].(map[string]any) }
 	sibWorkload := Workload{Resource: "/v1/pods", Namespace: "shop-prod", NamespaceUID: "uid-shop-prod", Name: "web", UID: "pod-prod"}
+	// seal gives the first result a sealed source, as a foreign report's.
+	seal := func(c *CaptureV2) {
+		sealed := sealedSource("mixed-report", "uid-shop-dev")
+		rep(c)["metadata"].(map[string]any)["uid"] = sealed
+		for _, r := range rep(c)["results"].([]any) {
+			r.(map[string]any)[SourceField] = map[string]any{"report": sealed, "transformation": r.(map[string]any)[SourceField].(map[string]any)["transformation"]}
+		}
+	}
+	sealed := roundTrip(t, base)
+	seal(&sealed)
+	if err := ValidateProjection(sealed); err != nil {
+		t.Fatalf("a sealed source's extract is refused: %v", err)
+	}
 	for name, mutate := range map[string]func(*CaptureV2){
 		// Source report fields.
 		"report summary": func(c *CaptureV2) { rep(c)["summary"] = map[string]any{"fail": 2, "note": sibling} },
@@ -221,9 +234,33 @@ func TestValidateProjectionRefusesEveryLeak(t *testing.T) {
 			w := sibWorkload
 			c.ScopeChanges = append(c.ScopeChanges, ScopeChange{Kind: WorkloadReplaced, Namespace: "shop-dev", NamespaceUID: "uid-shop-dev", Previous: &c.Workloads[0], Current: &w})
 		},
-		// Withheld results.
-		"withheld text":  func(c *CaptureV2) { c.Projection.Withheld[0].Reason = sibling + " privileged" },
-		"withheld count": func(c *CaptureV2) { c.Projection.WithheldTotal = 0 },
+		// Sibling report counts and metadata (owner decision 2026-11-27).
+		"sibling report count": func(c *CaptureV2) { c.Projection.SourceReports = 2 },
+		"withheld sibling result": func(c *CaptureV2) {
+			c.Projection.Withheld = []Withheld{{Report: "sibling-report", Index: 3, Reason: "result resources lack namespace or UID; scope cannot be established"}}
+			c.Projection.WithheldTotal = 1
+		},
+		"withheld count": func(c *CaptureV2) { c.Projection.WithheldTotal = 4 },
+		"extract count":  func(c *CaptureV2) { c.Projection.Extracts = 5 },
+		"whole report":   func(c *CaptureV2) { c.Reports[0] = wholeReport(t) },
+		// Attribution by the frozen identities, never by name alone.
+		"reference of unfrozen workload":  func(c *CaptureV2) { ref(c)["uid"] = "pod-dev-unfrozen" },
+		"sibling workload under own name": func(c *CaptureV2) { ref(c)["uid"] = "pod-prod" },
+		// Sealed provenance names nothing else of its source.
+		"sealed provenance with digest": func(c *CaptureV2) {
+			seal(c)
+			src(c)["reportSha256"] = "0000"
+		},
+		"sealed provenance with index": func(c *CaptureV2) {
+			seal(c)
+			src(c)["resultIndex"] = 1
+		},
+		"malformed seal": func(c *CaptureV2) {
+			rep(c)["metadata"].(map[string]any)["uid"] = SealedSourcePrefix + sibling
+			for _, r := range rep(c)["results"].([]any) {
+				r.(map[string]any)[SourceField] = map[string]any{"report": SealedSourcePrefix + sibling, "transformation": TransformExact}
+			}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := roundTrip(t, base)

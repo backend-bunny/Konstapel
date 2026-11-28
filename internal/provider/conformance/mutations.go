@@ -81,6 +81,48 @@ func (m *mutant) Extract(in json.RawMessage, ns projection.Scope) (json.RawMessa
 	return m.Provider.Extract(in, ns)
 }
 
+// Leaker is a provider's encoding, in its own payload, of two namespace
+// disclosure regressions the projection mutations apply to its extracts.
+// RunMutations requires it: a provider that does not implement it exposes
+// neither regression, and its run fails.
+type Leaker interface {
+	// WithSiblingCounts returns the extract for ns with a count of the
+	// input's source records re-added, as an extraction that counts every
+	// source, siblings' included, would record it. ok is false when the
+	// input has no source record to count.
+	WithSiblingCounts(input, extract json.RawMessage, ns projection.Scope) (out json.RawMessage, ok bool, err error)
+	// WithSourceCopy returns the extract for ns with the input's source
+	// records copied whole instead of rebuilt. ok is false when the copy
+	// would not change the extract.
+	WithSourceCopy(input, extract json.RawMessage, ns projection.Scope) (out json.RawMessage, ok bool, err error)
+}
+
+// leak names one Leaker method.
+type leak func(Leaker, json.RawMessage, json.RawMessage, projection.Scope) (json.RawMessage, bool, error)
+
+var (
+	leakSiblingCounts leak = Leaker.WithSiblingCounts
+	leakSourceCopy    leak = Leaker.WithSourceCopy
+)
+
+// leaked applies l to the provider's extract.
+func leaked(l leak) func(*mutant, baseline) {
+	return func(m *mutant, _ baseline) {
+		m.extract = func(in json.RawMessage, ns projection.Scope) (json.RawMessage, error) {
+			ext, err := m.Provider.Extract(in, ns)
+			lk, ok := m.Provider.(Leaker)
+			if err != nil || !ok {
+				return ext, err
+			}
+			out, changed, err := l(lk, in, ext, ns)
+			if err != nil || !changed {
+				return ext, err
+			}
+			return out, nil
+		}
+	}
+}
+
 // baseline is what the unmutated provider gives for a case.
 type baseline struct {
 	c          Case
@@ -92,6 +134,9 @@ type baseline struct {
 	// extracted reports whether some namespace extract has evidence that
 	// changes its evaluation.
 	extracted bool
+	// siblingCounts and sourceCopy report whether the provider's Leaker
+	// changes some namespace extract of the case.
+	siblingCounts, sourceCopy bool
 }
 
 func (b baseline) has(f func(Observation) bool) bool {
@@ -385,6 +430,10 @@ func mutations() []mutation {
 					return m.Provider.Extract(in, ns)
 				}
 			}},
+		// Owner decisions 2026-11-27: a namespace extract counts nothing
+		// of its siblings' sources and never copies a source report.
+		{"extract re-adds sibling counts", KindProjection, func(b baseline) bool { return b.siblingCounts }, leaked(leakSiblingCounts)},
+		{"extract copies the source report", KindProjection, func(b baseline) bool { return b.sourceCopy }, leaked(leakSourceCopy)},
 	}
 }
 
@@ -493,6 +542,15 @@ func baselineOf(t *testing.T, p Provider, c Case) baseline {
 		}
 		if !sameJSON(normalize(e1), normalize(e2)) {
 			b.extracted = true
+		}
+		if lk, ok := p.(Leaker); ok {
+			for l, exposed := range map[*bool]leak{&b.siblingCounts: leakSiblingCounts, &b.sourceCopy: leakSourceCopy} {
+				_, changed, err := exposed(lk, c.Input, ext, ns)
+				if err != nil {
+					t.Fatal(err)
+				}
+				*l = *l || changed
+			}
 		}
 	}
 	return b

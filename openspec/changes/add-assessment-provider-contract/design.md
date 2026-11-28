@@ -208,6 +208,23 @@ must validate it before any export or summary exposure. Keep protected attachmen
 roles and access checks unchanged. Unknown scope fails closed for disclosure.
 The external plugin receives already projected local inputs and no credentials.
 
+Owner decisions of 2026-11-27 settle three questions left open by the first
+projection check:
+
+- A namespace Diagnostic records a stable reason code and its fixed text. A
+  content failure's own message stays on the platform-scoped run and binding
+  package, and storage refuses a namespace diagnostic with any other text.
+- A projection counts only its own extracts. It records no source-report
+  count and no withheld results, which named sibling reports.
+- Source results are attributed one by one against the frozen authorized
+  namespace and the workloads frozen in it, never live lookups or the
+  report's namespace. A result with a reference that cannot be resolved that
+  way stays unresolved in every namespace view. Provenance names a source
+  report only when the namespace may see it (a report in that namespace).
+  Any other source is named by a sealed reference, a digest of the report UID
+  and namespace UID that the platform can recompute. No extract copies its
+  report.
+
 ### 6. Prove a reusable contract without shipping a second integration
 
 Port the existing Kyverno path incrementally. Add a test-only reporting adapter

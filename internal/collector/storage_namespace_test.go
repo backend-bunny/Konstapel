@@ -2,12 +2,14 @@ package collector_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/backend-bunny/Konstapel/internal/collector"
+	"github.com/backend-bunny/Konstapel/internal/provider/projection"
 	"github.com/backend-bunny/Konstapel/internal/publication"
 	"github.com/backend-bunny/Konstapel/internal/s3store"
 )
@@ -98,6 +100,46 @@ func TestStorageRefusesNamespacePackageOfAnotherScope(t *testing.T) {
 			collector.Rehash(t, dir, d)
 			if _, err := s3store.ValidatePackage(dir); err == nil {
 				t.Fatal("the storage backend accepted a namespace package of another scope")
+			}
+		})
+	}
+}
+
+// A namespace Diagnostic package carries only its stable reason's fixed
+// text. One changed after export to carry the content failure's own
+// message, in diagnostic.json or in the descriptor, is refused.
+func TestStorageRefusesUnsanitizedNamespaceDiagnostics(t *testing.T) {
+	const hostile = "subject shop-prod-only references org-bundle@sha256:aa; uid-shop-prod SIBLING-SECRET"
+	failure := &collector.ContentFailure{Reason: collector.ReasonContentLost, Message: hostile}
+	dir, _ := collector.NamespaceDiagnosticPackage(t, failure)
+	if _, err := s3store.ValidatePackage(dir); err != nil {
+		t.Fatalf("the sanitized namespace diagnostic is refused: %v", err)
+	}
+	for name, tamper := range map[string]func(dir string, d *publication.Descriptor){
+		"diagnostic.json": func(dir string, _ *publication.Descriptor) {
+			b, _ := json.Marshal(publication.Diagnostic{Reason: collector.ReasonContentLost, MissingExports: []publication.FileRole{publication.RoleAssessmentResults}, Message: hostile})
+			if err := os.WriteFile(filepath.Join(dir, "diagnostic.json"), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"descriptor": func(_ string, d *publication.Descriptor) {
+			diag := *d.Diagnostic
+			diag.Message = hostile
+			d.Diagnostic = &diag
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, d := collector.NamespaceDiagnosticPackage(t, failure)
+			tamper(dir, &d)
+			collector.Rehash(t, dir, d)
+			_, err := s3store.ValidatePackage(dir)
+			if !errors.Is(err, projection.ErrDisclosure) {
+				t.Fatalf("the storage backend accepted an unsanitized namespace diagnostic: %v", err)
+			}
+			for _, leak := range []string{"SIBLING-SECRET", "uid-shop-prod", "org-bundle"} {
+				if strings.Contains(err.Error(), leak) {
+					t.Errorf("the refusal repeats %q: %v", leak, err)
+				}
 			}
 		})
 	}
