@@ -244,10 +244,11 @@ as production-ready installed providers.
 
 Signed bundles SHALL be able to define declarative checks for a reporting-only
 provider contract in the same versioned payload and under the same verification
-as engine policy content. A check definition SHALL name a check kind and
-parameters its provider's descriptor declares and SHALL NOT carry an executable,
-engine resource, endpoint, or permission. One content format SHALL serve every
-provider; engine policy content SHALL keep its format, identities and revisions.
+as engine policy content. A check definition SHALL name a check kind its
+provider's descriptor declares and the resources it expects evidence for, and
+SHALL NOT carry an executable, engine resource, endpoint or permission. One
+content format SHALL serve every provider; engine policy content SHALL keep its
+format, identities and revisions.
 
 #### Scenario: A verified bundle defines reporting-only checks
 
@@ -260,18 +261,43 @@ provider; engine policy content SHALL keep its format, identities and revisions.
 - **WHEN** a reporting-only check names an undeclared check kind or parameters outside its descriptor schema
 - **THEN** the bundle or affected binding reports invalid content without partially adopting it
 
+#### Scenario: A check definition carries more than declarative data
+
+- **WHEN** a check definition contains any member other than its kind, name and expected resources, declares a parameter schema, or is an engine policy under a reporting-only contract
+- **THEN** content validation rejects the bundle before it is cached or used
+- **AND** profile parameters for its checks are validated only against the kind's descriptor schema
+
+#### Scenario: The expected inventory comes from content
+
+- **WHEN** the host derives the subjects a reporting-only check expects evidence for
+- **THEN** it uses the resources the verified definition declares, never a provider report
+- **AND** a definition that expects cluster-scoped or unsupported resources is reported as an unsupported scope
+
 ### Requirement: Bundle compatibility follows provider selection
 
 Bundle compatibility SHALL be judged against the provider contracts the host can
 select, through the same provider selection that binding resolution uses,
 whether the provider is built in or administrator-registered. No separate
-provider allowlist SHALL decide content compatibility.
+provider allowlist SHALL decide content compatibility. Registration changes
+SHALL NOT change any bundle's acceptance; a registered contract SHALL be
+validated during selection, before execution.
 
 #### Scenario: The contract cannot be selected
 
 - **WHEN** verified content names a reporting-only contract that is neither built in nor registered and selectable
 - **THEN** resolution reports the incompatibility despite a valid signature
 - **AND** independently compatible bundles and bindings continue normally
+
+#### Scenario: A registration changes
+
+- **WHEN** a registration is created, disabled, removed, re-enabled or changes readiness
+- **THEN** the bindings whose content names its provider are resolved again promptly and become unavailable or recover accordingly
+- **AND** no other bundle is verified again and no earlier selection authorizes new work
+
+#### Scenario: A result depends on a provider-supplied schema
+
+- **WHEN** a check kind or parameter judgement depends on a provider's described schema
+- **THEN** it applies only to that exact provider release and schema revision and is not reused across incompatible changes
 
 #### Scenario: Existing engine content is unaffected
 

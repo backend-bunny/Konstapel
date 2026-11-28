@@ -45,6 +45,27 @@ be rejected before content is used.
 - **WHEN** a bundle has an unsupported schema, duplicate logical policy identity, missing inventory entry, or mismatching file checksum
 - **THEN** resolution reports invalid content and does not apply it
 
+### Requirement: One content format for every provider contract
+
+Each logical policy SHALL be one declarative document whose API version and kind
+are its check kind, interpreted by the one provider contract the payload names:
+engine policies for the Kyverno contract and reporting-only check definitions
+for any other. Provider compatibility SHALL be judged against the selectable
+contracts: built-in contracts before adoption and administrator-registered
+contracts during provider selection.
+
+#### Scenario: Validate reporting-only check content
+
+- **WHEN** a bundle names a reporting-only provider contract
+- **THEN** each logical policy must be a check definition that states only its kind, name and expected resources, with no parameter schema of its own
+- **AND** its OSCAL mappings, inventory, checksums, signature and provenance are validated exactly as for engine policy content
+
+#### Scenario: A provider registration changes
+
+- **WHEN** an administrator-registered provider is added, disabled or removed
+- **THEN** only bindings whose content names that provider are selected again
+- **AND** no bundle is verified again because of the registration change
+
 ### Requirement: Self-contained content closure
 
 Each bundle SHALL contain all policies, mappings, pinned catalog/profile content,
@@ -203,9 +224,10 @@ publication or resolved content.
 
 Bundle resolution SHALL verify supported payload and OSCAL versions, controller
 and provider compatibility, logical policies and parameters, and required engine
-capabilities before adoption. Initial runtime policies SHALL use modern Kyverno
-APIs and namespaced Linux workload scope. Unsupported content SHALL NOT trigger
-automatic engine installation or a fallback to legacy APIs.
+capabilities before adoption. Engine runtime policies SHALL use modern Kyverno
+APIs and namespaced Linux workload scope; reporting-only check definitions SHALL
+expect only namespaced Linux workload resources. Unsupported content SHALL NOT
+trigger automatic engine installation or a fallback to legacy APIs.
 
 #### Scenario: Encounter an unsupported requirement
 
@@ -227,7 +249,8 @@ automatic engine installation or a fallback to legacy APIs.
 ### Requirement: Content cannot replace central enforcement governance
 
 Bundles SHALL supply declarative policy content only. They SHALL NOT install
-executables, choose arbitrary provider binaries, grant exceptions, or override
+executables, choose arbitrary provider binaries or endpoints, grant permissions
+or exceptions, or override
 the resolved namespace scope, Audit/Deny mode, ownership, or exception eligibility.
 Rendered content SHALL retain stable logical identities under the existing
 targeting and exception contracts.

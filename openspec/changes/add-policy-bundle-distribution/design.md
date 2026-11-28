@@ -136,8 +136,18 @@ by the targeting/chart integration, and absence can recover without refetching
 otherwise valid content. Distinguish content compatibility from live engine
 readiness in the resolution result.
 
+Reporting-only check content (reconciled 2026-11-28 with
+`add-assessment-provider-contract` group 6, its Decision 8): the payload format
+and descriptor shape stay as they are. Under any contract other than the
+Kyverno one, each policy document is a reporting-only check definition with only
+its kind, name and expected `spec.resources`, no parameter schema of its own,
+and a component definition whose validation component carries that provider's
+name. Kyverno bundles are unchanged byte for byte.
+
 Bundle data cannot choose an arbitrary C2P executable. Resolve provider IDs only
-through Konstapel's installed allowlist. Do not run packaged scripts or plugins,
+through the provider selection seam: built-in contracts in the compatibility
+check, administrator-registered contracts during selection (Decision 8 of
+`add-assessment-provider-contract`). Do not run packaged scripts or plugins,
 install additional Kubernetes resources, or introduce alternate exception paths.
 Rendering consumes the existing contribution contract for selector, mode,
 parameters, ownership and exception eligibility; it records rendered hashes

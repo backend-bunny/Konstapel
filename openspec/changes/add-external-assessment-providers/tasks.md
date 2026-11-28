@@ -37,9 +37,10 @@ through `Registry.Select` and `content.Compatibility` fed from the selectable
 contracts are the shared, provider-neutral extension of
 [add-assessment-provider-contract](../add-assessment-provider-contract/tasks.md)
 group 6 (owner decision 2026-11-27). Group 3 consumes it and defines no content
-format, check-definition schema or provider allowlist of its own; feeding
-registrations into the allowlist waits for that change's compatibility revision
-decision (its design Decision 8).
+format, check-definition schema or provider allowlist of its own. Registered
+contracts are validated during selection and kept out of the acceptance key
+(owner decision 2026-11-28, that change's design Decision 8); check definitions
+carry the per-check resources the inventory is derived from.
 
 - [ ] 3.1 Integrate remote read-only collection with host scope, inventory and limits; test mixed-scope payloads/diagnostics, missing subjects, malformed results and deadline closure without scans.
   <!-- agent: tier=deep risk=high -->

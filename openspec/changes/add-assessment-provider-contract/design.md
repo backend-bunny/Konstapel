@@ -291,29 +291,120 @@ rules. A definition never carries an executable, engine resource, endpoint or
 permission. Existing Kyverno bundles keep their format, logical identities and
 policy revisions.
 
+**One content format (6.1, reconciled 2026-11-28).** The payload stays
+`konstapel.policy.bundle/v1`, and its descriptor keeps its shape. Every
+`policies` entry names one declarative document (role `policy`) with its
+logical name, its C2P `checks` and its OSCAL mappings, exactly as today. The
+document's `apiVersion` and `kind` are its check kind
+(`<group>/<version>/<Kind>`), and `compatibility.provider` names the one
+provider contract of the bundle. What the document must be follows from that
+contract:
+
+- `konstapel-kyverno/v1`: a `policies.kyverno.io/v1` ValidatingPolicy, the
+  existing rule, byte for byte. Existing bundles are unchanged, so their
+  digests, receipts, rendered policies, logical identities and policy
+  revisions are too.
+- Any other contract: a reporting-only check definition. Its only members are
+  `apiVersion` (with a group other than `policies.kyverno.io`), `kind`,
+  `metadata.name` (the logical name) and `spec.resources`. Any other member,
+  at any level, is rejected, so a definition cannot carry an image, command,
+  endpoint, service account, permission, engine rule or other executable
+  configuration. Its `policies` entry declares no `parameterSchema`: a
+  reporting-only kind's parameter contract is its descriptor's schema
+  (`ParametersFromDescriptor`), and profile parameters are validated against
+  that schema during selection. A definition fixes no parameter values.
+- `spec.resources` lists the resources the check expects evidence for, as
+  `{group, version, resource}` (empty group for core), at least one and each
+  once. The host derives a run's frozen inventory from them (external
+  Decision 9): which workloads a check expects comes from verified content,
+  never from a provider report. Targeting reports a definition's scope from
+  them with the same scope function as a policy's match rules: Namespaced
+  only when every resource is a supported namespaced workload resource.
+- The component definition's `validation` component is titled with the
+  contract's provider name, as `konstapel-kyverno` is today, so the OSCAL
+  closure, rule and check mapping rules apply unchanged.
+
+An older controller refuses such a bundle: it accepts only the Kyverno
+contract (`validateContent` and its compatibility check), so the extension
+fails closed without a new format version.
+
+Seam owners for each generalization:
+
+| Generalization | Owner and code |
+| --- | --- |
+| Payload rules: document kinds per contract, the definition shape, `spec.resources`, no content parameter schema for definitions, provider-titled validation component, closure, inventory, checksums, signature and provenance | Bundle (`add-policy-bundle-distribution`): `internal/bundle` (`validateContent`), `internal/assessment` (mapping closure) |
+| Reading a document's check kind and scope, giving it to the resolver, never rendering a non-delivery selection | Targeting: `internal/targeting`, its loader `internal/bundle/content.OCIContent` |
+| Whether a kind is declared, its modes and parameters, one provider per binding, the reasons each maps to | Registry: `provider.Registry.Select` |
+| Which contracts are selectable, and registration availability | Registry: `installed.Registry()`, `external.Catalog` |
+| Which bundles may be adopted at all (acceptance key) | Resolver: `content.Compatibility` and `resolve.Key.Compat` |
+
 Binding resolution consults `Registry.Select`, which the contract left
 unconnected to the targeting resolver. Wiring it in must keep
 `TestDefaultSelectionMatchesTheResolver` and every Kyverno resolver result
 unchanged and map `UnsupportedMode`, `MixedProviders` and unknown contracts to
 existing binding reasons. Bundle compatibility (`content.Compatibility.Providers`)
-is fed from the selectable contracts, `installed.Registry().Contracts()` and,
-when the external extension is enabled, registered contracts through
-`external.Catalog`, instead of a separate allowlist.
+is fed from the selectable built-in contracts, `installed.Registry().Contracts()`,
+instead of a separate allowlist. Registered contracts are selectable through
+`external.Catalog` when the external extension is enabled, but they are judged
+during selection, not in the acceptance key (below).
 
-**Design consideration (undecided): compatibility revision churn.**
-`content.Compatibility.Revision()` hashes the sorted provider allowlist, and
-that revision is the `Compat` component of every bundle acceptance key
-(`resolve.Key`). Any change in the allowlist therefore makes every bundle's
-acceptance unreachable, so every bundle, including unrelated Kyverno bundles,
-re-verifies and in-flight verifications end as stale. For the built-in registry
-this happens only with a controller release, which already changes the
-revision. A registry-fed allowlist that includes administrator registrations
-would also churn on every registration create, delete, enable or readiness
-change. Mitigation question for the owner: should the acceptance key carry only
-the built-in contracts, with registered contracts checked at selection time and
-kept out of the key; should the compatibility revision be scoped per bundle to
-the contract it names; or should registration churn forcing re-acceptance be
-accepted as intended? Task 6.3 does not start until this is answered.
+**Owner decision 2026-11-28: compatibility revision churn, option (a).**
+Immutable bundle verification is separate from installed-provider
+availability. `content.Compatibility.Revision()`, the `Compat` component of
+every acceptance key (`resolve.Key`), covers only what is static for a
+controller process: the rules version, the controller version, the sorted
+built-in contracts, the supported OSCAL versions and OS, and whether
+registered providers are enabled. Registration create, delete, enable,
+disable and readiness changes never change it, so they never make an
+acceptance unreachable and never reverify any bundle.
+
+- With registered providers disabled, `Check` is unchanged and the revision
+  is byte for byte today's value.
+- With them enabled, `Check` accepts, at the bundle level, a contract that is
+  not a built-in provider's name; it still rejects another version of a
+  built-in provider. The contract is then validated during selection, before
+  any execution: every binding resolution builds its catalog from the current
+  registrations and calls `Catalog.Resolve`, so an unknown, disabled,
+  ambiguous, unready or stale registration is a binding error
+  (`ContentUnavailable`) and nothing selected earlier is reused.
+- A registration change requeues the bindings whose content names that
+  provider: the binding controller watches `AssessmentProvider` and maps a
+  change to those bindings. A binding selected through a registration is also
+  requeued within the catalog's maximum status age, so a status nobody
+  refreshes cannot leave it reported as resolvable.
+- Removing or disabling a registration therefore stops new selections at the
+  next resolution. Work already frozen to a registration keeps its frozen
+  identity and the existing drain and recovery rules (`Frozen.Check`,
+  Decision 6 of the external change); nothing here changes them.
+- Validation results that depend on a provider-supplied schema are never
+  cached across schema revisions. Built-in kinds and schemas are compiled in,
+  so the controller version in the revision covers them, and `Select` is a
+  pure function evaluated on every resolution. A registered provider's kinds
+  and schemas come from its endpoint's description, which is bound to the
+  frozen release digest; they are checked against the run's definitions when
+  work is dispatched to that frozen identity (external task 3.1), never
+  reused for another release, and not recorded in the acceptance key.
+- Content validation and cryptographic trust are unchanged. The rule and
+  trust components of the key still change with the source rule and trust
+  material, and `InvalidateSource` and `InvalidateDigest` keep their callers.
+
+What the provider allowlist in the revision protects against today, and what
+covers each after the decision:
+
+| Protection today | After the decision |
+| --- | --- |
+| Content naming an uninstalled contract is never adopted | Built-in: unchanged (contracts in `Check` and the revision). Registered disabled: unchanged. Registered enabled: `Catalog.Resolve` during every selection; the content verifies but no binding resolves until the contract is selectable. |
+| A controller upgrade or downgrade that changes the built-in contracts never reuses an acceptance | Unchanged: built-in contracts and the controller version stay in the revision, and acceptances are in memory only. |
+| Toggling registered providers re-judges every bundle | The enabled flag is in the revision; changing it is a restart. |
+| A verification in flight while the provider set changes ends stale | Built-in sets change only with a restart. Registrations no longer affect acceptances; selection runs after resolution on every reconcile and the watch requeues it. |
+| A cached verdict never outlives the kinds and schemas it judged | Built-in: the controller version. Registered: checked against the frozen release's description at dispatch, never cached across releases. |
+| Trust and rule changes revoke acceptances | Unchanged: separate key components and invalidation calls. |
+
+Task 6.3 proves this with counts: a registration change does not reverify
+or re-accept an unrelated Kyverno bundle (no new resolution attempt, the
+acceptance store unchanged), while a binding on a registered contract becomes
+unavailable when its registration is disabled or removed and recovers when it
+returns.
 
 ## Risks / Trade-offs
 
@@ -331,8 +422,9 @@ accepted as intended? Task 6.3 does not start until this is answered.
   real producer compatibility as an independent acceptance gate.
 - [Reporting-only content becomes a second format] → One versioned payload for
   every provider, extended with the bundle owner; Kyverno bundles unchanged.
-- [A registry-fed allowlist forces re-acceptance] → Undecided; see Decision 8's
-  compatibility revision consideration before wiring registrations into it.
+- [A registry-fed allowlist forces re-acceptance] → Owner decision 2026-11-28
+  (Decision 8): registered contracts are judged during selection and kept out
+  of the acceptance key; registration changes requeue affected bindings only.
 
 ## Migration Plan
 
