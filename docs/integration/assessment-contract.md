@@ -423,7 +423,10 @@ Failure reasons:
 
 - `capture.json`: the frozen scope plus the observations so far;
 - `closed.json`: written at closure, before export, holding the closed
-  capture and its evaluation;
+  capture, its evaluation and the evaluation inputs that evaluation was
+  given (the binding's effective `maxEvidenceAge` and the continuity
+  boundaries at closure). A retried export uses these, never the binding,
+  the continuity tracker or the clock again;
 - `package/`: the exported package.
 
 Recovery follows from these:
@@ -651,10 +654,11 @@ This is the comparison delivery uses to decide a policy is current.
   verified against the directory before `Export` returns. `evaluation.json`
   is the evaluation made at closure. A package written by this release does
   not record the host's continuity boundaries or the binding's
-  `maxEvidenceAge`, so replay retrieves and validates that evaluation and
-  reports re-evaluation as unavailable. A package whose capture is a Kyverno
-  payload 3 records both, and replay also re-evaluates it from its files
-  alone (`konstapel replay`;
+  `maxEvidenceAge` (the controller still writes capture payload 2), so
+  replay retrieves and validates that evaluation and reports re-evaluation
+  as unavailable. A package whose capture is a Kyverno payload 3 records
+  both, as frozen in `closed.json`, and replay also re-evaluates it from its
+  files alone (`konstapel replay`;
   [replay: retrieval and re-evaluation](../assessment-providers.md#replay-retrieval-and-re-evaluation)).
 - **Control coverage summary.** With an `ExportRequest.Coverage` producer
   (the assessment controller always sets one), the package also carries

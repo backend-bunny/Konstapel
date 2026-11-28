@@ -591,6 +591,12 @@ type AssessmentRunReconciler struct {
 	// destinations for platform packages; nil includes no copy (documents
 	// are then reported NotRetrieved).
 	Attachments *AttachmentStorage
+	// CaptureWrite is the Kyverno capture payload version packages are
+	// written with; zero is the installed descriptor's capture.write.
+	// Payload 3 records the evaluation inputs frozen at closure; readers
+	// ship before writers, so production writes payload 2 until a release
+	// that reads payload 3 has shipped.
+	CaptureWrite int
 
 	checkedMu sync.Mutex
 	checked   map[types.UID]time.Time // last integrity check per retained run
@@ -617,15 +623,30 @@ func (r *AssessmentRunReconciler) integrityInterval() time.Duration {
 	return MaxRetentionRequeue
 }
 
-// closedRun is a run's frozen closure: the capture as closed and its
-// evaluation. It is written before export, so a retry after a crash
-// re-exports the same snapshot instead of collecting newer observations.
+// closedRun is a run's frozen closure: the capture as closed, its
+// evaluation and the evaluation inputs it was made with. It is written
+// before export, so a retry after a crash re-exports the same snapshot
+// instead of collecting newer observations or reading the binding and the
+// continuity tracker again.
 type closedRun struct {
 	Capture    collector.CaptureV2  `json:"capture"`
 	Evaluation collector.Evaluation `json:"evaluation"`
+	// Inputs are the evaluation inputs the closure evaluation was given:
+	// the binding's effective maxEvidenceAge and the continuity boundaries
+	// at closure. Nil in a closure staged before they were recorded; such a
+	// closure is exported without them, never completed from current state.
+	Inputs *collector.EvaluationInputs `json:"inputs,omitempty"`
 	// Supporting is the supporting-evidence context frozen at closure
 	// (assessment_supporting.go); nil for a run started without one.
 	Supporting *coverage.SupportingEvidenceContext `json:"supporting,omitempty"`
+}
+
+// captureWrite is the payload version packages are written with.
+func (r *AssessmentRunReconciler) captureWrite() int {
+	if r.CaptureWrite != 0 {
+		return r.CaptureWrite
+	}
+	return kyverno.Descriptor().Capture.Write
 }
 
 func (r *AssessmentRunReconciler) now() time.Time {
@@ -981,8 +1002,10 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 	}
 	trial := c
 	trial.Window.Closed = now
-	// A closing run evaluates at the closure boundary it freezes.
-	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: trial, Boundaries: r.boundaries(trial), MaxEvidenceAge: maxAge}, trial.Window.Closed)
+	// A closing run evaluates at the closure boundary it freezes, with the
+	// binding's limit and the continuity boundaries as they are now.
+	boundaries := r.boundaries(trial)
+	ev, err := kyverno.Evaluate(kyverno.EvaluationInput{Capture: trial, Boundaries: boundaries, MaxEvidenceAge: maxAge}, trial.Window.Closed)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -999,8 +1022,12 @@ func (r *AssessmentRunReconciler) collect(ctx context.Context, run *v1alpha1.Ass
 	if err := r.retryFreeze(ctx, run); err != nil {
 		return ctrl.Result{}, err
 	}
-	// Close the bounded window: freeze the capture and its evaluation first.
-	frozen = closedRun{Capture: trial, Evaluation: ev, Supporting: r.closeSupporting(ctx, run, b, trial.Window.Closed)}
+	// Close the bounded window: freeze the capture, its evaluation and the
+	// inputs that evaluation was given, together and first. This is the
+	// only point where they belong together: the binding and the tracker
+	// may change later, and a restarted controller has no tracker.
+	inputs := collector.FreezeEvaluationInputs(maxAge, boundaries)
+	frozen = closedRun{Capture: trial, Evaluation: ev, Inputs: &inputs, Supporting: r.closeSupporting(ctx, run, b, trial.Window.Closed)}
 	if err := assessment.Write(filepath.Join(r.staging(run), "closed.json"), frozen); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1020,6 +1047,11 @@ func (r *AssessmentRunReconciler) finish(ctx context.Context, run *v1alpha1.Asse
 	req := collector.ExportRequest{Root: r.Runtime.ContentRoot, Out: pkg,
 		Run: publication.RunRef{ClusterID: c.Cluster, BindingUID: string(b.UID), RunUID: string(run.UID)}, Scope: r.scope(run, b, c),
 		BindingConfiguration: run.Status.BindingConfiguration, Capture: c, Evaluation: ev}
+	if frozen.Inputs != nil && r.captureWrite() == collector.CaptureV3Version {
+		// Only the inputs frozen with this closure; a closure without them
+		// is exported as payload 2.
+		req.Inputs = frozen.Inputs
+	}
 	if err := r.exportContent(run, &req); err != nil {
 		return ctrl.Result{}, err
 	}
