@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.4.0](https://github.com/backend-bunny/Konstapel/compare/v0.3.0...v0.4.0) (2026-11-28)
+
+
+### Features
+
+* **api:** AssessmentProvider registration API and RBAC (2.1) ([#383](https://github.com/backend-bunny/Konstapel/issues/383)) ([f75ccc8](https://github.com/backend-bunny/Konstapel/commit/f75ccc86050da9e9478e04d1b1af134f6e701a92))
+* **bundles:** separately versioned OCI revision for split hardening checks (1.3) ([#404](https://github.com/backend-bunny/Konstapel/issues/404)) ([601a8a4](https://github.com/backend-bunny/Konstapel/commit/601a8a459ef7ba37e8592386298d7cf2a9b13d92))
+* **chart:** opt-in external provider client configuration (2.3) ([#386](https://github.com/backend-bunny/Konstapel/issues/386)) ([81e9e53](https://github.com/backend-bunny/Konstapel/commit/81e9e532abdd386b3d52076242a7db0d99488f58))
+* **chart:** reference external provider chart (5.1) ([#392](https://github.com/backend-bunny/Konstapel/issues/392)) ([b829cd1](https://github.com/backend-bunny/Konstapel/commit/b829cd1e67d9ce7082e3e74f42a582883e8d8dfa))
+* **charts:** opt-in exception admission webhooks and gated revocation ([#356](https://github.com/backend-bunny/Konstapel/issues/356)) ([1ef9794](https://github.com/backend-bunny/Konstapel/commit/1ef9794ad5a3459d20645861aed48c79f55afbef))
+* **collector:** connect provider captures to run content (3.2) ([#360](https://github.com/backend-bunny/Konstapel/issues/360)) ([53c7d47](https://github.com/backend-bunny/Konstapel/commit/53c7d4755228af7f034fce2aff10d3025bac0b9f))
+* **collector:** provider-discriminated capture boundary (3.1) ([#357](https://github.com/backend-bunny/Konstapel/issues/357)) ([221a5b5](https://github.com/backend-bunny/Konstapel/commit/221a5b581f4d2c321cc33e3ad4f9d58178b53168))
+* **collector:** record provider selection changes observed after freeze ([#397](https://github.com/backend-bunny/Konstapel/issues/397)) ([382df84](https://github.com/backend-bunny/Konstapel/commit/382df8460f8295f3cb47cb201a1f56f7d99526c0))
+* **collector:** shared namespace projection check (3.3) ([#365](https://github.com/backend-bunny/Konstapel/issues/365)) ([747ee66](https://github.com/backend-bunny/Konstapel/commit/747ee66069044c9908c21f34e1550384adc80c52))
+* **content:** single-validation hardening variants (1.1-1.2) ([#380](https://github.com/backend-bunny/Konstapel/issues/380)) ([c67e1fe](https://github.com/backend-bunny/Konstapel/commit/c67e1fe1349f0d60d8a10648a5add3ee25c1b9c0))
+* **provider:** bound adapter collection on the host (2.3, 2.4) ([#348](https://github.com/backend-bunny/Konstapel/issues/348)) ([17149c5](https://github.com/backend-bunny/Konstapel/commit/17149c51ef901d02484fc10a60d24fb8cc5b491f))
+* **provider:** derive provider availability from descriptors (2.2) ([#347](https://github.com/backend-bunny/Konstapel/issues/347)) ([0da2b44](https://github.com/backend-bunny/Konstapel/commit/0da2b44c2354b821cc388d6e0e8d448f4260d4fc))
+* **provider:** installed-provider registry and conformance harness ([#344](https://github.com/backend-bunny/Konstapel/issues/344)) ([1c54f63](https://github.com/backend-bunny/Konstapel/commit/1c54f633bb916675042f80dae28964a7fa39fada))
+* **provider:** Kyverno inventory and collection adapters (2.1) ([#346](https://github.com/backend-bunny/Konstapel/issues/346)) ([5f1c19f](https://github.com/backend-bunny/Konstapel/commit/5f1c19f2b4685a4c0922e1a5840b7e59dfd15af9))
+* **provider:** mutual TLS transport for external providers (1.2) ([#382](https://github.com/backend-bunny/Konstapel/issues/382)) ([bffca04](https://github.com/backend-bunny/Konstapel/commit/bffca045bb1c971b156af90bd2d18b44385ffebf))
+* **provider:** protocol revision 2 inventory, capture identity and collection seam (3.1.1-3.1.3) ([#398](https://github.com/backend-bunny/Konstapel/issues/398)) ([1f6e9a5](https://github.com/backend-bunny/Konstapel/commit/1f6e9a5e1d70cb1121db442ef151cf9b64138c87))
+* **provider:** pure evaluators with explicit time (4.1) ([#368](https://github.com/backend-bunny/Konstapel/issues/368)) ([399ce04](https://github.com/backend-bunny/Konstapel/commit/399ce0499d47bdf01047dd86710dc219981cae91))
+* **provider:** reference provider signing, SBOM and provenance (5.2) ([#393](https://github.com/backend-bunny/Konstapel/issues/393)) ([0ddcaa5](https://github.com/backend-bunny/Konstapel/commit/0ddcaa58d50abe3744705732b46d0360994a66b6))
+* **provider:** registered external provider selection (2.2) ([#385](https://github.com/backend-bunny/Konstapel/issues/385)) ([12f49ba](https://github.com/backend-bunny/Konstapel/commit/12f49baa1456e7b5499f2946ed567588a89ed30c))
+* **provider:** separate evaluator endpoint with its own identity (2.4) ([#399](https://github.com/backend-bunny/Konstapel/issues/399)) ([36e5d45](https://github.com/backend-bunny/Konstapel/commit/36e5d457a01b51f095704f41a34e3aa1b1bc3488))
+* **provider:** shared C2P conversion of frozen snapshots (4.2) ([#370](https://github.com/backend-bunny/Konstapel/issues/370)) ([6670503](https://github.com/backend-bunny/Konstapel/commit/667050360a11f873716d0f1a305924515a8a3ef7))
+* **provider:** versioned external provider protocol (1.1) ([#381](https://github.com/backend-bunny/Konstapel/issues/381)) ([1e5485e](https://github.com/backend-bunny/Konstapel/commit/1e5485eaae6e7bbd9c96fa7766a727a3ad20c252))
+* **signing:** bounded recovery attempt and recorded success (recovery 2.5, 2.6) ([#371](https://github.com/backend-bunny/Konstapel/issues/371)) ([bc0d485](https://github.com/backend-bunny/Konstapel/commit/bc0d4853092fba7de7d85e7ed3e5a1b66d461353))
+* **signing:** evidence signing request API, admission, and roles (recovery 1.1-1.4) ([#355](https://github.com/backend-bunny/Konstapel/issues/355)) ([2333cf0](https://github.com/backend-bunny/Konstapel/commit/2333cf0a383aa91329f7742320504ebbe0875e1f))
+* **signing:** per-run recovery claim and manager wiring (recovery 2.3) ([#364](https://github.com/backend-bunny/Konstapel/issues/364)) ([edbde0b](https://github.com/backend-bunny/Konstapel/commit/edbde0b81694e590e8813711b06301b1fecd869e))
+* **signing:** recovery attempt via signingRequirement (recovery 2.4) ([#367](https://github.com/backend-bunny/Konstapel/issues/367)) ([23efdb6](https://github.com/backend-bunny/Konstapel/commit/23efdb6699b3190a0c6b1bc01ae8c6878eaff5f9))
+* **signing:** recovery request gauge and events (recovery 3.1) ([#374](https://github.com/backend-bunny/Konstapel/issues/374)) ([a169f53](https://github.com/backend-bunny/Konstapel/commit/a169f5381d0d29858e2065e4ab58c1c4fb8b58a0))
+* **signing:** recovery retention bound and eligibility (recovery 2.1-2.2) ([#361](https://github.com/backend-bunny/Konstapel/issues/361)) ([94f8934](https://github.com/backend-bunny/Konstapel/commit/94f89341a0f43fb70f267de35c8fddc620888711))
+* **targeting:** bounded Kyverno readiness diagnostics (1.1-1.2) ([#372](https://github.com/backend-bunny/Konstapel/issues/372)) ([4969f3a](https://github.com/backend-bunny/Konstapel/commit/4969f3a18049b80e8118ac9dc4d518c9ea89c301))
+* **targeting:** bounded readiness recheck for owned Kyverno policies (3.1-3.2) ([#396](https://github.com/backend-bunny/Konstapel/issues/396)) ([896029a](https://github.com/backend-bunny/Konstapel/commit/896029aca9eb0e943ca5e6326ddec09e04e49925)), closes [#358](https://github.com/backend-bunny/Konstapel/issues/358)
+
+
+### Bug Fixes
+
+* **admission:** requester policies overwrite requestedBy wholesale ([#390](https://github.com/backend-bunny/Konstapel/issues/390)) ([8dc1f83](https://github.com/backend-bunny/Konstapel/commit/8dc1f836454dae8a3876ed172837ca1f5c84cc3d))
+* **bundles:** require signature payload in bundle verification docs; guard verifier ([#407](https://github.com/backend-bunny/Konstapel/issues/407)) ([a771fbc](https://github.com/backend-bunny/Konstapel/commit/a771fbcf5de8ff719de9e249bda340d0375ca554))
+* **charts:** require signature payload when verifying chart artifacts ([#403](https://github.com/backend-bunny/Konstapel/issues/403)) ([f9b5e27](https://github.com/backend-bunny/Konstapel/commit/f9b5e2746e805c8b3a274aa30c2988205d19047c))
+* **deps:** update go modules ([#210](https://github.com/backend-bunny/Konstapel/issues/210)) ([f2f5d97](https://github.com/backend-bunny/Konstapel/commit/f2f5d97b6e7c91d0e60cc63dbc027a683cdef4de))
+* **images:** require image-signature payload in cosign verification ([#394](https://github.com/backend-bunny/Konstapel/issues/394)) ([c0da0d1](https://github.com/backend-bunny/Konstapel/commit/c0da0d13cdaf0f3bd607c9703b94876f65d2013e))
+* **projection:** sanitized diagnostics and per-result attribution in namespace views ([#408](https://github.com/backend-bunny/Konstapel/issues/408)) ([3d145ed](https://github.com/backend-bunny/Konstapel/commit/3d145edb07f0d91fd7edcee7a2298bb0b69681c4))
+
+
+### Build and Image
+
+* **deps:** lock file maintenance ([#295](https://github.com/backend-bunny/Konstapel/issues/295)) ([c166077](https://github.com/backend-bunny/Konstapel/commit/c166077909ef51728f09129b1659c04a6dabf698))
+* **deps:** lock go-licenses built with Go 1.27 ([#353](https://github.com/backend-bunny/Konstapel/issues/353)) ([c4684ea](https://github.com/backend-bunny/Konstapel/commit/c4684ead8286e95fba035ed1de4efb92581a7a48))
+
 ## [0.3.0](https://github.com/backend-bunny/Konstapel/compare/v0.2.0...v0.3.0) (2026-11-23)
 
 
